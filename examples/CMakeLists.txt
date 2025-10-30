@@ -1,6 +1,9 @@
 list(APPEND TF_EXAMPLES
   simple 
   dataflow_arith
+  nodeflow
+  nodeflow_variadic
+  varnodeflow
   attach_data
   async
   async_module
