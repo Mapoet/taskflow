@@ -25,7 +25,6 @@ int main(){
     []() { std::cout << "TaskC\n"; },
     []() { std::cout << "TaskD\n"; }
   );
-
   A.name("A");
   B.name("B");
   C.name("C");
