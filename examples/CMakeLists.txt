@@ -1,5 +1,6 @@
 list(APPEND TF_EXAMPLES
   simple 
+  dataflow_arith
   attach_data
   async
   async_module
