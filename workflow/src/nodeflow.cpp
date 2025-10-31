@@ -825,12 +825,15 @@ GraphBuilder::create_loop_decl(const std::string& name,
   // The function already has access to all needed state via closures (like master's counter)
   // Extracting from futures here may cause issues if futures are shared across iterations
   tf::Task cond_task = taskflow_.emplace([fin = input_futures, fn = node->condition_func_, promises = node->out.promises]() mutable -> int {
+    static int cond_call_count = 0;
+    cond_call_count++;
     // Extract input values from futures
     std::unordered_map<std::string, std::any> in_vals;
     for (const auto& [key, fut] : fin) {
       in_vals[key] = fut.get();
     }
     int result = fn(in_vals);
+    std::cout << "[DEBUG] Condition task call #" << cond_call_count << ", result=" << result << "\n";
     // Store result as output if output_keys contains "result"
     if (auto it = promises.find("result"); it != promises.end()) {
       it->second->set_value(std::any{result});
