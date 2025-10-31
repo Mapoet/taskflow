@@ -31,14 +31,7 @@ int main() {
     {"value"}
   );
 
-  // Condition node: returns 0 for even, 1 for odd
-  auto [B, tB] = builder.create_condition_node("B",
-    []() -> int {
-      // In real usage, this would access A's output
-      // For demo, return 0 (even branch)
-      return 0;
-    }
-  );
+  // (Use declarative condition below; do not create a separate B node)
 
   // Build branches as subgraphs using declarative API
   auto C_task = builder.create_subgraph("C", [&](wf::GraphBuilder& gb){
@@ -60,7 +53,7 @@ int main() {
   });
 
   // Declarative condition wiring
-  builder.create_condition_decl("B_decl",
+  builder.create_condition_decl("B",
     std::vector<std::string>{"A"},
     [](){ return 0; },
     std::vector<tf::Task>{C_task, D_task}
@@ -78,12 +71,7 @@ int main() {
     {"data"}
   );
 
-  // Multi-condition: returns {0, 2} to execute branches 0 and 2 in parallel
-  auto [F, tF] = builder.create_multi_condition_node("F",
-    []() -> tf::SmallVector<int> {
-      return {0, 2};  // Execute first and third branches
-    }
-  );
+  // (Use declarative multi-condition below; do not create a separate F node)
 
   // Multiple branches as subgraphs
   auto G_task = builder.create_subgraph("G", [&](wf::GraphBuilder& gb){
@@ -102,7 +90,7 @@ int main() {
     std::cout << "  -> Branch I (executed)\n";
   });
   // Declarative multi-condition wiring
-  builder.create_multi_condition_decl("F_decl",
+  builder.create_multi_condition_decl("F",
     std::vector<std::string>{"E"},
     [](){ return tf::SmallVector<int>{0,2}; },
     std::vector<tf::Task>{G_task, H_task, I_task}
@@ -147,60 +135,30 @@ int main() {
 
   int counter = 0;
 
-  // Loop body
-  auto loop_body = [&counter]() {
-    std::cout << "  Loop iteration: counter = " << counter << "\n";
-    counter++;
-  };
+  // Build loop body as a subgraph
+  auto loop_body_task = builder.create_subgraph("LoopBody", [&](wf::GraphBuilder& gb){
+    // Minimal body: one task prints counter and increments
+    gb.taskflow().emplace([&counter](){
+      std::cout << "  Loop iteration: counter = " << counter << "\n";
+      ++counter;
+    }).name("LoopBody_print");
+  });
 
-  // Loop condition: continue while counter < 5
-  auto loop_condition = [&counter]() -> int {
-    return (counter < 5) ? 0 : 1;  // 0 to continue, 1 to exit
-  };
+  // Optional exit action subgraph
+  auto loop_exit_task = builder.create_subgraph("LoopExit", [&](wf::GraphBuilder& gb){
+    gb.taskflow().emplace([](){ std::cout << "  Loop exited\n"; }).name("LoopExit_print");
+  });
 
-  auto [Loop, tLoop] = builder.create_loop_node("Loop",
-    loop_body,
-    loop_condition
+  // Declarative loop: condition 0 loops back to body, non-zero goes to exit
+  builder.create_loop_decl(
+    "Loop",
+    std::vector<std::string>{"A"},
+    loop_body_task,
+    [&counter]() -> int { return (counter < 5) ? 0 : 1; },
+    loop_exit_task
   );
 
-  // Get the condition task from the loop structure
-  // The loop creates: body_task -> cond_task
-  // We need to manually add: cond_task -> body_task (for loop back)
-  // And: cond_task -> exit_task (for exit)
-  
-  // Create exit task
-  auto exit_task = builder.taskflow().emplace([]() {
-    std::cout << "  Loop exited\n";
-  }).name("Loop_exit");
-
-  // Find the condition task (it's named "Loop_condition")
-  // For now, we'll use a different approach: manually create the loop structure
-  
-  std::cout << "  Loop structure: body -> condition -> (body if 0, exit if non-zero)\n";
-
-  // ==========================================================================
-  // Manual loop construction (more control)
-  // ==========================================================================
-  std::cout << "\n4b. Manual Loop Construction:\n";
-  
-  int manual_counter = 0;
-  
-  auto manual_body = builder.taskflow().emplace([&manual_counter]() {
-    std::cout << "  Manual loop iteration: counter = " << manual_counter << "\n";
-    manual_counter++;
-  }).name("ManualLoop_body");
-  
-  auto manual_cond = builder.taskflow().emplace([&manual_counter]() -> int {
-    return (manual_counter < 3) ? 0 : 1;
-  }).name("ManualLoop_condition");
-  
-  auto manual_exit = builder.taskflow().emplace([]() {
-    std::cout << "  Manual loop exited\n";
-  }).name("ManualLoop_exit");
-  
-  // Loop structure: body -> condition -> (body if 0, exit if 1)
-  manual_body.precede(manual_cond);
-  manual_cond.precede(manual_body, manual_exit);  // Index 0 = body (loop), index 1 = exit
+  std::cout << "  Loop structure (decl): body -> condition -> (body if 0, exit if non-zero)\n";
 
   // ==========================================================================
   // Execute

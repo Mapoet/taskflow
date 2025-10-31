@@ -725,6 +725,28 @@ class GraphBuilder {
                                        std::function<tf::SmallVector<int>()> func,
                                        const std::vector<tf::Task>& successors);
 
+  /**
+   * @brief Declarative loop using an existing body task (e.g., from create_subgraph)
+   * @param name Loop name
+   * @param body_task Task representing the loop body
+   * @param condition_func Returns 0 to continue (loop back), non-zero to exit
+   * @param exit_task Optional task to run when exiting the loop (non-zero)
+   * @return The created condition task controlling the loop
+   */
+  tf::Task create_loop_decl(const std::string& name,
+                            tf::Task body_task,
+                            std::function<int()> condition_func,
+                            tf::Task exit_task = tf::Task{});
+
+  /**
+   * @brief Declarative loop with auto predecessors by node names
+   */
+  tf::Task create_loop_decl(const std::string& name,
+                            const std::vector<std::string>& depend_on_nodes,
+                            tf::Task body_task,
+                            std::function<int()> condition_func,
+                            tf::Task exit_task = tf::Task{});
+
  private:
   // Helper to extract typed future from source node (for create_typed_node)
   template <typename T>

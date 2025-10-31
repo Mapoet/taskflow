@@ -469,8 +469,8 @@ GraphBuilder::create_loop_node(const std::string& name,
   // - condition -> body (if returns 0, continue loop)
   // - condition -> (exit) (if returns non-zero)
   body_task.precede(cond_task);
-  // Condition task will loop back to body when returning 0
-  // This requires the user to set up: cond_task.precede(body_task) when condition returns 0
+  // Loop back on index 0
+  cond_task.precede(body_task);
   
   // Store the body task as the main task (entry point of loop)
   nodes_[name] = node;
@@ -548,6 +548,37 @@ tf::Task GraphBuilder::create_multi_condition_decl(const std::string& name,
     }
   }
   return task;
+}
+
+tf::Task GraphBuilder::create_loop_decl(const std::string& name,
+                                        tf::Task body_task,
+                                        std::function<int()> condition_func,
+                                        tf::Task exit_task) {
+  // Create the condition controller
+  auto cond_task = taskflow_.emplace(std::move(condition_func)).name(name);
+  // Wire loop: body -> cond
+  body_task.precede(cond_task);
+  // cond index 0 -> body (loop-back)
+  cond_task.precede(body_task);
+  // Note: exit_task linkage is optional and can be connected by caller if needed
+  tasks_[name] = cond_task;
+  return cond_task;
+}
+
+tf::Task GraphBuilder::create_loop_decl(const std::string& name,
+                                        const std::vector<std::string>& depend_on_nodes,
+                                        tf::Task body_task,
+                                        std::function<int()> condition_func,
+                                        tf::Task exit_task) {
+  auto cond_task = create_loop_decl(name, body_task, std::move(condition_func), exit_task);
+  for (const auto& n : depend_on_nodes) {
+    auto it = tasks_.find(n);
+    if (it != tasks_.end()) {
+      // Only body depends on predecessors; condition is triggered by body
+      it->second.precede(body_task);
+    }
+  }
+  return cond_task;
 }
 
 // Deprecated precede/succeed methods are implemented inline in nodeflow_impl.hpp
