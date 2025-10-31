@@ -60,11 +60,11 @@ int main() {
   });
 
   // Declarative condition wiring
-  auto cond_task = builder.create_condition_decl("B_decl",
+  builder.create_condition_decl("B_decl",
+    std::vector<std::string>{"A"},
     [](){ return 0; },
     std::vector<tf::Task>{C_task, D_task}
   );
-  tA.precede(cond_task);
 
   std::cout << "  A -> B (condition) -> C or D\n";
 
@@ -102,11 +102,11 @@ int main() {
     std::cout << "  -> Branch I (executed)\n";
   });
   // Declarative multi-condition wiring
-  auto mcond_task = builder.create_multi_condition_decl("F_decl",
+  builder.create_multi_condition_decl("F_decl",
+    std::vector<std::string>{"E"},
     [](){ return tf::SmallVector<int>{0,2}; },
     std::vector<tf::Task>{G_task, H_task, I_task}
   );
-  tE.precede(mcond_task);
 
   std::cout << "  E -> F (multi-condition) -> G, I (parallel)\n";
 

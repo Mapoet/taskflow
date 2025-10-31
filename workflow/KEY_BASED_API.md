@@ -537,45 +537,87 @@ builder
 
 ```dot
 digraph Taskflow {
-subgraph cluster_p0x7ffd5a691e70 {
+subgraph cluster_p0x7ffdc7cb6fb0 {
 label="Taskflow: advanced_control_flow";
-p0x654efa412500[label="A" ];
-p0x654efa412640[label="B" shape=diamond color=black fillcolor=aquamarine style=filled];
-p0x654efa412640 -> p0x654efa412740 [style=dashed label="0"];
-p0x654efa412640 -> p0x654efa412820 [style=dashed label="1"];
-p0x654efa413020[label="E" ];
-p0x654efa413160[label="F" shape=diamond color=black fillcolor=aquamarine style=filled];
-p0x654efa413160 -> p0x654efa413290 [style=dashed label="0"];
-p0x654efa413160 -> p0x654efa413370 [style=dashed label="1"];
-p0x654efa413160 -> p0x654efa413450 [style=dashed label="2"];
-p0x654efa413b90[shape=box3d, color=blue, label="Pipeline [m1]"];
-p0x654efa413dd0[label="Loop_body" ];
-p0x654efa413dd0 -> p0x654efa413eb0;
-p0x654efa414020[label="Loop_exit" ];
-p0x654efa413370[label="H" ];
-p0x654efa413450[label="I" ];
-p0x654efa412740[label="C" ];
-p0x654efa412820[label="D" ];
-p0x654efa413eb0[label="Loop_condition" shape=diamond color=black fillcolor=aquamarine style=filled];
-p0x654efa413290[label="G" ];
-p0x654efa414100[label="ManualLoop_body" ];
-p0x654efa414100 -> p0x654efa4141e0;
-p0x654efa4141e0[label="ManualLoop_condition" shape=diamond color=black fillcolor=aquamarine style=filled];
-p0x654efa4141e0 -> p0x654efa414100 [style=dashed label="0"];
-p0x654efa4141e0 -> p0x654efa4142c0 [style=dashed label="1"];
-p0x654efa4142c0[label="ManualLoop_exit" ];
+p0x626c0a7c3500[label="A" ];
+p0x626c0a7c3500 -> p0x626c0a7c6930;
+p0x626c0a7c3640[label="B" shape=diamond color=black fillcolor=aquamarine style=filled];
+p0x626c0a7c70a0[label="E" ];
+p0x626c0a7c70a0 -> p0x626c0a7ca000;
+p0x626c0a7c71e0[label="F" shape=diamond color=black fillcolor=aquamarine style=filled];
+p0x626c0a7ca7b0[shape=box3d, color=blue, label="Pipeline [m1]"];
+p0x626c0a7ca9f0[label="Loop_body" ];
+p0x626c0a7ca9f0 -> p0x626c0a7caad0;
+p0x626c0a7cac40[label="Loop_exit" ];
+p0x626c0a7c8070[shape=box3d, color=blue, label="G [m2]"];
+p0x626c0a7c8fb0[shape=box3d, color=blue, label="H [m3]"];
+p0x626c0a7c9f20[shape=box3d, color=blue, label="I [m4]"];
+p0x626c0a7ca000[label="F_decl" shape=diamond color=black fillcolor=aquamarine style=filled];
+p0x626c0a7ca000 -> p0x626c0a7c8070 [style=dashed label="0"];
+p0x626c0a7ca000 -> p0x626c0a7c8fb0 [style=dashed label="1"];
+p0x626c0a7ca000 -> p0x626c0a7c9f20 [style=dashed label="2"];
+p0x626c0a7c6930[label="B_decl" shape=diamond color=black fillcolor=aquamarine style=filled];
+p0x626c0a7c6930 -> p0x626c0a7c4fb0 [style=dashed label="0"];
+p0x626c0a7c6930 -> p0x626c0a7c6850 [style=dashed label="1"];
+p0x626c0a7c4fb0[shape=box3d, color=blue, label="C [m5]"];
+p0x626c0a7caad0[label="Loop_condition" shape=diamond color=black fillcolor=aquamarine style=filled];
+p0x626c0a7c6850[shape=box3d, color=blue, label="D [m6]"];
+p0x626c0a7cad20[label="ManualLoop_body" ];
+p0x626c0a7cad20 -> p0x626c0a7cae00;
+p0x626c0a7cae00[label="ManualLoop_condition" shape=diamond color=black fillcolor=aquamarine style=filled];
+p0x626c0a7cae00 -> p0x626c0a7cad20 [style=dashed label="0"];
+p0x626c0a7cae00 -> p0x626c0a7caff0 [style=dashed label="1"];
+p0x626c0a7caff0[label="ManualLoop_exit" ];
 }
-subgraph cluster_p0x654efa4135d0 {
+subgraph cluster_p0x626c0a7c50e0 {
+label="m6";
+p0x626c0a7c5b50[label="D_src" ];
+p0x626c0a7c5b50 -> p0x626c0a7c5c30;
+p0x626c0a7c5c30[label="D_src_to_x_adapter" ];
+p0x626c0a7c5c30 -> p0x626c0a7c6580;
+p0x626c0a7c6580[label="D_proc" ];
+p0x626c0a7c6580 -> p0x626c0a7c6730;
+p0x626c0a7c6730[label="D_sink" ];
+}
+subgraph cluster_p0x626c0a7c3790 {
+label="m5";
+p0x626c0a7c4290[label="C_src" ];
+p0x626c0a7c4290 -> p0x626c0a7c4370;
+p0x626c0a7c4370[label="C_src_to_x_adapter" ];
+p0x626c0a7c4370 -> p0x626c0a7c4ce0;
+p0x626c0a7c4ce0[label="C_proc" ];
+p0x626c0a7c4ce0 -> p0x626c0a7c4e90;
+p0x626c0a7c4e90[label="C_sink" ];
+}
+subgraph cluster_p0x626c0a7c9170 {
+label="m4";
+p0x626c0a7c9be0[label="Si" ];
+p0x626c0a7c9be0 -> p0x626c0a7c9de0;
+p0x626c0a7c9de0[label="Ki" ];
+}
+subgraph cluster_p0x626c0a7c81a0 {
+label="m3";
+p0x626c0a7c8c90[label="Sh" ];
+p0x626c0a7c8c90 -> p0x626c0a7c8e90;
+p0x626c0a7c8e90[label="Kh" ];
+}
+subgraph cluster_p0x626c0a7c7310 {
+label="m2";
+p0x626c0a7c7d30[label="Sg" ];
+p0x626c0a7c7d30 -> p0x626c0a7c7f30;
+p0x626c0a7c7f30[label="Kg" ];
+}
+subgraph cluster_p0x626c0a7ca130 {
 label="m1";
-p0x654efa413710[label="cond" shape=diamond color=black fillcolor=aquamarine style=filled];
-p0x654efa413710 -> p0x654efa4137f0 [style=dashed label="0"];
-p0x654efa413710 -> p0x654efa4138f0 [style=dashed label="1"];
-p0x654efa413710 -> p0x654efa4139d0 [style=dashed label="2"];
-p0x654efa413710 -> p0x654efa413ab0 [style=dashed label="3"];
-p0x654efa4137f0[label="nprt-0" ];
-p0x654efa4138f0[label="nprt-1" ];
-p0x654efa4139d0[label="nprt-2" ];
-p0x654efa413ab0[label="nprt-3" ];
+p0x626c0a7ca2e0[label="cond" shape=diamond color=black fillcolor=aquamarine style=filled];
+p0x626c0a7ca2e0 -> p0x626c0a7ca3c0 [style=dashed label="0"];
+p0x626c0a7ca2e0 -> p0x626c0a7ca4c0 [style=dashed label="1"];
+p0x626c0a7ca2e0 -> p0x626c0a7ca5a0 [style=dashed label="2"];
+p0x626c0a7ca2e0 -> p0x626c0a7ca680 [style=dashed label="3"];
+p0x626c0a7ca3c0[label="nprt-0" ];
+p0x626c0a7ca4c0[label="nprt-1" ];
+p0x626c0a7ca5a0[label="nprt-2" ];
+p0x626c0a7ca680[label="nprt-3" ];
 }
 }
 ```
