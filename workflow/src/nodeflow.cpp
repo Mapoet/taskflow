@@ -128,29 +128,45 @@ std::vector<std::string> AnyNode::get_output_keys() const {
 // ============================================================================
 
 AnySink::AnySink(std::unordered_map<std::string, std::shared_future<std::any>> fin, const std::string& name)
-    : inputs(std::move(fin)), node_name_(name.empty() ? "AnySink" : name) {}
+    : inputs(std::move(fin)), node_name_(name.empty() ? "AnySink" : name), callback_(nullptr) {}
+
+AnySink::AnySink(std::unordered_map<std::string, std::shared_future<std::any>> fin,
+                 std::function<void(const std::unordered_map<std::string, std::any>&)> callback,
+                 const std::string& name)
+    : inputs(std::move(fin)), node_name_(name.empty() ? "AnySink" : name), callback_(std::move(callback)) {}
 
 std::function<void()> AnySink::functor(const char* node_name) const {
   auto fin = inputs;
-  return [fin, node_name]() mutable {
-    std::cout << (node_name ? node_name : "AnySink") << ": ";
-    bool first = true;
+  auto callback = callback_;
+  return [fin, callback, node_name]() mutable {
+    // Collect values from futures
+    std::unordered_map<std::string, std::any> values;
     for (const auto& [key, fut] : fin) {
-      if (!first) std::cout << ' ';
-      first = false;
-      const std::any& a = fut.get();
-      std::cout << key << '=';
-      if (a.type() == typeid(double)) {
-        std::cout << std::any_cast<double>(a);
-      } else if (a.type() == typeid(int)) {
-        std::cout << std::any_cast<int>(a);
-      } else if (a.type() == typeid(std::string)) {
-        std::cout << std::any_cast<std::string>(a);
-      } else {
-        std::cout << "<" << a.type().name() << ">";
-      }
+      values[key] = fut.get();
     }
-    std::cout << '\n';
+    
+    // Call callback if provided, otherwise use default output
+    if (callback) {
+      callback(values);
+    } else {
+      std::cout << (node_name ? node_name : "AnySink") << ": ";
+      bool first = true;
+      for (const auto& [key, val] : values) {
+        if (!first) std::cout << ' ';
+        first = false;
+        std::cout << key << '=';
+        if (val.type() == typeid(double)) {
+          std::cout << std::any_cast<double>(val);
+        } else if (val.type() == typeid(int)) {
+          std::cout << std::any_cast<int>(val);
+        } else if (val.type() == typeid(std::string)) {
+          std::cout << std::any_cast<std::string>(val);
+        } else {
+          std::cout << "<" << val.type().name() << ">";
+        }
+      }
+      std::cout << '\n';
+    }
   };
 }
 
@@ -396,13 +412,22 @@ GraphBuilder::create_any_node(const std::string& name,
 std::pair<std::shared_ptr<AnySink>, tf::Task>
 GraphBuilder::create_any_sink(const std::string& name,
                               const std::vector<std::pair<std::string, std::string>>& input_specs) {
+  return create_any_sink(name, input_specs, nullptr);
+}
+
+std::pair<std::shared_ptr<AnySink>, tf::Task>
+GraphBuilder::create_any_sink(const std::string& name,
+                              const std::vector<std::pair<std::string, std::string>>& input_specs,
+                              std::function<void(const std::unordered_map<std::string, std::any>&)> callback) {
   // Get any futures from source nodes
   std::unordered_map<std::string, std::shared_future<std::any>> input_futures;
   for (const auto& [source_node, source_key] : input_specs) {
     input_futures[source_key] = get_output(source_node, source_key);
   }
   
-  auto node = std::make_shared<AnySink>(std::move(input_futures), name);
+  auto node = callback 
+    ? std::make_shared<AnySink>(std::move(input_futures), std::move(callback), name)
+    : std::make_shared<AnySink>(std::move(input_futures), name);
   auto task = add_any_sink(node);
   
   // Auto-register dependencies

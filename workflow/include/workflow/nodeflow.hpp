@@ -230,8 +230,12 @@ class TypedSink : public INode {
  public:
   std::tuple<std::shared_future<Ins>...> inputs;
   std::string node_name_;
+  std::function<void(const std::tuple<Ins...>&)> callback_;
 
   explicit TypedSink(std::tuple<std::shared_future<Ins>...> fin, const std::string& name = "");
+  explicit TypedSink(std::tuple<std::shared_future<Ins>...> fin,
+                     std::function<void(const std::tuple<Ins...>&)> callback,
+                     const std::string& name = "");
   std::string name() const override { return node_name_; }
   std::string type() const override { return "TypedSink"; }
   std::function<void()> functor(const char* node_name) const override;
@@ -291,9 +295,13 @@ struct AnyNode : public INode {
 struct AnySink : public INode {
   std::unordered_map<std::string, std::shared_future<std::any>> inputs;
   std::string node_name_;
+  std::function<void(const std::unordered_map<std::string, std::any>&)> callback_;
 
   AnySink() = default;
   explicit AnySink(std::unordered_map<std::string, std::shared_future<std::any>> fin, const std::string& name = "");
+  explicit AnySink(std::unordered_map<std::string, std::shared_future<std::any>> fin,
+                    std::function<void(const std::unordered_map<std::string, std::any>&)> callback,
+                    const std::string& name = "");
   std::string name() const override { return node_name_; }
   std::string type() const override { return "AnySink"; }
   std::function<void()> functor(const char* node_name) const override;
@@ -615,6 +623,44 @@ class GraphBuilder {
   std::pair<std::shared_ptr<AnySink>, tf::Task>
   create_any_sink(const std::string& name,
                   const std::vector<std::pair<std::string, std::string>>& input_specs);
+
+  /**
+   * @brief Create and add an any-based sink with key-based inputs and a callback function
+   * @param name Node name
+   * @param input_specs Vector of {source_node_name, source_output_key} pairs
+   * @param callback Function to process the collected values: (values_map) -> void
+   * @return Pair of (node_ptr, task_handle)
+   */
+  std::pair<std::shared_ptr<AnySink>, tf::Task>
+  create_any_sink(const std::string& name,
+                  const std::vector<std::pair<std::string, std::string>>& input_specs,
+                  std::function<void(const std::unordered_map<std::string, std::any>&)> callback);
+
+  /**
+   * @brief Create and add a typed sink with key-based inputs
+   * @tparam Ins... Input types (must be explicitly specified)
+   * @param name Node name
+   * @param input_specs Vector of {source_node_name, source_output_key} pairs
+   * @return Pair of (node_ptr, task_handle)
+   */
+  template <typename... Ins>
+  std::pair<std::shared_ptr<TypedSink<Ins...>>, tf::Task>
+  create_typed_sink(const std::string& name,
+                    const std::vector<std::pair<std::string, std::string>>& input_specs);
+
+  /**
+   * @brief Create and add a typed sink with key-based inputs and a callback function
+   * @tparam Ins... Input types (must be explicitly specified)
+   * @param name Node name
+   * @param input_specs Vector of {source_node_name, source_output_key} pairs
+   * @param callback Function to process the collected values: (values_tuple) -> void
+   * @return Pair of (node_ptr, task_handle)
+   */
+  template <typename... Ins>
+  std::pair<std::shared_ptr<TypedSink<Ins...>>, tf::Task>
+  create_typed_sink(const std::string& name,
+                    const std::vector<std::pair<std::string, std::string>>& input_specs,
+                    std::function<void(const std::tuple<Ins...>&)> callback);
 
   // ============================================================================
   // Advanced Control Flow Nodes: Condition, Multi-Condition, Pipeline, Loop
