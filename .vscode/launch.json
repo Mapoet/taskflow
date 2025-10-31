@@ -1,0 +1,51 @@
+{
+  // VS Code launch configurations
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "(gdb) Debug workflow/advanced_control_flow",
+      "type": "cppdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/build/workflow/advanced_control_flow",
+      "args": [],
+      "stopAtEntry": false,
+      "cwd": "${workspaceFolder}/build",
+      "environment": [],
+      "externalConsole": false,
+      "MIMode": "gdb",
+      "miDebuggerPath": "/usr/bin/gdb",
+      "setupCommands": [
+        {
+          "description": "Enable pretty-printing for gdb",
+          "text": "-enable-pretty-printing",
+          "ignoreFailures": true
+        }
+      ],
+      "preLaunchTask": "Build Debug: advanced_control_flow"
+    }
+    ,
+    {
+      "name": "(gdb) Debug workflow/loop_only",
+      "type": "cppdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/build/workflow/loop_only",
+      "args": [],
+      "stopAtEntry": false,
+      "cwd": "${workspaceFolder}/build",
+      "environment": [],
+      "externalConsole": false,
+      "MIMode": "gdb",
+      "miDebuggerPath": "/usr/bin/gdb",
+      "setupCommands": [
+        {
+          "description": "Enable pretty-printing for gdb",
+          "text": "-enable-pretty-printing",
+          "ignoreFailures": true
+        }
+      ],
+      "preLaunchTask": "Build Debug: loop_only"
+    }
+  ]
+}
+
+
