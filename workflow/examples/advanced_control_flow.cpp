@@ -66,11 +66,15 @@ int main() {
     );
   });
 
-  // Declarative condition wiring
+  // Declarative condition wiring with string-keyed inputs
   builder.create_condition_decl("B",
-    std::vector<std::string>{"A"},
-    [](){ return 0; },
-    std::vector<tf::Task>{C_task, D_task}
+    {{"A", "value"}},  // input_specs: from A's "value" output
+    [](const std::unordered_map<std::string, std::any>& inputs) {
+      int val = std::any_cast<int>(inputs.at("value"));
+      return (val % 2 == 0) ? 0 : 1;  // Even -> C (0), Odd -> D (1)
+    },
+    std::vector<tf::Task>{C_task, D_task},
+    {"result"}  // output_keys
   );
 
   std::cout << "  A -> B (condition) -> C or D\n";
@@ -121,11 +125,15 @@ int main() {
       }
     );
   });
-  // Declarative multi-condition wiring
+  // Declarative multi-condition wiring with string-keyed inputs
   builder.create_multi_condition_decl("F",
-    std::vector<std::string>{"E"},
-    [](){ return tf::SmallVector<int>{0,2}; },
-    std::vector<tf::Task>{G_task, H_task, I_task}
+    {{"E", "data"}},  // input_specs: from E's "data" output
+    [](const std::unordered_map<std::string, std::any>& inputs) {
+      // Always return indices 0 and 2 (G and I)
+      return tf::SmallVector<int>{0, 2};
+    },
+    std::vector<tf::Task>{G_task, H_task, I_task},
+    {"result"}  // output_keys
   );
 
   std::cout << "  E -> F (multi-condition) -> G, I (parallel)\n";
@@ -167,71 +175,63 @@ int main() {
 
   int counter = 0;
 
-  // Build loop body using create_subtask so the subgraph is built & run each iteration
-  auto loop_body_task = builder.create_subtask("LoopBody", [&counter](wf::GraphBuilder& gb){
-    auto [dummy_src, tSrc] = gb.create_typed_source(
-      "loop_trigger",
-      std::make_tuple(counter),
-      std::vector<std::string>{"trigger"}
-    );
-
-    auto [process, tProc] = gb.create_typed_node<int>(
-      "loop_iteration",
-      {{"loop_trigger", "trigger"}},
-      [&counter](const std::tuple<int>&) {
-        ++counter;
-        return std::make_tuple(counter);
-      },
-      std::vector<std::string>{"result"}
-    );
-
-    auto [sink, tSink] = gb.create_any_sink(
-      "loop_complete",
-      {{"loop_iteration", "result"}},
-      [](const std::unordered_map<std::string, std::any>& values) {
-        if (values.find("result") != values.end()) {
-          int result = std::any_cast<int>(values.at("result"));
-          std::cout << "  Loop iteration completed: counter = " << result << "\n";
-        }
-      }
-    );
-  });
-
-  // Optional exit action subgraph using declarative API
-  auto loop_exit_task = builder.create_subgraph("LoopExit", [](wf::GraphBuilder& gb){
-    // Create a simple source and sink for exit message
-    auto [exit_src, tExitSrc] = gb.create_typed_source("exit_msg",
-      std::make_tuple(0),
-      std::vector<std::string>{"msg"}
-    );
-    
-    auto [exit_proc, tExitProc] = gb.create_typed_node<int>("exit_print",
-      {{"exit_msg", "msg"}},
-      [](const std::tuple<int>&) {
-        return std::make_tuple(0);
-      },
-      {"done"}
-    );
-    
-    auto [exit_sink, tExitSink] = gb.create_any_sink("exit_sink",
-      {{"exit_print", "done"}},
-      [](const std::unordered_map<std::string, std::any>&) {
-        std::cout << "  Loop exited successfully\n";
-      }
-    );
-  });
-
-  // Declarative loop: condition 0 loops back to body, non-zero goes to exit
+  // Declarative loop with string-keyed inputs
   builder.create_loop_decl(
     "Loop",
-    std::vector<std::string>{"A"},
-    loop_body_task,
-    [&counter]() -> int { 
+    {{"A", "value"}},  // input_specs: from A's "value" output
+    [&counter](wf::GraphBuilder& gb, const std::unordered_map<std::string, std::any>& inputs) {
+      // Build loop body using the nested GraphBuilder
+      auto [trigger, tSrc] = gb.create_typed_source(
+        "loop_trigger",
+        std::make_tuple(counter),
+        std::vector<std::string>{"trigger"}
+      );
+      auto [process, tProc] = gb.create_typed_node<int>(
+        "loop_iteration",
+        {{"loop_trigger", "trigger"}},
+        [&counter](const std::tuple<int>&) {
+          ++counter;
+          return std::make_tuple(counter);
+        },
+        std::vector<std::string>{"result"}
+      );
+      auto [sink, tSink] = gb.create_any_sink(
+        "loop_complete",
+        {{"loop_iteration", "result"}},
+        [](const std::unordered_map<std::string, std::any>& values) {
+          if (values.find("result") != values.end()) {
+            int result = std::any_cast<int>(values.at("result"));
+            std::cout << "  Loop iteration completed: counter = " << result << "\n";
+          }
+        }
+      );
+    },
+    [&counter](const std::unordered_map<std::string, std::any>& inputs) -> int {
       // Only read counter, don't modify it (modification happens in loop body)
       int result = (counter < 5) ? 0 : 1;
       return result;
     },
-    loop_exit_task
+    [](wf::GraphBuilder& gb, const std::unordered_map<std::string, std::any>& inputs) {
+      // Build exit subgraph
+      auto [exit_src, tExitSrc] = gb.create_typed_source("exit_msg",
+        std::make_tuple(0),
+        std::vector<std::string>{"msg"}
+      );
+      auto [exit_proc, tExitProc] = gb.create_typed_node<int>("exit_print",
+        {{"exit_msg", "msg"}},
+        [](const std::tuple<int>&) {
+          return std::make_tuple(0);
+        },
+        {"done"}
+      );
+      auto [exit_sink, tExitSink] = gb.create_any_sink("exit_sink",
+        {{"exit_print", "done"}},
+        [](const std::unordered_map<std::string, std::any>&) {
+          std::cout << "  Loop exited successfully\n";
+        }
+      );
+    },
+    {"result"}  // output_keys
   );
 
   std::cout << "  Loop structure (decl): body -> condition -> (body if 0, exit if non-zero)\n";

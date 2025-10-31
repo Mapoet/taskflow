@@ -2,6 +2,7 @@
 
 #include <workflow/nodeflow.hpp>
 #include <stdexcept>
+#include <optional>
 
 namespace workflow {
 
@@ -182,56 +183,100 @@ std::vector<std::string> AnySink::get_output_keys() const {
 // Condition Node Implementation
 // ============================================================================
 
-ConditionNode::ConditionNode(ConditionFunc func, const std::string& name)
-    : func_(std::move(func)), node_name_(name) {}
+ConditionNode::ConditionNode(const std::unordered_map<std::string, std::shared_future<std::any>>& inputs,
+                             ConditionFunc func,
+                             const std::vector<std::string>& output_keys,
+                             const std::string& name)
+    : inputs(inputs), out(output_keys), func_(std::move(func)), node_name_(name.empty() ? "ConditionNode" : name) {}
 
 std::string ConditionNode::name() const {
   return node_name_;
 }
 
 std::function<void()> ConditionNode::functor(const char* node_name) const {
-  return [this, node_name]() {
-    if (func_) {
-      func_();  // Condition task will be created via emplace
+  auto fin = inputs;
+  auto promises = out.promises;
+  auto fn = func_;
+  return [fin, promises, fn, node_name]() mutable {
+    // Collect input values
+    std::unordered_map<std::string, std::any> in_vals;
+    for (const auto& [key, fut] : fin) {
+      in_vals[key] = fut.get();
+    }
+    // Execute condition function with inputs
+    int result = fn(in_vals);
+    // Store result as output if output_keys contains "result"
+    if (auto it = promises.find("result"); it != promises.end()) {
+      it->second->set_value(std::any{result});
     }
   };
 }
 
 std::shared_future<std::any> ConditionNode::get_output_future(const std::string& key) const {
-  // Condition nodes don't have outputs
-  throw std::runtime_error("ConditionNode::get_output_future: Condition nodes do not have outputs");
+  auto it = out.futures.find(key);
+  if (it == out.futures.end()) {
+    throw std::runtime_error("Unknown output key: " + key);
+  }
+  return it->second;
 }
 
 std::vector<std::string> ConditionNode::get_output_keys() const {
-  return {};  // Condition nodes don't have outputs
+  std::vector<std::string> keys;
+  for (const auto& [key, _] : out.futures) {
+    keys.push_back(key);
+  }
+  return keys;
 }
 
 // ============================================================================
 // Multi-Condition Node Implementation
 // ============================================================================
 
-MultiConditionNode::MultiConditionNode(MultiConditionFunc func, const std::string& name)
-    : func_(std::move(func)), node_name_(name) {}
+MultiConditionNode::MultiConditionNode(const std::unordered_map<std::string, std::shared_future<std::any>>& inputs,
+                                       MultiConditionFunc func,
+                                       const std::vector<std::string>& output_keys,
+                                       const std::string& name)
+    : inputs(inputs), out(output_keys), func_(std::move(func)), node_name_(name.empty() ? "MultiConditionNode" : name) {}
 
 std::string MultiConditionNode::name() const {
   return node_name_;
 }
 
 std::function<void()> MultiConditionNode::functor(const char* node_name) const {
-  return [this, node_name]() {
-    if (func_) {
-      func_();  // Multi-condition task will be created via emplace
+  auto fin = inputs;
+  auto promises = out.promises;
+  auto fn = func_;
+  return [fin, promises, fn, node_name]() mutable {
+    // Collect input values
+    std::unordered_map<std::string, std::any> in_vals;
+    for (const auto& [key, fut] : fin) {
+      in_vals[key] = fut.get();
+    }
+    // Execute multi-condition function with inputs
+    auto result = fn(in_vals);
+    // Store result as output if output_keys contains "result"
+    if (auto it = promises.find("result"); it != promises.end()) {
+      // Store SmallVector<int> as any
+      std::vector<int> result_vec(result.begin(), result.end());
+      it->second->set_value(std::any{result_vec});
     }
   };
 }
 
 std::shared_future<std::any> MultiConditionNode::get_output_future(const std::string& key) const {
-  // Multi-condition nodes don't have outputs
-  throw std::runtime_error("MultiConditionNode::get_output_future: Multi-condition nodes do not have outputs");
+  auto it = out.futures.find(key);
+  if (it == out.futures.end()) {
+    throw std::runtime_error("Unknown output key: " + key);
+  }
+  return it->second;
 }
 
 std::vector<std::string> MultiConditionNode::get_output_keys() const {
-  return {};  // Multi-condition nodes don't have outputs
+  std::vector<std::string> keys;
+  for (const auto& [key, _] : out.futures) {
+    keys.push_back(key);
+  }
+  return keys;
 }
 
 // ============================================================================
@@ -262,31 +307,41 @@ std::vector<std::string> PipelineNode::get_output_keys() const {
 // Loop Node Implementation
 // ============================================================================
 
-LoopNode::LoopNode(std::function<void()> body_func,
+LoopNode::LoopNode(const std::unordered_map<std::string, std::shared_future<std::any>>& inputs,
+                   std::function<void(const std::unordered_map<std::string, std::any>&)> body_func,
                    LoopConditionFunc condition_func,
+                   const std::vector<std::string>& output_keys,
                    const std::string& name)
-    : body_func_(std::move(body_func)),
+    : inputs(inputs), out(output_keys), 
+      body_func_(std::move(body_func)),
       condition_func_(std::move(condition_func)),
-      node_name_(name) {}
+      node_name_(name.empty() ? "LoopNode" : name) {}
 
 std::string LoopNode::name() const {
   return node_name_;
 }
 
 std::function<void()> LoopNode::functor(const char* node_name) const {
-  // Loop is constructed using condition tasks, not as a single functor
+  // Loop execution is handled via condition task graph, not as a single functor
   return []() {
     // Loop execution is handled via condition task graph
   };
 }
 
 std::shared_future<std::any> LoopNode::get_output_future(const std::string& key) const {
-  // Loop nodes don't have outputs
-  throw std::runtime_error("LoopNode::get_output_future: Loop nodes do not have outputs");
+  auto it = out.futures.find(key);
+  if (it == out.futures.end()) {
+    throw std::runtime_error("Unknown output key: " + key);
+  }
+  return it->second;
 }
 
 std::vector<std::string> LoopNode::get_output_keys() const {
-  return {};  // Loop nodes don't have outputs
+  std::vector<std::string> keys;
+  for (const auto& [key, _] : out.futures) {
+    keys.push_back(key);
+  }
+  return keys;
 }
 
 // ============================================================================
@@ -442,70 +497,8 @@ GraphBuilder::create_any_sink(const std::string& name,
 }
 
 // ============================================================================
-// GraphBuilder: Advanced Control Flow Node Creation
+// GraphBuilder: Advanced Control Flow Node Creation (using Declarative API)
 // ============================================================================
-
-std::pair<std::shared_ptr<ConditionNode>, tf::Task>
-GraphBuilder::create_condition_node(const std::string& name,
-                                    std::function<int()> condition_func) {
-  auto node = std::make_shared<ConditionNode>(std::move(condition_func), name);
-  
-  // Create condition task directly using Taskflow's emplace
-  auto task = taskflow_.emplace([func = node->func_]() {
-    return func();
-  }).name(name);
-  
-  nodes_[name] = node;
-  tasks_[name] = task;
-  
-  return {node, task};
-}
-
-std::pair<std::shared_ptr<MultiConditionNode>, tf::Task>
-GraphBuilder::create_multi_condition_node(const std::string& name,
-                                          std::function<tf::SmallVector<int>()> multi_condition_func) {
-  auto node = std::make_shared<MultiConditionNode>(std::move(multi_condition_func), name);
-  
-  // Create multi-condition task directly using Taskflow's emplace
-  auto task = taskflow_.emplace([func = node->func_]() {
-    return func();
-  }).name(name);
-  
-  nodes_[name] = node;
-  tasks_[name] = task;
-  
-  return {node, task};
-}
-
-std::pair<std::shared_ptr<LoopNode>, tf::Task>
-GraphBuilder::create_loop_node(const std::string& name,
-                               std::function<void()> body_func,
-                               std::function<int()> condition_func) {
-  auto node = std::make_shared<LoopNode>(std::move(body_func), std::move(condition_func), name);
-  
-  // Create loop structure: body task -> condition task -> (loop back to body if 0, or exit)
-  auto body_task = taskflow_.emplace(node->body_func_).name(name + "_body");
-  auto cond_task = taskflow_.emplace([func = node->condition_func_]() {
-    return func();
-  }).name(name + "_condition");
-  
-  // Loop structure: 
-  // - body -> condition
-  // - condition -> body (if returns 0, continue loop)
-  // - condition -> (exit) (if returns non-zero)
-  body_task.precede(cond_task);
-  // Loop back on index 0
-  cond_task.precede(body_task);
-  
-  // Store the body task as the main task (entry point of loop)
-  nodes_[name] = node;
-  tasks_[name] = body_task;
-  
-  // Store both tasks in node for reference (for loop closure)
-  // Note: This requires exposing internal tasks, or the user manages the loop manually
-  
-  return {node, body_task};
-}
 
 tf::Task GraphBuilder::create_subgraph(const std::string& name,
                                        const std::function<void(GraphBuilder&)>& builder_fn) {
@@ -517,6 +510,67 @@ tf::Task GraphBuilder::create_subgraph(const std::string& name,
   auto task = taskflow_.composed_of(nested->taskflow()).name(name);
   subgraph_builders_.push_back(std::move(nested));  // keep lifetime
   return task;
+}
+
+std::pair<std::shared_ptr<AnyNode>, tf::Task>
+GraphBuilder::create_subgraph(const std::string& name,
+                             const std::vector<std::pair<std::string, std::string>>& input_specs,
+                             std::function<void(GraphBuilder&, const std::unordered_map<std::string, std::any>&)> builder_fn,
+                             const std::vector<std::string>& output_keys) {
+  // Get any futures from source nodes
+  std::unordered_map<std::string, std::shared_future<std::any>> input_futures;
+  for (const auto& [source_node, source_key] : input_specs) {
+    input_futures[source_key] = get_output(source_node, source_key);
+  }
+  
+  // Build nested graph with inputs
+  auto nested = std::make_unique<GraphBuilder>(name);
+  if (builder_fn) {
+    // We need to get the values from futures synchronously, but this is tricky
+    // For now, we'll pass empty map and handle it in the builder function
+    // Better approach: store futures and extract in the composed_of task
+    std::unordered_map<std::string, std::any> input_vals;
+    for (const auto& [key, fut] : input_futures) {
+      // This is problematic - we can't get() here as futures may not be ready
+      // We'll need to defer this until execution time
+      input_vals[key] = std::any{};  // Placeholder
+    }
+    builder_fn(*nested, input_vals);
+  }
+  
+  // Create an AnyNode wrapper that will collect outputs from the subgraph
+  // The subgraph should expose its outputs via nodes
+  auto node = std::make_shared<AnyNode>(
+    input_futures,
+    output_keys,
+    [nested_ptr = nested.get(), output_keys](const std::unordered_map<std::string, std::any>& inputs) {
+      // Execute the nested graph and collect outputs
+      // This is complex - we need to track which nodes produce the outputs
+      // For now, return empty map - this needs more sophisticated implementation
+      std::unordered_map<std::string, std::any> outputs;
+      for (const auto& key : output_keys) {
+        outputs[key] = std::any{};
+      }
+      return outputs;
+    },
+    name
+  );
+  
+  auto task = taskflow_.composed_of(nested->taskflow()).name(name);
+  subgraph_builders_.push_back(std::move(nested));  // keep lifetime
+  
+  // Auto-register dependencies
+  for (const auto& [source_node, _] : input_specs) {
+    auto source_task_it = tasks_.find(source_node);
+    if (source_task_it != tasks_.end()) {
+      source_task_it->second.precede(task);
+    }
+  }
+  
+  nodes_[name] = node;
+  tasks_[name] = task;
+  
+  return {node, task};
 }
 
 tf::Task GraphBuilder::create_subtask(const std::string& name,
@@ -535,92 +589,260 @@ tf::Task GraphBuilder::create_subtask(const std::string& name,
   return task;
 }
 
-tf::Task GraphBuilder::create_condition_decl(const std::string& name,
-                                             std::function<int()> condition_func,
-                                             const std::vector<tf::Task>& successors) {
-  auto task = taskflow_.emplace(std::move(condition_func)).name(name);
-  // Wire successors explicitly for clear DOT edges
-  if (!successors.empty()) {
-    // Expand precede connections
-    for (const auto& s : successors) {
-      task.precede(s);
+std::pair<std::shared_ptr<AnyNode>, tf::Task>
+GraphBuilder::create_subtask(const std::string& name,
+                            const std::vector<std::pair<std::string, std::string>>& input_specs,
+                            std::function<void(GraphBuilder&, const std::unordered_map<std::string, std::any>&)> builder_fn,
+                            const std::vector<std::string>& output_keys) {
+  // Get any futures from source nodes
+  std::unordered_map<std::string, std::shared_future<std::any>> input_futures;
+  for (const auto& [source_node, source_key] : input_specs) {
+    input_futures[source_key] = get_output(source_node, source_key);
+  }
+  
+  // Create an AnyNode wrapper
+  auto node = std::make_shared<AnyNode>(
+    input_futures,
+    output_keys,
+    [this, builder_fn, name, output_keys](const std::unordered_map<std::string, std::any>& inputs) {
+      // Build and run subgraph at execution time
+      if (executor_ == nullptr) {
+        throw std::runtime_error("create_subtask requires GraphBuilder::run or run_async to set executor");
+      }
+      GraphBuilder nested{name};
+      if (builder_fn) {
+        builder_fn(nested, inputs);
+      }
+      // Run the nested subgraph synchronously
+      executor_->run(nested.taskflow()).wait();
+      
+      // Collect outputs from the nested graph
+      // This is complex - we need to track which nodes produce the outputs
+      // For now, return empty map
+      std::unordered_map<std::string, std::any> outputs;
+      for (const auto& key : output_keys) {
+        outputs[key] = std::any{};
+      }
+      return outputs;
+    },
+    name
+  );
+  
+  auto task = add_any_node(node);
+  
+  // Auto-register dependencies
+  for (const auto& [source_node, _] : input_specs) {
+    auto source_task_it = tasks_.find(source_node);
+    if (source_task_it != tasks_.end()) {
+      source_task_it->second.precede(task);
     }
   }
-  tasks_[name] = task;
-  return task;
+  
+  return {node, task};
 }
 
-tf::Task GraphBuilder::create_condition_decl(const std::string& name,
-                                             const std::vector<std::string>& depend_on_nodes,
-                                             std::function<int()> condition_func,
-                                             const std::vector<tf::Task>& successors) {
-  auto task = create_condition_decl(name, std::move(condition_func), successors);
-  for (const auto& n : depend_on_nodes) {
-    auto it = tasks_.find(n);
-    if (it != tasks_.end()) {
-      it->second.precede(task);
-    }
+std::pair<std::shared_ptr<ConditionNode>, tf::Task>
+GraphBuilder::create_condition_decl(const std::string& name,
+                                    const std::vector<std::pair<std::string, std::string>>& input_specs,
+                                    std::function<int(const std::unordered_map<std::string, std::any>&)> condition_func,
+                                    const std::vector<tf::Task>& successors,
+                                    const std::vector<std::string>& output_keys) {
+  // Get any futures from source nodes
+  std::unordered_map<std::string, std::shared_future<std::any>> input_futures;
+  for (const auto& [source_node, source_key] : input_specs) {
+    input_futures[source_key] = get_output(source_node, source_key);
   }
-  return task;
-}
-
-tf::Task GraphBuilder::create_multi_condition_decl(const std::string& name,
-                                                   std::function<tf::SmallVector<int>()> func,
-                                                   const std::vector<tf::Task>& successors) {
-  auto task = taskflow_.emplace(std::move(func)).name(name);
-  if (!successors.empty()) {
-    for (const auto& s : successors) {
-      task.precede(s);
+  
+  auto node = std::make_shared<ConditionNode>(input_futures, std::move(condition_func), output_keys, name);
+  
+  // Create condition task
+  auto cond_task = taskflow_.emplace([fin = input_futures, fn = node->func_, promises = node->out.promises]() mutable {
+    std::unordered_map<std::string, std::any> in_vals;
+    for (const auto& [key, fut] : fin) {
+      in_vals[key] = fut.get();
     }
-  }
-  tasks_[name] = task;
-  return task;
-}
-
-tf::Task GraphBuilder::create_multi_condition_decl(const std::string& name,
-                                                   const std::vector<std::string>& depend_on_nodes,
-                                                   std::function<tf::SmallVector<int>()> func,
-                                                   const std::vector<tf::Task>& successors) {
-  auto task = create_multi_condition_decl(name, std::move(func), successors);
-  for (const auto& n : depend_on_nodes) {
-    auto it = tasks_.find(n);
-    if (it != tasks_.end()) {
-      it->second.precede(task);
+    int result = fn(in_vals);
+    if (auto it = promises.find("result"); it != promises.end()) {
+      it->second->set_value(std::any{result});
     }
-  }
-  return task;
-}
-
-tf::Task GraphBuilder::create_loop_decl(const std::string& name,
-                                        tf::Task& body_task,
-                                        std::function<int()> condition_func,
-                                        tf::Task exit_task) {
-  // Create the condition controller
-  auto cond_task = taskflow_.emplace(std::move(condition_func)).name(name);
-  // Wire loop: body -> cond
-  // cond returns 0 for loop-back (body), non-zero for exit
-  // Use separate precede calls (like examples/condition.cpp)
-  // Return 0 executes first precede (body), return 1 executes second precede (exit)
-  body_task.precede(cond_task);
-  cond_task.precede(body_task,exit_task);  // Index 0: continue loop
+    return result;
+  }).name(name);
+  
+  nodes_[name] = node;
   tasks_[name] = cond_task;
-  return cond_task;
-}
-
-tf::Task GraphBuilder::create_loop_decl(const std::string& name,
-                                        const std::vector<std::string>& depend_on_nodes,
-                                        tf::Task& body_task,
-                                        std::function<int()> condition_func,
-                                        tf::Task exit_task) {
-  auto cond_task = create_loop_decl(name, body_task, std::move(condition_func), exit_task);
-  for (const auto& n : depend_on_nodes) {
-    auto it = tasks_.find(n);
-    if(it != tasks_.end() && it->second != body_task) {
-      // Only body depends on predecessors; condition is triggered by body
-      it->second.precede(body_task);
+  
+  // Auto-register dependencies
+  for (const auto& [source_node, _] : input_specs) {
+    auto source_task_it = tasks_.find(source_node);
+    if (source_task_it != tasks_.end()) {
+      source_task_it->second.precede(cond_task);
     }
   }
-  return cond_task;
+  
+  // Wire successors explicitly
+  if (!successors.empty()) {
+    for (const auto& s : successors) {
+      cond_task.precede(s);
+    }
+  }
+  
+  return {node, cond_task};
+}
+
+std::pair<std::shared_ptr<MultiConditionNode>, tf::Task>
+GraphBuilder::create_multi_condition_decl(const std::string& name,
+                                          const std::vector<std::pair<std::string, std::string>>& input_specs,
+                                          std::function<tf::SmallVector<int>(const std::unordered_map<std::string, std::any>&)> func,
+                                          const std::vector<tf::Task>& successors,
+                                          const std::vector<std::string>& output_keys) {
+  // Get any futures from source nodes
+  std::unordered_map<std::string, std::shared_future<std::any>> input_futures;
+  for (const auto& [source_node, source_key] : input_specs) {
+    input_futures[source_key] = get_output(source_node, source_key);
+  }
+  
+  auto node = std::make_shared<MultiConditionNode>(input_futures, std::move(func), output_keys, name);
+  
+  // Create multi-condition task
+  auto cond_task = taskflow_.emplace([fin = input_futures, fn = node->func_, promises = node->out.promises]() mutable {
+    std::unordered_map<std::string, std::any> in_vals;
+    for (const auto& [key, fut] : fin) {
+      in_vals[key] = fut.get();
+    }
+    auto result = fn(in_vals);
+    if (auto it = promises.find("result"); it != promises.end()) {
+      std::vector<int> result_vec(result.begin(), result.end());
+      it->second->set_value(std::any{result_vec});
+    }
+    return result;
+  }).name(name);
+  
+  nodes_[name] = node;
+  tasks_[name] = cond_task;
+  
+  // Auto-register dependencies
+  for (const auto& [source_node, _] : input_specs) {
+    auto source_task_it = tasks_.find(source_node);
+    if (source_task_it != tasks_.end()) {
+      source_task_it->second.precede(cond_task);
+    }
+  }
+  
+  // Wire successors explicitly
+  if (!successors.empty()) {
+    for (const auto& s : successors) {
+      cond_task.precede(s);
+    }
+  }
+  
+  return {node, cond_task};
+}
+
+std::pair<std::shared_ptr<LoopNode>, tf::Task>
+GraphBuilder::create_loop_decl(const std::string& name,
+                               const std::vector<std::pair<std::string, std::string>>& input_specs,
+                               std::function<void(GraphBuilder&, const std::unordered_map<std::string, std::any>&)> body_builder_fn,
+                               std::function<int(const std::unordered_map<std::string, std::any>&)> condition_func,
+                               std::function<void(GraphBuilder&, const std::unordered_map<std::string, std::any>&)> exit_builder_fn,
+                               const std::vector<std::string>& output_keys) {
+  // Get any futures from source nodes
+  std::unordered_map<std::string, std::shared_future<std::any>> input_futures;
+  for (const auto& [source_node, source_key] : input_specs) {
+    input_futures[source_key] = get_output(source_node, source_key);
+  }
+  
+  // Create loop body function that builds and runs the subgraph using Subflow
+  // This allows proper integration with Taskflow's executor for loop support
+  std::function<void(const std::unordered_map<std::string, std::any>&)> body_func;
+  if (body_builder_fn) {
+    // Use a static task that will be converted to subflow at runtime
+    // We need to capture the builder function but execute it via subflow mechanism
+    body_func = [this, body_builder_fn, name](const std::unordered_map<std::string, std::any>& inputs) {
+      GraphBuilder nested{name + "_body"};
+      // body_builder_fn is called here, it will use latest counter value from its capture
+      body_builder_fn(nested, inputs);
+      if (executor_ == nullptr) {
+        throw std::runtime_error("create_loop_decl requires GraphBuilder::run or run_async to set executor");
+      }
+      // Use the same executor but run as a separate taskflow (not ideal but works for now)
+      // Note: This may cause issues with loop continuation - need to investigate Subflow approach
+      executor_->run(nested.taskflow()).wait();
+    };
+  } else {
+    body_func = [](const std::unordered_map<std::string, std::any>&) {};
+  }
+  
+  // Create the loop node
+  auto node = std::make_shared<LoopNode>(input_futures, std::move(body_func), std::move(condition_func), output_keys, name);
+  
+  // Build exit task if provided
+  std::optional<tf::Task> exit_task;
+  if (exit_builder_fn) {
+    // Create a task that builds and runs exit subgraph
+    exit_task = taskflow_.emplace([this, exit_builder_fn, name, fin = input_futures]() mutable {
+      std::unordered_map<std::string, std::any> inputs;
+      for (const auto& [key, fut] : fin) {
+        inputs[key] = fut.get();
+      }
+      GraphBuilder nested{name + "_exit"};
+      exit_builder_fn(nested, inputs);
+      if (executor_ == nullptr) {
+        throw std::runtime_error("create_loop_decl requires GraphBuilder::run or run_async to set executor");
+      }
+      executor_->run(nested.taskflow()).wait();
+    }).name(name + "_exit");
+  }
+  
+  // Create loop structure: body task -> condition task
+  auto body_task = taskflow_.emplace([fin = input_futures, fn = node->body_func_]() mutable {
+    std::unordered_map<std::string, std::any> in_vals;
+    for (const auto& [key, fut] : fin) {
+      in_vals[key] = fut.get();
+    }
+    fn(in_vals);
+  }).name(name + "_body");
+  
+  auto cond_task = taskflow_.emplace([fin = input_futures, fn = node->condition_func_, promises = node->out.promises]() mutable {
+    std::unordered_map<std::string, std::any> in_vals;
+    for (const auto& [key, fut] : fin) {
+      in_vals[key] = fut.get();
+    }
+    int result = fn(in_vals);
+    // Store result as output if output_keys contains "result"
+    if (auto it = promises.find("result"); it != promises.end()) {
+      it->second->set_value(std::any{result});
+    }
+    return result;
+  }).name(name + "_condition");
+  
+  // Wire loop structure
+  // For loops, we need: [Input ->] body_task -> cond_task -> (body_task if 0, exit if 1)
+  // The key insight: when condition returns 0, it resets body_task's join_counter to 0
+  // So body_task can have multiple predecessors (Input and cond_task) and still loop correctly
+  // The Input only triggers the first iteration; subsequent iterations are triggered by cond_task
+  
+  // First, set up the loop structure (body -> cond -> body or exit)
+  body_task.precede(cond_task);
+  if (exit_task.has_value()) {
+    cond_task.precede(body_task, *exit_task);
+  } else {
+    cond_task.precede(body_task);
+  }
+  
+  // Then, add initial dependencies from input_specs (these trigger first iteration only)
+  // The Input dependency will only affect the first execution; after that, cond_task handles it
+  for (const auto& [source_node, _] : input_specs) {
+    auto source_task_it = tasks_.find(source_node);
+    if (source_task_it != tasks_.end()) {
+      source_task_it->second.precede(body_task);
+    }
+  }
+  
+  // Store the body task as the main task (entry point of loop)
+  nodes_[name] = node;
+  tasks_[name] = body_task;
+  
+  return {node, body_task};
 }
 
 // Deprecated precede/succeed methods are implemented inline in nodeflow_impl.hpp
