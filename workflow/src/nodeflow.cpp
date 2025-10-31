@@ -784,12 +784,13 @@ GraphBuilder::create_loop_decl(const std::string& name,
       // Create a fresh Taskflow for this iteration
       // Use stack allocation like master's create_subtask, not unique_ptr
       // The taskflow inside will be used by executor, which keeps it alive during execution
-      GraphBuilder nested(name + "_body");
-      body_builder_fn(nested, in_vals);
+      auto nested = std::make_unique<GraphBuilder>(name + "_body");
+      body_builder_fn(*nested, in_vals);
       
       // Run the nested subgraph synchronously (master's approach)
       //executor_->run(nested.taskflow()).wait();
-      executor_->corun(nested.taskflow());
+      executor_->corun(nested->taskflow());
+      subgraph_builders_.push_back(std::move(nested));
     }
   }).name(name + "_body");
   
@@ -812,11 +813,12 @@ GraphBuilder::create_loop_decl(const std::string& name,
       }
       // Build exit subgraph in a fresh Taskflow
       // Use stack allocation like master's create_subtask
-      GraphBuilder nested(name + "_exit");
-      exit_builder_fn(nested, inputs);
+      auto nested = std::make_unique<GraphBuilder>(name + "_exit");
+      exit_builder_fn(*nested, inputs);
       // Run synchronously like body task
       //executor_->run(nested.taskflow()).wait();
-      executor_->corun(nested.taskflow());
+      executor_->corun(nested->taskflow());
+      subgraph_builders_.push_back(std::move(nested));
     }).name(name + "_exit");
   }
   
