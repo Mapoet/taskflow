@@ -306,26 +306,15 @@ struct AnySink : public INode {
 // ============================================================================
 
 /**
- * @brief Condition node that returns an integer to select which branch subgraph to execute
- * @details Returns an integer index (0, 1, 2...) indicating which branch subgraph to execute
- *          Each branch is a GraphBuilder subgraph composed of workflow nodes
+ * @brief Condition node that returns an integer to select successor task
+ * @details Returns an integer index (0, 1, 2...) indicating which successor task to execute
  */
 class ConditionNode : public INode {
  public:
   using ConditionFunc = std::function<int()>;
-  using BranchBuilder = std::function<void(GraphBuilder&)>;  // Function to build branch subgraph
   
   ConditionNode() = default;
-  
-  /**
-   * @brief Create a condition node with multiple branch subgraphs
-   * @param func Condition function that returns branch index
-   * @param branches Vector of functions that build each branch subgraph
-   * @param name Node name
-   */
-  explicit ConditionNode(ConditionFunc func,
-                        std::vector<BranchBuilder> branches,
-                        const std::string& name = "");
+  explicit ConditionNode(ConditionFunc func, const std::string& name = "");
   
   std::string name() const override;
   std::string type() const override { return "ConditionNode"; }
@@ -334,8 +323,6 @@ class ConditionNode : public INode {
   std::vector<std::string> get_output_keys() const override;
   
   ConditionFunc func_;
-  std::vector<BranchBuilder> branches_;  // Branch subgraph builders
-  std::vector<tf::Taskflow> branch_taskflows_;  // Taskflows for each branch
   std::string node_name_;
 };
 
@@ -392,28 +379,26 @@ class PipelineNode : public INode {
 };
 
 // ============================================================================
-// Loop Node: Creates a loop using a condition node with subgraph body
+// Loop Node: Creates a loop using a condition node
 // ============================================================================
 
 /**
  * @brief Loop node that creates iterative control flow using a condition
  * @details Uses a condition function to decide whether to continue loop or exit
- *          Loop body is a GraphBuilder subgraph composed of workflow nodes
  */
 class LoopNode : public INode {
  public:
   using LoopConditionFunc = std::function<int()>;  // Returns 0 to continue, non-zero to exit
-  using LoopBodyBuilder = std::function<void(GraphBuilder&)>;  // Function to build loop body subgraph
   
   LoopNode() = default;
   
   /**
    * @brief Create a loop node
-   * @param body_builder Function that builds the loop body subgraph
+   * @param body_func Function to execute in each iteration
    * @param condition_func Function that returns 0 to continue loop, non-zero to exit
    * @param name Node name
    */
-  explicit LoopNode(LoopBodyBuilder body_builder,
+  explicit LoopNode(std::function<void()> body_func,
                     LoopConditionFunc condition_func,
                     const std::string& name = "");
   
@@ -423,9 +408,8 @@ class LoopNode : public INode {
   std::shared_future<std::any> get_output_future(const std::string& key) const override;
   std::vector<std::string> get_output_keys() const override;
   
-  LoopBodyBuilder body_builder_;
+  std::function<void()> body_func_;
   LoopConditionFunc condition_func_;
-  tf::Taskflow body_taskflow_;  // Taskflow for loop body
   std::string node_name_;
 };
 
@@ -637,18 +621,15 @@ class GraphBuilder {
   // ============================================================================
 
   /**
-   * @brief Create and add a condition node with branch subgraphs
+   * @brief Create and add a condition node
    * @param name Node name
-   * @param condition_func Function that returns an integer index (0, 1, 2...) to select branch
-   * @param branches Vector of functions that build each branch subgraph using GraphBuilder
+   * @param condition_func Function that returns an integer index (0, 1, 2...) to select successor
    * @return Pair of (node_ptr, task_handle)
-   * @details The returned index selects which branch subgraph to execute
-   *          Each branch is built as a separate GraphBuilder subgraph
+   * @details The returned index corresponds to the position of the successor in precede() call
    */
   std::pair<std::shared_ptr<ConditionNode>, tf::Task>
   create_condition_node(const std::string& name,
-                       std::function<int()> condition_func,
-                       std::vector<std::function<void(GraphBuilder&)>> branches);
+                       std::function<int()> condition_func);
 
   /**
    * @brief Create and add a multi-condition node
@@ -677,19 +658,52 @@ class GraphBuilder {
                        Ps&&... pipes);
 
   /**
-   * @brief Create and add a loop node with subgraph body
+   * @brief Create and add a loop node
    * @param name Node name
-   * @param body_builder Function that builds the loop body subgraph using GraphBuilder
+   * @param body_func Function to execute in each iteration
    * @param condition_func Function that returns 0 to continue loop, non-zero to exit
    * @return Pair of (node_ptr, task_handle)
-   * @details Creates a loop using condition task. Loop body is a GraphBuilder subgraph.
-   *          Loop continues while condition returns 0.
+   * @details Creates a loop using condition task. Loop continues while condition returns 0.
    */
   std::pair<std::shared_ptr<LoopNode>, tf::Task>
   create_loop_node(const std::string& name,
-                   std::function<void(GraphBuilder&)> body_builder,
+                   std::function<void()> body_func,
                    std::function<int()> condition_func);
-  
+
+  // ----------------------------------------------------------------------------
+  // Declarative helpers for control flow and subgraphs
+  // ----------------------------------------------------------------------------
+
+  /**
+   * @brief Create a subgraph as a module task using a nested GraphBuilder
+   * @param name Subgraph name
+   * @param builder_fn Function that receives a nested GraphBuilder to define the subgraph
+   * @return Task handle representing the subgraph module
+   */
+  tf::Task create_subgraph(const std::string& name,
+                           const std::function<void(GraphBuilder&)>& builder_fn);
+
+  /**
+   * @brief Declarative condition with explicit successor tasks
+   * @param name Condition task name
+   * @param condition_func Function returning index of successor
+   * @param successors Successor tasks to wire in order
+   * @return The created condition task
+   */
+  tf::Task create_condition_decl(const std::string& name,
+                                 std::function<int()> condition_func,
+                                 const std::vector<tf::Task>& successors);
+
+  /**
+   * @brief Declarative multi-condition with explicit successor tasks
+   * @param name Multi-condition task name
+   * @param func Function returning indices of successors to run
+   * @param successors Successor tasks to wire in order
+   * @return The created multi-condition task
+   */
+  tf::Task create_multi_condition_decl(const std::string& name,
+                                       std::function<tf::SmallVector<int>()> func,
+                                       const std::vector<tf::Task>& successors);
 
  private:
   // Helper to extract typed future from source node (for create_typed_node)
@@ -712,6 +726,8 @@ class GraphBuilder {
   std::unordered_map<std::string, tf::Task> tasks_;
   // Adapter tasks created for typed extraction: key format "<node>::<key>"
   mutable std::unordered_map<std::string, tf::Task> adapter_tasks_;
+  // Hold nested subgraph builders to keep composed_of lifetimes valid
+  std::vector<std::unique_ptr<GraphBuilder>> subgraph_builders_;
 };
 
 }  // namespace workflow
