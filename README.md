@@ -365,6 +365,81 @@ executor.run(taskflow).wait();
 ```
 
 
+# Workflow: High-Level Dataflow Library
+
+The **Workflow** library is a high-level dataflow abstraction built on top of Taskflow, providing:
+
+- **Unified Node Interface**: All nodes inherit from `INode` base class for polymorphism
+- **Type-Safe Nodes**: Compile-time type checking with `TypedNode`, `TypedSource`, `TypedSink`
+- **Runtime Flexibility**: Dynamic type handling with `AnyNode`, `AnySource`, `AnySink`
+- **Graph Builder**: Simplified API for graph construction, dependency management, and execution
+- **String-Keyed I/O**: Flexible data access via `std::unordered_map<std::string, std::any>`
+
+## Quick Example
+
+```cpp
+#include <workflow/nodeflow.hpp>
+#include <taskflow/taskflow.hpp>
+
+int main() {
+  namespace wf = workflow;
+  tf::Executor executor;
+  wf::GraphBuilder builder("my_workflow");
+
+  // Typed source node
+  auto A = std::make_shared<wf::TypedSource<double>>(
+    std::make_tuple(3.5), "A"
+  );
+  auto tA = builder.add_typed_source(A);
+
+  // Typed transform node
+  using B_Inputs = std::tuple<std::shared_future<double>>;
+  auto B = std::make_shared<wf::TypedNode<B_Inputs, double>>(
+    std::make_tuple(std::get<0>(A->out.futures)),
+    [](const std::tuple<double>& in) {
+      return std::make_tuple(std::get<0>(in) + 1.0);
+    },
+    "B"
+  );
+  auto tB = builder.add_typed_node(B);
+
+  // Any-based sink (with adapter)
+  auto p_result = std::make_shared<std::promise<std::any>>();
+  auto f_result = p_result->get_future().share();
+  auto adapter = builder.taskflow().emplace([p_result, fut=std::get<0>(B->out.futures)]() {
+    p_result->set_value(std::any{fut.get()});
+  }).name("Adapter");
+  
+  auto H = std::make_shared<wf::AnySink>(
+    {{"result", f_result}},
+    "H"
+  );
+  auto tH = builder.add_any_sink(H);
+  
+  // Configure dependencies
+  builder.precede(tA, std::vector<tf::Task>{tB});
+  adapter.succeed(tB);
+  builder.succeed(tH, adapter);
+
+  // Execute
+  builder.run(executor);
+  return 0;
+}
+```
+
+## Building Workflow Examples
+
+Enable the workflow library during CMake configuration:
+
+```bash
+mkdir build && cd build
+cmake .. -DTF_BUILD_WORKFLOW=ON
+cmake --build . --target unified_example
+./workflow/unified_example
+```
+
+See `workflow/README.md` and `readme/guide_workflow.md` for detailed documentation and technical roadmap.
+
 # Supported Compilers
 
 To use Taskflow, you only need a compiler that supports C++17:
@@ -441,28 +516,3 @@ You are completely free to re-distribute your work derived from Taskflow.
 [email me]:              mailto:twh760812@gmail.com
 [Cpp Conference 2018]:   https://github.com/CppCon/CppCon2018
 [TPDS22]:                https://tsung-wei-huang.github.io/papers/tpds21-taskflow.pdf
-
-```dot
-digraph Taskflow {
-subgraph cluster_p0x7ffe453c4500 {
-label="Taskflow: keyed_nodeflow";
-p0x63ea90d63220[label="A" ];
-p0x63ea90d63220 -> p0x63ea90d63460;
-p0x63ea90d63220 -> p0x63ea90d63780;
-p0x63ea90d63220 -> p0x63ea90d63ab0;
-p0x63ea90d63460[label="B" ];
-p0x63ea90d63460 -> p0x63ea90d63e50;
-p0x63ea90d63460 -> p0x63ea90d64330;
-p0x63ea90d63780[label="C" ];
-p0x63ea90d63780 -> p0x63ea90d63e50;
-p0x63ea90d63780 -> p0x63ea90d64330;
-p0x63ea90d63ab0[label="E" ];
-p0x63ea90d63ab0 -> p0x63ea90d64330;
-p0x63ea90d63e50[label="D" ];
-p0x63ea90d63e50 -> p0x63ea90d64500;
-p0x63ea90d64330[label="G" ];
-p0x63ea90d64330 -> p0x63ea90d64500;
-p0x63ea90d64500[label="H" ];
-}
-}
-```
