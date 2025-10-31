@@ -87,6 +87,9 @@
         "stop_token": "cpp",
         "typeindex": "cpp",
         "valarray": "cpp",
-        "spatialreference": "cpp"
+        "spatialreference": "cpp",
+        "callback": "cpp",
+        "camera": "cpp",
+        "scriptengine": "cpp"
     }
 }

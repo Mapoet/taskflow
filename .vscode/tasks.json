@@ -1,0 +1,52 @@
+{
+  // VS Code build tasks
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "CMake Configure Debug",
+      "type": "shell",
+      "command": "cmake",
+      "args": [
+        "-S", ".",
+        "-B", "build",
+        "-DCMAKE_BUILD_TYPE=Debug",
+        "-DTF_BUILD_WORKFLOW=ON"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Build Debug: advanced_control_flow",
+      "type": "shell",
+      "dependsOn": "CMake Configure Debug",
+      "command": "cmake",
+      "args": [
+        "--build", "build",
+        "--target", "advanced_control_flow"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    }
+    ,
+    {
+      "label": "Build Debug: loop_only",
+      "type": "shell",
+      "dependsOn": "CMake Configure Debug",
+      "command": "cmake",
+      "args": [
+        "--build", "build",
+        "--target", "loop_only"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    }
+  ]
+}
+
+

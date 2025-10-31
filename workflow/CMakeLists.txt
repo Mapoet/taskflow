@@ -54,6 +54,15 @@ elseif(TARGET Taskflow)
   target_link_libraries(advanced_control_flow Taskflow)
 endif()
 
+# Loop-only example
+add_executable(loop_only examples/loop_only.cpp)
+target_link_libraries(loop_only workflow)
+if(TARGET Taskflow::Taskflow)
+  target_link_libraries(loop_only Taskflow::Taskflow)
+elseif(TARGET Taskflow)
+  target_link_libraries(loop_only Taskflow)
+endif()
+
 # Install rules (optional)
 # install(TARGETS workflow EXPORT workflowTargets
 #   ARCHIVE DESTINATION lib
