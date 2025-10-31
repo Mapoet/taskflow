@@ -9,13 +9,16 @@
 3. **纯虚基类设计**：所有节点（已知类型/未知类型）派生自统一的 `INode` 基类
 4. **构图管理器**：提供高级 API 管理节点增删、输入输出配置以及异步执行
 5. **代码风格一致**：与现有 `nodeflow.hpp` 保持一致
+6. **Key-based I/O**：所有输入输出通过字符串 key 访问，提供语义清晰的数据流
+7. **声明式构图**：自动依赖推断，减少手动配置错误
 
 ### 1.2 设计目标
 
 - **类型安全**：编译时类型检查（Typed Nodes）
 - **运行时灵活**：动态类型处理（Any-based Nodes）
 - **统一接口**：多态支持（INode 基类）
-- **易用性**：简化的构图 API（GraphBuilder）
+- **易用性**：声明式构图 API（GraphBuilder）
+- **可读性**：Key-based I/O 提升代码可维护性
 
 ## 二、技术架构设计
 
@@ -24,7 +27,7 @@
 ```
 ┌─────────────────────────────────────────────────────────┐
 │              User Application Layer                     │
-│  (GraphBuilder, Node Creation, Execution)              │
+│  (Declarative API, Key-based I/O, Auto Dependencies)   │
 └─────────────────────────────────────────────────────────┘
                       ▲
                       │
@@ -32,7 +35,8 @@
 │              Workflow Abstraction Layer                 │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  │
 │  │   INode      │  │ GraphBuilder │  │  Node Types  │  │
-│  │ (Interface)  │  │  (Manager)   │  │  (Concrete)  │  │
+│  │ (Interface)  │  │  (Manager)    │  │  (Concrete)  │  │
+│  │             │  │ + Adapters    │  │              │  │
 │  └──────────────┘  └──────────────┘  └──────────────┘  │
 └─────────────────────────────────────────────────────────┘
                       ▲
@@ -47,7 +51,7 @@
 
 #### 组件 1: 纯虚基类 `INode`
 
-**设计意图**：提供统一的节点接口，支持多态操作
+**设计意图**：提供统一的节点接口，支持多态操作和 key-based 访问
 
 **接口定义**：
 ```cpp
@@ -57,14 +61,18 @@ class INode {
   virtual std::string name() const = 0;
   virtual std::string type() const = 0;
   virtual std::function<void()> functor(const char* node_name) const = 0;
+  virtual std::shared_future<std::any> get_output_future(const std::string& key) const = 0;
+  virtual std::vector<std::string> get_output_keys() const = 0;
 };
 ```
 
 **设计要点**：
 - 虚析构函数支持多态销毁
 - `name()` 返回节点名称，便于调试和管理
-- `type()` 返回类型标识符（"TypedNode", "AnyNode" 等）
+- `type()` 返回类型标识符（"TypedSource", "AnyNode" 等）
 - `functor()` 创建 Taskflow 兼容的可执行函数
+- `get_output_future(key)` 统一输出访问接口（类型擦除）
+- `get_output_keys()` 获取所有输出 key，支持动态查询
 
 #### 组件 2: 模板特化节点（编译时类型安全）
 
@@ -76,10 +84,31 @@ class INode {
 3. **`TypedSink<Ins...>`**：消费多个类型化的输入
 
 **关键设计决策**：
-- **输入类型表示**：使用 `std::tuple<std::shared_future<Ins>...>` 作为 `InputsTuple`
-- **类型萃取**：从 `InputsTuple` 提取值类型 `tuple<Ins...>` 用于操作函数
-- **操作函数签名**：`std::function<std::tuple<Outs...>(ValuesTuple)>`，接收解包后的值
-- **类型存储**：使用 `std::any` 存储操作函数（类型擦除），在构造时转换为正确的 `std::function`
+
+1. **输入类型表示**：使用 `std::tuple<std::shared_future<Ins>...>` 作为 `InputsTuple`
+2. **类型萃取**：从 `InputsTuple` 提取值类型 `tuple<Ins...>` 用于操作函数
+3. **操作函数签名**：`std::function<std::tuple<Outs...>(ValuesTuple)>`，接收解包后的值
+4. **Key-based 输出**：`TypedOutputs` 同时提供索引访问和 key 访问
+5. **类型存储**：使用 `std::any` 存储操作函数（类型擦除），在构造时转换为正确的 `std::function`
+
+**数据模型**：
+
+```cpp
+template <typename... Outs>
+struct TypedOutputs {
+  // 类型化的 promises/futures（索引访问）
+  std::tuple<std::shared_ptr<std::promise<Outs>>...> promises;
+  std::tuple<std::shared_future<Outs>...> futures;
+  
+  // Key-based 访问（类型擦除）
+  std::unordered_map<std::string, std::shared_future<std::any>> futures_map;
+  std::vector<std::string> output_keys;
+  std::unordered_map<std::string, std::size_t> key_to_index_;
+  
+  // Any promises（用于同步）
+  std::unordered_map<std::size_t, std::shared_ptr<std::promise<std::any>>> any_promises_;
+};
+```
 
 **实现技巧**：
 ```cpp
@@ -97,6 +126,10 @@ template <typename... Futures>
 struct ExtractValueTypesHelper<std::tuple<Futures...>> {
   using type = std::tuple<typename FutureValueType<Futures>::type...>;
 };
+
+// 使用
+using InputsTuple = std::tuple<std::shared_future<double>, std::shared_future<int>>;
+using ValuesTuple = ExtractValueTypesHelper<InputsTuple>::type;  // tuple<double, int>
 ```
 
 #### 组件 3: 运行时类型擦除节点（Any-based）
@@ -112,10 +145,20 @@ struct ExtractValueTypesHelper<std::tuple<Futures...>> {
 - **数据传递**：使用 `std::shared_ptr<std::promise<std::any>>` + `std::shared_future<std::any>`
 - **线程安全**：共享指针和共享 future 确保 lambdas 可复制（Taskflow 要求）
 - **类型转换**：使用 `std::any_cast<T>` 在运行时提取值
+- **Key-based 访问**：所有输入输出通过字符串 key 访问
 
-#### 组件 4: GraphBuilder 管理器
+**数据模型**：
 
-**设计意图**：简化构图、依赖配置和执行流程
+```cpp
+struct AnyOutputs {
+  std::unordered_map<std::string, std::shared_ptr<std::promise<std::any>>> promises;
+  std::unordered_map<std::string, std::shared_future<std::any>> futures;
+};
+```
+
+#### 组件 4: GraphBuilder 管理器（声明式 API）
+
+**设计意图**：简化构图、依赖配置和执行流程，支持自动依赖推断
 
 **核心功能**：
 
@@ -124,15 +167,27 @@ struct ExtractValueTypesHelper<std::tuple<Futures...>> {
    - 统一添加接口（支持类型化/Any 节点）
    - 节点查找和迭代
 
-2. **依赖配置**
-   - `precede(from, to)`：设置 from → to 依赖
-   - `succeed(to, from)`：设置 from → to 依赖（反向语法）
-   - 支持单个任务或容器（vector/list）
+2. **声明式构图**（推荐）
+   - `create_typed_source(name, values, output_keys)` - 创建源节点
+   - `create_typed_node<Ins...>(name, input_specs, functor, output_keys)` - 创建节点
+     - 输入类型：显式指定 `<Ins...>`
+     - 输出类型：从 functor 返回类型自动推断
+   - `create_any_source/node/sink()` - Any 节点创建
+   - **自动依赖推断**：根据 `input_specs` 自动建立依赖关系
 
-3. **执行管理**
-   - `run(executor)`：同步执行
-   - `run_async(executor)`：异步执行返回 Future
-   - `dump(ostream)`：输出 DOT 可视化
+3. **输入辅助函数**
+   - `get_input<T>(node_name, key)` - 获取类型化的输入
+   - `get_output(node_name, key)` - 获取 type-erased 输出
+
+4. **适配器任务管理**
+   - 自动创建适配器任务连接 Typed → Any
+   - 适配器任务注册到 `adapter_tasks_` 映射
+   - 依赖关系：优先使用 `adapter → target`，无适配器时使用 `source → target`
+
+5. **执行管理**
+   - `run(executor)` - 同步执行
+   - `run_async(executor)` - 异步执行返回 Future
+   - `dump(ostream)` - 输出 DOT 可视化
 
 **实现要点**：
 ```cpp
@@ -141,10 +196,26 @@ class GraphBuilder {
   tf::Taskflow taskflow_;
   std::unordered_map<std::string, std::shared_ptr<INode>> nodes_;
   std::unordered_map<std::string, tf::Task> tasks_;
+  std::unordered_map<std::string, tf::Task> adapter_tasks_;  // 适配器任务映射
   
  public:
-  tf::Task add_node(std::shared_ptr<INode> node);
-  // ... template methods for typed nodes
+  // 声明式 API（推荐）
+  template <typename... Outs>
+  std::pair<std::shared_ptr<TypedSource<Outs...>>, tf::Task>
+  create_typed_source(const std::string& name, 
+                      std::tuple<Outs...> values,
+                      const std::vector<std::string>& output_keys);
+  
+  template <typename... Ins, typename OpType>
+  auto create_typed_node(const std::string& name,
+                        const std::vector<std::pair<std::string, std::string>>& input_specs,
+                        OpType&& functor,
+                        const std::vector<std::string>& output_keys);
+  
+  // 输入辅助函数
+  template <typename T>
+  std::shared_future<T> get_input(const std::string& node_name, 
+                                  const std::string& key) const;
 };
 ```
 
@@ -159,7 +230,8 @@ workflow/
 │   └── nodeflow.cpp          # 非模板代码实现
 ├── examples/
 │   ├── keyed_example.cpp     # Any-based 示例
-│   └── unified_example.cpp    # 统一 API 示例
+│   ├── unified_example.cpp  # Key-based API 示例
+│   └── declarative_example.cpp # 声明式 API 示例
 └── CMakeLists.txt
 ```
 
@@ -170,7 +242,7 @@ workflow/
 
 ## 三、实现技术路线
 
-### 阶段 1: 基础架构（已完成）
+### 阶段 1: 基础架构（已完成）✅
 
 ✅ **步骤 1.1**: 重构头文件结构
 - 将原 `nodeflow.hpp` 中的实现提取到 `src/nodeflow.cpp`
@@ -180,13 +252,13 @@ workflow/
 ✅ **步骤 1.2**: 设计纯虚基类
 - 定义 `INode` 接口
 - 包含 `name()`, `type()`, `functor()` 纯虚方法
-- 确保所有节点类型可多态使用
+- 添加 `get_output_future(key)` 和 `get_output_keys()` 统一接口
 
 ✅ **步骤 1.3**: 更新现有节点继承
 - `AnyNode`, `AnySource`, `AnySink` 继承 `INode`
 - 实现所有纯虚方法
 
-### 阶段 2: 模板节点开发（已完成）
+### 阶段 2: 模板节点开发（已完成）✅
 
 ✅ **步骤 2.1**: 实现类型萃取工具
 ```cpp
@@ -201,45 +273,74 @@ template <typename Tuple> struct ExtractValueTypesHelper;
 - 使用 `std::tuple<Outs...>` 存储初始值
 - 使用 `TypedOutputs<Outs...>` 管理输出 promises/futures
 - 在 `functor()` 中将值设置到 promises
+- 添加 key-based 输出访问
 
 ✅ **步骤 2.3**: 实现 TypedNode
 - 构造函数接收 `InputsTuple` 和操作函数
 - 将操作函数转换为正确的 `std::function` 类型并存储在 `std::any` 中
 - `functor()` 中从 futures 提取值，调用操作函数，设置输出 promises
+- 添加 key-based 输入/输出访问
 
 ✅ **步骤 2.4**: 实现 TypedSink
 - 接收 `std::tuple<std::shared_future<Ins>...>` 作为输入
 - 在 `functor()` 中提取所有输入值并打印
 
-### 阶段 3: GraphBuilder 开发（已完成）
+### 阶段 3: Key-based I/O 系统（已完成）✅
 
-✅ **步骤 3.1**: 节点管理
-- `add_node()`：统一入口，处理名称冲突
-- 模板方法 `add_typed_*()` 和 `add_any_*()` 便捷接口
+✅ **步骤 3.1**: 扩展 TypedOutputs
+- 添加 `futures_map: map<string, shared_future<any>>`
+- 添加 `output_keys: vector<string>`
+- 添加 `key_to_index_: map<string, size_t>`
+- 添加 `any_promises_: map<size_t, shared_ptr<promise<any>>>`
 
-✅ **步骤 3.2**: 依赖配置
-- `precede()` / `succeed()` 单任务版本
-- 模板版本支持容器（vector/list）
+✅ **步骤 3.2**: 实现 key-based 访问方法
+- `get_typed<I>(key)` - 通过 key 和索引获取类型化 future
+- `get_typed_by_key<T>(key)` - 通过 key 和类型获取类型化 future
+- `get(key)` - 获取 type-erased future
+- `keys()` - 获取所有输出 key
 
-✅ **步骤 3.3**: 执行接口
-- `run()` 同步执行
-- `run_async()` 异步执行
-- `dump()` 图可视化
+✅ **步骤 3.3**: 统一接口实现
+- `INode::get_output_future(key)` - 所有节点类型统一接口
+- `INode::get_output_keys()` - 获取所有输出 key
 
-### 阶段 4: 示例与测试（已完成）
+### 阶段 4: 声明式构图 API（已完成）✅
 
-✅ **步骤 4.1**: 更新示例
+✅ **步骤 4.1**: 实现声明式节点创建
+- `create_typed_source(name, values, output_keys)`
+- `create_typed_node<Ins...>(name, input_specs, functor, output_keys)`
+  - 输入类型：显式指定
+  - 输出类型：从 functor 返回类型自动推断
+- `create_any_source/node/sink()`
+
+✅ **步骤 4.2**: 实现自动依赖推断
+- 解析 `input_specs: vector<pair<source_node, source_key>>`
+- 自动建立依赖关系：`source → target` 或 `adapter → target`
+- 无需手动 `precede/succeed` 调用
+
+✅ **步骤 4.3**: 实现适配器任务管理
+- 在 `get_typed_input_impl<T>()` 中创建适配器任务
+- 适配器任务注册到 `adapter_tasks_["source::key"]`
+- 依赖关系：优先使用适配器，否则使用源节点
+
+✅ **步骤 4.4**: 输入辅助函数
+- `get_input<T>(node_name, key)` - 获取类型化输入
+- `get_output(node_name, key)` - 获取 type-erased 输出
+
+### 阶段 5: 示例与文档（已完成）✅
+
+✅ **步骤 5.1**: 更新示例
 - `keyed_example.cpp`：纯 Any-based 示例
-- `unified_example.cpp`：展示统一 API、多态、混合使用
+- `unified_example.cpp`：Key-based API 示例
+- `declarative_example.cpp`：声明式 API 完整示例
 
-✅ **步骤 4.2**: 构建系统更新
+✅ **步骤 5.2**: 构建系统更新
 - 更新 `CMakeLists.txt` 编译 `src/nodeflow.cpp`
-- 添加 `unified_example` 目标
+- 添加示例目标
 
-✅ **步骤 4.3**: 修复编译错误
-- 模板参数包顺序问题（使用 `InputsTuple` 替代参数包）
-- `std::any` 存储操作函数并正确提取类型
-- Future 返回类型（`tf::Future<void>`）
+✅ **步骤 5.3**: 文档编写
+- 更新 `README.md` - 完整库文档
+- 更新 `KEY_BASED_API.md` - Key-based API 详细说明
+- 更新 `guide_workflow.md` - 技术路线文档
 
 ## 四、关键技术难点与解决方案
 
@@ -267,11 +368,76 @@ template <typename OpType>
 TypedNode(InputsTuple fin, OpType&& fn, const std::string& name) {
   using ValuesTuple = typename ExtractValueTypesHelper<InputsTuple>::type;
   using OpFuncType = std::function<std::tuple<Outs...>(ValuesTuple)>;
-  op_ = OpFuncType(std::forward<OpType>(fn));  // 类型转换
+  op_ = OpFuncType(std::forward<OpType>(fn));  // 类型转换并存储在 std::any
 }
 ```
 
-### 难点 3: GraphBuilder 中节点名称传递
+### 难点 3: Key-based 输出访问的实现
+
+**问题**：需要同时支持索引访问（类型安全）和 key 访问（灵活）
+
+**解决**：双重存储 + 映射表
+```cpp
+template <typename... Outs>
+struct TypedOutputs {
+  // 索引访问（类型安全）
+  std::tuple<std::shared_future<Outs>...> futures;
+  
+  // Key 访问（类型擦除）
+  std::unordered_map<std::string, std::shared_future<std::any>> futures_map;
+  std::vector<std::string> output_keys;
+  std::unordered_map<std::string, std::size_t> key_to_index_;
+  
+  // 同步用 Any promises
+  std::unordered_map<std::size_t, std::shared_ptr<std::promise<std::any>>> any_promises_;
+};
+```
+
+### 难点 4: 声明式 API 的输出类型推断
+
+**问题**：如何从 functor 返回类型推断输出类型？
+
+**解决**：使用 `std::invoke_result` 和类型萃取
+```cpp
+template <typename... Ins, typename OpType>
+auto create_typed_node(const std::string& name, /*...*/, OpType&& functor, /*...*/) {
+  // 创建测试输入类型
+  using TestInput = std::tuple<Ins...>;
+  
+  // 推断返回类型
+  using ReturnType = typename std::invoke_result<OpType, TestInput>::type;
+  // ReturnType = std::tuple<Outs...>
+  
+  // 提取输出类型并创建节点
+  using NodeType = TypedNode<InputsTuple, /* 从 ReturnType 提取 Outs... */>;
+  // ...
+}
+```
+
+### 难点 5: 自动依赖推断与适配器管理
+
+**问题**：如何自动建立正确的依赖关系（包括适配器任务）？
+
+**解决**：
+1. 在 `create_typed_node` 中遍历 `input_specs`
+2. 检查是否存在适配器：`adapter_tasks_["source::key"]`
+3. 如果存在适配器：`adapter → target`
+4. 否则：`source → target`
+
+```cpp
+for (const auto& [source_node, source_key] : input_specs) {
+  const std::string adapter_key = source_node + "::" + source_key;
+  auto adapter_it = adapter_tasks_.find(adapter_key);
+  
+  if (adapter_it != adapter_tasks_.end()) {
+    adapter_it->second.precede(task);  // 使用适配器
+  } else {
+    tasks_[source_node].precede(task);  // 直接连接
+  }
+}
+```
+
+### 难点 6: GraphBuilder 中节点名称传递
 
 **问题**：`node->functor(node_name.c_str())` 可能传递临时字符串指针
 
@@ -283,58 +449,103 @@ auto task = taskflow_.emplace([node, task_name]() {
 });
 ```
 
-### 难点 4: 类型化与 Any 节点互操作
+### 难点 7: 类型化与 Any 节点互操作
 
 **问题**：Typed 节点输出 `tuple<shared_future<T>...>`，Any 节点需要 `unordered_map<string, shared_future<any>>`
 
 **解决**：使用适配器任务桥接
 ```cpp
-// 创建 promise/future 对
-auto p_prod = std::make_shared<std::promise<std::any>>();
-auto f_prod = p_prod->get_future().share();
+// 在 get_typed_input_impl 中创建适配器
+auto any_fut = node->get_output_future(key);  // 获取 any future
+auto p_typed = std::make_shared<std::promise<T>>();
+auto f_typed = p_typed->get_future().share();
 
-// 适配器任务：从 typed future 提取值并转换为 any
-auto adapter = taskflow.emplace([p_prod, typed_fut]() {
-  p_prod->set_value(std::any{typed_fut.get()});
-});
+// 适配器任务：从 any future 提取值并转换为 typed
+auto adapter = taskflow_.emplace([any_fut, p_typed]() {
+  std::any value = any_fut.get();
+  T typed_value = std::any_cast<T>(value);
+  p_typed->set_value(std::move(typed_value));
+}).name(node_name + "_to_" + key + "_adapter");
+
+// 注册并建立依赖
+adapter_tasks_[node_name + "::" + key] = adapter;
+source_task.precede(adapter);
 ```
 
 ## 五、使用模式与最佳实践
 
-### 模式 1: 纯类型化工作流（性能优先）
+### 模式 1: 声明式构图（推荐）✅
 
-适用场景：类型在编译时已知，需要最大性能
+**适用场景**：所有新代码
+
+**特点**：
+- 最小代码量
+- 自动依赖推断
+- Key-based I/O
+
+```cpp
+wf::GraphBuilder builder("workflow");
+auto [A, _] = builder.create_typed_source("A",
+  std::make_tuple(3.5, 7), {"x", "k"});
+
+auto [B, _] = builder.create_typed_node<double>("B",
+  {{"A", "x"}},  // 输入规范
+  [](const std::tuple<double>& in) {
+    return std::make_tuple(std::get<0>(in) + 1.0);
+  },
+  {"b"}  // 输出 key
+);
+
+// 依赖自动推断：B 依赖 A
+builder.run(executor);
+```
+
+### 模式 2: 纯类型化工作流（性能优先）
+
+**适用场景**：类型在编译时已知，需要最大性能
 
 ```cpp
 wf::GraphBuilder builder("typed_workflow");
-auto A = std::make_shared<wf::TypedSource<double>>(std::make_tuple(3.5), "A");
-auto B = std::make_shared<wf::TypedNode</*...*/>>(/*...*/);
-builder.precede(tA, std::vector<tf::Task>{tB});
+auto A = std::make_shared<wf::TypedSource<double>>(
+  std::make_tuple(3.5), {"x"}, "A");
+auto B = std::make_shared<wf::TypedNode</*...*/>>(/*...*/, {"b"}, "B");
+builder.precede(tA, std::vector<tf::Task>{tB});  // 手动依赖（deprecated）
 ```
 
-### 模式 2: 纯 Any-based 工作流（灵活性优先）
+### 模式 3: 纯 Any-based 工作流（灵活性优先）
 
-适用场景：类型在运行时确定，需要动态组合
+**适用场景**：类型在运行时确定，需要动态组合
 
 ```cpp
 wf::GraphBuilder builder("any_workflow");
-auto A = std::make_shared<wf::AnySource>({{"x", std::any{3.5}}}, "A");
-auto B = std::make_shared<wf::AnyNode>(/*...*/);
+auto [A, _] = builder.create_any_source("A",
+  {{"x", std::any{3.5}}});
+auto [B, _] = builder.create_any_node("B",
+  {{"A", "x"}},
+  [](const auto& in) {
+    double x = std::any_cast<double>(in.at("x"));
+    return std::unordered_map<std::string, std::any>{{"b", x + 1.0}};
+  },
+  {"b"});
 ```
 
-### 模式 3: 混合工作流（平衡性能与灵活性）
+### 模式 4: 混合工作流（平衡性能与灵活性）
 
-适用场景：核心计算路径使用类型化节点，接口层使用 Any 节点
+**适用场景**：核心计算路径使用类型化节点，接口层使用 Any 节点
 
 ```cpp
-// 类型化核心计算
-auto compute = std::make_shared<wf::TypedNode</*...*/>>(/*...*/);
+// 类型化核心计算（性能）
+auto [D, _] = builder.create_typed_node<double, double>("D",
+  {{"B", "b"}, {"C", "c"}},
+  [](const std::tuple<double, double>& in) {
+    return std::make_tuple(std::get<0>(in) * std::get<1>(in));
+  },
+  {"prod"});
 
-// 适配器：类型化 -> Any
-auto adapter = /*...*/;
-
-// Any-based 接口
-auto sink = std::make_shared<wf::AnySink>(/*...*/);
+// Any-based 接口（灵活性）
+auto [H, _] = builder.create_any_sink("H",
+  {{"D", "prod"}, {"G", "sum"}});
+// 适配器任务自动创建：D::prod → H
 ```
 
 ## 六、扩展方向
@@ -342,8 +553,8 @@ auto sink = std::make_shared<wf::AnySink>(/*...*/);
 ### 6.1 类型系统增强
 
 - **类型验证**：在 Any 节点中添加运行时类型检查
-- **类型推断**：从函数签名自动推断节点输入输出类型
-- **类型适配**：自动生成类型化 ↔ Any 适配器
+- **类型推断**：从函数签名自动推断节点输入输出类型（部分实现）
+- **类型适配**：自动生成类型化 ↔ Any 适配器（已实现部分）
 
 ### 6.2 构图能力增强
 
@@ -373,7 +584,7 @@ auto sink = std::make_shared<wf::AnySink>(/*...*/);
 - `workflow/include/workflow/nodeflow.hpp`：主要接口定义
 - `workflow/include/workflow/nodeflow_impl.hpp`：模板实现
 - `workflow/src/nodeflow.cpp`：非模板实现
-- `workflow/examples/unified_example.cpp`：完整示例
+- `workflow/examples/declarative_example.cpp`：声明式 API 完整示例
 
 ### 7.2 参考示例
 
@@ -390,7 +601,9 @@ Workflow 库通过以下设计实现了灵活且类型安全的数据流编程�
 
 1. **统一接口**：`INode` 基类提供多态支持
 2. **双重类型系统**：编译时类型安全 + 运行时灵活性
-3. **简化 API**：`GraphBuilder` 降低使用复杂度
-4. **清晰分离**：声明/实现分离，易于维护和扩展
+3. **Key-based I/O**：字符串 key 访问提升可读性和可维护性
+4. **声明式构图**：自动依赖推断减少手动配置错误
+5. **简化 API**：`GraphBuilder` 降低使用复杂度
+6. **清晰分离**：声明/实现分离，易于维护和扩展
 
-该设计既满足了高性能需求（类型化节点），又保持了足够的灵活性（Any 节点），同时通过统一的接口实现了良好的可扩展性。
+该设计既满足了高性能需求（类型化节点），又保持了足够的灵活性（Any 节点），同时通过统一的接口和声明式 API 实现了良好的可扩展性和易用性。
