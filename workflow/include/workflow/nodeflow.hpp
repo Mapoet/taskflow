@@ -517,6 +517,8 @@ class GraphBuilder {
   tf::Executor* executor_;
   std::unordered_map<std::string, std::shared_ptr<INode>> nodes_;
   std::unordered_map<std::string, tf::Task> tasks_;
+  // Adapter tasks created for typed extraction: key format "<node>::<key>"
+  mutable std::unordered_map<std::string, tf::Task> adapter_tasks_;
 };
 
 }  // namespace workflow

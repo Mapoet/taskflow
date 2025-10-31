@@ -456,12 +456,18 @@ auto GraphBuilder::create_typed_node(const std::string& name,
                                                output_keys, 
                                                std::make_index_sequence<std::tuple_size_v<OutsTuple>>{});
   
-  // Auto-register dependencies: target depends on all source nodes
+  // Auto-register dependencies: prefer adapter→target; otherwise source→target
   auto task = result.second;
-  for (const auto& [source_node, _] : input_specs) {
-    auto source_task_it = tasks_.find(source_node);
-    if (source_task_it != tasks_.end()) {
-      source_task_it->second.precede(task);
+  for (const auto& [source_node, source_key] : input_specs) {
+    const std::string adapter_key = source_node + "::" + source_key;
+    auto adapter_it = adapter_tasks_.find(adapter_key);
+    if (adapter_it != adapter_tasks_.end()) {
+      adapter_it->second.precede(task);
+    } else {
+      auto source_task_it = tasks_.find(source_node);
+      if (source_task_it != tasks_.end()) {
+        source_task_it->second.precede(task);
+      }
     }
   }
   
@@ -535,6 +541,8 @@ std::shared_future<T> GraphBuilder::get_typed_input_impl(const std::string& node
   // The node using this future will depend on source, and adapter will complete
   // before the node runs (since adapter depends on source and completes quickly)
   source_task.precede(adapter_task);
+  // Register adapter task so that consumers can depend on it explicitly
+  adapter_tasks_[node_name + "::" + key] = adapter_task;
   
   return f_typed;
 }
