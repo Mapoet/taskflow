@@ -557,10 +557,11 @@ tf::Task GraphBuilder::create_loop_decl(const std::string& name,
   // Create the condition controller
   auto cond_task = taskflow_.emplace(std::move(condition_func)).name(name);
   // Wire loop: body -> cond
-  body_task.precede(cond_task);
-  // cond index 0 -> body (loop-back)
-  cond_task.precede(body_task);
-  // Note: exit_task linkage is optional and can be connected by caller if needed
+  body_task.succeed(cond_task);
+  // cond returns 0 for loop-back (body), non-zero for exit
+  // Use separate precede calls (like examples/condition.cpp)
+  // Return 0 executes first precede (body), return 1 executes second precede (exit)
+  cond_task.precede(body_task,exit_task);  // Index 0: continue loop
   tasks_[name] = cond_task;
   return cond_task;
 }

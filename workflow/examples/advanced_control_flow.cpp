@@ -20,7 +20,7 @@ int main() {
   wf::GraphBuilder builder("advanced_control_flow");
 
   std::cout << "=== Advanced Control Flow Example ===\n\n";
-
+#if 1
   // ==========================================================================
   // Example 1: Condition Node (if-else branching)
   // ==========================================================================
@@ -127,7 +127,7 @@ int main() {
   );
 
   std::cout << "  Pipeline with 3 stages, 4 parallel lines\n";
-
+#endif
   // ==========================================================================
   // Example 4: Loop Node
   // ==========================================================================
@@ -135,18 +135,60 @@ int main() {
 
   int counter = 0;
 
-  // Build loop body as a subgraph
-  auto loop_body_task = builder.create_subgraph("LoopBody", [&](wf::GraphBuilder& gb){
-    // Minimal body: one task prints counter and increments
-    gb.taskflow().emplace([&counter](){
-      std::cout << "  Loop iteration: counter = " << counter << "\n";
-      ++counter;
-    }).name("LoopBody_print");
+  // Build loop body as a subgraph using declarative API
+  // The lambda captures 'counter' by reference to access it as a parameter
+  auto loop_body_task = builder.create_subgraph("LoopBody", [&counter](wf::GraphBuilder& gb){
+    // Note: This builder_fn is called only once during graph construction,
+    // not during execution. The subgraph is built once and executed multiple times.
+    
+    // Use declarative API structure: source -> process -> sink
+    // Note: counter is accessed via lambda capture, not through dataflow
+    // This demonstrates parameter passing through closures while using declarative structure
+    auto [dummy_src, tSrc] = gb.create_typed_source("loop_trigger",
+      std::make_tuple(0),  // Dummy value (counter accessed via capture instead)
+      std::vector<std::string>{"trigger"}
+    );
+    
+    // Process node: prints and increments (counter passed via lambda capture)
+    auto [process, tProc] = gb.create_typed_node<int>("loop_iteration",
+      {{"loop_trigger", "trigger"}},  // Declarative input structure
+      [&counter](const std::tuple<int>&) {
+        // Access counter via capture (parameter passed through closure)
+        std::cout << "  Loop iteration: counter = " << counter << "\n";
+        ++counter;  // Increment counter in loop body
+        return std::make_tuple(counter);  // Return updated value
+      },
+      {"result"}
+    );
+    
+    // Sink to complete the flow
+    auto [sink, tSink] = gb.create_any_sink("loop_complete",
+      {{"loop_iteration", "result"}}
+    );
+    
+    // All dependencies automatically inferred from input_specs
   });
 
-  // Optional exit action subgraph
-  auto loop_exit_task = builder.create_subgraph("LoopExit", [&](wf::GraphBuilder& gb){
-    gb.taskflow().emplace([](){ std::cout << "  Loop exited\n"; }).name("LoopExit_print");
+  // Optional exit action subgraph using declarative API
+  auto loop_exit_task = builder.create_subgraph("LoopExit", [](wf::GraphBuilder& gb){
+    // Create a simple source and sink for exit message
+    auto [exit_src, tExitSrc] = gb.create_typed_source("exit_msg",
+      std::make_tuple(0),
+      std::vector<std::string>{"msg"}
+    );
+    
+    auto [exit_proc, tExitProc] = gb.create_typed_node<int>("exit_print",
+      {{"exit_msg", "msg"}},
+      [](const std::tuple<int>&) {
+        std::cout << "  Loop exited\n";
+        return std::make_tuple(0);
+      },
+      {"done"}
+    );
+    
+    auto [exit_sink, tExitSink] = gb.create_any_sink("exit_sink",
+      {{"exit_print", "done"}}
+    );
   });
 
   // Declarative loop: condition 0 loops back to body, non-zero goes to exit
@@ -154,7 +196,12 @@ int main() {
     "Loop",
     std::vector<std::string>{"A"},
     loop_body_task,
-    [&counter]() -> int { return (counter < 5) ? 0 : 1; },
+    [&counter]() -> int { 
+      // Only read counter, don't modify it (modification happens in loop body)
+      int result = (counter < 5) ? 0 : 1;
+      std::cout << "  Loop condition: counter=" << counter << ", returning " << result << "\n";
+      return result;
+    },
     loop_exit_task
   );
 
