@@ -94,30 +94,32 @@ builder.create_pipeline_node("Pipeline",
 
 ### 循环节点 (Loop Node)
 
-使用声明式 API 创建循环体：
+使用 `create_subtask` 创建循环体（每次执行时重建并运行子图）：
 
 ```cpp
 int counter = 0;
 
-// 使用声明式 API 构建循环体子图
-auto loop_body_task = builder.create_subgraph("LoopBody", [&counter](wf::GraphBuilder& gb){
-  // 在子图中使用声明式 API 创建节点结构
+// 使用 create_subtask 重建并运行子图
+auto loop_body_task = builder.create_subtask("LoopBody", [&counter](wf::GraphBuilder& gb){
   auto [trigger, _] = gb.create_typed_source("loop_trigger",
-    std::make_tuple(0), {"trigger"}
+    std::make_tuple(counter), {"trigger"}
   );
-  
   auto [process, _] = gb.create_typed_node<int>("loop_iteration",
     {{"loop_trigger", "trigger"}},
     [&counter](const std::tuple<int>&) {
-      std::cout << "  Loop iteration: counter = " << counter << "\n";
-      ++counter;  // 在循环体中更新 counter
+      ++counter;
       return std::make_tuple(counter);
     },
     {"result"}
   );
-  
   auto [sink, _] = gb.create_any_sink("loop_complete",
-    {{"loop_iteration", "result"}}
+    {{"loop_iteration", "result"}},
+    [](const std::unordered_map<std::string, std::any>& values){
+      if (auto it = values.find("result"); it != values.end()) {
+        std::cout << "  Loop iteration completed: counter = "
+                  << std::any_cast<int>(it->second) << "\n";
+      }
+    }
   );
 });
 
@@ -140,10 +142,45 @@ builder.create_loop_decl(
 ```
 
 **关键特性**：
-- ✅ 循环体使用声明式 API，结构清晰
+- ✅ 循环体使用 `create_subtask` 支持多次迭代
 - ✅ 参数通过 lambda 捕获传递
 - ✅ 条件函数决定循环是否继续
-- ✅ 支持嵌套的声明式工作流
+- ✅ 子图内部依赖自动推断
+
+### Sink 回调（结果收集/处理）
+
+- Any Sink 回调：
+```cpp
+auto [sink, tSink] = builder.create_any_sink(
+  "H", {{"D","prod"}},
+  [](const std::unordered_map<std::string, std::any>& values){
+    double prod = std::any_cast<double>(values.at("prod"));
+    // 自定义处理/汇总
+  }
+);
+```
+
+- Typed Sink 回调：
+```cpp
+auto [tsink, tTask] = builder.create_typed_sink<double, int>(
+  "T", {{"X","a"},{"Y","b"}},
+  [](const std::tuple<double,int>& vals){
+    auto [a,b] = vals; /* ... */
+  }
+);
+```
+
+### 噪声控制
+
+为输出更可控，库内部默认去除了节点级的 "emitted"/"done" 打印；建议通过 Sink 回调进行精确日志输出。
+
+### 测试 DOT 结构
+
+循环示例（loop_only）：
+```
+Loop [diamond] -> LoopBody (0: continue)
+Loop [diamond] -> LoopExit  (1: exit)
+```
 
 ### 子图创建 (Subgraph)
 

@@ -376,6 +376,12 @@ The **Workflow** library is a high-level **declarative dataflow** abstraction bu
 - **🔗 Unified Interface**: Polymorphic `INode` base class for all node types
 - **🎨 Graph Builder**: High-level API managing construction, execution, and visualization
 
+### What's New (Workflow)
+
+- `create_subtask(name, builder_fn)`: build-and-run a fresh subgraph at task execution (recommended for loop bodies).
+- Sink callbacks: `create_any_sink(..., callback)` and `create_typed_sink<...>(..., callback)` to collect/process final results.
+- Cleaner console: internal node prints removed; use callbacks for precise logs.
+
 ## Quick Example (Declarative API)
 
 ```cpp
@@ -457,6 +463,13 @@ cmake --build . --target advanced_control_flow
 ```
 
 **Advanced Control Flow**: The workflow library also supports condition nodes, multi-condition nodes, pipeline nodes, and loop nodes with declarative API. See `workflow/examples/advanced_control_flow.cpp` for examples.
+
+DOT snapshots (examples):
+
+```
+loop_only: Loop (diamond) -> LoopBody [0], LoopExit [1]
+advanced_control_flow: B (diamond)-> C/D; F (diamond)-> G/H/I; Loop (diamond)-> LoopBody/LoopExit
+```
 
 See `workflow/README.md` and `readme/guide_workflow.md` for detailed documentation and technical roadmap.
 
