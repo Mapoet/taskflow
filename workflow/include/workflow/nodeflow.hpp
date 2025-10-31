@@ -316,13 +316,17 @@ struct AnySink : public INode {
 /**
  * @brief Condition node that returns an integer to select successor task
  * @details Returns an integer index (0, 1, 2...) indicating which successor task to execute
+ *          Supports string-keyed input and output parameters like regular nodes
  */
 class ConditionNode : public INode {
  public:
-  using ConditionFunc = std::function<int()>;
+  using ConditionFunc = std::function<int(const std::unordered_map<std::string, std::any>&)>;
   
   ConditionNode() = default;
-  explicit ConditionNode(ConditionFunc func, const std::string& name = "");
+  explicit ConditionNode(const std::unordered_map<std::string, std::shared_future<std::any>>& inputs,
+                         ConditionFunc func,
+                         const std::vector<std::string>& output_keys,
+                         const std::string& name = "");
   
   std::string name() const override;
   std::string type() const override { return "ConditionNode"; }
@@ -330,6 +334,8 @@ class ConditionNode : public INode {
   std::shared_future<std::any> get_output_future(const std::string& key) const override;
   std::vector<std::string> get_output_keys() const override;
   
+  std::unordered_map<std::string, std::shared_future<std::any>> inputs;
+  AnyOutputs out;
   ConditionFunc func_;
   std::string node_name_;
 };
@@ -341,13 +347,17 @@ class ConditionNode : public INode {
 /**
  * @brief Multi-condition node that returns multiple indices for parallel execution
  * @details Returns tf::SmallVector<int> to select multiple successor tasks to execute
+ *          Supports string-keyed input and output parameters like regular nodes
  */
 class MultiConditionNode : public INode {
  public:
-  using MultiConditionFunc = std::function<tf::SmallVector<int>()>;
+  using MultiConditionFunc = std::function<tf::SmallVector<int>(const std::unordered_map<std::string, std::any>&)>;
   
   MultiConditionNode() = default;
-  explicit MultiConditionNode(MultiConditionFunc func, const std::string& name = "");
+  explicit MultiConditionNode(const std::unordered_map<std::string, std::shared_future<std::any>>& inputs,
+                               MultiConditionFunc func,
+                               const std::vector<std::string>& output_keys,
+                               const std::string& name = "");
   
   std::string name() const override;
   std::string type() const override { return "MultiConditionNode"; }
@@ -355,6 +365,8 @@ class MultiConditionNode : public INode {
   std::shared_future<std::any> get_output_future(const std::string& key) const override;
   std::vector<std::string> get_output_keys() const override;
   
+  std::unordered_map<std::string, std::shared_future<std::any>> inputs;
+  AnyOutputs out;
   MultiConditionFunc func_;
   std::string node_name_;
 };
@@ -393,21 +405,26 @@ class PipelineNode : public INode {
 /**
  * @brief Loop node that creates iterative control flow using a condition
  * @details Uses a condition function to decide whether to continue loop or exit
+ *          Supports string-keyed input and output parameters like regular nodes
  */
 class LoopNode : public INode {
  public:
-  using LoopConditionFunc = std::function<int()>;  // Returns 0 to continue, non-zero to exit
+  using LoopConditionFunc = std::function<int(const std::unordered_map<std::string, std::any>&)>;  // Returns 0 to continue, non-zero to exit
   
   LoopNode() = default;
   
   /**
    * @brief Create a loop node
-   * @param body_func Function to execute in each iteration
+   * @param inputs Input futures from other nodes
+   * @param body_func Function to execute in each iteration (receives inputs)
    * @param condition_func Function that returns 0 to continue loop, non-zero to exit
+   * @param output_keys Output key names
    * @param name Node name
    */
-  explicit LoopNode(std::function<void()> body_func,
+  explicit LoopNode(const std::unordered_map<std::string, std::shared_future<std::any>>& inputs,
+                    std::function<void(const std::unordered_map<std::string, std::any>&)> body_func,
                     LoopConditionFunc condition_func,
+                    const std::vector<std::string>& output_keys,
                     const std::string& name = "");
   
   std::string name() const override;
@@ -416,7 +433,9 @@ class LoopNode : public INode {
   std::shared_future<std::any> get_output_future(const std::string& key) const override;
   std::vector<std::string> get_output_keys() const override;
   
-  std::function<void()> body_func_;
+  std::unordered_map<std::string, std::shared_future<std::any>> inputs;
+  AnyOutputs out;
+  std::function<void(const std::unordered_map<std::string, std::any>&)> body_func_;
   LoopConditionFunc condition_func_;
   std::string node_name_;
 };
@@ -667,28 +686,6 @@ class GraphBuilder {
   // ============================================================================
 
   /**
-   * @brief Create and add a condition node
-   * @param name Node name
-   * @param condition_func Function that returns an integer index (0, 1, 2...) to select successor
-   * @return Pair of (node_ptr, task_handle)
-   * @details The returned index corresponds to the position of the successor in precede() call
-   */
-  std::pair<std::shared_ptr<ConditionNode>, tf::Task>
-  create_condition_node(const std::string& name,
-                       std::function<int()> condition_func);
-
-  /**
-   * @brief Create and add a multi-condition node
-   * @param name Node name
-   * @param multi_condition_func Function that returns tf::SmallVector<int> to select multiple successors
-   * @return Pair of (node_ptr, task_handle)
-   * @details Returns multiple indices to execute multiple successor tasks in parallel
-   */
-  std::pair<std::shared_ptr<MultiConditionNode>, tf::Task>
-  create_multi_condition_node(const std::string& name,
-                              std::function<tf::SmallVector<int>()> multi_condition_func);
-
-  /**
    * @brief Create and add a pipeline node
    * @tparam Ps Pipe types
    * @param name Node name
@@ -702,19 +699,6 @@ class GraphBuilder {
   create_pipeline_node(const std::string& name,
                        size_t num_lines,
                        Ps&&... pipes);
-
-  /**
-   * @brief Create and add a loop node
-   * @param name Node name
-   * @param body_func Function to execute in each iteration
-   * @param condition_func Function that returns 0 to continue loop, non-zero to exit
-   * @return Pair of (node_ptr, task_handle)
-   * @details Creates a loop using condition task. Loop continues while condition returns 0.
-   */
-  std::pair<std::shared_ptr<LoopNode>, tf::Task>
-  create_loop_node(const std::string& name,
-                   std::function<void()> body_func,
-                   std::function<int()> condition_func);
 
   // ----------------------------------------------------------------------------
   // Declarative helpers for control flow and subgraphs
@@ -730,6 +714,21 @@ class GraphBuilder {
                            const std::function<void(GraphBuilder&)>& builder_fn);
 
   /**
+   * @brief Create a subgraph with string-keyed inputs and outputs
+   * @param name Subgraph name
+   * @param input_specs Vector of {source_node_name, source_output_key} pairs
+   * @param builder_fn Function that receives a nested GraphBuilder and input values to define the subgraph
+   * @param output_keys Output key names that the subgraph will produce
+   * @return Pair of (subgraph_node_ptr, task_handle)
+   * @details The subgraph receives inputs and can produce outputs. Automatically establishes dependencies.
+   */
+  std::pair<std::shared_ptr<AnyNode>, tf::Task>
+  create_subgraph(const std::string& name,
+                  const std::vector<std::pair<std::string, std::string>>& input_specs,
+                  std::function<void(GraphBuilder&, const std::unordered_map<std::string, std::any>&)> builder_fn,
+                  const std::vector<std::string>& output_keys);
+
+  /**
    * @brief Create a task that builds and runs a fresh subgraph at execution time
    * @param name Task name
    * @param builder_fn Function to populate the subgraph using a provided GraphBuilder
@@ -742,68 +741,69 @@ class GraphBuilder {
                           const std::function<void(GraphBuilder&)>& builder_fn);
 
   /**
-   * @brief Declarative condition with explicit successor tasks
-   * @param name Condition task name
-   * @param condition_func Function returning index of successor
-   * @param successors Successor tasks to wire in order
-   * @return The created condition task
+   * @brief Create a subtask with string-keyed inputs and outputs
+   * @param name Task name
+   * @param input_specs Vector of {source_node_name, source_output_key} pairs
+   * @param builder_fn Function to populate the subgraph using a provided GraphBuilder and input values
+   * @param output_keys Output key names that the subtask will produce
+   * @return Pair of (subtask_node_ptr, task_handle)
+   * @details The subtask receives inputs and can produce outputs. Automatically establishes dependencies.
    */
-  tf::Task create_condition_decl(const std::string& name,
-                                 std::function<int()> condition_func,
-                                 const std::vector<tf::Task>& successors);
+  std::pair<std::shared_ptr<AnyNode>, tf::Task>
+  create_subtask(const std::string& name,
+                 const std::vector<std::pair<std::string, std::string>>& input_specs,
+                 std::function<void(GraphBuilder&, const std::unordered_map<std::string, std::any>&)> builder_fn,
+                 const std::vector<std::string>& output_keys);
 
   /**
-   * @brief Declarative condition with auto predecessors by node names
+   * @brief Declarative condition with string-keyed inputs and outputs
    * @param name Condition task name
-   * @param depend_on_nodes Node names that must complete before condition
-   * @param condition_func Function returning index of successor
+   * @param input_specs Vector of {source_node_name, source_output_key} pairs
+   * @param condition_func Function that receives inputs and returns index of successor
    * @param successors Successor tasks to wire
+   * @param output_keys Output key names (e.g., {"result"})
+   * @return Pair of (node_ptr, task_handle)
    */
-  tf::Task create_condition_decl(const std::string& name,
-                                 const std::vector<std::string>& depend_on_nodes,
-                                 std::function<int()> condition_func,
-                                 const std::vector<tf::Task>& successors);
+  std::pair<std::shared_ptr<ConditionNode>, tf::Task>
+  create_condition_decl(const std::string& name,
+                        const std::vector<std::pair<std::string, std::string>>& input_specs,
+                        std::function<int(const std::unordered_map<std::string, std::any>&)> condition_func,
+                        const std::vector<tf::Task>& successors,
+                        const std::vector<std::string>& output_keys = {"result"});
 
   /**
-   * @brief Declarative multi-condition with explicit successor tasks
+   * @brief Declarative multi-condition with string-keyed inputs and outputs
    * @param name Multi-condition task name
-   * @param func Function returning indices of successors to run
+   * @param input_specs Vector of {source_node_name, source_output_key} pairs
+   * @param func Function that receives inputs and returns indices of successors to run
    * @param successors Successor tasks to wire in order
-   * @return The created multi-condition task
+   * @param output_keys Output key names (e.g., {"result"})
+   * @return Pair of (node_ptr, task_handle)
    */
-  tf::Task create_multi_condition_decl(const std::string& name,
-                                       std::function<tf::SmallVector<int>()> func,
-                                       const std::vector<tf::Task>& successors);
+  std::pair<std::shared_ptr<MultiConditionNode>, tf::Task>
+  create_multi_condition_decl(const std::string& name,
+                              const std::vector<std::pair<std::string, std::string>>& input_specs,
+                              std::function<tf::SmallVector<int>(const std::unordered_map<std::string, std::any>&)> func,
+                              const std::vector<tf::Task>& successors,
+                              const std::vector<std::string>& output_keys = {"result"});
 
   /**
-   * @brief Declarative multi-condition with auto predecessors by node names
-   */
-  tf::Task create_multi_condition_decl(const std::string& name,
-                                       const std::vector<std::string>& depend_on_nodes,
-                                       std::function<tf::SmallVector<int>()> func,
-                                       const std::vector<tf::Task>& successors);
-
-  /**
-   * @brief Declarative loop using an existing body task (e.g., from create_subgraph)
+   * @brief Declarative loop with string-keyed inputs and outputs
    * @param name Loop name
-   * @param body_task Task representing the loop body
-   * @param condition_func Returns 0 to continue (loop back), non-zero to exit
-   * @param exit_task Optional task to run when exiting the loop (non-zero)
-   * @return The created condition task controlling the loop
+   * @param input_specs Vector of {source_node_name, source_output_key} pairs
+   * @param body_builder_fn Function that receives a GraphBuilder and inputs to build the loop body
+   * @param condition_func Function that receives inputs and returns 0 to continue (loop back), non-zero to exit
+   * @param exit_builder_fn Optional function to build exit task (receives GraphBuilder and inputs)
+   * @param output_keys Output key names
+   * @return Pair of (node_ptr, task_handle for loop entry)
    */
-  tf::Task create_loop_decl(const std::string& name,
-                            tf::Task& body_task,
-                            std::function<int()> condition_func,
-                            tf::Task exit_task = tf::Task{});
-
-  /**
-   * @brief Declarative loop with auto predecessors by node names
-   */
-  tf::Task create_loop_decl(const std::string& name,
-                            const std::vector<std::string>& depend_on_nodes,
-                            tf::Task& body_task,
-                            std::function<int()> condition_func,
-                            tf::Task exit_task = tf::Task{});
+  std::pair<std::shared_ptr<LoopNode>, tf::Task>
+  create_loop_decl(const std::string& name,
+                   const std::vector<std::pair<std::string, std::string>>& input_specs,
+                   std::function<void(GraphBuilder&, const std::unordered_map<std::string, std::any>&)> body_builder_fn,
+                   std::function<int(const std::unordered_map<std::string, std::any>&)> condition_func,
+                   std::function<void(GraphBuilder&, const std::unordered_map<std::string, std::any>&)> exit_builder_fn = nullptr,
+                   const std::vector<std::string>& output_keys = {});
 
  private:
   // Helper to extract typed future from source node (for create_typed_node)
