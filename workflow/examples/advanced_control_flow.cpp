@@ -135,38 +135,28 @@ int main() {
 
   int counter = 0;
 
-  // Build loop body as a subgraph using declarative API
-  // The lambda captures 'counter' by reference to access it as a parameter
-  auto loop_body_task = builder.create_subgraph("LoopBody", [&counter](wf::GraphBuilder& gb){
-    // Note: This builder_fn is called only once during graph construction,
-    // not during execution. The subgraph is built once and executed multiple times.
-    
-    // Use declarative API structure: source -> process -> sink
-    // Note: counter is accessed via lambda capture, not through dataflow
-    // This demonstrates parameter passing through closures while using declarative structure
-    auto [dummy_src, tSrc] = gb.create_typed_source("loop_trigger",
-      std::make_tuple(0),  // Dummy value (counter accessed via capture instead)
+  // Build loop body using create_subtask so the subgraph is built & run each iteration
+  auto loop_body_task = builder.create_subtask("LoopBody", [&counter](wf::GraphBuilder& gb){
+    auto [dummy_src, tSrc] = gb.create_typed_source(
+      "loop_trigger",
+      std::make_tuple(counter),
       std::vector<std::string>{"trigger"}
     );
-    
-    // Process node: prints and increments (counter passed via lambda capture)
-    auto [process, tProc] = gb.create_typed_node<int>("loop_iteration",
-      {{"loop_trigger", "trigger"}},  // Declarative input structure
+
+    auto [process, tProc] = gb.create_typed_node<int>(
+      "loop_iteration",
+      {{"loop_trigger", "trigger"}},
       [&counter](const std::tuple<int>&) {
-        // Access counter via capture (parameter passed through closure)
-        std::cout << "  Loop iteration: counter = " << counter << "\n";
-        ++counter;  // Increment counter in loop body
-        return std::make_tuple(counter);  // Return updated value
+        ++counter;
+        return std::make_tuple(counter);
       },
-      {"result"}
+      std::vector<std::string>{"result"}
     );
-    
-    // Sink to complete the flow
-    auto [sink, tSink] = gb.create_any_sink("loop_complete",
+
+    auto [sink, tSink] = gb.create_any_sink(
+      "loop_complete",
       {{"loop_iteration", "result"}}
     );
-    
-    // All dependencies automatically inferred from input_specs
   });
 
   // Optional exit action subgraph using declarative API
@@ -180,7 +170,6 @@ int main() {
     auto [exit_proc, tExitProc] = gb.create_typed_node<int>("exit_print",
       {{"exit_msg", "msg"}},
       [](const std::tuple<int>&) {
-        std::cout << "  Loop exited\n";
         return std::make_tuple(0);
       },
       {"done"}
@@ -199,7 +188,6 @@ int main() {
     [&counter]() -> int { 
       // Only read counter, don't modify it (modification happens in loop body)
       int result = (counter < 5) ? 0 : 1;
-      std::cout << "  Loop condition: counter=" << counter << ", returning " << result << "\n";
       return result;
     },
     loop_exit_task

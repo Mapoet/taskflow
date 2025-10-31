@@ -684,6 +684,18 @@ class GraphBuilder {
                            const std::function<void(GraphBuilder&)>& builder_fn);
 
   /**
+   * @brief Create a task that builds and runs a fresh subgraph at execution time
+   * @param name Task name
+   * @param builder_fn Function to populate the subgraph using a provided GraphBuilder
+   * @return Task handle representing the executable subtask
+   * @details Unlike create_subgraph (which creates a composed_of module that runs once),
+   *          this creates a normal task that, on each execution, constructs a new subgraph
+   *          and runs it using the enclosing builder's executor. This is suitable for loop bodies.
+   */
+  tf::Task create_subtask(const std::string& name,
+                          const std::function<void(GraphBuilder&)>& builder_fn);
+
+  /**
    * @brief Declarative condition with explicit successor tasks
    * @param name Condition task name
    * @param condition_func Function returning index of successor
@@ -734,7 +746,7 @@ class GraphBuilder {
    * @return The created condition task controlling the loop
    */
   tf::Task create_loop_decl(const std::string& name,
-                            tf::Task body_task,
+                            tf::Task& body_task,
                             std::function<int()> condition_func,
                             tf::Task exit_task = tf::Task{});
 
@@ -743,7 +755,7 @@ class GraphBuilder {
    */
   tf::Task create_loop_decl(const std::string& name,
                             const std::vector<std::string>& depend_on_nodes,
-                            tf::Task body_task,
+                            tf::Task& body_task,
                             std::function<int()> condition_func,
                             tf::Task exit_task = tf::Task{});
 
