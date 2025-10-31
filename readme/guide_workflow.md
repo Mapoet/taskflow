@@ -548,29 +548,186 @@ auto [H, _] = builder.create_any_sink("H",
 // 适配器任务自动创建：D::prod → H
 ```
 
-## 六、扩展方向
+## 六、高级控制流节点实现
 
-### 6.1 类型系统增强
+### 6.1 控制流节点概述
 
-- **类型验证**：在 Any 节点中添加运行时类型检查
-- **类型推断**：从函数签名自动推断节点输入输出类型（部分实现）
-- **类型适配**：自动生成类型化 ↔ Any 适配器（已实现部分）
+Workflow 库在声明式 API 基础上，提供了四种高级控制流节点：
 
-### 6.2 构图能力增强
+1. **条件节点 (Condition Node)**：基于条件的 if-else 分支
+2. **多条件节点 (Multi-Condition Node)**：并行执行多个分支
+3. **管道节点 (Pipeline Node)**：结构化流水线执行
+4. **循环节点 (Loop Node)**：迭代执行直到条件满足
 
-- **子图支持**：节点可以包含子工作流
-- **条件分支**：基于数据值的条件执行
-- **循环支持**：迭代执行子图
-- **动态节点**：运行时添加/删除节点
+所有控制流节点都使用声明式 API 构建，支持在子图中使用 `gb` 创建执行结构体并传递参数。
 
-### 6.3 执行优化
+### 6.2 子图创建机制
 
-- **调度策略**：优先级调度、资源感知调度
-- **数据局部性**：优化数据传递路径
-- **并行度控制**：限制并发任务数
-- **性能分析**：集成性能分析工具
+**核心 API**：
+```cpp
+tf::Task create_subgraph(const std::string& name,
+                        const std::function<void(GraphBuilder&)>& builder_fn);
+```
 
-### 6.4 工具支持
+**设计要点**：
+- 子图构建函数 `builder_fn` 在构图时调用一次
+- 子图作为 `composed_of` 任务嵌入主图
+- 子图内部可以使用完整的声明式 API
+- 参数通过 lambda 捕获传递到子图内部
+
+**示例**：
+```cpp
+auto module_task = builder.create_subgraph("Module", [&counter](wf::GraphBuilder& gb){
+  // 在子图中使用声明式 API
+  auto [src, _] = gb.create_typed_source("src", std::make_tuple(1.0), {"x"});
+  auto [proc, _] = gb.create_typed_node<double>("proc", 
+    {{"src", "x"}},
+    [&counter](const std::tuple<double>& in) {
+      // 使用捕获的参数
+      return std::make_tuple(std::get<0>(in) + counter);
+    },
+    {"y"}
+  );
+  auto [sink, _] = gb.create_any_sink("sink", {{"proc", "y"}});
+  // 依赖关系自动推断
+});
+```
+
+### 6.3 条件节点实现
+
+**API**：
+```cpp
+tf::Task create_condition_decl(const std::string& name,
+                              const std::vector<std::string>& depend_on_nodes,
+                              std::function<int()> condition_func,
+                              const std::vector<tf::Task>& successors);
+```
+
+**实现机制**：
+- 使用 Taskflow 的 `emplace` 创建条件任务
+- 条件函数返回整数索引，选择后继节点
+- 返回 0 执行第一个后继，返回 1 执行第二个后继，以此类推
+- 依赖关系：前置节点 → 条件节点 → 后继节点
+
+### 6.4 多条件节点实现
+
+**API**：
+```cpp
+tf::Task create_multi_condition_decl(const std::string& name,
+                                    const std::vector<std::string>& depend_on_nodes,
+                                    std::function<tf::SmallVector<int>()> func,
+                                    const std::vector<tf::Task>& successors);
+```
+
+**实现机制**：
+- 条件函数返回 `tf::SmallVector<int>`，包含要执行的分支索引
+- 多个分支并行执行（由 Taskflow 调度器管理）
+- 用于需要同时执行多个路径的场景
+
+### 6.5 管道节点实现
+
+**API**：
+```cpp
+template <typename... Ps>
+tf::Task create_pipeline_node(const std::string& name,
+                              std::tuple<tf::Pipe<Ps>...>&& pipes,
+                              size_t lines);
+```
+
+**实现机制**：
+- 直接使用 Taskflow 的 `Pipeline` 算法
+- 管道阶段通过 `tf::Pipe` 定义，支持 `SERIAL` 和 `PARALLEL` 类型
+- `lines` 参数指定并行流水线数量
+- 内部使用 `tf::Pipeline` 对象，通过 `composed_of` 嵌入主图
+
+### 6.6 循环节点实现
+
+**API**：
+```cpp
+tf::Task create_loop_decl(const std::string& name,
+                         const std::vector<std::string>& depend_on_nodes,
+                         tf::Task body_task,
+                         std::function<int()> condition_func,
+                         tf::Task exit_task);
+```
+
+**实现机制**：
+1. **循环体**：通过 `create_subgraph` 创建，使用声明式 API 构建内部结构
+2. **条件任务**：创建条件任务连接循环体和退出任务
+3. **依赖关系**：
+   - 前置节点 → 循环体（首次执行）
+   - 循环体 → 条件任务
+   - 条件返回 0 → 循环体（继续循环）
+   - 条件返回非 0 → 退出任务（退出循环）
+
+**关键设计**：
+- 循环体子图通过 `composed_of` 创建，支持多次执行
+- 参数（如 counter）通过 lambda 捕获传递
+- 条件函数只读取状态，不修改（修改在循环体中完成）
+- 支持可选的退出动作子图
+
+**示例**：
+```cpp
+int counter = 0;
+
+// 循环体使用声明式 API
+auto loop_body_task = builder.create_subgraph("LoopBody", [&counter](wf::GraphBuilder& gb){
+  auto [trigger, _] = gb.create_typed_source("trigger", std::make_tuple(0), {"t"});
+  auto [process, _] = gb.create_typed_node<int>("process",
+    {{"trigger", "t"}},
+    [&counter](const std::tuple<int>&) {
+      ++counter;  // 在循环体中修改
+      return std::make_tuple(counter);
+    },
+    {"result"}
+  );
+  auto [sink, _] = gb.create_any_sink("sink", {{"process", "result"}});
+});
+
+// 循环条件
+builder.create_loop_decl("Loop",
+  {"A"},  // 依赖节点 A
+  loop_body_task,
+  [&counter]() -> int { 
+    return (counter < 5) ? 0 : 1;  // 只读取，不修改
+  },
+  exit_task
+);
+```
+
+### 6.7 控制流节点设计原则
+
+1. **声明式优先**：所有控制流节点都支持声明式 API
+2. **子图重用**：分支、循环体等通过子图创建，便于复用
+3. **参数传递**：通过 lambda 捕获传递外部变量，支持复杂状态管理
+4. **自动依赖**：子图内部依赖自动推断，无需手动配置
+5. **类型灵活**：支持 Typed 和 Any 节点的混合使用
+
+## 七、扩展方向
+
+### 7.1 类型系统增强
+
+- ✅ **类型适配**：自动生成类型化 ↔ Any 适配器（已实现）
+- ⏳ **类型验证**：在 Any 节点中添加运行时类型检查
+- ⏳ **类型推断增强**：从函数签名完全自动推断节点输入输出类型（部分实现）
+
+### 7.2 构图能力增强
+
+- ✅ **子图支持**：通过 `create_subgraph` 支持节点包含子工作流（已实现）
+- ✅ **条件分支**：通过 `create_condition_decl` 支持基于条件的条件执行（已实现）
+- ✅ **多条件分支**：通过 `create_multi_condition_decl` 支持并行分支执行（已实现）
+- ✅ **循环支持**：通过 `create_loop_decl` 支持迭代执行子图（已实现）
+- ✅ **管道执行**：通过 `create_pipeline_node` 支持结构化流水线（已实现）
+- ⏳ **动态节点**：运行时添加/删除节点
+
+### 7.3 执行优化
+
+- ⏳ **调度策略**：优先级调度、资源感知调度
+- ⏳ **数据局部性**：优化数据传递路径
+- ⏳ **并行度控制**：限制并发任务数
+- ⏳ **性能分析**：集成性能分析工具
+
+### 7.4 工具支持
 
 - **可视化工具**：图形界面构建和可视化工作流
 - **调试工具**：数据流追踪、断点支持
@@ -581,19 +738,25 @@ auto [H, _] = builder.create_any_sink("H",
 
 ### 7.1 关键文件
 
-- `workflow/include/workflow/nodeflow.hpp`：主要接口定义
-- `workflow/include/workflow/nodeflow_impl.hpp`：模板实现
-- `workflow/src/nodeflow.cpp`：非模板实现
+- `workflow/include/workflow/nodeflow.hpp`：主要接口定义（INode, 节点类型, GraphBuilder）
+- `workflow/include/workflow/nodeflow_impl.hpp`：模板实现（Typed 节点模板）
+- `workflow/src/nodeflow.cpp`：非模板实现（Any 节点, GraphBuilder, 控制流节点）
 - `workflow/examples/declarative_example.cpp`：声明式 API 完整示例
+- `workflow/examples/advanced_control_flow.cpp`：高级控制流节点示例
 
 ### 7.2 参考示例
 
-参考 `examples/` 目录下的示例了解 Taskflow 的各种用法：
+**Workflow 库示例**（`workflow/examples/`）：
+- ✅ `declarative_example.cpp`：声明式 API 完整示例（推荐）
+- ✅ `unified_example.cpp`：Key-based API 演示
+- ✅ `keyed_example.cpp`：纯 Any-based 工作流
+- ✅ `advanced_control_flow.cpp`：高级控制流节点（condition, multi-condition, pipeline, loop）
+
+**Taskflow 基础示例**（`examples/`）：
 - `simple.cpp`：基础任务依赖
 - `dataflow_arith.cpp`：数据流传递（promise/future）
-- `nodeflow.cpp`：节点封装模式
-- `nodeflow_variadic.cpp`：变长参数节点
-- `varnodeflow.cpp`：Any 类型节点
+- `condition.cpp`：条件任务示例
+- `while_loop.cpp`：循环示例
 
 ## 八、总结
 

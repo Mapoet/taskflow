@@ -787,6 +787,129 @@ cmake --build . --target declarative_example
 - **`declarative_example.cpp`**: 🎯 **Recommended** - Declarative API with auto-deps
 - **`unified_example.cpp`**: Key-based API demonstration
 - **`keyed_example.cpp`**: Pure Any-based workflow
+- **`advanced_control_flow.cpp`**: Advanced control flow (condition, multi-condition, pipeline, loop)
+
+## 🎮 Advanced Control Flow Nodes
+
+The Workflow library provides powerful control flow constructs built on Taskflow's primitives:
+
+### Condition Node (If-Else Branching)
+
+Creates conditional execution paths based on a boolean function:
+
+```cpp
+// Create branches as subgraphs
+auto C_task = builder.create_subgraph("C", [&](wf::GraphBuilder& gb){
+  // Branch logic for condition true
+});
+
+auto D_task = builder.create_subgraph("D", [&](wf::GraphBuilder& gb){
+  // Branch logic for condition false
+});
+
+// Create condition: returns 0 for C (true), 1 for D (false)
+builder.create_condition_decl("B",
+  {"A"},  // Depend on node A first
+  [](int x) { return (x % 2 == 0) ? 0 : 1; },
+  {C_task, D_task}  // Successors
+);
+```
+
+### Multi-Condition Node (Parallel Branches)
+
+Executes multiple branches based on a vector return value:
+
+```cpp
+builder.create_multi_condition_decl("F",
+  {"E"},
+  []() -> tf::SmallVector<int> {
+    return {0, 2};  // Execute branches 0 and 2 in parallel
+  },
+  {G_task, H_task, I_task}  // Multiple successors
+);
+```
+
+### Pipeline Node
+
+Creates a structured pipeline with multiple stages and parallel lines:
+
+```cpp
+builder.create_pipeline_node("Pipeline",
+  std::make_tuple(
+    tf::Pipe{tf::PipeType::SERIAL, [](tf::Pipeflow& pf) { /* stage 1 */ }},
+    tf::Pipe{tf::PipeType::PARALLEL, [](tf::Pipeflow& pf) { /* stage 2 */ }},
+    tf::Pipe{tf::PipeType::SERIAL, [](tf::Pipeflow& pf) { /* stage 3 */ }}
+  ),
+  4  // 4 parallel lines
+);
+```
+
+### Loop Node (Iterative Control Flow)
+
+Creates iterative loops with condition-based exit:
+
+```cpp
+int counter = 0;
+
+// Build loop body as a subgraph using declarative API
+auto loop_body_task = builder.create_subgraph("LoopBody", [&counter](wf::GraphBuilder& gb){
+  // Use declarative API to build loop body structure
+  auto [trigger, _] = gb.create_typed_source("loop_trigger",
+    std::make_tuple(0), {"trigger"}
+  );
+  
+  auto [process, _] = gb.create_typed_node<int>("loop_iteration",
+    {{"loop_trigger", "trigger"}},
+    [&counter](const std::tuple<int>&) {
+      std::cout << "  Loop iteration: counter = " << counter << "\n";
+      ++counter;
+      return std::make_tuple(counter);
+    },
+    {"result"}
+  );
+  
+  auto [sink, _] = gb.create_any_sink("loop_complete",
+    {{"loop_iteration", "result"}}
+  );
+});
+
+// Optional exit action subgraph
+auto loop_exit_task = builder.create_subgraph("LoopExit", [](wf::GraphBuilder& gb){
+  // Exit logic
+});
+
+// Create loop: condition returns 0 to continue, non-zero to exit
+builder.create_loop_decl(
+  "Loop",
+  {"A"},  // Depend on node A first
+  loop_body_task,
+  [&counter]() -> int { 
+    return (counter < 5) ? 0 : 1;  // Continue if counter < 5
+  },
+  loop_exit_task
+);
+```
+
+**Key Features**:
+- ✅ Loop body uses declarative API for clean structure
+- ✅ Parameter passing via lambda capture
+- ✅ Condition function decides loop continuation
+- ✅ Subgraphs support nested declarative workflows
+
+### Subgraph Creation
+
+Create reusable workflow modules:
+
+```cpp
+auto module_task = builder.create_subgraph("ModuleName", [](wf::GraphBuilder& gb){
+  // Use gb to build the subgraph with declarative API
+  auto [A, _] = gb.create_typed_source("A", std::make_tuple(1.0), {"x"});
+  auto [B, _] = gb.create_typed_node<double>("B", {{"A", "x"}}, /*...*/, {"y"});
+  // Dependencies automatically inferred within subgraph
+});
+
+// Use module_task in main graph or as loop body
+```
 
 ## 🔮 Future Enhancements
 
@@ -794,10 +917,8 @@ cmake --build . --target declarative_example
 - Visual graph representation with type/key annotations
 - Performance profiling and monitoring
 - Support for optional inputs/outputs
-- Pipeline and loop constructs
 - Error handling and recovery mechanisms
 - Conditional execution based on data values
-- Subgraph composition support
 
 ## 📄 License
 

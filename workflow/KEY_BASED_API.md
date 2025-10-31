@@ -33,6 +33,133 @@
    - 适配器任务注册到 `adapter_tasks_` 映射
    - 依赖关系：优先使用 `adapter → target`，无适配器时使用 `source → target`
 
+## 🎮 高级控制流节点
+
+### 条件节点 (Condition Node)
+
+使用声明式 API 创建条件分支：
+
+```cpp
+// 创建分支子图
+auto C_task = builder.create_subgraph("C", [&](wf::GraphBuilder& gb){
+  // 条件为 true 时的分支逻辑
+  auto [src, _] = gb.create_typed_source("C_src", std::make_tuple(100.0), {"x"});
+  auto [proc, _] = gb.create_typed_node<double>("C_proc", {{"C_src","x"}}, 
+    [](const std::tuple<double>& in) {
+      return std::make_tuple(std::get<0>(in) * 2.0);
+    }, {"y"});
+  auto [sink, _] = gb.create_any_sink("C_sink", {{"C_proc","y"}});
+});
+
+auto D_task = builder.create_subgraph("D", [&](wf::GraphBuilder& gb){
+  // 条件为 false 时的分支逻辑
+});
+
+// 创建条件节点：返回 0 执行 C（true），返回 1 执行 D（false）
+builder.create_condition_decl("B",
+  {"A"},  // 先依赖节点 A
+  []() { return (condition_value) ? 0 : 1; },
+  {C_task, D_task}  // 后继节点
+);
+```
+
+### 多条件节点 (Multi-Condition Node)
+
+支持并行执行多个分支：
+
+```cpp
+builder.create_multi_condition_decl("F",
+  {"E"},
+  []() -> tf::SmallVector<int> {
+    return {0, 2};  // 并行执行分支 0 和 2
+  },
+  {G_task, H_task, I_task}  // 多个后继节点
+);
+```
+
+### 管道节点 (Pipeline Node)
+
+创建结构化管道执行：
+
+```cpp
+builder.create_pipeline_node("Pipeline",
+  std::make_tuple(
+    tf::Pipe{tf::PipeType::SERIAL, [](tf::Pipeflow& pf) { /* 阶段 1 */ }},
+    tf::Pipe{tf::PipeType::PARALLEL, [](tf::Pipeflow& pf) { /* 阶段 2 */ }},
+    tf::Pipe{tf::PipeType::SERIAL, [](tf::Pipeflow& pf) { /* 阶段 3 */ }}
+  ),
+  4  // 4 条并行流水线
+);
+```
+
+### 循环节点 (Loop Node)
+
+使用声明式 API 创建循环体：
+
+```cpp
+int counter = 0;
+
+// 使用声明式 API 构建循环体子图
+auto loop_body_task = builder.create_subgraph("LoopBody", [&counter](wf::GraphBuilder& gb){
+  // 在子图中使用声明式 API 创建节点结构
+  auto [trigger, _] = gb.create_typed_source("loop_trigger",
+    std::make_tuple(0), {"trigger"}
+  );
+  
+  auto [process, _] = gb.create_typed_node<int>("loop_iteration",
+    {{"loop_trigger", "trigger"}},
+    [&counter](const std::tuple<int>&) {
+      std::cout << "  Loop iteration: counter = " << counter << "\n";
+      ++counter;  // 在循环体中更新 counter
+      return std::make_tuple(counter);
+    },
+    {"result"}
+  );
+  
+  auto [sink, _] = gb.create_any_sink("loop_complete",
+    {{"loop_iteration", "result"}}
+  );
+});
+
+// 可选的退出动作子图
+auto loop_exit_task = builder.create_subgraph("LoopExit", [](wf::GraphBuilder& gb){
+  // 退出逻辑
+});
+
+// 创建循环：条件返回 0 继续，非 0 退出
+builder.create_loop_decl(
+  "Loop",
+  {"A"},  // 先依赖节点 A
+  loop_body_task,
+  [&counter]() -> int { 
+    // 只读取 counter，不修改（修改在循环体中完成）
+    return (counter < 5) ? 0 : 1;
+  },
+  loop_exit_task
+);
+```
+
+**关键特性**：
+- ✅ 循环体使用声明式 API，结构清晰
+- ✅ 参数通过 lambda 捕获传递
+- ✅ 条件函数决定循环是否继续
+- ✅ 支持嵌套的声明式工作流
+
+### 子图创建 (Subgraph)
+
+创建可重用的工作流模块：
+
+```cpp
+auto module_task = builder.create_subgraph("ModuleName", [](wf::GraphBuilder& gb){
+  // 在子图中使用声明式 API
+  auto [A, _] = gb.create_typed_source("A", std::make_tuple(1.0), {"x"});
+  auto [B, _] = gb.create_typed_node<double>("B", {{"A", "x"}}, /*...*/, {"y"});
+  // 子图内的依赖关系自动推断
+});
+
+// 可作为主图的一部分或循环体使用
+```
+
 ## 🎯 技术特点
 
 ### 1. Key-based I/O 系统
