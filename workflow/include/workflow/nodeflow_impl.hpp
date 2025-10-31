@@ -127,7 +127,7 @@ std::function<void()> TypedSource<Outs...>::functor(const char* node_name) const
         it->second->set_value(std::any{v});
       }
     });
-    std::cout << (node_name ? node_name : "TypedSource") << " emitted\n";
+    // std::cout << (node_name ? node_name : "TypedSource") << " emitted\n";
   };
 }
 
@@ -203,7 +203,7 @@ std::function<void()> TypedNode<InputsTuple, Outs...>::functor(const char* node_
         it->second->set_value(std::any{v});
       }
     });
-    std::cout << (node_name ? node_name : "TypedNode") << " done\n";
+    // std::cout << (node_name ? node_name : "TypedNode") << " done\n";
   };
 }
 

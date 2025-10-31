@@ -52,7 +52,7 @@ std::function<void()> AnySource::functor(const char* node_name) const {
       }
       it->second->set_value(val);
     }
-      std::cout << (node_name ? node_name : "AnySource") << " emitted\n";
+    // std::cout << (node_name ? node_name : "AnySource") << " emitted\n";
   };
 }
 
@@ -103,7 +103,7 @@ std::function<void()> AnyNode::functor(const char* node_name) const {
       }
       it->second->set_value(val);
     }
-      std::cout << (node_name ? node_name : "AnyNode") << " done\n";
+    // std::cout << (node_name ? node_name : "AnyNode") << " done\n";
   };
 }
 
@@ -494,6 +494,22 @@ tf::Task GraphBuilder::create_subgraph(const std::string& name,
   return task;
 }
 
+tf::Task GraphBuilder::create_subtask(const std::string& name,
+                                      const std::function<void(GraphBuilder&)>& builder_fn) {
+  auto task = taskflow_.emplace([this, builder_fn, name]() mutable {
+    if (executor_ == nullptr) {
+      throw std::runtime_error("create_subtask requires GraphBuilder::run or run_async to set executor");
+    }
+    GraphBuilder nested{name};
+    if (builder_fn) {
+      builder_fn(nested);
+    }
+    // Run the nested subgraph synchronously on the same executor
+    executor_->run(nested.taskflow()).wait();
+  }).name(name);
+  return task;
+}
+
 tf::Task GraphBuilder::create_condition_decl(const std::string& name,
                                              std::function<int()> condition_func,
                                              const std::vector<tf::Task>& successors) {
@@ -551,16 +567,16 @@ tf::Task GraphBuilder::create_multi_condition_decl(const std::string& name,
 }
 
 tf::Task GraphBuilder::create_loop_decl(const std::string& name,
-                                        tf::Task body_task,
+                                        tf::Task& body_task,
                                         std::function<int()> condition_func,
                                         tf::Task exit_task) {
   // Create the condition controller
   auto cond_task = taskflow_.emplace(std::move(condition_func)).name(name);
   // Wire loop: body -> cond
-  body_task.succeed(cond_task);
   // cond returns 0 for loop-back (body), non-zero for exit
   // Use separate precede calls (like examples/condition.cpp)
   // Return 0 executes first precede (body), return 1 executes second precede (exit)
+  body_task.precede(cond_task);
   cond_task.precede(body_task,exit_task);  // Index 0: continue loop
   tasks_[name] = cond_task;
   return cond_task;
@@ -568,13 +584,13 @@ tf::Task GraphBuilder::create_loop_decl(const std::string& name,
 
 tf::Task GraphBuilder::create_loop_decl(const std::string& name,
                                         const std::vector<std::string>& depend_on_nodes,
-                                        tf::Task body_task,
+                                        tf::Task& body_task,
                                         std::function<int()> condition_func,
                                         tf::Task exit_task) {
   auto cond_task = create_loop_decl(name, body_task, std::move(condition_func), exit_task);
   for (const auto& n : depend_on_nodes) {
     auto it = tasks_.find(n);
-    if (it != tasks_.end()) {
+    if(it != tasks_.end() && it->second != body_task) {
       // Only body depends on predecessors; condition is triggered by body
       it->second.precede(body_task);
     }
