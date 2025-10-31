@@ -695,6 +695,18 @@ class GraphBuilder {
                                  const std::vector<tf::Task>& successors);
 
   /**
+   * @brief Declarative condition with auto predecessors by node names
+   * @param name Condition task name
+   * @param depend_on_nodes Node names that must complete before condition
+   * @param condition_func Function returning index of successor
+   * @param successors Successor tasks to wire
+   */
+  tf::Task create_condition_decl(const std::string& name,
+                                 const std::vector<std::string>& depend_on_nodes,
+                                 std::function<int()> condition_func,
+                                 const std::vector<tf::Task>& successors);
+
+  /**
    * @brief Declarative multi-condition with explicit successor tasks
    * @param name Multi-condition task name
    * @param func Function returning indices of successors to run
@@ -702,6 +714,14 @@ class GraphBuilder {
    * @return The created multi-condition task
    */
   tf::Task create_multi_condition_decl(const std::string& name,
+                                       std::function<tf::SmallVector<int>()> func,
+                                       const std::vector<tf::Task>& successors);
+
+  /**
+   * @brief Declarative multi-condition with auto predecessors by node names
+   */
+  tf::Task create_multi_condition_decl(const std::string& name,
+                                       const std::vector<std::string>& depend_on_nodes,
                                        std::function<tf::SmallVector<int>()> func,
                                        const std::vector<tf::Task>& successors);
 

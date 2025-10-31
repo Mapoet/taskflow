@@ -509,6 +509,20 @@ tf::Task GraphBuilder::create_condition_decl(const std::string& name,
   return task;
 }
 
+tf::Task GraphBuilder::create_condition_decl(const std::string& name,
+                                             const std::vector<std::string>& depend_on_nodes,
+                                             std::function<int()> condition_func,
+                                             const std::vector<tf::Task>& successors) {
+  auto task = create_condition_decl(name, std::move(condition_func), successors);
+  for (const auto& n : depend_on_nodes) {
+    auto it = tasks_.find(n);
+    if (it != tasks_.end()) {
+      it->second.precede(task);
+    }
+  }
+  return task;
+}
+
 tf::Task GraphBuilder::create_multi_condition_decl(const std::string& name,
                                                    std::function<tf::SmallVector<int>()> func,
                                                    const std::vector<tf::Task>& successors) {
@@ -519,6 +533,20 @@ tf::Task GraphBuilder::create_multi_condition_decl(const std::string& name,
     }
   }
   tasks_[name] = task;
+  return task;
+}
+
+tf::Task GraphBuilder::create_multi_condition_decl(const std::string& name,
+                                                   const std::vector<std::string>& depend_on_nodes,
+                                                   std::function<tf::SmallVector<int>()> func,
+                                                   const std::vector<tf::Task>& successors) {
+  auto task = create_multi_condition_decl(name, std::move(func), successors);
+  for (const auto& n : depend_on_nodes) {
+    auto it = tasks_.find(n);
+    if (it != tasks_.end()) {
+      it->second.precede(task);
+    }
+  }
   return task;
 }
 
