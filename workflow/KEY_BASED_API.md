@@ -127,6 +127,21 @@ auto keys = B->get_output_keys();  // ["b"]
 - Key-based 输出访问
 - 统一接口 (`get_output_future`, `get_output_keys`)
 
+```dot
+digraph Taskflow {
+subgraph cluster_p0x7ffcd9e95cf0 {
+label="Taskflow: unified_workflow";
+p0x6352e8ba8670[label="A" ];
+p0x6352e8ba9010[label="B" ];
+p0x6352e8ba9680[label="C" ];
+p0x6352e8ba9cf0[label="E" ];
+p0x6352e8baa3d0[label="D" ];
+p0x6352e8baaf40[label="G" ];
+p0x6352e8bab0a0[label="H" ];
+}
+}
+```
+
 ### Phase 2: 输入辅助函数
 ```cpp
 // 添加辅助函数简化输入获取
@@ -140,6 +155,31 @@ auto B = std::make_shared<wf::TypedNode</*...*/>>(
 );
 ```
 
+```dot
+digraph Taskflow {
+subgraph cluster_p0x7fff412eb470 {
+label="Taskflow: keyed_nodeflow";
+p0x6432d86112a0[label="A" ];
+p0x6432d86112a0 -> p0x6432d8611500;
+p0x6432d86112a0 -> p0x6432d8611820;
+p0x6432d86112a0 -> p0x6432d8611b50;
+p0x6432d8611500[label="B" ];
+p0x6432d8611500 -> p0x6432d8611ef0;
+p0x6432d8611500 -> p0x6432d86123d0;
+p0x6432d8611820[label="C" ];
+p0x6432d8611820 -> p0x6432d8611ef0;
+p0x6432d8611820 -> p0x6432d86123d0;
+p0x6432d8611b50[label="E" ];
+p0x6432d8611b50 -> p0x6432d86123d0;
+p0x6432d8611ef0[label="D" ];
+p0x6432d8611ef0 -> p0x6432d8612550;
+p0x6432d86123d0[label="G" ];
+p0x6432d86123d0 -> p0x6432d8612550;
+p0x6432d8612550[label="H" ];
+}
+}
+```
+
 ### Phase 3: 高级构图 API
 ```cpp
 // 完全声明式
@@ -147,19 +187,6 @@ builder
   .add_typed_source("A", std::make_tuple(3.5, 7), {"x", "k"})
   .add_typed_node("B", {"A::x"}, [](auto x){return x+1;}, {"b"})
   .connect("A", "B", {"x"});
-```
-
-### Phase 4: Type-free Functor（可选）
-```cpp
-// 运行时类型擦除的 functor（性能较低）
-builder.add_node("B", 
-  {{"x", "A::x"}},
-  [](const std::unordered_map<std::string, std::any>& in) {
-    double x = std::any_cast<double>(in.at("x"));
-    return std::unordered_map<std::string, std::any>{{"b", x + 1.0}};
-  },
-  {"b"}
-);
 ```
 
 ```dot
@@ -203,6 +230,20 @@ p0x582cdb3c4cf0[label="H" ];
 }
 }
 ```
+
+### Phase 4: Type-free Functor（可选）
+```cpp
+// 运行时类型擦除的 functor（性能较低）
+builder.add_node("B", 
+  {{"x", "A::x"}},
+  [](const std::unordered_map<std::string, std::any>& in) {
+    double x = std::any_cast<double>(in.at("x"));
+    return std::unordered_map<std::string, std::any>{{"b", x + 1.0}};
+  },
+  {"b"}
+);
+```
+
 
 ## 总结
 
