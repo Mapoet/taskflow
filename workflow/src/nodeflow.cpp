@@ -166,34 +166,17 @@ std::vector<std::string> AnySink::get_output_keys() const {
 // Condition Node Implementation
 // ============================================================================
 
-ConditionNode::ConditionNode(ConditionFunc func,
-                            std::vector<BranchBuilder> branches,
-                            const std::string& name)
-    : func_(std::move(func)), branches_(std::move(branches)), node_name_(name) {
-  // Pre-build all branch taskflows
-  branch_taskflows_.resize(branches_.size());
-  for (size_t i = 0; i < branches_.size(); ++i) {
-    if (branches_[i]) {
-      GraphBuilder branch_builder(node_name_ + "_branch_" + std::to_string(i));
-      branches_[i](branch_builder);
-      branch_taskflows_[i] = std::move(branch_builder.taskflow());
-    }
-  }
-}
+ConditionNode::ConditionNode(ConditionFunc func, const std::string& name)
+    : func_(std::move(func)), node_name_(name) {}
 
 std::string ConditionNode::name() const {
   return node_name_;
 }
 
 std::function<void()> ConditionNode::functor(const char* node_name) const {
-  // Condition nodes use Subflow to dynamically select and execute branch
-  return [this, node_name](tf::Subflow& sf) {
+  return [this, node_name]() {
     if (func_) {
-      int branch_idx = func_();
-      if (branch_idx >= 0 && branch_idx < static_cast<int>(branch_taskflows_.size())) {
-        // Execute selected branch using composed_of
-        sf.composed_of(branch_taskflows_[branch_idx]);
-      }
+      func_();  // Condition task will be created via emplace
     }
   };
 }
@@ -263,29 +246,21 @@ std::vector<std::string> PipelineNode::get_output_keys() const {
 // Loop Node Implementation
 // ============================================================================
 
-LoopNode::LoopNode(LoopBodyBuilder body_builder,
+LoopNode::LoopNode(std::function<void()> body_func,
                    LoopConditionFunc condition_func,
                    const std::string& name)
-    : body_builder_(std::move(body_builder)),
+    : body_func_(std::move(body_func)),
       condition_func_(std::move(condition_func)),
-      node_name_(name) {
-  // Pre-build loop body taskflow
-  if (body_builder_) {
-    GraphBuilder body_builder_instance(node_name_ + "_body");
-    body_builder_(body_builder_instance);
-    body_taskflow_ = std::move(body_builder_instance.taskflow());
-  }
-}
+      node_name_(name) {}
 
 std::string LoopNode::name() const {
   return node_name_;
 }
 
 std::function<void()> LoopNode::functor(const char* node_name) const {
-  // Loop uses Subflow to execute body, then condition task controls loop
-  return [this, node_name](tf::Subflow& sf) {
-    // Execute loop body
-    sf.composed_of(body_taskflow_);
+  // Loop is constructed using condition tasks, not as a single functor
+  return []() {
+    // Loop execution is handled via condition task graph
   };
 }
 
@@ -447,38 +422,18 @@ GraphBuilder::create_any_sink(const std::string& name,
 
 std::pair<std::shared_ptr<ConditionNode>, tf::Task>
 GraphBuilder::create_condition_node(const std::string& name,
-                                    std::function<int()> condition_func,
-                                    std::vector<std::function<void(GraphBuilder&)>> branches) {
-  auto node = std::make_shared<ConditionNode>(std::move(condition_func), std::move(branches), name);
+                                    std::function<int()> condition_func) {
+  auto node = std::make_shared<ConditionNode>(std::move(condition_func), name);
   
-  // Create subflow task that will execute selected branch
-  auto task = taskflow_.emplace([node]() {
-    // This will be converted to Subflow task
+  // Create condition task directly using Taskflow's emplace
+  auto task = taskflow_.emplace([func = node->func_]() {
+    return func();
   }).name(name);
   
-  // Actually, we need to use composed_of with a condition task
-  // Create condition task first
-  auto cond_task = taskflow_.emplace([func = node->func_]() {
-    return func();
-  }).name(name + "_condition");
-  
-  // Create module tasks for each branch
-  std::vector<tf::Task> branch_tasks;
-  for (size_t i = 0; i < node->branch_taskflows_.size(); ++i) {
-    auto branch_task = taskflow_.composed_of(node->branch_taskflows_[i])
-                           .name(name + "_branch_" + std::to_string(i));
-    branch_tasks.push_back(branch_task);
-  }
-  
-  // Set up condition: cond_task precedes all branches
-  if (!branch_tasks.empty()) {
-    cond_task.precede(branch_tasks);
-  }
-  
   nodes_[name] = node;
-  tasks_[name] = cond_task;
+  tasks_[name] = task;
   
-  return {node, cond_task};
+  return {node, task};
 }
 
 std::pair<std::shared_ptr<MultiConditionNode>, tf::Task>
@@ -525,6 +480,46 @@ GraphBuilder::create_loop_node(const std::string& name,
   // Note: This requires exposing internal tasks, or the user manages the loop manually
   
   return {node, body_task};
+}
+
+tf::Task GraphBuilder::create_subgraph(const std::string& name,
+                                       const std::function<void(GraphBuilder&)>& builder_fn) {
+  // Build a nested graph and keep it alive under this builder
+  auto nested = std::make_unique<GraphBuilder>(name);
+  if (builder_fn) {
+    builder_fn(*nested);
+  }
+  auto task = taskflow_.composed_of(nested->taskflow()).name(name);
+  subgraph_builders_.push_back(std::move(nested));  // keep lifetime
+  return task;
+}
+
+tf::Task GraphBuilder::create_condition_decl(const std::string& name,
+                                             std::function<int()> condition_func,
+                                             const std::vector<tf::Task>& successors) {
+  auto task = taskflow_.emplace(std::move(condition_func)).name(name);
+  // Wire successors explicitly for clear DOT edges
+  if (!successors.empty()) {
+    // Expand precede connections
+    for (const auto& s : successors) {
+      task.precede(s);
+    }
+  }
+  tasks_[name] = task;
+  return task;
+}
+
+tf::Task GraphBuilder::create_multi_condition_decl(const std::string& name,
+                                                   std::function<tf::SmallVector<int>()> func,
+                                                   const std::vector<tf::Task>& successors) {
+  auto task = taskflow_.emplace(std::move(func)).name(name);
+  if (!successors.empty()) {
+    for (const auto& s : successors) {
+      task.precede(s);
+    }
+  }
+  tasks_[name] = task;
+  return task;
 }
 
 // Deprecated precede/succeed methods are implemented inline in nodeflow_impl.hpp

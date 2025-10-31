@@ -40,17 +40,31 @@ int main() {
     }
   );
 
-  // Branch nodes (created manually for now)
-  auto C_task = builder.taskflow().emplace([]() {
-    std::cout << "  -> Even branch (C)\n";
-  }).name("C");
+  // Build branches as subgraphs using declarative API
+  auto C_task = builder.create_subgraph("C", [&](wf::GraphBuilder& gb){
+    auto [CS, tCS] = gb.create_typed_source("C_src", std::make_tuple(100.0), std::vector<std::string>{"x"});
+    auto [CN, tCN] = gb.create_typed_node<double>("C_proc", {{"C_src","x"}}, [](const std::tuple<double>& in){
+      std::cout << "  -> Even branch (C)\n";
+      return std::make_tuple(std::get<0>(in) * 2.0);
+    }, std::vector<std::string>{"y"});
+    auto [CK, tCK] = gb.create_any_sink("C_sink", {{"C_proc","y"}});
+  });
 
-  auto D_task = builder.taskflow().emplace([]() {
-    std::cout << "  -> Odd branch (D)\n";
-  }).name("D");
+  auto D_task = builder.create_subgraph("D", [&](wf::GraphBuilder& gb){
+    auto [DS, tDS] = gb.create_typed_source("D_src", std::make_tuple(200.0), std::vector<std::string>{"x"});
+    auto [DN, tDN] = gb.create_typed_node<double>("D_proc", {{"D_src","x"}}, [](const std::tuple<double>& in){
+      std::cout << "  -> Odd branch (D)\n";
+      return std::make_tuple(std::get<0>(in) * 3.0);
+    }, std::vector<std::string>{"y"});
+    auto [DK, tDK] = gb.create_any_sink("D_sink", {{"D_proc","y"}});
+  });
 
-  // Set up condition: B precedes both branches
-  tB.precede(C_task, D_task);
+  // Declarative condition wiring
+  auto cond_task = builder.create_condition_decl("B_decl",
+    [](){ return 0; },
+    std::vector<tf::Task>{C_task, D_task}
+  );
+  tA.precede(cond_task);
 
   std::cout << "  A -> B (condition) -> C or D\n";
 
@@ -71,21 +85,28 @@ int main() {
     }
   );
 
-  // Multiple branch nodes
-  auto G_task = builder.taskflow().emplace([]() {
+  // Multiple branches as subgraphs
+  auto G_task = builder.create_subgraph("G", [&](wf::GraphBuilder& gb){
+    auto [S, tS] = gb.create_typed_source("Sg", std::make_tuple(1.0), std::vector<std::string>{"v"});
+    auto [K, tK] = gb.create_any_sink("Kg", {{"Sg","v"}});
     std::cout << "  -> Branch G (executed)\n";
-  }).name("G");
-
-  auto H_task = builder.taskflow().emplace([]() {
+  });
+  auto H_task = builder.create_subgraph("H", [&](wf::GraphBuilder& gb){
+    auto [S, tS] = gb.create_typed_source("Sh", std::make_tuple(2.0), std::vector<std::string>{"v"});
+    auto [K, tK] = gb.create_any_sink("Kh", {{"Sh","v"}});
     std::cout << "  -> Branch H (not executed)\n";
-  }).name("H");
-
-  auto I_task = builder.taskflow().emplace([]() {
+  });
+  auto I_task = builder.create_subgraph("I", [&](wf::GraphBuilder& gb){
+    auto [S, tS] = gb.create_typed_source("Si", std::make_tuple(3.0), std::vector<std::string>{"v"});
+    auto [K, tK] = gb.create_any_sink("Ki", {{"Si","v"}});
     std::cout << "  -> Branch I (executed)\n";
-  }).name("I");
-
-  // Multi-condition precedes all branches
-  tF.precede(G_task, H_task, I_task);
+  });
+  // Declarative multi-condition wiring
+  auto mcond_task = builder.create_multi_condition_decl("F_decl",
+    [](){ return tf::SmallVector<int>{0,2}; },
+    std::vector<tf::Task>{G_task, H_task, I_task}
+  );
+  tE.precede(mcond_task);
 
   std::cout << "  E -> F (multi-condition) -> G, I (parallel)\n";
 
