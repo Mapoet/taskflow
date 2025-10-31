@@ -517,7 +517,7 @@ auto GraphBuilder::create_typed_node_impl(const std::string& name,
 // Helper to extract typed future from source node
 template <typename T>
 std::shared_future<T> GraphBuilder::get_typed_input_impl(const std::string& node_name, 
-                                                         const std::string& key) const {
+                                                         const std::string& key) {
   auto node = get_node(node_name);
   if (!node) {
     throw std::runtime_error("Source node not found: " + node_name);
@@ -538,9 +538,8 @@ std::shared_future<T> GraphBuilder::get_typed_input_impl(const std::string& node
   }
   auto source_task = source_task_it->second;
   
-  // Create adapter task (need to use get_flow_builder() to support Subflow)
-  auto& fb = const_cast<GraphBuilder*>(this)->get_flow_builder();
-  auto adapter_task = fb.emplace([any_fut, p_typed]() {
+  // Create adapter task
+  auto adapter_task = taskflow_.emplace([any_fut, p_typed]() {
     try {
       std::any value = any_fut.get();
       T typed_value = std::any_cast<T>(value);

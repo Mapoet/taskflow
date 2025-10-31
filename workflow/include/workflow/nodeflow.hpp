@@ -452,15 +452,6 @@ class GraphBuilder {
  public:
   explicit GraphBuilder(const std::string& name = "workflow");
   
-  /**
-   * @brief Construct GraphBuilder from a FlowBuilder (Taskflow or Subflow)
-   * @param flow_builder Reference to FlowBuilder (can be Taskflow or Subflow)
-   * @param name Name for the builder
-   * @details This allows GraphBuilder to work directly on Subflow graphs,
-   *          enabling proper loop execution without creating separate topologies
-   */
-  GraphBuilder(tf::FlowBuilder& flow_builder, const std::string& name = "subflow_builder");
-  
   ~GraphBuilder() = default;
 
   // Disable copy, allow move
@@ -567,15 +558,9 @@ class GraphBuilder {
    * @note Only valid when GraphBuilder owns the Taskflow (constructed from name)
    */
   tf::Taskflow& taskflow() { 
-    if (!owns_taskflow_) {
-      throw std::runtime_error("GraphBuilder constructed from FlowBuilder does not own Taskflow");
-    }
     return taskflow_; 
   }
   const tf::Taskflow& taskflow() const { 
-    if (!owns_taskflow_) {
-      throw std::runtime_error("GraphBuilder constructed from FlowBuilder does not own Taskflow");
-    }
     return taskflow_; 
   }
   
@@ -825,12 +810,34 @@ class GraphBuilder {
                    std::function<int(const std::unordered_map<std::string, std::any>&)> condition_func,
                    std::function<void(GraphBuilder&, const std::unordered_map<std::string, std::any>&)> exit_builder_fn = nullptr,
                    const std::vector<std::string>& output_keys = {});
+  /**
+   * @brief Declarative loop using an existing body task (e.g., from create_subgraph)
+   * @param name Loop name
+   * @param body_task Task representing the loop body
+   * @param condition_func Returns 0 to continue (loop back), non-zero to exit
+   * @param exit_task Optional task to run when exiting the loop (non-zero)
+   * @return The created condition task controlling the loop
+   */
+  tf::Task create_loop_decl(const std::string& name,
+                            tf::Task& body_task,
+                            std::function<int()> condition_func,
+                            tf::Task exit_task = tf::Task{});
 
+  /**
+   * @brief Declarative loop with auto predecessors by node names
+   */
+  tf::Task create_loop_decl(const std::string& name,
+                            const std::vector<std::string>& depend_on_nodes,
+                            tf::Task& body_task,
+                            std::function<int()> condition_func,
+                            tf::Task exit_task = tf::Task{});
+
+                   
  private:
   // Helper to extract typed future from source node (for create_typed_node)
   template <typename T>
   std::shared_future<T> get_typed_input_impl(const std::string& node_name, 
-                                             const std::string& key) const;
+                                             const std::string& key);
   
   // Implementation helper for create_typed_node
   template <typename... Ins, typename OpType, std::size_t... OutIndices>
@@ -842,8 +849,6 @@ class GraphBuilder {
   
  private:
   tf::Taskflow taskflow_;  // Used when constructed from name (owns graph)
-  tf::FlowBuilder* flow_builder_;  // Used when constructed from FlowBuilder (references external graph)
-  bool owns_taskflow_;  // Whether we own taskflow_ or just reference flow_builder_
   tf::Executor* executor_;
   std::unordered_map<std::string, std::shared_ptr<INode>> nodes_;
   std::unordered_map<std::string, tf::Task> tasks_;
@@ -851,9 +856,6 @@ class GraphBuilder {
   mutable std::unordered_map<std::string, tf::Task> adapter_tasks_;
   // Hold nested subgraph builders to keep composed_of lifetimes valid
   std::vector<std::unique_ptr<GraphBuilder>> subgraph_builders_;
-  
-  // Helper to get the FlowBuilder we're working with
-  tf::FlowBuilder& get_flow_builder();
 };
 
 }  // namespace workflow
