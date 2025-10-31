@@ -122,8 +122,39 @@ struct TypedOutputs {
     return std::get<I>(futures);
   }
   
+  // Get typed future by key and type (runtime lookup, type-safe extraction)
+  template <typename T>
+  std::shared_future<T> get_typed_by_key(const std::string& key) const {
+    auto it = key_to_index_.find(key);
+    if (it == key_to_index_.end()) {
+      throw std::runtime_error("Unknown output key: " + key);
+    }
+    std::size_t idx = it->second;
+    // Use a helper to extract the typed future at runtime
+    return get_typed_future_impl<T>(idx);
+  }
+  
   // Get all output keys
   const std::vector<std::string>& keys() const { return output_keys; }
+  
+ private:
+  // Helper to extract typed future by index at runtime
+  template <typename T>
+  std::shared_future<T> get_typed_future_impl(std::size_t idx) const {
+    // Use a visitor pattern or recursive template to find matching type
+    return get_typed_future_impl_helper<T>(idx, std::index_sequence_for<Outs...>{});
+  }
+  
+  template <typename T, std::size_t... Is>
+  std::shared_future<T> get_typed_future_impl_helper(std::size_t idx, std::index_sequence<Is...>) const {
+    // Check if idx matches and type matches at that index
+    bool found = false;
+    ((idx == Is && std::is_same_v<T, std::tuple_element_t<Is, std::tuple<Outs...>>> ? (found = true) : false), ...);
+    if (found) {
+      return std::get<idx>(futures);
+    }
+    throw std::runtime_error("Type mismatch: key maps to different type");
+  }
 };
 
 // ============================================================================
@@ -335,40 +366,27 @@ class GraphBuilder {
    */
   tf::Task add_any_sink(std::shared_ptr<AnySink> node);
 
+  // Deprecated: Use declarative API instead (dependencies auto-inferred from inputs)
+  // These methods are kept for backward compatibility but should not be used
+  // with the new declarative API
+  
   /**
-   * @brief Set execution dependency: task_from precedes task_to
+   * @deprecated Use declarative API (create_typed_node/create_any_node) instead.
+   * Dependencies are automatically inferred from input specifications.
    */
+  [[deprecated("Use declarative API instead - dependencies are auto-inferred")]]
   void precede(tf::Task from, tf::Task to);
+  
   template <typename Container>
+  [[deprecated("Use declarative API instead - dependencies are auto-inferred")]]
   void precede(tf::Task from, const Container& to);
+  
+  [[deprecated("Use declarative API instead - dependencies are auto-inferred")]]
   void succeed(tf::Task to, tf::Task from);
+  
   template <typename Container>
+  [[deprecated("Use declarative API instead - dependencies are auto-inferred")]]
   void succeed(tf::Task to, const Container& from);
-
-  /**
-   * @brief Connect nodes using key-based interface (type-free)
-   * @param from_node Source node name
-   * @param from_keys Output keys from source node
-   * @param to_node Target node name  
-   * @param to_keys Input keys for target node (must match from_keys in order)
-   * @details Automatically handles future connections and dependencies
-   */
-  void connect(const std::string& from_node, const std::vector<std::string>& from_keys,
-               const std::string& to_node, const std::vector<std::string>& to_keys);
-
-  /**
-   * @brief Connect single output to single input
-   */
-  void connect(const std::string& from_node, const std::string& from_key,
-               const std::string& to_node, const std::string& to_key);
-
-  /**
-   * @brief Connect multiple nodes using mapping specification
-   * @param mapping Map from target node to vector of source node keys
-   *        Format: {"target_node": [{"source_node1": "key1"}, {"source_node2": "key2"}]}
-   */
-  void connect(const std::unordered_map<std::string, 
-                std::vector<std::pair<std::string, std::string>>>& mapping);
 
   /**
    * @brief Run the graph asynchronously
@@ -394,6 +412,9 @@ class GraphBuilder {
    */
   tf::Taskflow& taskflow() { return taskflow_; }
   const tf::Taskflow& taskflow() const { return taskflow_; }
+  
+  // Internal mutable access (for const methods that need to create adapter tasks)
+  tf::Taskflow& taskflow_mutable() { return taskflow_; }
 
   /**
    * @brief Get node by name
@@ -410,6 +431,87 @@ class GraphBuilder {
    */
   std::shared_future<std::any> get_output(const std::string& node_name, const std::string& key) const;
 
+  /**
+   * @brief Get typed input from a node by key (for TypedNode construction)
+   * @tparam T Type of the value
+   * @param node_name Source node name
+   * @param key Output key from source node
+   * @return Typed shared_future
+   */
+  template <typename T>
+  std::shared_future<T> get_input(const std::string& node_name, const std::string& key) const;
+
+  // ============================================================================
+  // Declarative API: Create nodes with automatic dependency inference
+  // ============================================================================
+
+  /**
+   * @brief Create and add a typed source node
+   * @param name Node name
+   * @param values Initial values
+   * @param output_keys Output key names
+   * @return Pair of (node_ptr, task_handle)
+   */
+  template <typename... Outs>
+  std::pair<std::shared_ptr<TypedSource<Outs...>>, tf::Task> 
+  create_typed_source(const std::string& name,
+                       std::tuple<Outs...> values,
+                       const std::vector<std::string>& output_keys);
+
+  /**
+   * @brief Create and add a typed node with key-based inputs
+   * @tparam Ins... Input types (must be explicitly specified)
+   * @tparam OpType Functor type (auto-deduced)
+   * @param name Node name
+   * @param input_specs Vector of {source_node_name, source_output_key} pairs
+   * @param functor Operation function: tuple<Ins...> -> tuple<Outs...>
+   * @param output_keys Output key names
+   * @details Automatically fetches inputs, infers output types from functor, and establishes dependencies
+   */
+  template <typename... Ins, typename OpType>
+  auto create_typed_node(const std::string& name,
+                        const std::vector<std::pair<std::string, std::string>>& input_specs,
+                        OpType&& functor,
+                        const std::vector<std::string>& output_keys);
+
+  /**
+   * @brief Create and add an any-based source node
+   */
+  std::pair<std::shared_ptr<AnySource>, tf::Task>
+  create_any_source(const std::string& name,
+                    std::unordered_map<std::string, std::any> values);
+
+  /**
+   * @brief Create and add an any-based node with key-based inputs
+   */
+  std::pair<std::shared_ptr<AnyNode>, tf::Task>
+  create_any_node(const std::string& name,
+                  const std::vector<std::pair<std::string, std::string>>& input_specs,
+                  std::function<std::unordered_map<std::string, std::any>(
+                      const std::unordered_map<std::string, std::any>&)> functor,
+                  const std::vector<std::string>& output_keys);
+
+  /**
+   * @brief Create and add an any-based sink with key-based inputs
+   */
+  std::pair<std::shared_ptr<AnySink>, tf::Task>
+  create_any_sink(const std::string& name,
+                  const std::vector<std::pair<std::string, std::string>>& input_specs);
+
+ private:
+  // Helper to extract typed future from source node (for create_typed_node)
+  template <typename T>
+  std::shared_future<T> get_typed_input_impl(const std::string& node_name, 
+                                             const std::string& key) const;
+  
+  // Implementation helper for create_typed_node
+  template <typename... Ins, typename OpType, std::size_t... OutIndices>
+  auto create_typed_node_impl(const std::string& name,
+                              std::tuple<std::shared_future<Ins>...> input_futures,
+                              OpType&& functor,
+                              const std::vector<std::string>& output_keys,
+                              std::index_sequence<OutIndices...>);
+  
  private:
   tf::Taskflow taskflow_;
   tf::Executor* executor_;

@@ -131,13 +131,9 @@ int main() {
   }
 
   // ==========================================================================
-  // Configure dependencies using GraphBuilder (simplified)
+  // Dependencies are automatically inferred from input specifications
+  // No manual precede/succeed calls needed!
   // ==========================================================================
-  
-  builder.precede(tA, std::vector<tf::Task>{tB, tC, tE});
-  builder.succeed(tD, std::vector<tf::Task>{tB, tC});
-  builder.succeed(tG, std::vector<tf::Task>{tC, tB, tE});
-  builder.succeed(tH, std::vector<tf::Task>{tD, tG});
 
   // ==========================================================================
   // Run the workflow

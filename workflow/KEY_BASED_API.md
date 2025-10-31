@@ -162,6 +162,48 @@ builder.add_node("B",
 );
 ```
 
+```dot
+digraph Taskflow {
+subgraph cluster_p0x7fff691ce000 {
+label="Taskflow: declarative_workflow";
+p0x570acb8fa670[label="A" ];
+p0x570acb8fa670 -> p0x570acb8fa750;
+p0x570acb8fa670 -> p0x570acb8fadd0;
+p0x570acb8fa670 -> p0x570acb8faeb0;
+p0x570acb8fa670 -> p0x570acb8fb600;
+p0x570acb8fa670 -> p0x570acb8fb6e0;
+p0x570acb8fa670 -> p0x570acb8fbe50;
+p0x570acb8fa750[label="A_to_x_adapter" ];
+p0x570acb8fadd0[label="B" ];
+p0x570acb8fadd0 -> p0x570acb8fc0e0;
+p0x570acb8fadd0 -> p0x570acb8fc910;
+p0x570acb8fadd0 -> p0x570acb8fcbe0;
+p0x570acb8fadd0 -> p0x570acb8fda30;
+p0x570acb8faeb0[label="A_to_x_adapter" ];
+p0x570acb8fb600[label="C" ];
+p0x570acb8fb600 -> p0x570acb8fbfc0;
+p0x570acb8fb600 -> p0x570acb8fc910;
+p0x570acb8fb600 -> p0x570acb8fcd00;
+p0x570acb8fb600 -> p0x570acb8fda30;
+p0x570acb8fb6e0[label="A_to_k_adapter" ];
+p0x570acb8fbe50[label="E" ];
+p0x570acb8fbe50 -> p0x570acb8fcac0;
+p0x570acb8fbe50 -> p0x570acb8fda30;
+p0x570acb8fbfc0[label="C_to_c_adapter" ];
+p0x570acb8fc0e0[label="B_to_b_adapter" ];
+p0x570acb8fc910[label="D" ];
+p0x570acb8fc910 -> p0x570acb8fdbe0;
+p0x570acb8fcac0[label="E_to_ek_adapter" ];
+p0x570acb8fcbe0[label="B_to_b_adapter" ];
+p0x570acb8fcd00[label="C_to_c_adapter" ];
+p0x570acb8fda30[label="G" ];
+p0x570acb8fda30 -> p0x570acb8fdbe0;
+p0x570acb8fda30 -> p0x570acb8fdbe0;
+p0x570acb8fdbe0[label="H" ];
+}
+}
+```
+
 ## 总结
 
 当前的实现已经提供了 key-based 输出访问和统一接口，大大简化了代码。下一步可以：

@@ -244,43 +244,68 @@ std::shared_future<std::any> GraphBuilder::get_output(const std::string& node_na
   return node->get_output_future(key);
 }
 
-void GraphBuilder::connect(const std::string& from_node, const std::vector<std::string>& from_keys,
-                           const std::string& to_node, const std::vector<std::string>& to_keys) {
-  if (from_keys.size() != to_keys.size()) {
-    throw std::runtime_error("Number of source keys must match target keys");
-  }
-  
-  auto from_task = tasks_[from_node];
-  auto to_task_it = tasks_.find(to_node);
-  if (to_task_it == tasks_.end()) {
-    throw std::runtime_error("Target node not found: " + to_node);
-  }
-  auto to_task = to_task_it->second;
-  
-  // Set execution dependency
-  from_task.precede(to_task);
-  
-  // For typed nodes, we need to handle input assignment
-  // This is complex because typed nodes need typed futures, not any futures
-  // For now, this connects dependencies only
-  // Actual data connection needs to be handled at node creation time
+// ============================================================================
+// Declarative API implementation (non-template parts)
+// ============================================================================
+
+std::pair<std::shared_ptr<AnySource>, tf::Task>
+GraphBuilder::create_any_source(const std::string& name,
+                                std::unordered_map<std::string, std::any> values) {
+  auto node = std::make_shared<AnySource>(std::move(values), name);
+  auto task = add_any_source(node);
+  return {node, task};
 }
 
-void GraphBuilder::connect(const std::string& from_node, const std::string& from_key,
-                           const std::string& to_node, const std::string& to_key) {
-  connect(from_node, std::vector<std::string>{from_key}, to_node, std::vector<std::string>{to_key});
-}
-
-void GraphBuilder::connect(const std::unordered_map<std::string, 
-                            std::vector<std::pair<std::string, std::string>>>& mapping) {
-  for (const auto& [target_node, sources] : mapping) {
-    for (const auto& [source_node, source_key] : sources) {
-      // For simplicity, use first output key as input key
-      // This assumes 1-to-1 mapping
-      connect(source_node, source_key, target_node, source_key);
+std::pair<std::shared_ptr<AnyNode>, tf::Task>
+GraphBuilder::create_any_node(const std::string& name,
+                              const std::vector<std::pair<std::string, std::string>>& input_specs,
+                              std::function<std::unordered_map<std::string, std::any>(
+                                  const std::unordered_map<std::string, std::any>&)> functor,
+                              const std::vector<std::string>& output_keys) {
+  // Get any futures from source nodes
+  std::unordered_map<std::string, std::shared_future<std::any>> input_futures;
+  for (const auto& [source_node, source_key] : input_specs) {
+    input_futures[source_key] = get_output(source_node, source_key);
+  }
+  
+  auto node = std::make_shared<AnyNode>(std::move(input_futures), output_keys, std::move(functor), name);
+  auto task = add_any_node(node);
+  
+  // Auto-register dependencies
+  for (const auto& [source_node, _] : input_specs) {
+    auto source_task_it = tasks_.find(source_node);
+    if (source_task_it != tasks_.end()) {
+      source_task_it->second.precede(task);
     }
   }
+  
+  return {node, task};
 }
+
+std::pair<std::shared_ptr<AnySink>, tf::Task>
+GraphBuilder::create_any_sink(const std::string& name,
+                              const std::vector<std::pair<std::string, std::string>>& input_specs) {
+  // Get any futures from source nodes
+  std::unordered_map<std::string, std::shared_future<std::any>> input_futures;
+  for (const auto& [source_node, source_key] : input_specs) {
+    input_futures[source_key] = get_output(source_node, source_key);
+  }
+  
+  auto node = std::make_shared<AnySink>(std::move(input_futures), name);
+  auto task = add_any_sink(node);
+  
+  // Auto-register dependencies
+  for (const auto& [source_node, _] : input_specs) {
+    auto source_task_it = tasks_.find(source_node);
+    if (source_task_it != tasks_.end()) {
+      source_task_it->second.precede(task);
+    }
+  }
+  
+  return {node, task};
+}
+
+// Deprecated precede/succeed methods are implemented inline in nodeflow_impl.hpp
 
 }  // namespace workflow
 
