@@ -139,7 +139,7 @@ using ValuesTuple = ExtractValueTypesHelper<InputsTuple>::type;  // tuple<double
 **节点类型**：
 1. **`AnySource`**：使用 `unordered_map<string, any>` 产生初始值
 2. **`AnyNode`**：使用 `unordered_map<string, any>` 进行输入输出
-3. **`AnySink`**：消费 `unordered_map<string, any>` 并打印结果
+3. **`AnySink`**：消费 `unordered_map<string, any>`；可选回调用于结果收集/处理
 
 **关键设计决策**：
 - **数据传递**：使用 `std::shared_ptr<std::promise<std::any>>` + `std::shared_future<std::any>`
@@ -188,6 +188,7 @@ struct AnyOutputs {
    - `run(executor)` - 同步执行
    - `run_async(executor)` - 异步执行返回 Future
    - `dump(ostream)` - 输出 DOT 可视化
+   - `create_subtask(name, builder_fn)` - 任务执行时构建并运行子图（适合循环体）
 
 **实现要点**：
 ```cpp
@@ -652,7 +653,7 @@ tf::Task create_loop_decl(const std::string& name,
 ```
 
 **实现机制**：
-1. **循环体**：通过 `create_subgraph` 创建，使用声明式 API 构建内部结构
+1. **循环体**：推荐通过 `create_subtask` 创建，使用声明式 API 构建内部结构（避免模块任务仅运行一次的限制）
 2. **条件任务**：创建条件任务连接循环体和退出任务
 3. **依赖关系**：
    - 前置节点 → 循环体（首次执行）
@@ -661,7 +662,7 @@ tf::Task create_loop_decl(const std::string& name,
    - 条件返回非 0 → 退出任务（退出循环）
 
 **关键设计**：
-- 循环体子图通过 `composed_of` 创建，支持多次执行
+- 循环体通过 `create_subtask` 创建，每次迭代重建并运行子图，确保可重复执行
 - 参数（如 counter）通过 lambda 捕获传递
 - 条件函数只读取状态，不修改（修改在循环体中完成）
 - 支持可选的退出动作子图

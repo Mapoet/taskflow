@@ -13,6 +13,15 @@ The Workflow library provides a powerful abstraction for building dataflow graph
 - **🔗 Unified Interface**: Polymorphic `INode` base class for all node types
 - **🎨 Graph Builder**: High-level API managing construction, execution, and visualization
 
+## 🔄 What's New (Latest)
+
+- Added `create_subtask(name, builder_fn)`: builds and runs a fresh subgraph at task execution time. Ideal for loop bodies to avoid module-task single-run semantics.
+- Enhanced sinks with callbacks:
+  - `create_any_sink(..., callback)` where callback receives `std::unordered_map<std::string, std::any>`
+  - `create_typed_sink<Ins...>(..., callback)` where callback receives `std::tuple<Ins...>`
+- Cleaned default console noise: removed builtin "emitted"/"done" prints from nodes; output is now user-controlled (e.g., via sink callbacks).
+- Loop examples updated to use `create_subtask` for iterative execution; `advanced_control_flow.cpp` and `loop_only.cpp` verified.
+
 ## 📐 Architecture
 
 ### Design Principles
@@ -432,14 +441,7 @@ int main() {
 }
 ```
 
-**Output**:
-```
-A emitted
-B done
-C done
-D done
-H: prod=31.5
-```
+Tip: default internal prints were removed; use sink callbacks to log final values.
 
 ### Example 2: Traditional API (Key-based)
 
@@ -530,6 +532,28 @@ create_any_node(const std::string& name,
 std::pair<std::shared_ptr<AnySink>, tf::Task>
 create_any_sink(const std::string& name,
                 const std::vector<std::pair<std::string, std::string>>& input_specs);
+
+// Any Sink with callback
+std::pair<std::shared_ptr<AnySink>, tf::Task>
+create_any_sink(const std::string& name,
+                const std::vector<std::pair<std::string, std::string>>& input_specs,
+                std::function<void(const std::unordered_map<std::string, std::any>&)> callback);
+
+// Typed Sink with and without callback
+template <typename... Ins>
+std::pair<std::shared_ptr<TypedSink<Ins...>>, tf::Task>
+create_typed_sink(const std::string& name,
+                  const std::vector<std::pair<std::string, std::string>>& input_specs);
+
+template <typename... Ins>
+std::pair<std::shared_ptr<TypedSink<Ins...>>, tf::Task>
+create_typed_sink(const std::string& name,
+                  const std::vector<std::pair<std::string, std::string>>& input_specs,
+                  std::function<void(const std::tuple<Ins...>&)> callback);
+
+// Build-and-run subgraph each execution (good for loop bodies)
+tf::Task create_subtask(const std::string& name,
+                        const std::function<void(GraphBuilder&)>& builder_fn);
 ```
 
 #### Input/Output Access
@@ -851,25 +875,27 @@ Creates iterative loops with condition-based exit:
 ```cpp
 int counter = 0;
 
-// Build loop body as a subgraph using declarative API
-auto loop_body_task = builder.create_subgraph("LoopBody", [&counter](wf::GraphBuilder& gb){
-  // Use declarative API to build loop body structure
+// Build loop body using create_subtask (rebuilds subgraph each iteration)
+auto loop_body_task = builder.create_subtask("LoopBody", [&counter](wf::GraphBuilder& gb){
   auto [trigger, _] = gb.create_typed_source("loop_trigger",
-    std::make_tuple(0), {"trigger"}
+    std::make_tuple(counter), {"trigger"}
   );
-  
   auto [process, _] = gb.create_typed_node<int>("loop_iteration",
     {{"loop_trigger", "trigger"}},
     [&counter](const std::tuple<int>&) {
-      std::cout << "  Loop iteration: counter = " << counter << "\n";
       ++counter;
       return std::make_tuple(counter);
     },
     {"result"}
   );
-  
   auto [sink, _] = gb.create_any_sink("loop_complete",
-    {{"loop_iteration", "result"}}
+    {{"loop_iteration", "result"}},
+    [](const std::unordered_map<std::string, std::any>& values){
+      if (auto it = values.find("result"); it != values.end()) {
+        std::cout << "  Loop iteration completed: counter = "
+                  << std::any_cast<int>(it->second) << "\n";
+      }
+    }
   );
 });
 
@@ -895,6 +921,56 @@ builder.create_loop_decl(
 - ✅ Parameter passing via lambda capture
 - ✅ Condition function decides loop continuation
 - ✅ Subgraphs support nested declarative workflows
+ - ✅ For iterative execution, prefer `create_subtask` over `create_subgraph`
+
+## 🧪 Test Graphs (DOT Snapshots)
+
+Below are DOT graph snippets from the verified examples (generated via `builder.dump`).
+
+### loop_only
+
+```
+digraph Taskflow {
+subgraph cluster_... {
+label="Taskflow: loop_only";
+Input -> LoopBody;
+LoopBody -> Loop;
+Loop [shape=diamond];
+Loop -> LoopBody [style=dashed label="0"];  // continue
+Loop -> LoopExit [style=dashed label="1"]; // exit
+}
+}
+```
+
+Behavior: Loop body executes 5 times (counter 1..5) then exits; logging is handled by the `loop_complete` sink callback.
+
+### advanced_control_flow
+
+```
+digraph Taskflow {
+subgraph cluster_... {
+label="Taskflow: advanced_control_flow";
+A -> B; A -> LoopBody;
+E -> F;
+B [shape=diamond] -> C [m2] | D [m6];
+F [shape=diamond] -> G [m3] | H [m4] | I [m5];
+Loop [shape=diamond] -> LoopBody (0) | LoopExit (1);
+}
+}
+```
+
+Behavior: condition selects branch C; multi-condition selects G and I; pipeline runs 3 stages over 4 lines; loop iterates 5 times; sink callbacks print concise results for each segment.
+
+## 🛠️ Technical Notes (Updates)
+
+- Module task vs subtask for loops:
+  - `create_subgraph` creates a module task (single-run semantics). Not suitable as loop body since the same module cannot be dispatched repeatedly.
+  - `create_subtask` creates a normal task whose callable builds and runs a fresh subgraph on each execution using the enclosing executor; this supports iterative loop semantics.
+- Sink callbacks:
+  - Any-based sink: `std::function<void(const std::unordered_map<std::string, std::any>&)>`
+  - Typed sink: `std::function<void(const std::tuple<Ins...>&)>`
+  - If no callback is provided, a simple default print is used.
+- Noise reduction: removed internal per-node "emitted"/"done" prints to keep outputs focused on user intent (callbacks or explicit `std::cout`).
 
 ### Subgraph Creation
 
