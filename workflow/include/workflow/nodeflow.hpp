@@ -451,6 +451,16 @@ class LoopNode : public INode {
 class GraphBuilder {
  public:
   explicit GraphBuilder(const std::string& name = "workflow");
+  
+  /**
+   * @brief Construct GraphBuilder from a FlowBuilder (Taskflow or Subflow)
+   * @param flow_builder Reference to FlowBuilder (can be Taskflow or Subflow)
+   * @param name Name for the builder
+   * @details This allows GraphBuilder to work directly on Subflow graphs,
+   *          enabling proper loop execution without creating separate topologies
+   */
+  GraphBuilder(tf::FlowBuilder& flow_builder, const std::string& name = "subflow_builder");
+  
   ~GraphBuilder() = default;
 
   // Disable copy, allow move
@@ -554,9 +564,20 @@ class GraphBuilder {
 
   /**
    * @brief Get the underlying Taskflow
+   * @note Only valid when GraphBuilder owns the Taskflow (constructed from name)
    */
-  tf::Taskflow& taskflow() { return taskflow_; }
-  const tf::Taskflow& taskflow() const { return taskflow_; }
+  tf::Taskflow& taskflow() { 
+    if (!owns_taskflow_) {
+      throw std::runtime_error("GraphBuilder constructed from FlowBuilder does not own Taskflow");
+    }
+    return taskflow_; 
+  }
+  const tf::Taskflow& taskflow() const { 
+    if (!owns_taskflow_) {
+      throw std::runtime_error("GraphBuilder constructed from FlowBuilder does not own Taskflow");
+    }
+    return taskflow_; 
+  }
   
   // Internal mutable access (for const methods that need to create adapter tasks)
   tf::Taskflow& taskflow_mutable() { return taskflow_; }
@@ -820,7 +841,9 @@ class GraphBuilder {
                               std::index_sequence<OutIndices...>);
   
  private:
-  tf::Taskflow taskflow_;
+  tf::Taskflow taskflow_;  // Used when constructed from name (owns graph)
+  tf::FlowBuilder* flow_builder_;  // Used when constructed from FlowBuilder (references external graph)
+  bool owns_taskflow_;  // Whether we own taskflow_ or just reference flow_builder_
   tf::Executor* executor_;
   std::unordered_map<std::string, std::shared_ptr<INode>> nodes_;
   std::unordered_map<std::string, tf::Task> tasks_;
@@ -828,11 +851,14 @@ class GraphBuilder {
   mutable std::unordered_map<std::string, tf::Task> adapter_tasks_;
   // Hold nested subgraph builders to keep composed_of lifetimes valid
   std::vector<std::unique_ptr<GraphBuilder>> subgraph_builders_;
+  
+  // Helper to get the FlowBuilder we're working with
+  tf::FlowBuilder& get_flow_builder();
 };
 
 }  // namespace workflow
 
-// Include template implementations
+// Include template implementations (after namespace close - nodeflow_impl.hpp defines its own namespace)
 #include <workflow/nodeflow_impl.hpp>
 
 #endif  // WORKFLOW_NODEFLOW_HPP

@@ -538,9 +538,9 @@ std::shared_future<T> GraphBuilder::get_typed_input_impl(const std::string& node
   }
   auto source_task = source_task_it->second;
   
-  // Create adapter task (non-const access to taskflow_ needed)
-  auto& tf = const_cast<GraphBuilder*>(this)->taskflow_mutable();
-  auto adapter_task = tf.emplace([any_fut, p_typed]() {
+  // Create adapter task (need to use get_flow_builder() to support Subflow)
+  auto& fb = const_cast<GraphBuilder*>(this)->get_flow_builder();
+  auto adapter_task = fb.emplace([any_fut, p_typed]() {
     try {
       std::any value = any_fut.get();
       T typed_value = std::any_cast<T>(value);
