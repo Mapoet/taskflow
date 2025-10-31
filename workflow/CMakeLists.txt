@@ -46,6 +46,14 @@ elseif(TARGET Taskflow)
   target_link_libraries(declarative_example Taskflow)
 endif()
 
+add_executable(advanced_control_flow examples/advanced_control_flow.cpp)
+target_link_libraries(advanced_control_flow workflow)
+if(TARGET Taskflow::Taskflow)
+  target_link_libraries(advanced_control_flow Taskflow::Taskflow)
+elseif(TARGET Taskflow)
+  target_link_libraries(advanced_control_flow Taskflow)
+endif()
+
 # Install rules (optional)
 # install(TARGETS workflow EXPORT workflowTargets
 #   ARCHIVE DESTINATION lib

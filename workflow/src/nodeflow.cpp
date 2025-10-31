@@ -163,6 +163,142 @@ std::vector<std::string> AnySink::get_output_keys() const {
 }
 
 // ============================================================================
+// Condition Node Implementation
+// ============================================================================
+
+ConditionNode::ConditionNode(ConditionFunc func,
+                            std::vector<BranchBuilder> branches,
+                            const std::string& name)
+    : func_(std::move(func)), branches_(std::move(branches)), node_name_(name) {
+  // Pre-build all branch taskflows
+  branch_taskflows_.resize(branches_.size());
+  for (size_t i = 0; i < branches_.size(); ++i) {
+    if (branches_[i]) {
+      GraphBuilder branch_builder(node_name_ + "_branch_" + std::to_string(i));
+      branches_[i](branch_builder);
+      branch_taskflows_[i] = std::move(branch_builder.taskflow());
+    }
+  }
+}
+
+std::string ConditionNode::name() const {
+  return node_name_;
+}
+
+std::function<void()> ConditionNode::functor(const char* node_name) const {
+  // Condition nodes use Subflow to dynamically select and execute branch
+  return [this, node_name](tf::Subflow& sf) {
+    if (func_) {
+      int branch_idx = func_();
+      if (branch_idx >= 0 && branch_idx < static_cast<int>(branch_taskflows_.size())) {
+        // Execute selected branch using composed_of
+        sf.composed_of(branch_taskflows_[branch_idx]);
+      }
+    }
+  };
+}
+
+std::shared_future<std::any> ConditionNode::get_output_future(const std::string& key) const {
+  // Condition nodes don't have outputs
+  throw std::runtime_error("ConditionNode::get_output_future: Condition nodes do not have outputs");
+}
+
+std::vector<std::string> ConditionNode::get_output_keys() const {
+  return {};  // Condition nodes don't have outputs
+}
+
+// ============================================================================
+// Multi-Condition Node Implementation
+// ============================================================================
+
+MultiConditionNode::MultiConditionNode(MultiConditionFunc func, const std::string& name)
+    : func_(std::move(func)), node_name_(name) {}
+
+std::string MultiConditionNode::name() const {
+  return node_name_;
+}
+
+std::function<void()> MultiConditionNode::functor(const char* node_name) const {
+  return [this, node_name]() {
+    if (func_) {
+      func_();  // Multi-condition task will be created via emplace
+    }
+  };
+}
+
+std::shared_future<std::any> MultiConditionNode::get_output_future(const std::string& key) const {
+  // Multi-condition nodes don't have outputs
+  throw std::runtime_error("MultiConditionNode::get_output_future: Multi-condition nodes do not have outputs");
+}
+
+std::vector<std::string> MultiConditionNode::get_output_keys() const {
+  return {};  // Multi-condition nodes don't have outputs
+}
+
+// ============================================================================
+// Pipeline Node Implementation
+// ============================================================================
+
+std::string PipelineNode::name() const {
+  return node_name_;
+}
+
+std::function<void()> PipelineNode::functor(const char* node_name) const {
+  // Pipeline is executed via composed_of, not directly
+  return []() {
+    // Pipeline execution is handled by Taskflow's composed_of
+  };
+}
+
+std::shared_future<std::any> PipelineNode::get_output_future(const std::string& key) const {
+  // Pipeline nodes don't have outputs in the traditional sense
+  throw std::runtime_error("PipelineNode::get_output_future: Pipeline nodes do not have key-based outputs");
+}
+
+std::vector<std::string> PipelineNode::get_output_keys() const {
+  return {};  // Pipeline nodes don't have key-based outputs
+}
+
+// ============================================================================
+// Loop Node Implementation
+// ============================================================================
+
+LoopNode::LoopNode(LoopBodyBuilder body_builder,
+                   LoopConditionFunc condition_func,
+                   const std::string& name)
+    : body_builder_(std::move(body_builder)),
+      condition_func_(std::move(condition_func)),
+      node_name_(name) {
+  // Pre-build loop body taskflow
+  if (body_builder_) {
+    GraphBuilder body_builder_instance(node_name_ + "_body");
+    body_builder_(body_builder_instance);
+    body_taskflow_ = std::move(body_builder_instance.taskflow());
+  }
+}
+
+std::string LoopNode::name() const {
+  return node_name_;
+}
+
+std::function<void()> LoopNode::functor(const char* node_name) const {
+  // Loop uses Subflow to execute body, then condition task controls loop
+  return [this, node_name](tf::Subflow& sf) {
+    // Execute loop body
+    sf.composed_of(body_taskflow_);
+  };
+}
+
+std::shared_future<std::any> LoopNode::get_output_future(const std::string& key) const {
+  // Loop nodes don't have outputs
+  throw std::runtime_error("LoopNode::get_output_future: Loop nodes do not have outputs");
+}
+
+std::vector<std::string> LoopNode::get_output_keys() const {
+  return {};  // Loop nodes don't have outputs
+}
+
+// ============================================================================
 // GraphBuilder implementation
 // ============================================================================
 
@@ -303,6 +439,92 @@ GraphBuilder::create_any_sink(const std::string& name,
   }
   
   return {node, task};
+}
+
+// ============================================================================
+// GraphBuilder: Advanced Control Flow Node Creation
+// ============================================================================
+
+std::pair<std::shared_ptr<ConditionNode>, tf::Task>
+GraphBuilder::create_condition_node(const std::string& name,
+                                    std::function<int()> condition_func,
+                                    std::vector<std::function<void(GraphBuilder&)>> branches) {
+  auto node = std::make_shared<ConditionNode>(std::move(condition_func), std::move(branches), name);
+  
+  // Create subflow task that will execute selected branch
+  auto task = taskflow_.emplace([node]() {
+    // This will be converted to Subflow task
+  }).name(name);
+  
+  // Actually, we need to use composed_of with a condition task
+  // Create condition task first
+  auto cond_task = taskflow_.emplace([func = node->func_]() {
+    return func();
+  }).name(name + "_condition");
+  
+  // Create module tasks for each branch
+  std::vector<tf::Task> branch_tasks;
+  for (size_t i = 0; i < node->branch_taskflows_.size(); ++i) {
+    auto branch_task = taskflow_.composed_of(node->branch_taskflows_[i])
+                           .name(name + "_branch_" + std::to_string(i));
+    branch_tasks.push_back(branch_task);
+  }
+  
+  // Set up condition: cond_task precedes all branches
+  if (!branch_tasks.empty()) {
+    cond_task.precede(branch_tasks);
+  }
+  
+  nodes_[name] = node;
+  tasks_[name] = cond_task;
+  
+  return {node, cond_task};
+}
+
+std::pair<std::shared_ptr<MultiConditionNode>, tf::Task>
+GraphBuilder::create_multi_condition_node(const std::string& name,
+                                          std::function<tf::SmallVector<int>()> multi_condition_func) {
+  auto node = std::make_shared<MultiConditionNode>(std::move(multi_condition_func), name);
+  
+  // Create multi-condition task directly using Taskflow's emplace
+  auto task = taskflow_.emplace([func = node->func_]() {
+    return func();
+  }).name(name);
+  
+  nodes_[name] = node;
+  tasks_[name] = task;
+  
+  return {node, task};
+}
+
+std::pair<std::shared_ptr<LoopNode>, tf::Task>
+GraphBuilder::create_loop_node(const std::string& name,
+                               std::function<void()> body_func,
+                               std::function<int()> condition_func) {
+  auto node = std::make_shared<LoopNode>(std::move(body_func), std::move(condition_func), name);
+  
+  // Create loop structure: body task -> condition task -> (loop back to body if 0, or exit)
+  auto body_task = taskflow_.emplace(node->body_func_).name(name + "_body");
+  auto cond_task = taskflow_.emplace([func = node->condition_func_]() {
+    return func();
+  }).name(name + "_condition");
+  
+  // Loop structure: 
+  // - body -> condition
+  // - condition -> body (if returns 0, continue loop)
+  // - condition -> (exit) (if returns non-zero)
+  body_task.precede(cond_task);
+  // Condition task will loop back to body when returning 0
+  // This requires the user to set up: cond_task.precede(body_task) when condition returns 0
+  
+  // Store the body task as the main task (entry point of loop)
+  nodes_[name] = node;
+  tasks_[name] = body_task;
+  
+  // Store both tasks in node for reference (for loop closure)
+  // Note: This requires exposing internal tasks, or the user manages the loop manually
+  
+  return {node, body_task};
 }
 
 // Deprecated precede/succeed methods are implemented inline in nodeflow_impl.hpp

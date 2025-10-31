@@ -6,6 +6,8 @@
 #define WORKFLOW_NODEFLOW_HPP
 
 #include <taskflow/taskflow.hpp>
+#include <taskflow/algorithm/pipeline.hpp>
+#include <taskflow/utility/small_vector.hpp>
 #include <future>
 #include <memory>
 #include <any>
@@ -29,6 +31,10 @@ template <typename... Ins> class TypedSink;
 struct AnyNode;
 struct AnySource;
 struct AnySink;
+class ConditionNode;
+class MultiConditionNode;
+class PipelineNode;
+class LoopNode;
 class GraphBuilder;
 
 // ============================================================================
@@ -296,6 +302,134 @@ struct AnySink : public INode {
 };
 
 // ============================================================================
+// Condition Node: Returns an integer index to select which successor to execute
+// ============================================================================
+
+/**
+ * @brief Condition node that returns an integer to select which branch subgraph to execute
+ * @details Returns an integer index (0, 1, 2...) indicating which branch subgraph to execute
+ *          Each branch is a GraphBuilder subgraph composed of workflow nodes
+ */
+class ConditionNode : public INode {
+ public:
+  using ConditionFunc = std::function<int()>;
+  using BranchBuilder = std::function<void(GraphBuilder&)>;  // Function to build branch subgraph
+  
+  ConditionNode() = default;
+  
+  /**
+   * @brief Create a condition node with multiple branch subgraphs
+   * @param func Condition function that returns branch index
+   * @param branches Vector of functions that build each branch subgraph
+   * @param name Node name
+   */
+  explicit ConditionNode(ConditionFunc func,
+                        std::vector<BranchBuilder> branches,
+                        const std::string& name = "");
+  
+  std::string name() const override;
+  std::string type() const override { return "ConditionNode"; }
+  std::function<void()> functor(const char* node_name) const override;
+  std::shared_future<std::any> get_output_future(const std::string& key) const override;
+  std::vector<std::string> get_output_keys() const override;
+  
+  ConditionFunc func_;
+  std::vector<BranchBuilder> branches_;  // Branch subgraph builders
+  std::vector<tf::Taskflow> branch_taskflows_;  // Taskflows for each branch
+  std::string node_name_;
+};
+
+// ============================================================================
+// Multi-Condition Node: Returns multiple indices to execute multiple successors
+// ============================================================================
+
+/**
+ * @brief Multi-condition node that returns multiple indices for parallel execution
+ * @details Returns tf::SmallVector<int> to select multiple successor tasks to execute
+ */
+class MultiConditionNode : public INode {
+ public:
+  using MultiConditionFunc = std::function<tf::SmallVector<int>()>;
+  
+  MultiConditionNode() = default;
+  explicit MultiConditionNode(MultiConditionFunc func, const std::string& name = "");
+  
+  std::string name() const override;
+  std::string type() const override { return "MultiConditionNode"; }
+  std::function<void()> functor(const char* node_name) const override;
+  std::shared_future<std::any> get_output_future(const std::string& key) const override;
+  std::vector<std::string> get_output_keys() const override;
+  
+  MultiConditionFunc func_;
+  std::string node_name_;
+};
+
+// ============================================================================
+// Pipeline Node: Wraps a Taskflow Pipeline for pipeline scheduling
+// ============================================================================
+
+/**
+ * @brief Pipeline node that wraps a Taskflow Pipeline
+ * @details Encapsulates a pipeline scheduling framework with parallel lines and serial pipes
+ */
+class PipelineNode : public INode {
+ public:
+  PipelineNode() = default;
+  
+  // Create from Taskflow Pipeline
+  template <typename... Ps>
+  explicit PipelineNode(tf::Pipeline<Ps...>& pipeline, const std::string& name = "");
+  
+  std::string name() const override;
+  std::string type() const override { return "PipelineNode"; }
+  std::function<void()> functor(const char* node_name) const override;
+  std::shared_future<std::any> get_output_future(const std::string& key) const override;
+  std::vector<std::string> get_output_keys() const override;
+  
+  // Store pipeline as type-erased wrapper
+  std::any pipeline_wrapper_;
+  std::string node_name_;
+};
+
+// ============================================================================
+// Loop Node: Creates a loop using a condition node with subgraph body
+// ============================================================================
+
+/**
+ * @brief Loop node that creates iterative control flow using a condition
+ * @details Uses a condition function to decide whether to continue loop or exit
+ *          Loop body is a GraphBuilder subgraph composed of workflow nodes
+ */
+class LoopNode : public INode {
+ public:
+  using LoopConditionFunc = std::function<int()>;  // Returns 0 to continue, non-zero to exit
+  using LoopBodyBuilder = std::function<void(GraphBuilder&)>;  // Function to build loop body subgraph
+  
+  LoopNode() = default;
+  
+  /**
+   * @brief Create a loop node
+   * @param body_builder Function that builds the loop body subgraph
+   * @param condition_func Function that returns 0 to continue loop, non-zero to exit
+   * @param name Node name
+   */
+  explicit LoopNode(LoopBodyBuilder body_builder,
+                    LoopConditionFunc condition_func,
+                    const std::string& name = "");
+  
+  std::string name() const override;
+  std::string type() const override { return "LoopNode"; }
+  std::function<void()> functor(const char* node_name) const override;
+  std::shared_future<std::any> get_output_future(const std::string& key) const override;
+  std::vector<std::string> get_output_keys() const override;
+  
+  LoopBodyBuilder body_builder_;
+  LoopConditionFunc condition_func_;
+  tf::Taskflow body_taskflow_;  // Taskflow for loop body
+  std::string node_name_;
+};
+
+// ============================================================================
 // Graph Builder: Manages graph construction and execution
 // ============================================================================
 
@@ -497,6 +631,65 @@ class GraphBuilder {
   std::pair<std::shared_ptr<AnySink>, tf::Task>
   create_any_sink(const std::string& name,
                   const std::vector<std::pair<std::string, std::string>>& input_specs);
+
+  // ============================================================================
+  // Advanced Control Flow Nodes: Condition, Multi-Condition, Pipeline, Loop
+  // ============================================================================
+
+  /**
+   * @brief Create and add a condition node with branch subgraphs
+   * @param name Node name
+   * @param condition_func Function that returns an integer index (0, 1, 2...) to select branch
+   * @param branches Vector of functions that build each branch subgraph using GraphBuilder
+   * @return Pair of (node_ptr, task_handle)
+   * @details The returned index selects which branch subgraph to execute
+   *          Each branch is built as a separate GraphBuilder subgraph
+   */
+  std::pair<std::shared_ptr<ConditionNode>, tf::Task>
+  create_condition_node(const std::string& name,
+                       std::function<int()> condition_func,
+                       std::vector<std::function<void(GraphBuilder&)>> branches);
+
+  /**
+   * @brief Create and add a multi-condition node
+   * @param name Node name
+   * @param multi_condition_func Function that returns tf::SmallVector<int> to select multiple successors
+   * @return Pair of (node_ptr, task_handle)
+   * @details Returns multiple indices to execute multiple successor tasks in parallel
+   */
+  std::pair<std::shared_ptr<MultiConditionNode>, tf::Task>
+  create_multi_condition_node(const std::string& name,
+                              std::function<tf::SmallVector<int>()> multi_condition_func);
+
+  /**
+   * @brief Create and add a pipeline node
+   * @tparam Ps Pipe types
+   * @param name Node name
+   * @param num_lines Number of parallel lines
+   * @param pipes Variadic pipe arguments
+   * @return Pair of (node_ptr, task_handle)
+   * @details Creates a Taskflow Pipeline with specified number of lines and pipes
+   */
+  template <typename... Ps>
+  std::pair<std::shared_ptr<PipelineNode>, tf::Task>
+  create_pipeline_node(const std::string& name,
+                       size_t num_lines,
+                       Ps&&... pipes);
+
+  /**
+   * @brief Create and add a loop node with subgraph body
+   * @param name Node name
+   * @param body_builder Function that builds the loop body subgraph using GraphBuilder
+   * @param condition_func Function that returns 0 to continue loop, non-zero to exit
+   * @return Pair of (node_ptr, task_handle)
+   * @details Creates a loop using condition task. Loop body is a GraphBuilder subgraph.
+   *          Loop continues while condition returns 0.
+   */
+  std::pair<std::shared_ptr<LoopNode>, tf::Task>
+  create_loop_node(const std::string& name,
+                   std::function<void(GraphBuilder&)> body_builder,
+                   std::function<int()> condition_func);
+  
 
  private:
   // Helper to extract typed future from source node (for create_typed_node)
