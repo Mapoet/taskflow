@@ -23,7 +23,7 @@ int main() {
       auto current_count = counter;  // Capture current value when building graph
       auto [trigger, tSrc] = gb.create_typed_source(
         "loop_trigger",
-        std::make_tuple(std::any_cast<int>(inputs.at("input"))),
+        std::make_tuple(counter==0?std::any_cast<int>(inputs.at("input")):counter),
         std::vector<std::string>{"trigger"}
       );
       auto [process, tProc] = gb.create_typed_node<int>(
