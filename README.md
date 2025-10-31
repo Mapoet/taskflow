@@ -448,9 +448,15 @@ Enable the workflow library during CMake configuration:
 ```bash
 mkdir build && cd build
 cmake .. -DTF_BUILD_WORKFLOW=ON
-cmake --build . --target unified_example
-./workflow/unified_example
+cmake --build . --target declarative_example
+./workflow/declarative_example
+
+# Or build advanced control flow example
+cmake --build . --target advanced_control_flow
+./workflow/advanced_control_flow
 ```
+
+**Advanced Control Flow**: The workflow library also supports condition nodes, multi-condition nodes, pipeline nodes, and loop nodes with declarative API. See `workflow/examples/advanced_control_flow.cpp` for examples.
 
 See `workflow/README.md` and `readme/guide_workflow.md` for detailed documentation and technical roadmap.
 
