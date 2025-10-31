@@ -1,167 +1,296 @@
-# Workflow: String-Keyed Nodeflow Library
+# Workflow: Unified Nodeflow Library for Taskflow
 
-A Taskflow-based dataflow library with string-keyed heterogeneous inputs/outputs using `std::unordered_map<std::string, std::any>`.
+A high-level dataflow library built on Taskflow, supporting both **compile-time type-safe nodes** and **runtime type-erased nodes** through a unified interface.
 
 ## Overview
 
-The Workflow library provides a high-level abstraction for building dataflow graphs where nodes communicate through named channels (string keys) rather than positional arguments. This design enables:
+The Workflow library provides a powerful abstraction for building dataflow graphs with flexible type handling:
 
-- **Self-documenting code**: Node inputs/outputs are identified by meaningful string keys
-- **Flexible composition**: Nodes can be easily connected by matching keys
-- **Type safety with flexibility**: Uses `std::any` for type-erased values while maintaining clear semantics
-- **Parallel execution**: Built on Taskflow for efficient concurrent task execution
+- **Pure Virtual Interface (`INode`)**: All nodes inherit from a common base class, enabling polymorphism
+- **Typed Nodes**: Compile-time type-safe nodes using C++ templates (`TypedNode`, `TypedSource`, `TypedSink`)
+- **Any-based Nodes**: Runtime type-erased nodes using `std::any` (`AnyNode`, `AnySource`, `AnySink`)
+- **String-keyed I/O**: Flexible key-based data access via `std::unordered_map<std::string, std::any>`
+- **Graph Builder**: High-level API for graph construction, dependency management, and execution
+- **Taskflow Integration**: Built on Taskflow for efficient parallel execution
 
-## Features
+## Architecture
 
-- **String-keyed I/O**: All node inputs/outputs are accessed via string keys in unordered_map, enabling flexible key-based access and template-friendly node functions.
-- **Heterogeneous types**: Uses `std::any` for type-erased values, supporting any C++ type.
-- **Taskflow integration**: Built on top of Taskflow for efficient parallel execution.
-- **Clean API**: Simple node creation with lambda functions for easy integration.
+### Design Principles
+
+1. **Separation of Concerns**: Header declarations in `include/`, implementations in `src/`
+2. **Type Safety with Flexibility**: Support both typed (compile-time) and untyped (runtime) nodes
+3. **Polymorphism**: Unified `INode` interface for all node types
+4. **Easy Composition**: `GraphBuilder` simplifies graph construction and execution
+
+### Component Overview
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                    INode (Base)                         │
+│  - name(): string                                       │
+│  - type(): string                                       │
+│  - functor(): function<void()>                         │
+└─────────────────────────────────────────────────────────┘
+          ▲                    ▲
+          │                    │
+    ┌─────┴─────┐      ┌──────┴──────┐
+    │           │      │              │
+┌───▼────┐ ┌───▼────┐ │  ┌─────────▼─┐
+│ Typed  │ │ Typed  │ │  │ Any-based│
+│ Nodes  │ │ Source │ │  │ Nodes    │
+│        │ │ Sink   │ │  │ Source   │
+└────────┘ └────────┘ │  │ Sink     │
+                      └──┴──────────┘
+```
 
 ## Directory Structure
 
 ```
 workflow/
 ├── include/workflow/
-│   └── nodeflow.hpp       # Main library header
-├── src/                   # (Reserved for future .cpp implementations)
+│   ├── nodeflow.hpp          # Main header (declarations)
+│   └── nodeflow_impl.hpp     # Template implementations
+├── src/
+│   └── nodeflow.cpp          # Implementation for non-template code
 ├── examples/
-│   └── keyed_example.cpp # Example usage
-└── CMakeLists.txt        # Build configuration
+│   ├── keyed_example.cpp      # Any-based nodes example
+│   └── unified_example.cpp    # Unified API with typed/any nodes
+├── CMakeLists.txt
+└── README.md
 ```
 
-## Example Program: keyed_example
+## Core Components
 
-The `keyed_example.cpp` demonstrates a complete workflow with multiple nodes performing arithmetic operations.
+### 1. Pure Virtual Base Class: `INode`
 
-### Program Description
+All nodes inherit from `INode`, providing a unified interface:
 
-This example implements the following computation graph:
-
-```
-A: emits {"x": 3.5, "k": 7}
-  ↓
-  ├─→ B: {"x"} → {"b": x+1}
-  ├─→ C: {"x"} → {"c": 2*x}
-  └─→ E: {"k"} → {"ek": k-2}
-       ↓
-       ├─→ D: {"b", "c"} → {"prod": b*c}
-       └─→ G: {"c", "b", "ek"} → {"sum": c+b, "parity": ek%2}
-            ↓
-            H: prints {"prod", "sum", "parity"}
+```cpp
+class INode {
+ public:
+  virtual std::string name() const = 0;
+  virtual std::string type() const = 0;
+  virtual std::function<void()> functor(const char* node_name) const = 0;
+};
 ```
 
-### Data Flow
+**Benefits**:
+- Enables polymorphism: store nodes as `std::shared_ptr<INode>`
+- Unified node management and inspection
+- Easy iteration over all nodes regardless of type
 
-- **Node A (Source)**: Produces two values: `x = 3.5` (double) and `k = 7` (int)
-- **Node B**: Computes `b = x + 1 = 4.5`
-- **Node C**: Computes `c = 2 * x = 7.0`
-- **Node E**: Computes `ek = k - 2 = 5`
-- **Node D**: Computes `prod = b * c = 4.5 * 7.0 = 31.5`
-- **Node G**: Computes two values:
-  - `sum = c + b = 7.0 + 4.5 = 11.5`
-  - `parity = ek % 2 = 5 % 2 = 1`
-- **Node H (Sink)**: Prints the final results
+### 2. Typed Nodes (Compile-time Type-safe)
 
-### Expected Output
+Type-safe nodes for known input/output types:
 
-```
-A emitted
-E done
-C done
-B done
-G done
-D done
-H: parity=1 sum=11.5 prod=31.5
+#### `TypedSource<Outs...>`
+
+Produces initial values with compile-time type checking:
+
+```cpp
+auto A = std::make_shared<wf::TypedSource<double, int>>(
+  std::make_tuple(3.5, 7), "A"
+);
+auto [x_fut, k_fut] = A->out.futures;  // Type-safe access
 ```
 
-### Execution Graph (DOT Format)
+#### `TypedNode<InputsTuple, Outs...>`
 
-The program outputs a DOT graph description that can be visualized:
+Transforms typed inputs to typed outputs:
 
-```dot
-digraph Taskflow {
-  subgraph cluster_keyed_nodeflow {
-    label="Taskflow: keyed_nodeflow";
-    
-    A[label="A"];
-    B[label="B"];
-    C[label="C"];
-    E[label="E"];
-    D[label="D"];
-    G[label="G"];
-    H[label="H"];
-    
-    A -> B;
-    A -> C;
-    A -> E;
-    B -> D;
-    C -> D;
-    B -> G;
-    C -> G;
-    E -> G;
-    D -> H;
-    G -> H;
-  }
-}
+```cpp
+using B_Inputs = std::tuple<std::shared_future<double>>;
+auto B = std::make_shared<wf::TypedNode<B_Inputs, double>>(
+  std::make_tuple(x_fut),
+  [](const std::tuple<double>& in) {
+    double x = std::get<0>(in);
+    return std::make_tuple(x + 1.0);
+  },
+  "B"
+);
 ```
 
-Visualization:
-- **A** (source) has three outgoing edges to B, C, E
-- **B** and **C** feed into both **D** and **G**
-- **E** feeds into **G**
-- **D** and **G** both feed into **H** (sink)
+**Advantages**:
+- Compile-time type checking
+- No runtime type casting overhead
+- IDE autocomplete support
+- Clear type contracts
 
-### Code Structure
+#### `TypedSink<Ins...>`
 
-The example shows:
-1. Creating a source node with multiple heterogeneous outputs
-2. Creating transform nodes that consume specific inputs by key
-3. Creating nodes with multiple outputs
-4. Wiring nodes together using `out.futures.at("key")` syntax
-5. Creating a sink node to consume and display final results
+Consumes typed values:
 
-## Usage
+```cpp
+auto H = std::make_shared<wf::TypedSink<double, int>>(
+  std::make_tuple(prod_fut, count_fut), "H"
+);
+```
 
-### Basic Example
+### 3. Any-based Nodes (Runtime Type-erased)
+
+Flexible nodes using `std::any` for heterogeneous types:
+
+#### `AnySource`
+
+```cpp
+auto A = std::make_shared<wf::AnySource>(
+  std::unordered_map<std::string, std::any>{
+    {"x", std::any{3.5}},
+    {"k", std::any{7}}
+  },
+  "A"
+);
+```
+
+#### `AnyNode`
+
+```cpp
+auto D = std::make_shared<wf::AnyNode>(
+  {{"b", B->out.futures.at("b")}, {"c", C->out.futures.at("c")}},
+  {"prod"},
+  [](const auto& in) {
+    double b = std::any_cast<double>(in.at("b"));
+    double c = std::any_cast<double>(in.at("c"));
+    return std::unordered_map<std::string, std::any>{{"prod", b * c}};
+  },
+  "D"
+);
+```
+
+#### `AnySink`
+
+```cpp
+auto H = std::make_shared<wf::AnySink>(
+  {{"prod", f_prod}, {"sum", f_sum}, {"parity", f_parity}}, "H"
+);
+```
+
+**Advantages**:
+- Dynamic type handling
+- Easy mixing of different types
+- String-keyed access for clarity
+
+### 4. Graph Builder
+
+High-level API for building and executing workflows:
+
+```cpp
+wf::GraphBuilder builder("my_workflow");
+tf::Executor executor;
+
+// Add nodes
+auto tA = builder.add_typed_source(A);
+auto tB = builder.add_typed_node(B);
+auto tH = builder.add_any_sink(H);
+
+// Configure dependencies
+builder.precede(tA, std::vector<tf::Task>{tB, tC});
+builder.succeed(tH, std::vector<tf::Task>{tD, tG});
+
+// Execute
+builder.run(executor);
+builder.dump(std::cout);  // Visualize graph
+```
+
+**Features**:
+- Automatic node name management
+- Duplicate name detection
+- Support for both typed and any-based nodes
+- Dependency configuration (single or multiple)
+- Synchronous and asynchronous execution
+- Graph visualization
+
+## Complete Example
+
+See `examples/unified_example.cpp` for a comprehensive demonstration:
 
 ```cpp
 #include <workflow/nodeflow.hpp>
 #include <taskflow/taskflow.hpp>
 
-namespace wf = workflow;
-
 int main() {
+  namespace wf = workflow;
   tf::Executor executor;
-  tf::Taskflow tf("my_workflow");
+  wf::GraphBuilder builder("unified_workflow");
 
-  // Source: emit initial values
-  wf::AnySource A({{"x", std::any{3.5}}, {"k", std::any{7}}});
-
-  // Node: transform inputs to outputs
-  wf::AnyNode B(
-      {{"x", A.out.futures.at("x")}},  // inputs
-      {"b"},                            // output keys
-      [](const std::unordered_map<std::string, std::any>& in) {
-        double x = std::any_cast<double>(in.at("x"));
-        return std::unordered_map<std::string, std::any>{{"b", x + 1.0}};
-      }
+  // Typed source
+  auto A = std::make_shared<wf::TypedSource<double, int>>(
+    std::make_tuple(3.5, 7), "A"
   );
+  auto tA = builder.add_typed_source(A);
+  auto [x_fut, k_fut] = A->out.futures;
 
-  // Sink: consume final values
-  wf::AnySink H({{"b", B.out.futures.at("b")}});
+  // Typed nodes
+  using B_Inputs = std::tuple<std::shared_future<double>>;
+  auto B = std::make_shared<wf::TypedNode<B_Inputs, double>>(
+    std::make_tuple(x_fut),
+    [](const std::tuple<double>& in) {
+      return std::make_tuple(std::get<0>(in) + 1.0);
+    },
+    "B"
+  );
+  auto tB = builder.add_typed_node(B);
 
-  // Create tasks and dependencies
-  auto tA = tf.emplace(A.functor("A")).name("A");
-  auto tB = tf.emplace(B.functor("B")).name("B");
-  auto tH = tf.emplace(H.functor("H")).name("H");
+  // Any-based sink
+  auto H = std::make_shared<wf::AnySink>(/* ... */, "H");
+  auto tH = builder.add_any_sink(H);
 
-  tA.precede(tB);
-  tB.precede(tH);
+  // Dependencies
+  builder.precede(tA, std::vector<tf::Task>{tB});
+  builder.succeed(tH, std::vector<tf::Task>{tB});
 
-  executor.run(tf).wait();
+  // Polymorphism demonstration
+  std::vector<std::shared_ptr<wf::INode>> all_nodes = {A, B, H};
+  for (auto& node : all_nodes) {
+    std::cout << "Node: " << node->name() << ", Type: " << node->type() << '\n';
+  }
+
+  // Execute
+  builder.run(executor);
   return 0;
 }
+```
+
+## Usage Patterns
+
+### Pattern 1: Pure Typed Workflow
+
+Use typed nodes for maximum type safety:
+
+```cpp
+wf::GraphBuilder builder("typed_workflow");
+auto A = std::make_shared<wf::TypedSource<double>>(std::make_tuple(3.5), "A");
+auto B = std::make_shared<wf::TypedNode</* ... */>>(/* ... */, "B");
+auto H = std::make_shared<wf::TypedSink<double>>(/* ... */, "H");
+```
+
+### Pattern 2: Pure Any-based Workflow
+
+Use any-based nodes for maximum flexibility:
+
+```cpp
+wf::GraphBuilder builder("any_workflow");
+auto A = std::make_shared<wf::AnySource>({{"x", std::any{3.5}}}, "A");
+auto B = std::make_shared<wf::AnyNode>(/* ... */, "B");
+auto H = std::make_shared<wf::AnySink>(/* ... */, "H");
+```
+
+### Pattern 3: Mixed Workflow
+
+Combine typed and any-based nodes using adapter tasks:
+
+```cpp
+// Typed nodes for computation
+auto D = std::make_shared<wf::TypedNode</* ... */>>(/* ... */);
+
+// Bridge: typed -> any
+auto p_prod = std::make_shared<std::promise<std::any>>();
+auto adapter = builder.taskflow().emplace([p_prod, fut=/*typed future*/]() {
+  p_prod->set_value(std::any{fut.get()});
+});
+
+// Any-based sink
+auto H = std::make_shared<wf::AnySink>({{"prod", p_prod->get_future().share()}}, "H");
 ```
 
 ## Building
@@ -173,11 +302,9 @@ From the taskflow root:
 ```bash
 mkdir build && cd build
 cmake .. -DTF_BUILD_WORKFLOW=ON
-cmake --build . --target keyed_example
-./workflow/keyed_example
+cmake --build . --target unified_example
+./workflow/unified_example
 ```
-
-The workflow library is built automatically when `TF_BUILD_WORKFLOW=ON` (default).
 
 ### Standalone
 
@@ -186,140 +313,85 @@ From the workflow directory:
 ```bash
 mkdir build && cd build
 cmake ..
-cmake --build . --target keyed_example
-./keyed_example
+cmake --build . --target unified_example
+./unified_example
 ```
 
-### Running the Example
+## API Reference
 
-After building, you can run the example:
+### GraphBuilder Methods
 
-```bash
-# From taskflow/build directory
-./workflow/keyed_example
+- `add_node(std::shared_ptr<INode>)` - Add any node via base interface
+- `add_typed_source/std::shared_ptr<TypedSource<Outs...>>)` - Add typed source
+- `add_typed_node(std::shared_ptr<TypedNode<...>>)` - Add typed node
+- `add_typed_sink(std::shared_ptr<TypedSink<Ins...>>)` - Add typed sink
+- `add_any_source(std::shared_ptr<AnySource>)` - Add any-based source
+- `add_any_node(std::shared_ptr<AnyNode>)` - Add any-based node
+- `add_any_sink(std::shared_ptr<AnySink>)` - Add any-based sink
+- `precede(tf::Task from, tf::Task to)` - Set dependency: from → to
+- `precede(tf::Task from, const Container& to)` - Set multiple dependencies
+- `succeed(tf::Task to, tf::Task from)` - Set dependency: from → to (alternative)
+- `succeed(tf::Task to, const Container& from)` - Set multiple dependencies
+- `run(executor)` - Synchronous execution
+- `run_async(executor)` - Asynchronous execution (returns `tf::Future<void>`)
+- `dump(ostream)` - Output DOT graph visualization
+- `get_node(name)` - Retrieve node by name
+- `nodes()` - Get all nodes
 
-# Or from workflow/build directory  
-./keyed_example
-```
+### Node Interface
 
-The program will:
-1. Execute all nodes in parallel where dependencies allow
-2. Print execution trace
-3. Display final results
-4. Output DOT graph description (can be visualized with Graphviz)
+All nodes support:
 
-## Key Concepts
+- `name()` - Get node name
+- `type()` - Get node type identifier
+- `functor(node_name)` - Create Taskflow-compatible functor
 
-### AnySource
+## Design Decisions
 
-Produces initial values with string keys:
-```cpp
-wf::AnySource src({{"key1", std::any{value1}}, {"key2", std::any{value2}}});
-```
+### Why Both Typed and Any-based Nodes?
 
-### AnyNode
+- **Typed Nodes**: Best for performance-critical paths where types are known at compile time
+- **Any-based Nodes**: Essential for dynamic workflows, heterogeneous data, and runtime flexibility
+- **Interoperability**: Adapter tasks bridge between typed and any-based nodes when needed
 
-Transforms inputs to outputs:
-```cpp
-wf::AnyNode node(
-    {{"input_key", future}},  // input map
-    {"output_key1", "output_key2"},  // output keys
-    [](const auto& in) {
-      // Access inputs: in.at("input_key")
-      // Return outputs: {{"output_key1", value1}, {"output_key2", value2}}
-      return std::unordered_map<std::string, std::any>{...};
-    }
-);
-```
+### Why Pure Virtual Base Class?
 
-### AnySink
+- Enables polymorphic node management
+- Simplifies graph inspection and debugging
+- Supports generic algorithms over node collections
+- Maintains type information while allowing runtime dispatch
 
-Consumes final values and prints them:
-```cpp
-wf::AnySink sink({{"key1", future1}, {"key2", future2}});
-```
+### Why GraphBuilder?
 
-## Benefits of String Keys
+- Simplifies common workflow patterns
+- Reduces boilerplate code
+- Automatic name management
+- Unified execution interface
+- Easy graph visualization
 
-1. **Self-documenting**: Keys describe the data semantics
-2. **Flexible composition**: Easy to wire nodes with matching keys
-3. **Template-friendly**: Lambda functions can easily access named parameters
-4. **Debugging**: Clear trace of data flow via key names
+## Performance Considerations
 
-## Visualizing the Execution Graph
-
-The program outputs a DOT graph description that can be visualized using Graphviz:
-
-### Installation
-
-```bash
-# Ubuntu/Debian
-sudo apt-get install graphviz
-
-# macOS
-brew install graphviz
-
-# Or download from https://graphviz.org/
-```
-
-### Generating Visualization
-
-Save the DOT output to a file and render it:
-
-```bash
-# Run the program and save DOT output
-./workflow/keyed_example > output.txt
-
-# Extract DOT part and render
-# (Edit output.txt to extract the digraph section)
-dot -Tpng output.dot -o graph.png
-dot -Tsvg output.dot -o graph.svg
-dot -Tpdf output.dot -o graph.pdf
-```
-
-Or pipe directly:
-
-```bash
-./workflow/keyed_example | grep -A 20 "digraph" > graph.dot
-dot -Tpng graph.dot -o graph.png
-```
-
-### Online Visualization
-
-You can also use online tools like:
-- [Graphviz Online](https://dreampuf.github.io/GraphvizOnline/)
-- [Webgraphviz](http://www.webgraphviz.com/)
-
-Copy the DOT graph from the program output and paste it into these tools for immediate visualization.
+1. **Typed Nodes**: Zero runtime type overhead, full compiler optimization
+2. **Any-based Nodes**: Minimal overhead from `std::any` type erasure
+3. **Taskflow Integration**: Efficient work-stealing scheduler
+4. **Data Passing**: `std::shared_ptr<promise>` + `std::shared_future` for thread-safe, copyable lambdas
 
 ## Future Enhancements
 
-- Type validation and schema checking
-- Automatic key inference from function signatures
-- Support for optional inputs/outputs
-- Visual graph representation with key annotations
-- Runtime type checking with better error messages
-- Support for node composition and subgraphs
+- Type validation and schema checking for Any-based nodes
+- Automatic adapter generation between typed and any-based nodes
+- Node composition and subgraph support
+- Visual graph representation with type/key annotations
 - Performance profiling and monitoring
+- Support for optional inputs/outputs
+- Pipeline and loop constructs
+- Error handling and recovery mechanisms
 
-## Architecture
+## Examples
 
-### Design Philosophy
+- `keyed_example.cpp`: Pure any-based workflow demonstration
+- `unified_example.cpp`: Mixed typed/any workflow with polymorphism
 
-The Workflow library is designed with the following principles:
+## License
 
-1. **Simplicity**: Minimal API surface with clear semantics
-2. **Flexibility**: Support for heterogeneous types through `std::any`
-3. **Expressiveness**: String keys make data flow self-documenting
-4. **Performance**: Leverages Taskflow's efficient task scheduling
-5. **Composability**: Nodes can be easily connected and reused
-
-### Internal Structure
-
-- **AnyOutputs**: Manages promises and futures for node outputs
-- **AnyNode**: Core transformation node with string-keyed I/O
-- **AnySource**: Produces initial values (no inputs)
-- **AnySink**: Consumes final values (no outputs)
-
-All nodes use `std::shared_ptr<std::promise<std::any>>` and `std::shared_future<std::any>` for thread-safe data passing, ensuring that task functors are copyable (required by Taskflow).
-
+See main Taskflow repository for license information.
