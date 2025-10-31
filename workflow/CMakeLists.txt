@@ -38,6 +38,14 @@ elseif(TARGET Taskflow)
   target_link_libraries(unified_example Taskflow)
 endif()
 
+add_executable(declarative_example examples/declarative_example.cpp)
+target_link_libraries(declarative_example workflow)
+if(TARGET Taskflow::Taskflow)
+  target_link_libraries(declarative_example Taskflow::Taskflow)
+elseif(TARGET Taskflow)
+  target_link_libraries(declarative_example Taskflow)
+endif()
+
 # Install rules (optional)
 # install(TARGETS workflow EXPORT workflowTargets
 #   ARCHIVE DESTINATION lib
