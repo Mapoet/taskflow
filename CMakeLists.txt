@@ -22,6 +22,7 @@
 # -DTF_BUILD_EXAMPLES=OFF/ON          // default ON
 # -DTF_BUILD_PROFILER=OFF/ON          // default OFF
 # -DTF_BUILD_TESTS=OFF/ON             // default ON
+# -DTF_BUILD_WORKFLOW=OFF/ON          // default ON
 # -------------------------------------------------------------------
 
 
@@ -39,6 +40,7 @@ option(TF_BUILD_CUDA "Enables builds of cuda code" OFF)
 #option(TF_BUILD_SYCL "Enables builds of sycl code" OFF)
 option(TF_BUILD_TESTS "Enables builds of tests" ON)
 option(TF_BUILD_EXAMPLES "Enables builds of examples" ON)
+option(TF_BUILD_WORKFLOW "Enables builds of workflow library and examples" ON)
 
 # project-specific variables
 set(TF_UTEST_DIR ${PROJECT_SOURCE_DIR}/unittests)
@@ -293,6 +295,7 @@ message(STATUS "TF_BUILD_CUDA: " ${TF_BUILD_CUDA})
 #message(STATUS "TF_BUILD_SYCL_BITCODE: " ${TF_BUILD_SYCL_BITCODE})
 message(STATUS "TF_BUILD_TESTS: " ${TF_BUILD_TESTS})
 message(STATUS "TF_BUILD_EXAMPLES: " ${TF_BUILD_EXAMPLES})
+message(STATUS "TF_BUILD_WORKFLOW: " ${TF_BUILD_WORKFLOW})
 message(STATUS "TF_UTEST_DIR: " ${TF_UTEST_DIR})
 message(STATUS "TF_EXAMPLE_DIR: " ${TF_EXAMPLE_DIR})
 message(STATUS "TF_BENCHMARK_DIR: " ${TF_BENCHMARK_DIR})
@@ -327,6 +330,13 @@ target_include_directories(${PROJECT_NAME} INTERFACE
 if(TF_BUILD_EXAMPLES)
   add_subdirectory(examples)
 endif(TF_BUILD_EXAMPLES)
+
+# -----------------------------------------------------------------------------
+# Workflow library and examples
+# -----------------------------------------------------------------------------
+if(TF_BUILD_WORKFLOW)
+  add_subdirectory(workflow)
+endif(TF_BUILD_WORKFLOW)
 
 # -----------------------------------------------------------------------------
 # Unittest

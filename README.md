@@ -442,3 +442,27 @@ You are completely free to re-distribute your work derived from Taskflow.
 [Cpp Conference 2018]:   https://github.com/CppCon/CppCon2018
 [TPDS22]:                https://tsung-wei-huang.github.io/papers/tpds21-taskflow.pdf
 
+```dot
+digraph Taskflow {
+subgraph cluster_p0x7ffe453c4500 {
+label="Taskflow: keyed_nodeflow";
+p0x63ea90d63220[label="A" ];
+p0x63ea90d63220 -> p0x63ea90d63460;
+p0x63ea90d63220 -> p0x63ea90d63780;
+p0x63ea90d63220 -> p0x63ea90d63ab0;
+p0x63ea90d63460[label="B" ];
+p0x63ea90d63460 -> p0x63ea90d63e50;
+p0x63ea90d63460 -> p0x63ea90d64330;
+p0x63ea90d63780[label="C" ];
+p0x63ea90d63780 -> p0x63ea90d63e50;
+p0x63ea90d63780 -> p0x63ea90d64330;
+p0x63ea90d63ab0[label="E" ];
+p0x63ea90d63ab0 -> p0x63ea90d64330;
+p0x63ea90d63e50[label="D" ];
+p0x63ea90d63e50 -> p0x63ea90d64500;
+p0x63ea90d64330[label="G" ];
+p0x63ea90d64330 -> p0x63ea90d64500;
+p0x63ea90d64500[label="H" ];
+}
+}
+```
