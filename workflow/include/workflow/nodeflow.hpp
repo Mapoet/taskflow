@@ -87,7 +87,7 @@ struct AnySource {
 
   AnySource() = default;
   explicit AnySource(std::unordered_map<std::string, std::any> vals)
-      : values(std::move(vals)), out(extract_keys(vals)) {}
+      : values(std::move(vals)), out(extract_keys(values)) {}
 
  private:
   static std::vector<std::string> extract_keys(
