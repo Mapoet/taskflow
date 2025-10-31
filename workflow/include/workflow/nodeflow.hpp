@@ -61,6 +61,19 @@ class INode {
    * @return String describing node type (e.g., "TypedNode", "AnyNode", "Source", "Sink")
    */
   virtual std::string type() const = 0;
+
+  /**
+   * @brief Get output future by key (type-erased)
+   * @param key Output key
+   * @return Shared future to the output value (as std::any)
+   */
+  virtual std::shared_future<std::any> get_output_future(const std::string& key) const = 0;
+  
+  /**
+   * @brief Get all output keys
+   * @return Vector of output key names
+   */
+  virtual std::vector<std::string> get_output_keys() const = 0;
 };
 
 // ============================================================================
@@ -86,8 +99,31 @@ template <typename... Outs>
 struct TypedOutputs {
   std::tuple<std::shared_ptr<std::promise<Outs>>...> promises;
   std::tuple<std::shared_future<Outs>...> futures;
+  // Key-value mapping for outputs (type-erased for unified interface)
+  std::unordered_map<std::string, std::shared_future<std::any>> futures_map;
+  std::vector<std::string> output_keys;  // Ordered keys matching tuple order
+  // Any promises to be set when typed values are available
+  std::unordered_map<std::size_t, std::shared_ptr<std::promise<std::any>>> any_promises_;
+  // Key to index mapping for typed future access
+  std::unordered_map<std::string, std::size_t> key_to_index_;
   
   TypedOutputs();
+  explicit TypedOutputs(const std::vector<std::string>& keys);
+  
+  // Get future by key (type-erased)
+  std::shared_future<std::any> get(const std::string& key) const;
+  
+  // Get typed future by key (type-safe, requires knowing which output by index)
+  template <std::size_t I>
+  std::shared_future<std::tuple_element_t<I, std::tuple<Outs...>>> get_typed(const std::string& key) const {
+    if (key_to_index_.at(key) != I) {
+      throw std::runtime_error("Key index mismatch for typed access");
+    }
+    return std::get<I>(futures);
+  }
+  
+  // Get all output keys
+  const std::vector<std::string>& keys() const { return output_keys; }
 };
 
 // ============================================================================
@@ -101,10 +137,17 @@ class TypedSource : public INode {
   TypedOutputs<Outs...> out;
   std::string node_name_;
 
+  // Constructor with explicit output keys
+  explicit TypedSource(std::tuple<Outs...> vals, 
+                       const std::vector<std::string>& output_keys,
+                       const std::string& name = "");
+  // Constructor with default keys (auto-generated: "out0", "out1", ...)
   explicit TypedSource(std::tuple<Outs...> vals, const std::string& name = "");
   std::string name() const override { return node_name_; }
   std::string type() const override { return "TypedSource"; }
   std::function<void()> functor(const char* node_name) const override;
+  std::shared_future<std::any> get_output_future(const std::string& key) const override;
+  std::vector<std::string> get_output_keys() const override;
 };
 
 // ============================================================================
@@ -121,11 +164,19 @@ class TypedNode : public INode {
   mutable std::any op_;  // Type-erased: callable(std::tuple<Values...>) -> std::tuple<Outs...>
   std::string node_name_;
 
+  // Constructor with explicit output keys
+  template <typename OpType>
+  TypedNode(InputsTuple fin, OpType&& fn, 
+            const std::vector<std::string>& output_keys,
+            const std::string& name = "");
+  // Constructor with default keys
   template <typename OpType>
   TypedNode(InputsTuple fin, OpType&& fn, const std::string& name = "");
   std::string name() const override { return node_name_; }
   std::string type() const override { return "TypedNode"; }
   std::function<void()> functor(const char* node_name) const override;
+  std::shared_future<std::any> get_output_future(const std::string& key) const override;
+  std::vector<std::string> get_output_keys() const override;
   
  private:
   // Helper to extract value types from InputsTuple
@@ -147,6 +198,8 @@ class TypedSink : public INode {
   std::string name() const override { return node_name_; }
   std::string type() const override { return "TypedSink"; }
   std::function<void()> functor(const char* node_name) const override;
+  std::shared_future<std::any> get_output_future(const std::string& key) const override;
+  std::vector<std::string> get_output_keys() const override;
 };
 
 // ============================================================================
@@ -163,6 +216,8 @@ struct AnySource : public INode {
   std::string name() const override { return node_name_; }
   std::string type() const override { return "AnySource"; }
   std::function<void()> functor(const char* node_name) const override;
+  std::shared_future<std::any> get_output_future(const std::string& key) const override;
+  std::vector<std::string> get_output_keys() const override;
 
  private:
   static std::vector<std::string> extract_keys(const std::unordered_map<std::string, std::any>& m);
@@ -188,6 +243,8 @@ struct AnyNode : public INode {
   std::string name() const override { return node_name_; }
   std::string type() const override { return "AnyNode"; }
   std::function<void()> functor(const char* node_name) const override;
+  std::shared_future<std::any> get_output_future(const std::string& key) const override;
+  std::vector<std::string> get_output_keys() const override;
 };
 
 // ============================================================================
@@ -203,6 +260,8 @@ struct AnySink : public INode {
   std::string name() const override { return node_name_; }
   std::string type() const override { return "AnySink"; }
   std::function<void()> functor(const char* node_name) const override;
+  std::shared_future<std::any> get_output_future(const std::string& key) const override;
+  std::vector<std::string> get_output_keys() const override;
 };
 
 // ============================================================================
@@ -287,6 +346,31 @@ class GraphBuilder {
   void succeed(tf::Task to, const Container& from);
 
   /**
+   * @brief Connect nodes using key-based interface (type-free)
+   * @param from_node Source node name
+   * @param from_keys Output keys from source node
+   * @param to_node Target node name  
+   * @param to_keys Input keys for target node (must match from_keys in order)
+   * @details Automatically handles future connections and dependencies
+   */
+  void connect(const std::string& from_node, const std::vector<std::string>& from_keys,
+               const std::string& to_node, const std::vector<std::string>& to_keys);
+
+  /**
+   * @brief Connect single output to single input
+   */
+  void connect(const std::string& from_node, const std::string& from_key,
+               const std::string& to_node, const std::string& to_key);
+
+  /**
+   * @brief Connect multiple nodes using mapping specification
+   * @param mapping Map from target node to vector of source node keys
+   *        Format: {"target_node": [{"source_node1": "key1"}, {"source_node2": "key2"}]}
+   */
+  void connect(const std::unordered_map<std::string, 
+                std::vector<std::pair<std::string, std::string>>>& mapping);
+
+  /**
    * @brief Run the graph asynchronously
    * @param executor Taskflow executor
    * @return Future handle
@@ -320,6 +404,11 @@ class GraphBuilder {
    * @brief Get all nodes
    */
   const std::unordered_map<std::string, std::shared_ptr<INode>>& nodes() const { return nodes_; }
+
+  /**
+   * @brief Get output future from a node by key (works for both typed and any nodes)
+   */
+  std::shared_future<std::any> get_output(const std::string& node_name, const std::string& key) const;
 
  private:
   tf::Taskflow taskflow_;
