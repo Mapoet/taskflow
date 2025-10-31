@@ -547,6 +547,46 @@ std::shared_future<T> GraphBuilder::get_typed_input_impl(const std::string& node
   return f_typed;
 }
 
+// ============================================================================
+// PipelineNode template implementation
+// ============================================================================
+
+template <typename... Ps>
+PipelineNode::PipelineNode(tf::Pipeline<Ps...>& pipeline, const std::string& name)
+    : node_name_(name) {
+  // This constructor is mainly for compatibility
+  // In practice, create_pipeline_node creates the shared_ptr directly
+  pipeline_wrapper_ = std::make_shared<tf::Pipeline<Ps...>>(std::move(pipeline));
+}
+
+// ============================================================================
+// GraphBuilder: create_pipeline_node template implementation
+// ============================================================================
+
+template <typename... Ps>
+std::pair<std::shared_ptr<PipelineNode>, tf::Task>
+GraphBuilder::create_pipeline_node(const std::string& name,
+                                   size_t num_lines,
+                                   Ps&&... pipes) {
+  // Create pipeline with given lines and pipes
+  auto pipeline_ptr = std::make_shared<tf::Pipeline<Ps...>>(num_lines, std::forward<Ps>(pipes)...);
+  
+  // Create task using composed_of first (before moving pipeline)
+  auto task = taskflow_.composed_of(*pipeline_ptr).name(name);
+  
+  // Wrap in PipelineNode and store pipeline reference
+  // Note: We store the pipeline_ptr in a way that maintains lifetime
+  // PipelineNode will hold a reference to keep it alive
+  auto node = std::make_shared<PipelineNode>();
+  node->node_name_ = name;
+  node->pipeline_wrapper_ = pipeline_ptr;  // Store shared_ptr in any
+  
+  nodes_[name] = node;
+  tasks_[name] = task;
+  
+  return {node, task};
+}
+
 }  // namespace workflow
 
 #endif  // WORKFLOW_NODEFLOW_IMPL_HPP

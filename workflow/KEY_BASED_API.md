@@ -534,3 +534,48 @@ builder
 - `readme/guide_workflow.md` - 技术路线与实现细节
 - `examples/declarative_example.cpp` - 声明式 API 完整示例
 - `examples/unified_example.cpp` - Key-based API 示例
+
+```dot
+digraph Taskflow {
+subgraph cluster_p0x7ffd5a691e70 {
+label="Taskflow: advanced_control_flow";
+p0x654efa412500[label="A" ];
+p0x654efa412640[label="B" shape=diamond color=black fillcolor=aquamarine style=filled];
+p0x654efa412640 -> p0x654efa412740 [style=dashed label="0"];
+p0x654efa412640 -> p0x654efa412820 [style=dashed label="1"];
+p0x654efa413020[label="E" ];
+p0x654efa413160[label="F" shape=diamond color=black fillcolor=aquamarine style=filled];
+p0x654efa413160 -> p0x654efa413290 [style=dashed label="0"];
+p0x654efa413160 -> p0x654efa413370 [style=dashed label="1"];
+p0x654efa413160 -> p0x654efa413450 [style=dashed label="2"];
+p0x654efa413b90[shape=box3d, color=blue, label="Pipeline [m1]"];
+p0x654efa413dd0[label="Loop_body" ];
+p0x654efa413dd0 -> p0x654efa413eb0;
+p0x654efa414020[label="Loop_exit" ];
+p0x654efa413370[label="H" ];
+p0x654efa413450[label="I" ];
+p0x654efa412740[label="C" ];
+p0x654efa412820[label="D" ];
+p0x654efa413eb0[label="Loop_condition" shape=diamond color=black fillcolor=aquamarine style=filled];
+p0x654efa413290[label="G" ];
+p0x654efa414100[label="ManualLoop_body" ];
+p0x654efa414100 -> p0x654efa4141e0;
+p0x654efa4141e0[label="ManualLoop_condition" shape=diamond color=black fillcolor=aquamarine style=filled];
+p0x654efa4141e0 -> p0x654efa414100 [style=dashed label="0"];
+p0x654efa4141e0 -> p0x654efa4142c0 [style=dashed label="1"];
+p0x654efa4142c0[label="ManualLoop_exit" ];
+}
+subgraph cluster_p0x654efa4135d0 {
+label="m1";
+p0x654efa413710[label="cond" shape=diamond color=black fillcolor=aquamarine style=filled];
+p0x654efa413710 -> p0x654efa4137f0 [style=dashed label="0"];
+p0x654efa413710 -> p0x654efa4138f0 [style=dashed label="1"];
+p0x654efa413710 -> p0x654efa4139d0 [style=dashed label="2"];
+p0x654efa413710 -> p0x654efa413ab0 [style=dashed label="3"];
+p0x654efa4137f0[label="nprt-0" ];
+p0x654efa4138f0[label="nprt-1" ];
+p0x654efa4139d0[label="nprt-2" ];
+p0x654efa413ab0[label="nprt-3" ];
+}
+}
+```
