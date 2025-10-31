@@ -349,7 +349,21 @@ std::vector<std::string> LoopNode::get_output_keys() const {
 // ============================================================================
 
 GraphBuilder::GraphBuilder(const std::string& name)
-    : taskflow_(name), executor_(nullptr) {}
+    : taskflow_(name), flow_builder_(nullptr), owns_taskflow_(true), executor_(nullptr) {}
+
+GraphBuilder::GraphBuilder(tf::FlowBuilder& flow_builder, const std::string& name)
+    : taskflow_(name), flow_builder_(&flow_builder), owns_taskflow_(false), executor_(nullptr) {
+  // When constructed from FlowBuilder, we use the external graph
+  // taskflow_ is still created but not used - we work directly with flow_builder_
+}
+
+tf::FlowBuilder& GraphBuilder::get_flow_builder() {
+  if (owns_taskflow_) {
+    return taskflow_;
+  } else {
+    return *flow_builder_;
+  }
+}
 
 tf::Task GraphBuilder::add_node(std::shared_ptr<INode> node) {
   if (!node) {
@@ -361,14 +375,24 @@ tf::Task GraphBuilder::add_node(std::shared_ptr<INode> node) {
     node_name = "node_" + std::to_string(nodes_.size());
   }
   
-  // Check for duplicate names
-  if (nodes_.find(node_name) != nodes_.end()) {
+  // Check for duplicate names only if we own the Taskflow (not operating on external Subflow)
+  // When operating on Subflow, the graph is cleared after each iteration, so duplicates are expected
+  // and allowed. The Subflow's graph handles the actual task lifecycle.
+  if (owns_taskflow_ && nodes_.find(node_name) != nodes_.end()) {
     throw std::runtime_error("Duplicate node name: " + node_name);
   }
   
+  // Only store in nodes_/tasks_ if we own the Taskflow
+  // For Subflow-based GraphBuilder, we still track locally for get_output() lookups,
+  // but allow overwriting since Subflow graph is cleared between iterations
+  if (owns_taskflow_) {
+    nodes_[node_name] = node;
+  } else {
+    // For Subflow: allow overwriting since graph is cleared after each execution
   nodes_[node_name] = node;
+  }
   std::string task_name = node_name;  // Store name as std::string for lambda capture
-  auto task = taskflow_.emplace([node, task_name]() {
+  auto task = get_flow_builder().emplace([node, task_name]() {
     // Call the node's functor with the stored name
     node->functor(task_name.c_str())();
   }).name(node_name);
@@ -398,6 +422,9 @@ void GraphBuilder::succeed(tf::Task to, tf::Task from) {
 }
 
 tf::Future<void> GraphBuilder::run_async(tf::Executor& executor) {
+  if (!owns_taskflow_) {
+    throw std::runtime_error("Cannot run GraphBuilder constructed from FlowBuilder - it does not own a Taskflow");
+  }
   executor_ = &executor;
   return executor.run(taskflow_);
 }
@@ -407,6 +434,9 @@ void GraphBuilder::run(tf::Executor& executor) {
 }
 
 void GraphBuilder::dump(std::ostream& os) const {
+  if (!owns_taskflow_) {
+    throw std::runtime_error("Cannot dump GraphBuilder constructed from FlowBuilder - it does not own a Taskflow");
+  }
   taskflow_.dump(os);
 }
 
@@ -507,7 +537,7 @@ tf::Task GraphBuilder::create_subgraph(const std::string& name,
   if (builder_fn) {
     builder_fn(*nested);
   }
-  auto task = taskflow_.composed_of(nested->taskflow()).name(name);
+  auto task = get_flow_builder().composed_of(nested->taskflow()).name(name);
   subgraph_builders_.push_back(std::move(nested));  // keep lifetime
   return task;
 }
@@ -556,7 +586,7 @@ GraphBuilder::create_subgraph(const std::string& name,
     name
   );
   
-  auto task = taskflow_.composed_of(nested->taskflow()).name(name);
+  auto task = get_flow_builder().composed_of(nested->taskflow()).name(name);
   subgraph_builders_.push_back(std::move(nested));  // keep lifetime
   
   // Auto-register dependencies
@@ -575,7 +605,7 @@ GraphBuilder::create_subgraph(const std::string& name,
 
 tf::Task GraphBuilder::create_subtask(const std::string& name,
                                       const std::function<void(GraphBuilder&)>& builder_fn) {
-  auto task = taskflow_.emplace([this, builder_fn, name]() mutable {
+  auto task = get_flow_builder().emplace([this, builder_fn, name]() mutable {
     if (executor_ == nullptr) {
       throw std::runtime_error("create_subtask requires GraphBuilder::run or run_async to set executor");
     }
@@ -656,7 +686,7 @@ GraphBuilder::create_condition_decl(const std::string& name,
   auto node = std::make_shared<ConditionNode>(input_futures, std::move(condition_func), output_keys, name);
   
   // Create condition task
-  auto cond_task = taskflow_.emplace([fin = input_futures, fn = node->func_, promises = node->out.promises]() mutable {
+  auto cond_task = get_flow_builder().emplace([fin = input_futures, fn = node->func_, promises = node->out.promises]() mutable {
     std::unordered_map<std::string, std::any> in_vals;
     for (const auto& [key, fut] : fin) {
       in_vals[key] = fut.get();
@@ -704,7 +734,7 @@ GraphBuilder::create_multi_condition_decl(const std::string& name,
   auto node = std::make_shared<MultiConditionNode>(input_futures, std::move(func), output_keys, name);
   
   // Create multi-condition task
-  auto cond_task = taskflow_.emplace([fin = input_futures, fn = node->func_, promises = node->out.promises]() mutable {
+  auto cond_task = get_flow_builder().emplace([fin = input_futures, fn = node->func_, promises = node->out.promises]() mutable {
     std::unordered_map<std::string, std::any> in_vals;
     for (const auto& [key, fut] : fin) {
       in_vals[key] = fut.get();
@@ -751,58 +781,65 @@ GraphBuilder::create_loop_decl(const std::string& name,
     input_futures[source_key] = get_output(source_node, source_key);
   }
   
-  // Create loop body function that builds and runs the subgraph using Subflow
-  // This allows proper integration with Taskflow's executor for loop support
-  std::function<void(const std::unordered_map<std::string, std::any>&)> body_func;
-  if (body_builder_fn) {
-    // Use a static task that will be converted to subflow at runtime
-    // We need to capture the builder function but execute it via subflow mechanism
-    body_func = [this, body_builder_fn, name](const std::unordered_map<std::string, std::any>& inputs) {
-      GraphBuilder nested{name + "_body"};
-      // body_builder_fn is called here, it will use latest counter value from its capture
-      body_builder_fn(nested, inputs);
-      if (executor_ == nullptr) {
-        throw std::runtime_error("create_loop_decl requires GraphBuilder::run or run_async to set executor");
-      }
-      // Use the same executor but run as a separate taskflow (not ideal but works for now)
-      // Note: This may cause issues with loop continuation - need to investigate Subflow approach
-      executor_->run(nested.taskflow()).wait();
-    };
-  } else {
-    body_func = [](const std::unordered_map<std::string, std::any>&) {};
-  }
+  // Create loop structure using Subflow for body task
+  // Key insight: Use Subflow instead of executor_->run() to avoid blocking executor state
+  // This allows proper loop continuation when condition returns 0
   
-  // Create the loop node
-  auto node = std::make_shared<LoopNode>(input_futures, std::move(body_func), std::move(condition_func), output_keys, name);
+  // Create the loop node (body_func is no longer needed - we'll use Subflow directly)
+  auto node = std::make_shared<LoopNode>(input_futures, 
+                                         std::function<void(const std::unordered_map<std::string, std::any>&)>{}, 
+                                         std::move(condition_func), 
+                                         output_keys, 
+                                         name);
   
-  // Build exit task if provided
+  // Build exit task if provided (use regular task with run().wait() like body task)
   std::optional<tf::Task> exit_task;
   if (exit_builder_fn) {
-    // Create a task that builds and runs exit subgraph
-    exit_task = taskflow_.emplace([this, exit_builder_fn, name, fin = input_futures]() mutable {
+    exit_task = get_flow_builder().emplace([this, exit_builder_fn, name, fin = input_futures]() mutable {
+      if (executor_ == nullptr) {
+        throw std::runtime_error("Loop exit task requires executor to be set.");
+      }
+      // Extract input values from futures
       std::unordered_map<std::string, std::any> inputs;
       for (const auto& [key, fut] : fin) {
         inputs[key] = fut.get();
       }
-      GraphBuilder nested{name + "_exit"};
+      // Build exit subgraph in a fresh Taskflow
+      GraphBuilder nested(name + "_exit");
       exit_builder_fn(nested, inputs);
-      if (executor_ == nullptr) {
-        throw std::runtime_error("create_loop_decl requires GraphBuilder::run or run_async to set executor");
-      }
+      // Run synchronously like body task
       executor_->run(nested.taskflow()).wait();
     }).name(name + "_exit");
   }
   
-  // Create loop structure: body task -> condition task
-  auto body_task = taskflow_.emplace([fin = input_futures, fn = node->body_func_]() mutable {
+  // Create body task as a regular task (like create_subtask) to allow repeated execution in loops
+  // Key insight from master: Use regular task with executor_->run().wait() instead of Subflow/Runtime/corun
+  // This allows the task to be re-scheduled multiple times as part of the loop's dependency chain
+  // Each execution creates a fresh Taskflow, runs it synchronously, and completes normally
+  auto body_task = get_flow_builder().emplace([this, body_builder_fn, name, fin = input_futures]() mutable {
+    if (executor_ == nullptr) {
+      throw std::runtime_error("Loop body task requires executor to be set. Call run() or run_async() before creating loops.");
+    }
+    
+    // Extract input values from futures  
     std::unordered_map<std::string, std::any> in_vals;
     for (const auto& [key, fut] : fin) {
       in_vals[key] = fut.get();
     }
-    fn(in_vals);
+    
+    if (body_builder_fn) {
+      // Create a fresh Taskflow for this iteration
+      // Each iteration gets its own graph, which is cleared after execution
+      GraphBuilder nested(name + "_body");
+      body_builder_fn(nested, in_vals);
+      
+      // Run the nested subgraph synchronously on the same executor
+      // This is the key: using run().wait() instead of corun allows proper loop continuation
+      executor_->run(nested.taskflow()).wait();
+    }
   }).name(name + "_body");
   
-  auto cond_task = taskflow_.emplace([fin = input_futures, fn = node->condition_func_, promises = node->out.promises]() mutable {
+  auto cond_task = get_flow_builder().emplace([fin = input_futures, fn = node->condition_func_, promises = node->out.promises]() mutable -> int {
     std::unordered_map<std::string, std::any> in_vals;
     for (const auto& [key, fut] : fin) {
       in_vals[key] = fut.get();
@@ -815,22 +852,18 @@ GraphBuilder::create_loop_decl(const std::string& name,
     return result;
   }).name(name + "_condition");
   
-  // Wire loop structure
-  // For loops, we need: [Input ->] body_task -> cond_task -> (body_task if 0, exit if 1)
-  // The key insight: when condition returns 0, it resets body_task's join_counter to 0
-  // So body_task can have multiple predecessors (Input and cond_task) and still loop correctly
-  // The Input only triggers the first iteration; subsequent iterations are triggered by cond_task
-  
-  // First, set up the loop structure (body -> cond -> body or exit)
+  // Wire loop structure: [Input ->] body_task -> cond_task -> (body_task if 0, exit if 1)
+  // Key insight: When condition returns 0, it resets body_task's join_counter to 0 and schedules it
+  // Runtime tasks (like body_task) are regular tasks that can be repeatedly executed
   body_task.precede(cond_task);
+  
   if (exit_task.has_value()) {
     cond_task.precede(body_task, *exit_task);
   } else {
     cond_task.precede(body_task);
   }
   
-  // Then, add initial dependencies from input_specs (these trigger first iteration only)
-  // The Input dependency will only affect the first execution; after that, cond_task handles it
+  // Add initial dependencies from input_specs (these trigger first iteration only)
   for (const auto& [source_node, _] : input_specs) {
     auto source_task_it = tasks_.find(source_node);
     if (source_task_it != tasks_.end()) {
