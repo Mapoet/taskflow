@@ -365,17 +365,18 @@ executor.run(taskflow).wait();
 ```
 
 
-# Workflow: High-Level Dataflow Library
+# Workflow: High-Level Declarative Dataflow Library
 
-The **Workflow** library is a high-level dataflow abstraction built on top of Taskflow, providing:
+The **Workflow** library is a high-level **declarative dataflow** abstraction built on top of Taskflow, providing:
 
-- **Unified Node Interface**: All nodes inherit from `INode` base class for polymorphism
-- **Type-Safe Nodes**: Compile-time type checking with `TypedNode`, `TypedSource`, `TypedSink`
-- **Runtime Flexibility**: Dynamic type handling with `AnyNode`, `AnySource`, `AnySink`
-- **Graph Builder**: Simplified API for graph construction, dependency management, and execution
-- **String-Keyed I/O**: Flexible data access via `std::unordered_map<std::string, std::any>`
+- **🔑 Key-based I/O**: All inputs/outputs accessed via string keys for clarity and flexibility
+- **🚀 Declarative API**: Create nodes with input specifications; dependencies auto-inferred
+- **⚡ Type Safety**: Compile-time type-safe nodes (`TypedNode`) for zero-overhead performance
+- **🔀 Runtime Flexibility**: Dynamic type handling (`AnyNode`) for heterogeneous data
+- **🔗 Unified Interface**: Polymorphic `INode` base class for all node types
+- **🎨 Graph Builder**: High-level API managing construction, execution, and visualization
 
-## Quick Example
+## Quick Example (Declarative API)
 
 ```cpp
 #include <workflow/nodeflow.hpp>
@@ -386,46 +387,59 @@ int main() {
   tf::Executor executor;
   wf::GraphBuilder builder("my_workflow");
 
-  // Typed source node
-  auto A = std::make_shared<wf::TypedSource<double>>(
-    std::make_tuple(3.5), "A"
+  // Create source node with output keys
+  auto [A, tA] = builder.create_typed_source("A",
+    std::make_tuple(3.5, 7),
+    std::vector<std::string>{"x", "k"}
   );
-  auto tA = builder.add_typed_source(A);
 
-  // Typed transform node
-  using B_Inputs = std::tuple<std::shared_future<double>>;
-  auto B = std::make_shared<wf::TypedNode<B_Inputs, double>>(
-    std::make_tuple(std::get<0>(A->out.futures)),
+  // Create typed nodes with automatic dependency inference
+  auto [B, tB] = builder.create_typed_node<double>("B",
+    {{"A", "x"}},  // Input: from A's "x" output
     [](const std::tuple<double>& in) {
       return std::make_tuple(std::get<0>(in) + 1.0);
     },
-    "B"
+    {"b"}  // Output key
   );
-  auto tB = builder.add_typed_node(B);
 
-  // Any-based sink (with adapter)
-  auto p_result = std::make_shared<std::promise<std::any>>();
-  auto f_result = p_result->get_future().share();
-  auto adapter = builder.taskflow().emplace([p_result, fut=std::get<0>(B->out.futures)]() {
-    p_result->set_value(std::any{fut.get()});
-  }).name("Adapter");
-  
-  auto H = std::make_shared<wf::AnySink>(
-    {{"result", f_result}},
-    "H"
+  auto [C, tC] = builder.create_typed_node<double>("C",
+    {{"A", "x"}},
+    [](const std::tuple<double>& in) {
+      return std::make_tuple(2.0 * std::get<0>(in));
+    },
+    {"c"}
   );
-  auto tH = builder.add_any_sink(H);
-  
-  // Configure dependencies
-  builder.precede(tA, std::vector<tf::Task>{tB});
-  adapter.succeed(tB);
-  builder.succeed(tH, adapter);
 
-  // Execute
+  auto [D, tD] = builder.create_typed_node<double, double>("D",
+    {{"B", "b"}, {"C", "c"}},  // Multiple inputs
+    [](const std::tuple<double, double>& in) {
+      return std::make_tuple(std::get<0>(in) * std::get<1>(in));
+    },
+    {"prod"}
+  );
+
+  // Create sink node
+  auto [H, tH] = builder.create_any_sink("H",
+    {{"D", "prod"}}
+  );
+
+  // No manual dependencies needed! Auto-inferred from input specs:
+  // - B depends on A (via {"A", "x"})
+  // - C depends on A (via {"A", "x"})
+  // - D depends on B, C (via {{"B", "b"}, {"C", "c"}})
+  // - H depends on D (via {"D", "prod"})
+
   builder.run(executor);
+  builder.dump(std::cout);  // Visualize graph
   return 0;
 }
 ```
+
+**Key Features**:
+- ✅ **Key-based I/O**: Inputs/outputs accessed via string keys (`{"A", "x"}`)
+- ✅ **Automatic Dependencies**: Dependencies inferred from input specifications
+- ✅ **Type Inference**: Output types auto-inferred from functor return type
+- ✅ **Adapter Tasks**: Automatically created for Typed → Any connections
 
 ## Building Workflow Examples
 
