@@ -233,19 +233,32 @@ std::vector<std::string> TypedSink<Ins...>::get_output_keys() const {
 
 template <typename... Ins>
 TypedSink<Ins...>::TypedSink(std::tuple<std::shared_future<Ins>...> fin, const std::string& name)
-    : inputs(std::move(fin)), node_name_(name.empty() ? "TypedSink" : name) {}
+    : inputs(std::move(fin)), node_name_(name.empty() ? "TypedSink" : name), callback_(nullptr) {}
+
+template <typename... Ins>
+TypedSink<Ins...>::TypedSink(std::tuple<std::shared_future<Ins>...> fin,
+                             std::function<void(const std::tuple<Ins...>&)> callback,
+                             const std::string& name)
+    : inputs(std::move(fin)), node_name_(name.empty() ? "TypedSink" : name), callback_(std::move(callback)) {}
 
 template <typename... Ins>
 std::function<void()> TypedSink<Ins...>::functor(const char* node_name) const {
   auto fin = inputs;
-  return [fin, node_name]() mutable {
+  auto callback = callback_;
+  return [fin, callback, node_name]() mutable {
     auto vals = detail::tuple_transform(fin, [](auto& f){ return f.get(); });
-    std::cout << (node_name ? node_name : "TypedSink") << ": ";
-    detail::tuple_for_each(vals, [](auto& v, auto I){
-      if (I.value > 0) std::cout << ' ';
-      std::cout << v;
-    });
-    std::cout << '\n';
+    
+    // Call callback if provided, otherwise use default output
+    if (callback) {
+      callback(vals);
+    } else {
+      std::cout << (node_name ? node_name : "TypedSink") << ": ";
+      detail::tuple_for_each(vals, [](auto& v, auto I){
+        if (I.value > 0) std::cout << ' ';
+        std::cout << v;
+      });
+      std::cout << '\n';
+    }
   };
 }
 
@@ -583,6 +596,63 @@ GraphBuilder::create_pipeline_node(const std::string& name,
   
   nodes_[name] = node;
   tasks_[name] = task;
+  
+  return {node, task};
+}
+
+// ============================================================================
+// GraphBuilder: create_typed_sink template implementation
+// ============================================================================
+
+template <typename... Ins>
+std::pair<std::shared_ptr<TypedSink<Ins...>>, tf::Task>
+GraphBuilder::create_typed_sink(const std::string& name,
+                                const std::vector<std::pair<std::string, std::string>>& input_specs) {
+  return create_typed_sink<Ins...>(name, input_specs, std::function<void(const std::tuple<Ins...>&)>{nullptr});
+}
+
+template <typename... Ins>
+std::pair<std::shared_ptr<TypedSink<Ins...>>, tf::Task>
+GraphBuilder::create_typed_sink(const std::string& name,
+                                const std::vector<std::pair<std::string, std::string>>& input_specs,
+                                std::function<void(const std::tuple<Ins...>&)> callback) {
+  if (input_specs.size() != sizeof...(Ins)) {
+    throw std::runtime_error("Number of input specifications (" + 
+                             std::to_string(input_specs.size()) + 
+                             ") must match number of input types (" + 
+                             std::to_string(sizeof...(Ins)) + ")");
+  }
+  
+  // Extract typed futures from source nodes
+  std::tuple<std::shared_future<Ins>...> input_futures = 
+    [this, &input_specs]<std::size_t... Is>(std::index_sequence<Is...>) {
+      return std::make_tuple(
+        get_typed_input_impl<std::tuple_element_t<Is, std::tuple<Ins...>>>(
+          input_specs[Is].first, 
+          input_specs[Is].second
+        )...
+      );
+    }(std::index_sequence_for<Ins...>{});
+  
+  // Create the sink node
+  auto node = callback
+    ? std::make_shared<TypedSink<Ins...>>(std::move(input_futures), std::move(callback), name)
+    : std::make_shared<TypedSink<Ins...>>(std::move(input_futures), name);
+  auto task = add_typed_sink(node);
+  
+  // Auto-register dependencies
+  for (const auto& [source_node, source_key] : input_specs) {
+    const std::string adapter_key = source_node + "::" + source_key;
+    auto adapter_it = adapter_tasks_.find(adapter_key);
+    if (adapter_it != adapter_tasks_.end()) {
+      adapter_it->second.precede(task);
+    } else {
+      auto source_task_it = tasks_.find(source_node);
+      if (source_task_it != tasks_.end()) {
+        source_task_it->second.precede(task);
+      }
+    }
+  }
   
   return {node, task};
 }

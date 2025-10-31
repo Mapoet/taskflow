@@ -40,7 +40,14 @@ int main() {
       std::cout << "  -> Even branch (C)\n";
       return std::make_tuple(std::get<0>(in) * 2.0);
     }, std::vector<std::string>{"y"});
-    auto [CK, tCK] = gb.create_any_sink("C_sink", {{"C_proc","y"}});
+    auto [CK, tCK] = gb.create_any_sink("C_sink", {{"C_proc","y"}},
+      [](const std::unordered_map<std::string, std::any>& values) {
+        if (values.find("y") != values.end()) {
+          double result = std::any_cast<double>(values.at("y"));
+          std::cout << "  C branch result: " << result << "\n";
+        }
+      }
+    );
   });
 
   auto D_task = builder.create_subgraph("D", [&](wf::GraphBuilder& gb){
@@ -49,7 +56,14 @@ int main() {
       std::cout << "  -> Odd branch (D)\n";
       return std::make_tuple(std::get<0>(in) * 3.0);
     }, std::vector<std::string>{"y"});
-    auto [DK, tDK] = gb.create_any_sink("D_sink", {{"D_proc","y"}});
+    auto [DK, tDK] = gb.create_any_sink("D_sink", {{"D_proc","y"}},
+      [](const std::unordered_map<std::string, std::any>& values) {
+        if (values.find("y") != values.end()) {
+          double result = std::any_cast<double>(values.at("y"));
+          std::cout << "  D branch result: " << result << "\n";
+        }
+      }
+    );
   });
 
   // Declarative condition wiring
@@ -76,18 +90,36 @@ int main() {
   // Multiple branches as subgraphs
   auto G_task = builder.create_subgraph("G", [&](wf::GraphBuilder& gb){
     auto [S, tS] = gb.create_typed_source("Sg", std::make_tuple(1.0), std::vector<std::string>{"v"});
-    auto [K, tK] = gb.create_any_sink("Kg", {{"Sg","v"}});
-    std::cout << "  -> Branch G (executed)\n";
+    auto [K, tK] = gb.create_any_sink("Kg", {{"Sg","v"}},
+      [](const std::unordered_map<std::string, std::any>& values) {
+        if (values.find("v") != values.end()) {
+          double result = std::any_cast<double>(values.at("v"));
+          std::cout << "  -> Branch G (executed) with value: " << result << "\n";
+        }
+      }
+    );
   });
   auto H_task = builder.create_subgraph("H", [&](wf::GraphBuilder& gb){
     auto [S, tS] = gb.create_typed_source("Sh", std::make_tuple(2.0), std::vector<std::string>{"v"});
-    auto [K, tK] = gb.create_any_sink("Kh", {{"Sh","v"}});
-    std::cout << "  -> Branch H (not executed)\n";
+    auto [K, tK] = gb.create_any_sink("Kh", {{"Sh","v"}},
+      [](const std::unordered_map<std::string, std::any>& values) {
+        if (values.find("v") != values.end()) {
+          double result = std::any_cast<double>(values.at("v"));
+          std::cout << "  -> Branch H (not executed) with value: " << result << "\n";
+        }
+      }
+    );
   });
   auto I_task = builder.create_subgraph("I", [&](wf::GraphBuilder& gb){
     auto [S, tS] = gb.create_typed_source("Si", std::make_tuple(3.0), std::vector<std::string>{"v"});
-    auto [K, tK] = gb.create_any_sink("Ki", {{"Si","v"}});
-    std::cout << "  -> Branch I (executed)\n";
+    auto [K, tK] = gb.create_any_sink("Ki", {{"Si","v"}},
+      [](const std::unordered_map<std::string, std::any>& values) {
+        if (values.find("v") != values.end()) {
+          double result = std::any_cast<double>(values.at("v"));
+          std::cout << "  -> Branch I (executed) with value: " << result << "\n";
+        }
+      }
+    );
   });
   // Declarative multi-condition wiring
   builder.create_multi_condition_decl("F",
@@ -155,7 +187,13 @@ int main() {
 
     auto [sink, tSink] = gb.create_any_sink(
       "loop_complete",
-      {{"loop_iteration", "result"}}
+      {{"loop_iteration", "result"}},
+      [](const std::unordered_map<std::string, std::any>& values) {
+        if (values.find("result") != values.end()) {
+          int result = std::any_cast<int>(values.at("result"));
+          std::cout << "  Loop iteration completed: counter = " << result << "\n";
+        }
+      }
     );
   });
 
@@ -176,7 +214,10 @@ int main() {
     );
     
     auto [exit_sink, tExitSink] = gb.create_any_sink("exit_sink",
-      {{"exit_print", "done"}}
+      {{"exit_print", "done"}},
+      [](const std::unordered_map<std::string, std::any>&) {
+        std::cout << "  Loop exited successfully\n";
+      }
     );
   });
 

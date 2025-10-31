@@ -32,7 +32,14 @@ int main() {
     );
     auto [sink, tSink] = gb.create_any_sink(
       "loop_complete",
-      {{"loop_iteration", "result"}}
+      {{"loop_iteration", "result"}},
+      [](const std::unordered_map<std::string, std::any>& values) {
+        // Custom callback to process the result
+        if (values.find("result") != values.end()) {
+          int result = std::any_cast<int>(values.at("result"));
+          std::cout << "Loop completed with result: " << result << "\n";
+        }
+      }
     );
   });
 
@@ -52,7 +59,10 @@ int main() {
     );
 
     auto [exit_sink, tExitSink] = gb.create_any_sink("exit_sink",
-      {{"exit_print", "done"}}
+      {{"exit_print", "done"}},
+      [](const std::unordered_map<std::string, std::any>&) {
+        std::cout << "Exit sink callback executed\n";
+      }
     );
   });
 
