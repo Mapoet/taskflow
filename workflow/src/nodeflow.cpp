@@ -909,6 +909,78 @@ GraphBuilder::create_loop_decl(const std::string& name,
   return {node, body_task};
 }
 
+// Native function version of create_loop_decl (no GraphBuilder)
+std::pair<std::shared_ptr<LoopNode>, tf::Task>
+GraphBuilder::create_loop_decl(const std::string& name,
+                               const std::vector<std::pair<std::string, std::string>>& input_specs,
+                               std::function<void()> body_func,
+                               std::function<int(const std::unordered_map<std::string, std::any>&)> condition_func,
+                               std::function<void()> exit_func,
+                               const std::vector<std::string>& output_keys) {
+  // Get any futures from source nodes
+  std::unordered_map<std::string, std::shared_future<std::any>> input_futures;
+  for (const auto& [source_node, source_key] : input_specs) {
+    input_futures[source_key] = get_output(source_node, source_key);
+  }
+  
+  // Create the loop node
+  auto node = std::make_shared<LoopNode>(input_futures, 
+                                         std::function<void(const std::unordered_map<std::string, std::any>&)>{}, 
+                                         std::move(condition_func), 
+                                         output_keys, 
+                                         name);
+  
+  // Create body task using native function (no GraphBuilder)
+  tf::Task body_task = taskflow_.emplace([body_func]() {
+    if (body_func) {
+      body_func();
+    }
+  }).name(name + "_body");
+  
+  tasks_[name + "_body"] = body_task;
+  
+  // Create exit task if provided
+  std::optional<tf::Task> exit_task;
+  if (exit_func) {
+    exit_task = taskflow_.emplace([exit_func]() {
+      exit_func();
+    }).name(name + "_exit");
+  }
+  
+  // Create condition task
+  tf::Task cond_task = taskflow_.emplace([fin = input_futures, fn = node->condition_func_, promises = node->out.promises]() mutable -> int {
+    // Extract input values from futures
+    std::unordered_map<std::string, std::any> in_vals;
+    for (const auto& [key, fut] : fin) {
+      in_vals[key] = fut.get();
+    }
+    int result = fn(in_vals);
+    // Store result as output if output_keys contains "result"
+    if (auto it = promises.find("result"); it != promises.end()) {
+      it->second->set_value(std::any{result});
+    }
+    return result;
+  }).name(name + "_condition");
+  
+  // Wire loop structure
+  body_task.precede(cond_task);
+  tf::Task final_exit = exit_task.has_value() ? *exit_task : tf::Task{};
+  cond_task.precede(body_task, final_exit);
+  
+  // Add initial dependencies from input_specs
+  for (const auto& [source_node, source_key] : input_specs) {
+    auto source_task_it = tasks_.find(source_node);
+    if (source_task_it != tasks_.end() && source_task_it->second != body_task) {
+      source_task_it->second.precede(body_task);
+    }
+  }
+  
+  nodes_[name] = node;
+  tasks_[name] = body_task;
+  
+  return {node, body_task};
+}
+
 // Master-style create_loop_decl: accepts pre-created body_task
 tf::Task GraphBuilder::create_loop_decl(const std::string& name,
                                         tf::Task& body_task,
