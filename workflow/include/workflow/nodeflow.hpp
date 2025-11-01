@@ -832,6 +832,88 @@ class GraphBuilder {
                             std::function<int()> condition_func,
                             tf::Task exit_task = tf::Task{});
 
+  // ============================================================================
+  // Taskflow Algorithm Nodes: Parallel Iterations, Reductions, Transforms
+  // ============================================================================
+
+  /**
+   * @brief Create a parallel for_each node that iterates over a container
+   * @tparam Container Container type (auto-deduced)
+   * @tparam C Callable type
+   * @param name Node name
+   * @param input_specs Vector of {source_node_name, source_output_key} to get the container
+   * @param callable Function to apply to each element: (element) -> void
+   * @param output_keys Optional output keys (for chaining)
+   * @return Pair of (node_ptr, task_handle)
+   * @details The container is extracted from the input at execution time
+   */
+  template <typename Container, typename C>
+  std::pair<std::shared_ptr<AnyNode>, tf::Task>
+  create_for_each(const std::string& name,
+                  const std::vector<std::pair<std::string, std::string>>& input_specs,
+                  C callable,
+                  const std::vector<std::string>& output_keys = {});
+
+  /**
+   * @brief Create a parallel for_each_index node that iterates over an index range
+   * @tparam B Beginning index type (integral)
+   * @tparam E Ending index type (integral)
+   * @tparam S Step type (integral)
+   * @tparam C Callable type
+   * @param name Node name
+   * @param input_specs Vector of {source_node_name, source_output_key} to get first, last, step
+   * @param callable Function to apply to each index: (index) -> void
+   * @param output_keys Optional output keys
+   * @return Pair of (node_ptr, task_handle)
+   * @details Expects inputs: "first", "last", "step" (optional, defaults to 1)
+   */
+  template <typename B, typename E, typename S = int, typename C>
+  std::pair<std::shared_ptr<AnyNode>, tf::Task>
+  create_for_each_index(const std::string& name,
+                        const std::vector<std::pair<std::string, std::string>>& input_specs,
+                        C callable,
+                        const std::vector<std::string>& output_keys = {});
+
+  /**
+   * @brief Create a parallel reduce node
+   * @tparam T Result type
+   * @tparam Container Container type (auto-deduced)
+   * @tparam BinaryOp Binary operation type
+   * @param name Node name
+   * @param input_specs Vector of {source_node_name, source_output_key} to get the container
+   * @param init Initial value (captured by reference - must remain alive)
+   * @param bop Binary operator: (T, element_type) -> T
+   * @param output_keys Output key for the reduced result (default: "result")
+   * @return Pair of (node_ptr, task_handle)
+   * @details The reduced result is stored in init and also exposed via output key
+   */
+  template <typename T, typename Container, typename BinaryOp>
+  std::pair<std::shared_ptr<AnyNode>, tf::Task>
+  create_reduce(const std::string& name,
+                const std::vector<std::pair<std::string, std::string>>& input_specs,
+                T& init,
+                BinaryOp bop,
+                const std::vector<std::string>& output_keys = {"result"});
+
+  /**
+   * @brief Create a parallel transform node
+   * @tparam InputContainer Input container type (auto-deduced)
+   * @tparam OutputContainer Output container type (auto-deduced)
+   * @tparam UnaryOp Unary operation type
+   * @param name Node name
+   * @param input_specs Vector of {source_node_name, source_output_key} to get the input container
+   * @param unary_op Unary operation: (input_element) -> output_element
+   * @param output_keys Output key for the transformed container (default: "result")
+   * @return Pair of (node_ptr, task_handle)
+   * @details Creates a new output container with transformed elements
+   */
+  template <typename InputContainer, typename OutputContainer, typename UnaryOp>
+  std::pair<std::shared_ptr<AnyNode>, tf::Task>
+  create_transform(const std::string& name,
+                  const std::vector<std::pair<std::string, std::string>>& input_specs,
+                  UnaryOp unary_op,
+                  const std::vector<std::string>& output_keys = {"result"});
+
                    
  private:
   // Helper to extract typed future from source node (for create_typed_node)

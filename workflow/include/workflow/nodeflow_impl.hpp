@@ -4,6 +4,9 @@
 #define WORKFLOW_NODEFLOW_IMPL_HPP
 
 #include <workflow/nodeflow.hpp>
+#include <taskflow/algorithm/for_each.hpp>
+#include <taskflow/algorithm/reduce.hpp>
+#include <taskflow/algorithm/transform.hpp>
 #include <tuple>
 #include <type_traits>
 
@@ -650,6 +653,106 @@ GraphBuilder::create_typed_sink(const std::string& name,
       if (source_task_it != tasks_.end()) {
         source_task_it->second.precede(task);
       }
+    }
+  }
+  
+  return {node, task};
+}
+
+// ============================================================================
+// Taskflow Algorithm Nodes Implementation
+// ============================================================================
+
+template <typename Container, typename C>
+std::pair<std::shared_ptr<AnyNode>, tf::Task>
+GraphBuilder::create_for_each(const std::string& name,
+                              const std::vector<std::pair<std::string, std::string>>& input_specs,
+                              C callable,
+                              const std::vector<std::string>& output_keys) {
+  // Get container future from input
+  if (input_specs.size() != 1) {
+    throw std::runtime_error("create_for_each expects exactly one input (the container)");
+  }
+  
+  auto container_future = get_output(input_specs[0].first, input_specs[0].second);
+  std::string container_key = input_specs[0].second;
+  
+  // Create output promises/futures
+  AnyOutputs outputs;
+  for (const auto& key : output_keys) {
+    auto promise = std::make_shared<std::promise<std::any>>();
+    outputs.promises[key] = promise;
+    outputs.futures[key] = promise->get_future().share();
+  }
+  
+  // Create the node - store callable in capture
+  auto node = std::make_shared<AnyNode>(
+    std::unordered_map<std::string, std::shared_future<std::any>>{{container_key, container_future}},
+    output_keys,
+    [callable, container_key, outputs](const std::unordered_map<std::string, std::any>& inputs) mutable -> std::unordered_map<std::string, std::any> {
+      // Extract container from inputs
+      const Container& container = std::any_cast<const Container&>(inputs.at(container_key));
+      
+      // Use Runtime to execute for_each (requires Runtime in execution context)
+      // Since we're in a task, we can use Runtime
+      // Note: This approach requires the task to be a Runtime task
+      // Actually, we'll use a different approach: create a sub-taskflow and run it
+      
+      std::unordered_map<std::string, std::any> result;
+      
+      // For now, just iterate sequentially (can be improved with Runtime)
+      // The proper way would be to use Runtime::run() but we need Runtime object
+      for (const auto& elem : container) {
+        callable(elem);
+      }
+      
+      // Set output promises
+      for (const auto& [key, promise] : outputs.promises) {
+        // For for_each, we might pass through the container or set empty
+        promise->set_value(std::any{});
+        result[key] = std::any{};
+      }
+      
+      return result;
+    },
+    name
+  );
+  node->out = outputs;
+  
+  // Create task - need to use Runtime to access executor's for_each
+  // Better approach: use Runtime task that can spawn sub-tasks
+  // Note: taskflow_ is accessible in template implementations (template member functions can access private members)
+  auto task = taskflow_.emplace([this, node, container_key, callable]() mutable {
+    if (executor_ == nullptr) {
+      throw std::runtime_error("create_for_each requires executor to be set. Call run() or run_async() first.");
+    }
+    
+    // Extract container from future
+    auto container_future = node->inputs.at(container_key);
+    const Container& container = std::any_cast<const Container&>(container_future.get());
+    
+    // Create a temporary Taskflow and use for_each algorithm
+    tf::Taskflow taskflow;
+    taskflow.for_each(container.begin(), container.end(), callable);
+    
+    // Run the taskflow using executor
+    executor_->run(taskflow).wait();
+    
+    // Set outputs (if any)
+    for (const auto& [key, promise] : node->out.promises) {
+      promise->set_value(std::any{});
+    }
+  }).name(name);
+  
+  // Store node and task
+  nodes_[name] = node;
+  tasks_[name] = task;
+  
+  // Auto-register dependencies
+  for (const auto& [source_node, source_key] : input_specs) {
+    auto source_task_it = tasks_.find(source_node);
+    if (source_task_it != tasks_.end()) {
+      source_task_it->second.precede(task);
     }
   }
   

@@ -63,6 +63,15 @@ elseif(TARGET Taskflow)
   target_link_libraries(loop_only Taskflow)
 endif()
 
+# Algorithm nodes example
+add_executable(algorithm_example examples/algorithm_example.cpp)
+target_link_libraries(algorithm_example workflow)
+if(TARGET Taskflow::Taskflow)
+  target_link_libraries(algorithm_example Taskflow::Taskflow)
+elseif(TARGET Taskflow)
+  target_link_libraries(algorithm_example Taskflow)
+endif()
+
 # Install rules (optional)
 # install(TARGETS workflow EXPORT workflowTargets
 #   ARCHIVE DESTINATION lib
