@@ -1,7 +1,6 @@
 ---
 alwaysApply: true
 ---
-
 # Agent Framework Development Rules
 
 ## 项目概述
@@ -23,11 +22,22 @@ Agent Framework 是基于 Taskflow `workflow` 库的高性能多模态智能代�
 - **头文件**：`include/agent/*.hpp`，使用 Doxygen 注释
 - **实现文件**：`src/<module>/*.cpp`，对应模块目录
 - **命名规范**：
-  - 文件名：`snake_case`（如 `llm_client.hpp`）
-  - 类名：`PascalCase`（如 `LLMClient`）
-  - 函数/变量：`snake_case`（如 `invoke_llm`）
-  - 常量：`UPPER_CASE` 或 `kCamelCase`
-  - 布尔变量：以 `is_`, `has_`, `should_` 开头
+  - **命名空间**：所有类、函数、类型都放在 `agent_framework` 一级命名空间中
+    ```cpp
+    namespace agent_framework {
+        class LLMClient { ... };
+        class ToolBus { ... };
+        // ...
+    }
+    ```
+    - 公共 API 通过 `agent_framework::` 访问（如 `agent_framework::LLMClient`）
+    - 内部实现可以使用嵌套命名空间（如 `agent_framework::internal::`）或匿名命名空间
+    - 避免使用全局命名空间，防止命名冲突
+  - **文件名**：`snake_case`（如 `llm_client.hpp`）
+  - **类名**：`PascalCase`（如 `LLMClient`）
+  - **函数/变量**：`snake_case`（如 `invoke_llm`）
+  - **常量**：`UPPER_CASE` 或 `kCamelCase`
+  - **布尔变量**：以 `is_`, `has_`, `should_` 开头
 
 ### 头文件规范
 
@@ -49,6 +59,12 @@ Agent Framework 是基于 Taskflow `workflow` 库的高性能多模态智能代�
 // 2. C/C++ 标准库
 // 3. 第三方库
 // 4. 本项目其他头文件
+
+namespace agent_framework {
+
+// 类、函数、类型定义
+
+} // namespace agent_framework
 
 #endif // __AGENT_CLASSNAME_H__
 ```
@@ -72,7 +88,9 @@ Agent Framework 是基于 Taskflow `workflow` 库的高性能多模态智能代�
 - **const 正确性**：优先使用 `const`，参数传递优先按值或 `const&`
 
 ```cpp
-// 函数定义示例
+// 函数定义示例（包含命名空间）
+namespace agent_framework {
+
 class LLMClient {
 public:
     // 异步调用 LLM，支持流式输出
@@ -81,6 +99,8 @@ public:
         std::function<void(std::string_view)> on_stream_token = nullptr
     );
 };
+
+} // namespace agent_framework
 
 // 控制流示例
 if (condition) {

@@ -19,7 +19,7 @@
 
 using json = nlohmann::json;
 
-namespace agent {
+namespace agent_framework {
 
 // ============================================================================
 // 枚举类型
@@ -67,6 +67,21 @@ enum class FusionStrategy {
     INTERMEDIATE,   // 中期融合（交叉注意力）
     LATE,           // 晚期融合（分别检索后合并）
     HYBRID          // 混合融合（综合多种方式）
+};
+
+// ============================================================================
+// 记忆管理相关类型（提前定义，供 LLMInput 使用）
+// ============================================================================
+
+/**
+ * @brief 消息结构（对话历史）
+ */
+struct Message {
+    std::string role;              // 角色（"user", "assistant", "system", "tool"）
+    std::string content;           // 消息内容
+    std::optional<std::string> tool_name;  // 工具名称（如果是 tool 消息）
+    std::optional<json> tool_result;       // 工具执行结果
+    std::time_t timestamp;         // 时间戳
 };
 
 // ============================================================================
@@ -211,7 +226,7 @@ struct Citation {
 };
 
 // ============================================================================
-// 记忆管理相关类型
+// 记忆管理相关类型（Message 已在上方定义）
 // ============================================================================
 
 /**
@@ -222,17 +237,6 @@ struct Event {
     std::string node_name;         // 节点名称
     std::string event_type;        // 事件类型（"input", "output", "error"）
     json data;                     // 事件数据（JSON 格式）
-};
-
-/**
- * @brief 消息结构（对话历史）
- */
-struct Message {
-    std::string role;              // 角色（"user", "assistant", "system", "tool"）
-    std::string content;           // 消息内容
-    std::optional<std::string> tool_name;  // 工具名称（如果是 tool 消息）
-    std::optional<json> tool_result;       // 工具执行结果
-    std::time_t timestamp;         // 时间戳
 };
 
 /**
@@ -365,7 +369,7 @@ struct StreamMessage {
     std::time_t timestamp;         // 时间戳
 };
 
-} // namespace agent
+} // namespace agent_framework
 
 #endif // __AGENT_TYPES_H__
 

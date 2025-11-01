@@ -787,7 +787,7 @@ public:
     virtual bool is_connected() const = 0;
     
     // 虚函数接口：获取传输类型
-    virtual agent::MCPTransport get_transport_type() const = 0;
+    virtual MCPTransport get_transport_type() const = 0;
 };
 
 /**
@@ -802,7 +802,7 @@ public:
     void disconnect() override;
     json send_request(const std::string& method, const json& params) override;
     bool is_connected() const override;
-    agent::MCPTransport get_transport_type() const override;
+    MCPTransport get_transport_type() const override;
     
 private:
     std::string command_;
@@ -826,7 +826,7 @@ public:
     void disconnect() override;
     json send_request(const std::string& method, const json& params) override;
     bool is_connected() const override;
-    agent::MCPTransport get_transport_type() const override;
+    MCPTransport get_transport_type() const override;
     
 private:
     std::string base_url_;
@@ -848,7 +848,7 @@ public:
     void disconnect() override;
     json send_request(const std::string& method, const json& params) override;
     bool is_connected() const override;
-    agent::MCPTransport get_transport_type() const override;
+    MCPTransport get_transport_type() const override;
     
 private:
     std::string ws_url_;
@@ -869,7 +869,7 @@ public:
     explicit MCPClient(std::unique_ptr<MCPTransport> transport);
     
     // 连接 MCP 服务
-    bool connect(const std::string& endpoint, agent::MCPTransport transport_type);
+    bool connect(const std::string& endpoint, MCPTransport transport_type);
     
     // 列举可用工具
     std::future<std::vector<ToolMeta>> list_tools();
