@@ -380,7 +380,7 @@ The **Workflow** library is a high-level **declarative dataflow** abstraction bu
 
 - **✨ NEW: Taskflow Algorithm Nodes** - Declarative API wrappers for Taskflow's parallel algorithms:
   - `create_for_each` - Parallel iteration over containers with shared parameter support
-  - `create_for_each_index` - Parallel iteration over index ranges (range passed as function parameters)
+  - `create_for_each_index` - Parallel iteration over index ranges with **return value collection** (range passed as function parameters)
   - `create_reduce` - Parallel reduction operations with shared parameter support
   - `create_transform` - Parallel transformation operations
   - All algorithms use `std::function` for explicit function signatures and support automatic dependency inference

@@ -143,11 +143,10 @@ int main() {
       loop_exit_task
     );
     
-    // Manually set dependencies (master mode - explicit control)
-    // Initial trigger: Input -> body_task (first iteration)
-    // Subsequent iterations: cond_task -> body_task (when cond returns 0)
-    // Note: We need to get the Input task - in master mode, we access it directly from input_task
-    std::get<1>(input_task).precede(loop_body_task);  
+    // Note: Dependencies are now automatically set by create_loop_decl:
+    // - Input -> body_task (initial trigger, from input_specs)
+    // - body_task -> cond_task -> body_task (when cond returns 0)
+    // No manual dependency setup needed!
 
 #endif
   std::cout << "=== Running loop_only example ===\n";
