@@ -1010,11 +1010,15 @@ GraphBuilder::create_reduce(const std::string& name,
     
     // Create a temporary Taskflow and use reduce algorithm with shared params
     // Wrap our 3-parameter bop with a 2-parameter lambda for Taskflow's reduce
+    // Taskflow's reduce expects: T bop(T, element) or T& bop(T&, element)
+    // We need to provide a binary operator that works with Taskflow's internal calls
     tf::Taskflow taskflow;
-    taskflow.reduce(container.begin(), container.end(), init, [bop, &shared_params](T& acc, const typename Container::value_type& elem) {
-      // Binary operator receives accumulator, element, and shared_params (modifiable)
-      acc = bop(acc, elem, shared_params);
-    });
+    // Use a simple wrapper that returns T (Taskflow will handle assignment)
+    taskflow.reduce(container.begin(), container.end(), init, 
+      [bop, &shared_params](const T& acc, const typename Container::value_type& elem) -> T {
+        // Taskflow calls this with const references and expects a return value
+        return bop(acc, elem, shared_params);
+      });
     
     // Run the taskflow using executor
     executor_->run(taskflow).wait();
@@ -1134,6 +1138,90 @@ GraphBuilder::create_reduce(const std::string& name,
   tasks_[name] = task;
   
   // Auto-register dependencies for all inputs (container + shared params)
+  for (const auto& [source_node, source_key] : input_specs) {
+    auto source_task_it = tasks_.find(source_node);
+    if (source_task_it != tasks_.end()) {
+      source_task_it->second.precede(task);
+    }
+  }
+  
+  return {node, task};
+}
+
+// transform implementation
+template <typename InputContainer, typename OutputContainer>
+std::pair<std::shared_ptr<AnyNode>, tf::Task>
+GraphBuilder::create_transform(const std::string& name,
+                               const std::vector<std::pair<std::string, std::string>>& input_specs,
+                               std::function<typename OutputContainer::value_type(typename InputContainer::value_type)> unary_op,
+                               const std::vector<std::string>& output_keys) {
+  // Get container future from input
+  if (input_specs.size() != 1) {
+    throw std::runtime_error("create_transform expects exactly one input (the container)");
+  }
+  
+  auto container_future = get_output(input_specs[0].first, input_specs[0].second);
+  std::string container_key = input_specs[0].second;
+  
+  // Create output promises/futures
+  AnyOutputs outputs;
+  for (const auto& key : output_keys) {
+    auto promise = std::make_shared<std::promise<std::any>>();
+    outputs.promises[key] = promise;
+    outputs.futures[key] = promise->get_future().share();
+  }
+  
+  // Create the node
+  auto node = std::make_shared<AnyNode>(
+    std::unordered_map<std::string, std::shared_future<std::any>>{{container_key, container_future}},
+    output_keys,
+    [unary_op, container_key, outputs](const std::unordered_map<std::string, std::any>& inputs) mutable -> std::unordered_map<std::string, std::any> {
+      // This won't be used since we handle execution in the task below
+      std::unordered_map<std::string, std::any> result;
+      for (const auto& [key, promise] : outputs.promises) {
+        promise->set_value(std::any{});
+        result[key] = std::any{};
+      }
+      return result;
+    },
+    name
+  );
+  node->out = outputs;
+  
+  // Create task that performs transformation using Taskflow's transform algorithm
+  auto task = taskflow_.emplace([this, node, container_key, unary_op]() mutable {
+    if (executor_ == nullptr) {
+      throw std::runtime_error("create_transform requires executor to be set. Call run() or run_async() first.");
+    }
+    
+    // Extract container from future
+    auto container_future = node->inputs.at(container_key);
+    const InputContainer& input_container = std::any_cast<const InputContainer&>(container_future.get());
+    
+    // Create output container and pre-allocate space
+    OutputContainer output_container;
+    output_container.resize(input_container.size());
+    
+    // Create a temporary Taskflow and use transform algorithm
+    // Taskflow's transform supports in-place transformation: transform(beg, end, out_beg, op)
+    tf::Taskflow taskflow;
+    taskflow.transform(input_container.begin(), input_container.end(), 
+                      output_container.begin(), unary_op);
+    
+    // Run the taskflow using executor
+    executor_->run(taskflow).wait();
+    
+    // Set outputs with transformed container
+    for (const auto& [key, promise] : node->out.promises) {
+      promise->set_value(std::any{output_container});
+    }
+  }).name(name);
+  
+  // Store node and task
+  nodes_[name] = node;
+  tasks_[name] = task;
+  
+  // Auto-register dependencies
   for (const auto& [source_node, source_key] : input_specs) {
     auto source_task_it = tasks_.find(source_node);
     if (source_task_it != tasks_.end()) {

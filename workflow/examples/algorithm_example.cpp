@@ -48,13 +48,15 @@ int main() {
   // ==========================================================================
   std::cout << "1. Using create_for_each to print each element:\n";
   
+  // Example 1a: create_for_each without shared parameters
   auto [for_each_node, for_each_task] = builder.create_for_each<std::vector<int>>(
     "PrintElements",
     {{"Input", "data"}},  // Input: container from Input node's "data" output (first element is container)
     std::function<void(int, std::unordered_map<std::string, std::any>&)>(
       [](int value, std::unordered_map<std::string, std::any>& shared_params) {
+        // Even without using shared_params, it's required in the function signature
+        (void)shared_params;  // Suppress unused parameter warning
         std::cout << "  Processing element: " << value << "\n";
-        // shared_params can be used to modify shared state across iterations
       }
     ),
     {}  // No outputs for for_each
@@ -96,17 +98,30 @@ int main() {
   // ==========================================================================
   std::cout << "\n3. Using create_reduce to compute sum:\n";
   
-  // Create a reduce node (this will be implemented)
-  // For now, we'll use a regular node as a placeholder
+  // Initialize accumulator (must remain alive during execution)
   int sum_result = 0;
-  auto [reduce_node, reduce_task] = builder.create_typed_node<std::vector<int>>(
+  
+  // Create a reduce node using the new API
+  auto [reduce_node, reduce_task] = builder.create_reduce<int, std::vector<int>>(
     "SumElements",
-    {{"SquareElements", "squared"}},
-    [&sum_result](const std::tuple<std::vector<int>>& in) {
-      const auto& vec = std::get<0>(in);
-      sum_result = std::accumulate(vec.begin(), vec.end(), 0);
-      std::cout << "  Sum of squared elements: " << sum_result << "\n";
-      return std::make_tuple(sum_result);
+    {{"SquareElements", "squared"}},  // Input: container (first element)
+    sum_result,  // Initial value (passed by reference)
+    std::function<int(int, int, std::unordered_map<std::string, std::any>&)>(
+      [](int acc, int element, std::unordered_map<std::string, std::any>& shared_params) -> int {
+        return acc + element;  // Simple addition reduction
+      }
+    ),
+    {"sum"}  // Output key
+  );
+  
+  // Create a node to display the result
+  auto [display_sum_node, display_sum_task] = builder.create_typed_node<int>(
+    "DisplaySum",
+    {{"SumElements", "sum"}},
+    [](const std::tuple<int>& in) {
+      int sum = std::get<0>(in);
+      std::cout << "  Sum of squared elements: " << sum << "\n";
+      return std::make_tuple(sum);
     },
     {"sum"}
   );
@@ -116,35 +131,32 @@ int main() {
   // ==========================================================================
   std::cout << "\n4. Using create_for_each_index to print indices:\n";
   
-  // Create source with index range parameters
-  auto [index_input, index_input_task] = builder.create_typed_source("IndexInput",
-    std::make_tuple(0, 20, 2),  // first=0, last=20, step=2
-    std::vector<std::string>{"first", "last", "step"}
+  // Create shared parameter source (optional, for demonstration)
+  auto [shared_param_node, shared_param_task] = builder.create_any_source("SharedParams",
+    {{"multiplier", std::any{2}}}
   );
   
-  // Note: create_for_each_index will be implemented later
-  // For now, we'll use a regular node as placeholder
-  auto [for_each_index_node, for_each_index_task] = builder.create_typed_node<int, int, int>(
+  // Use create_for_each_index with index range as function parameters
+  auto [for_each_index_node, for_each_index_task] = builder.create_for_each_index<int>(
     "PrintIndices",
-    {{"IndexInput", "first"}, {"IndexInput", "last"}, {"IndexInput", "step"}},
-    [](const std::tuple<int, int, int>& in) {
-      int first = std::get<0>(in);
-      int last = std::get<1>(in);
-      int step = std::get<2>(in);
-      std::cout << "  Indices from " << first << " to " << last << " (step " << step << "):\n";
-      for (int i = first; i < last; i += step) {
-        std::cout << "    Index: " << i << "\n";
+    {{"SharedParams", "multiplier"}},  // Shared parameters (optional)
+    0,   // first: beginning index (inclusive)
+    20,  // last: ending index (exclusive)
+    2,   // step: step size
+    std::function<void(int, std::unordered_map<std::string, std::any>&)>(
+      [](int index, std::unordered_map<std::string, std::any>& shared_params) {
+        int multiplier = std::any_cast<int>(shared_params.at("multiplier"));
+        std::cout << "    Index: " << index << ", multiplied: " << (index * multiplier) << "\n";
       }
-      return std::make_tuple(0);
-    },
-    {"done"}
+    ),
+    {}  // No outputs
   );
   
   // ==========================================================================
   // Create sink to collect final results
   // ==========================================================================
   auto [sink, sink_task] = builder.create_any_sink("FinalSink",
-    {{"SumElements", "sum"}},
+    {{"DisplaySum", "sum"}},  // Updated to use DisplaySum node
     [](const std::unordered_map<std::string, std::any>& values) {
       if (values.find("sum") != values.end()) {
         int final_sum = std::any_cast<int>(values.at("sum"));
