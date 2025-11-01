@@ -197,6 +197,224 @@ auto module_task = builder.create_subgraph("ModuleName", [](wf::GraphBuilder& gb
 // 可作为主图的一部分或循环体使用
 ```
 
+## 🧮 Taskflow 算法节点
+
+Workflow 库提供了 Taskflow 并行算法的声明式封装，使你能够在数据流图中利用 Taskflow 的高效并行执行能力。
+
+### 并行迭代：`create_for_each`
+
+并行迭代容器元素：
+
+```cpp
+std::vector<int> numbers = {1, 2, 3, 4, 5};
+
+// 创建包含容器的源节点
+auto [input, _] = builder.create_any_source("Input",
+  {{"data", std::any{numbers}}}
+);
+
+// 并行 for_each：对每个元素应用函数
+auto [for_each_node, for_each_task] = builder.create_for_each<std::vector<int>>(
+  "PrintElements",
+  {{"Input", "data"}},  // 输入：来自 Input 节点的容器
+  [](int value) {
+    std::cout << "处理元素: " << value << "\n";
+  },
+  {}  // 无输出
+);
+```
+
+**使用场景**：
+- 独立处理每个元素
+- 打印/日志记录容器元素
+- 对元素执行副作用操作
+
+### 并行索引迭代：`create_for_each_index`
+
+并行迭代索引范围：
+
+```cpp
+// 创建包含索引范围参数的源节点
+auto [index_input, _] = builder.create_typed_source("IndexInput",
+  std::make_tuple(0, 20, 2),  // first=0, last=20, step=2
+  {"first", "last", "step"}
+);
+
+// 并行 for_each_index：迭代索引
+auto [index_node, index_task] = builder.create_for_each_index<int, int, int>(
+  "ProcessIndices",
+  {{"IndexInput", "first"}, {"IndexInput", "last"}, {"IndexInput", "step"}},
+  [](int i) {
+    std::cout << "索引: " << i << "\n";
+  }
+);
+```
+
+**使用场景**：
+- 数值范围处理
+- 基于数组索引的操作
+- 并行生成序列
+
+### 并行归约：`create_reduce`
+
+使用二元操作符将容器归约为单个值：
+
+```cpp
+std::vector<int> numbers = {1, 2, 3, 4, 5};
+
+// 创建源节点
+auto [input, _] = builder.create_any_source("Input",
+  {{"data", std::any{numbers}}}
+);
+
+// 并行 reduce：计算总和
+int sum_result = 0;
+auto [reduce_node, reduce_task] = builder.create_reduce<int, std::vector<int>>(
+  "SumElements",
+  {{"Input", "data"}},
+  sum_result,  // 初始值（通过引用捕获，必须保持存活）
+  [](int acc, int val) { return acc + val; },  // 二元操作符
+  {"sum"}  // 输出键
+);
+
+// 通过输出键或 sum_result 变量访问结果
+```
+
+**重要提示**：
+- `init` 通过**引用**捕获 - 在执行期间必须保持存活
+- 结果存储在 `init` 中，**同时**通过输出键暴露
+- 二元操作符必须满足结合律和交换律以确保正确性
+
+**使用场景**：
+- 求和、乘积、最小值、最大值操作
+- 聚合容器值
+- 统计计算
+
+### 并行变换：`create_transform`
+
+变换容器元素，生成新容器：
+
+```cpp
+std::vector<int> input = {1, 2, 3, 4, 5};
+
+// 创建源节点
+auto [input_node, _] = builder.create_any_source("Input",
+  {{"data", std::any{input}}}
+);
+
+// 并行 transform：对每个元素求平方
+auto [transform_node, transform_task] = builder.create_transform<
+  std::vector<int>,      // 输入容器类型
+  std::vector<int>,      // 输出容器类型
+  std::function<int(int)> // 一元操作类型
+>(
+  "SquareElements",
+  {{"Input", "data"}},
+  [](int x) { return x * x; },  // 一元操作
+  {"squared"}  // 输出键
+);
+
+// 在后续节点中使用变换后的容器
+auto [sink, _] = builder.create_any_sink("Sink",
+  {{"SquareElements", "squared"}}
+);
+```
+
+**使用场景**：
+- 逐元素数学运算
+- 数据格式转换
+- 过滤/映射操作
+
+### 完整算法工作流示例
+
+参见 `examples/algorithm_example.cpp` 了解结合多个算法的完整示例：
+
+```cpp
+#include <workflow/nodeflow.hpp>
+#include <taskflow/taskflow.hpp>
+
+int main() {
+  namespace wf = workflow;
+  tf::Executor executor;
+  wf::GraphBuilder builder("algorithm_workflow");
+
+  // 1. 创建输入数据
+  std::vector<int> numbers = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
+  auto [input, _] = builder.create_any_source("Input",
+    {{"data", std::any{numbers}}}
+  );
+
+  // 2. 并行 for_each：打印元素
+  auto [for_each, _] = builder.create_for_each<std::vector<int>>(
+    "PrintElements",
+    {{"Input", "data"}},
+    [](int val) { std::cout << "元素: " << val << "\n"; }
+  );
+
+  // 3. 并行 transform：对元素求平方
+  auto [transform, _] = builder.create_transform<
+    std::vector<int>, std::vector<int>,
+    std::function<int(int)>
+  >(
+    "SquareElements",
+    {{"Input", "data"}},
+    [](int x) { return x * x; },
+    {"squared"}
+  );
+
+  // 4. 并行 reduce：对平方后的元素求和
+  int sum = 0;
+  auto [reduce, _] = builder.create_reduce<int, std::vector<int>>(
+    "SumSquares",
+    {{"SquareElements", "squared"}},
+    sum,
+    [](int acc, int val) { return acc + val; },
+    {"sum"}
+  );
+
+  // 5. 收集结果
+  auto [sink, _] = builder.create_any_sink("FinalSink",
+    {{"SumSquares", "sum"}},
+    [](const auto& values) {
+      int result = std::any_cast<int>(values.at("sum"));
+      std::cout << "平方和: " << result << "\n";
+    }
+  );
+
+  // 所有依赖关系自动推断！
+  builder.run(executor);
+  return 0;
+}
+```
+
+### 算法节点集成优势
+
+1. **一致的 API**：与普通节点相同的声明式模式
+2. **自动依赖**：输入规范自动建立依赖关系
+3. **并行执行**：利用 Taskflow 的高效工作窃取调度器
+4. **键控 I/O**：输出通过字符串键访问，便于链式调用
+5. **类型安全**：基于模板的容器和操作类型检查
+
+### 性能考虑
+
+- **并行执行**：算法利用 Taskflow 的并行调度器实现多核性能
+- **工作窃取**：跨工作线程的高效负载均衡
+- **零拷贝**：容器引用高效传递（无不必要的拷贝）
+- **开销**：最小的包装开销；执行主要由算法实现主导
+
+### 实现说明
+
+算法节点作为 `AnyNode` 包装器实现：
+1. 在执行时从输入 future 中提取容器/数据
+2. 创建临时的 `tf::Taskflow` 实例用于算法执行
+3. 使用 `executor_->run(taskflow).wait()` 同步执行算法
+4. 通过字符串键控的输出暴露结果，便于链式调用
+
+这种设计使得算法节点能够：
+- 通过统一接口与类型化和 any-based 节点协作
+- 利用 Taskflow 的高效并行算法
+- 保持一致的声明式 API 模式
+
 ## 🎯 技术特点
 
 ### 1. Key-based I/O 系统
@@ -692,12 +910,57 @@ builder
 2. 🥈 **Key-based API** - 需要精细控制时
 3. 🥉 **传统 API** - 向后兼容，已标记 deprecated
 
+### 算法节点 API 总结
+
+**声明式 API**：
+
+```cpp
+// for_each - 并行迭代容器
+builder.create_for_each<Container>("Name",
+  {{"SourceNode", "container_key"}},
+  [](ElementType elem) { /* process */ },
+  {"output_keys"}  // 可选
+);
+
+// for_each_index - 并行迭代索引范围
+builder.create_for_each_index<B, E, S>("Name",
+  {{"SourceNode", "first"}, {"SourceNode", "last"}, {"SourceNode", "step"}},
+  [](IndexType idx) { /* process */ }
+);
+
+// reduce - 并行归约
+T init = /* initial value */;
+builder.create_reduce<T, Container>("Name",
+  {{"SourceNode", "container_key"}},
+  init,  // 通过引用捕获
+  [](T acc, ElementType val) { return acc + val; },
+  {"result"}
+);
+
+// transform - 并行变换
+builder.create_transform<InputContainer, OutputContainer>("Name",
+  {{"SourceNode", "container_key"}},
+  [](InputElement elem) { return /* transform */; },
+  {"result"}
+);
+```
+
+**关键特性**：
+- ✅ 与普通节点相同的声明式 API 模式
+- ✅ 字符串键控的输入/输出
+- ✅ 自动依赖推断
+- ✅ 并行执行（Taskflow 调度器）
+- ✅ 无缝集成到现有工作流中
+
 ## 📚 相关文档
 
-- `workflow/README.md` - 完整库文档
+- `workflow/README.md` - 完整库文档（包含算法节点详细说明）
 - `readme/guide_workflow.md` - 技术路线与实现细节
 - `examples/declarative_example.cpp` - 声明式 API 完整示例
 - `examples/unified_example.cpp` - Key-based API 示例
+- `examples/algorithm_example.cpp` - 算法节点使用示例
+- `examples/advanced_control_flow.cpp` - 高级控制流示例
+- `examples/loop_only.cpp` - 循环控制流示例
 
 ```dot
 digraph Taskflow {

@@ -810,6 +810,29 @@ class GraphBuilder {
                    std::function<int(const std::unordered_map<std::string, std::any>&)> condition_func,
                    std::function<void(GraphBuilder&, const std::unordered_map<std::string, std::any>&)> exit_builder_fn = nullptr,
                    const std::vector<std::string>& output_keys = {});
+
+  /**
+   * @brief Declarative loop with native function body (no GraphBuilder)
+   * @param name Loop name
+   * @param input_specs Vector of {source_node_name, source_output_key} pairs
+   * @param body_func Native function to execute as loop body: (inputs) -> outputs
+   * @param condition_func Function that receives inputs and returns 0 to continue (loop back), non-zero to exit
+   * @param exit_func Optional native function to execute on exit: (inputs) -> outputs
+   * @param output_keys Output key names
+   * @return Pair of (node_ptr, task_handle for loop entry)
+   * @details This overload allows using plain functions/lambdas as loop body without GraphBuilder.
+   *          The body_func receives inputs and produces outputs, similar to create_any_node.
+   */
+  std::pair<std::shared_ptr<LoopNode>, tf::Task>
+  create_loop_decl(const std::string& name,
+                   const std::vector<std::pair<std::string, std::string>>& input_specs,
+                   std::function<std::unordered_map<std::string, std::any>(
+                       const std::unordered_map<std::string, std::any>&)> body_func,
+                   std::function<int(const std::unordered_map<std::string, std::any>&)> condition_func,
+                   std::function<std::unordered_map<std::string, std::any>(
+                       const std::unordered_map<std::string, std::any>&)> exit_func = nullptr,
+                   const std::vector<std::string>& output_keys = {});
+
   /**
    * @brief Declarative loop using an existing body task (e.g., from create_subgraph)
    * @param name Loop name
@@ -855,6 +878,45 @@ class GraphBuilder {
                   const std::vector<std::string>& output_keys = {});
 
   /**
+   * @brief Create a parallel for_each node with shared parameters from dependency nodes
+   * @tparam Container Container type (auto-deduced)
+   * @tparam C Callable type
+   * @param name Node name
+   * @param input_specs Vector of {source_node_name, source_output_key} to get the container
+   * @param shared_input_specs Vector of {source_node_name, source_output_key} to get shared parameters
+   * @param callable Function to apply to each element: (element, shared_params) -> void
+   *                  where shared_params is std::unordered_map<std::string, std::any>& (modifiable)
+   * @param output_keys Optional output keys (for chaining)
+   * @return Pair of (node_ptr, task_handle)
+   * @details Shared parameters are extracted once and passed to each element processing, allowing modification
+   */
+  template <typename Container, typename C>
+  std::pair<std::shared_ptr<AnyNode>, tf::Task>
+  create_for_each(const std::string& name,
+                  const std::vector<std::pair<std::string, std::string>>& input_specs,
+                  const std::vector<std::pair<std::string, std::string>>& shared_input_specs,
+                  C callable,
+                  const std::vector<std::string>& output_keys = {});
+
+  /**
+   * @brief Create a parallel for_each node with subgraph/subtask builder for each element
+   * @tparam Container Container type (auto-deduced)
+   * @tparam ElementType Element type from container
+   * @param name Node name
+   * @param input_specs Vector of {source_node_name, source_output_key} to get the container
+   * @param builder_fn Function that receives GraphBuilder and element value to build a subgraph/subtask
+   * @param output_keys Optional output keys (for chaining)
+   * @return Pair of (node_ptr, task_handle)
+   * @details For each element, a fresh subgraph is built and executed. Suitable for complex per-element processing.
+   */
+  template <typename Container>
+  std::pair<std::shared_ptr<AnyNode>, tf::Task>
+  create_for_each(const std::string& name,
+                  const std::vector<std::pair<std::string, std::string>>& input_specs,
+                  std::function<void(GraphBuilder&, typename Container::value_type)> builder_fn,
+                  const std::vector<std::string>& output_keys = {});
+
+  /**
    * @brief Create a parallel for_each_index node that iterates over an index range
    * @tparam B Beginning index type (integral)
    * @tparam E Ending index type (integral)
@@ -893,6 +955,26 @@ class GraphBuilder {
                 const std::vector<std::pair<std::string, std::string>>& input_specs,
                 T& init,
                 BinaryOp bop,
+                const std::vector<std::string>& output_keys = {"result"});
+
+  /**
+   * @brief Create a parallel reduce node with subgraph/subtask builder for reduction operation
+   * @tparam T Result type
+   * @tparam Container Container type (auto-deduced)
+   * @param name Node name
+   * @param input_specs Vector of {source_node_name, source_output_key} to get the container
+   * @param init Initial value (captured by reference - must remain alive)
+   * @param builder_fn Function that receives GraphBuilder, accumulator (T&), and element value to build reduction subgraph
+   * @param output_keys Output key for the reduced result (default: "result")
+   * @return Pair of (node_ptr, task_handle)
+   * @details The builder function can create a subgraph that processes the accumulator and element to produce the new accumulator value
+   */
+  template <typename T, typename Container>
+  std::pair<std::shared_ptr<AnyNode>, tf::Task>
+  create_reduce(const std::string& name,
+                const std::vector<std::pair<std::string, std::string>>& input_specs,
+                T& init,
+                std::function<void(GraphBuilder&, T&, typename Container::value_type)> builder_fn,
                 const std::vector<std::string>& output_keys = {"result"});
 
   /**

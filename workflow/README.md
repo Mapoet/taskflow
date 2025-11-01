@@ -15,6 +15,12 @@ The Workflow library provides a powerful abstraction for building dataflow graph
 
 ## 🔄 What's New (Latest)
 
+- **✨ NEW: Taskflow Algorithm Nodes** - Declarative API wrappers for Taskflow's parallel algorithms:
+  - `create_for_each` - Parallel iteration over containers
+  - `create_for_each_index` - Parallel iteration over index ranges  
+  - `create_reduce` - Parallel reduction operations
+  - `create_transform` - Parallel transformation operations
+  - All algorithms support string-keyed inputs/outputs and automatic dependency inference
 - Added `create_subtask(name, builder_fn)`: builds and runs a fresh subgraph at task execution time. Ideal for loop bodies to avoid module-task single-run semantics.
 - Enhanced sinks with callbacks:
   - `create_any_sink(..., callback)` where callback receives `std::unordered_map<std::string, std::any>`
@@ -67,9 +73,13 @@ workflow/
 ├── examples/
 │   ├── keyed_example.cpp      # Any-based nodes example
 │   ├── unified_example.cpp    # Key-based API demonstration
-│   └── declarative_example.cpp # Declarative API with auto-deps
+│   ├── declarative_example.cpp # Declarative API with auto-deps
+│   ├── advanced_control_flow.cpp # Control flow (condition, loop, pipeline)
+│   ├── loop_only.cpp         # Loop-only demonstration
+│   └── algorithm_example.cpp # Taskflow algorithm nodes example
 ├── CMakeLists.txt
-└── README.md
+├── README.md
+└── KEY_BASED_API.md
 ```
 
 ## 🏗️ Core Components
@@ -556,6 +566,61 @@ tf::Task create_subtask(const std::string& name,
                         const std::function<void(GraphBuilder&)>& builder_fn);
 ```
 
+#### Taskflow Algorithm Nodes
+
+The Workflow library provides declarative wrappers for Taskflow's parallel algorithms, enabling seamless integration with the dataflow graph:
+
+```cpp
+// Parallel for_each - iterate over container elements
+template <typename Container, typename C>
+std::pair<std::shared_ptr<AnyNode>, tf::Task>
+create_for_each(const std::string& name,
+                const std::vector<std::pair<std::string, std::string>>& input_specs,
+                C callable,
+                const std::vector<std::string>& output_keys = {});
+// Input: expects one input spec providing the container
+// Callable: (element) -> void
+
+// Parallel for_each_index - iterate over index range
+template <typename B, typename E, typename S = int, typename C>
+std::pair<std::shared_ptr<AnyNode>, tf::Task>
+create_for_each_index(const std::string& name,
+                      const std::vector<std::pair<std::string, std::string>>& input_specs,
+                      C callable,
+                      const std::vector<std::string>& output_keys = {});
+// Input: expects "first", "last", "step" (step optional, defaults to 1)
+// Callable: (index) -> void
+
+// Parallel reduce - reduce container to single value
+template <typename T, typename Container, typename BinaryOp>
+std::pair<std::shared_ptr<AnyNode>, tf::Task>
+create_reduce(const std::string& name,
+              const std::vector<std::pair<std::string, std::string>>& input_specs,
+              T& init,
+              BinaryOp bop,
+              const std::vector<std::string>& output_keys = {"result"});
+// Input: expects one input spec providing the container
+// BinaryOp: (T, element_type) -> T
+// Result: stored in init (captured by reference) and exposed via output key
+
+// Parallel transform - transform container elements
+template <typename InputContainer, typename OutputContainer, typename UnaryOp>
+std::pair<std::shared_ptr<AnyNode>, tf::Task>
+create_transform(const std::string& name,
+                const std::vector<std::pair<std::string, std::string>>& input_specs,
+                UnaryOp unary_op,
+                const std::vector<std::string>& output_keys = {"result"});
+// Input: expects one input spec providing the input container
+// UnaryOp: (input_element) -> output_element
+// Output: new container with transformed elements
+```
+
+**Key Features**:
+- ✅ String-keyed inputs/outputs (consistent with declarative API)
+- ✅ Automatic dependency inference
+- ✅ Parallel execution via Taskflow's efficient scheduler
+- ✅ Seamless integration with existing workflow nodes
+
 #### Input/Output Access
 
 ```cpp
@@ -812,6 +877,8 @@ cmake --build . --target declarative_example
 - **`unified_example.cpp`**: Key-based API demonstration
 - **`keyed_example.cpp`**: Pure Any-based workflow
 - **`advanced_control_flow.cpp`**: Advanced control flow (condition, multi-condition, pipeline, loop)
+- **`algorithm_example.cpp`**: Taskflow algorithm nodes (for_each, reduce, transform)
+- **`loop_only.cpp`**: Loop control flow demonstration
 
 ## 🎮 Advanced Control Flow Nodes
 
@@ -923,6 +990,224 @@ builder.create_loop_decl(
 - ✅ Subgraphs support nested declarative workflows
  - ✅ For iterative execution, prefer `create_subtask` over `create_subgraph`
 
+## 🔢 Taskflow Algorithm Nodes
+
+The Workflow library provides declarative wrappers for Taskflow's parallel algorithms, enabling you to leverage Taskflow's efficient parallel execution within your dataflow graphs.
+
+### Parallel Iteration: `create_for_each`
+
+Iterate over container elements in parallel:
+
+```cpp
+std::vector<int> numbers = {1, 2, 3, 4, 5};
+
+// Create source with container
+auto [input, _] = builder.create_any_source("Input",
+  {{"data", std::any{numbers}}}
+);
+
+// Parallel for_each: apply function to each element
+auto [for_each_node, for_each_task] = builder.create_for_each<std::vector<int>>(
+  "PrintElements",
+  {{"Input", "data"}},  // Input: container from Input node
+  [](int value) {
+    std::cout << "Processing: " << value << "\n";
+  },
+  {}  // No outputs
+);
+```
+
+**Use Cases**:
+- Processing each element independently
+- Printing/logging container elements
+- Side-effect operations on elements
+
+### Parallel Iteration by Index: `create_for_each_index`
+
+Iterate over index ranges in parallel:
+
+```cpp
+// Create source with index range parameters
+auto [index_input, _] = builder.create_typed_source("IndexInput",
+  std::make_tuple(0, 20, 2),  // first=0, last=20, step=2
+  {"first", "last", "step"}
+);
+
+// Parallel for_each_index: iterate over indices
+auto [index_node, index_task] = builder.create_for_each_index<int, int, int>(
+  "ProcessIndices",
+  {{"IndexInput", "first"}, {"IndexInput", "last"}, {"IndexInput", "step"}},
+  [](int i) {
+    std::cout << "Index: " << i << "\n";
+  }
+);
+```
+
+**Use Cases**:
+- Numeric range processing
+- Array index-based operations
+- Generating sequences in parallel
+
+### Parallel Reduction: `create_reduce`
+
+Reduce a container to a single value using a binary operator:
+
+```cpp
+std::vector<int> numbers = {1, 2, 3, 4, 5};
+
+// Create source
+auto [input, _] = builder.create_any_source("Input",
+  {{"data", std::any{numbers}}}
+);
+
+// Parallel reduce: compute sum
+int sum_result = 0;
+auto [reduce_node, reduce_task] = builder.create_reduce<int, std::vector<int>>(
+  "SumElements",
+  {{"Input", "data"}},
+  sum_result,  // Initial value (captured by reference)
+  [](int acc, int val) { return acc + val; },  // Binary operator
+  {"sum"}  // Output key
+);
+
+// Access result via output key or sum_result variable
+```
+
+**Important Notes**:
+- `init` is captured **by reference** - must remain alive during execution
+- Result is stored in `init` AND exposed via output key
+- Binary operator must be associative and commutative for correctness
+
+**Use Cases**:
+- Sum, product, min, max operations
+- Aggregating container values
+- Statistical computations
+
+### Parallel Transformation: `create_transform`
+
+Transform container elements producing a new container:
+
+```cpp
+std::vector<int> input = {1, 2, 3, 4, 5};
+
+// Create source
+auto [input_node, _] = builder.create_any_source("Input",
+  {{"data", std::any{input}}}
+);
+
+// Parallel transform: square each element
+auto [transform_node, transform_task] = builder.create_transform<
+  std::vector<int>,      // Input container type
+  std::vector<int>,      // Output container type
+  std::function<int(int)> // Unary operation type
+>(
+  "SquareElements",
+  {{"Input", "data"}},
+  [](int x) { return x * x; },  // Unary operation
+  {"squared"}  // Output key
+);
+
+// Use transformed container in subsequent nodes
+auto [sink, _] = builder.create_any_sink("Sink",
+  {{"SquareElements", "squared"}}
+);
+```
+
+**Use Cases**:
+- Element-wise mathematical operations
+- Data format conversions
+- Filtering/mapping operations
+
+### Complete Algorithm Workflow Example
+
+See `examples/algorithm_example.cpp` for a complete example combining multiple algorithms:
+
+```cpp
+#include <workflow/nodeflow.hpp>
+#include <taskflow/taskflow.hpp>
+
+int main() {
+  namespace wf = workflow;
+  tf::Executor executor;
+  wf::GraphBuilder builder("algorithm_workflow");
+
+  // 1. Create input data
+  std::vector<int> numbers = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
+  auto [input, _] = builder.create_any_source("Input",
+    {{"data", std::any{numbers}}}
+  );
+
+  // 2. Parallel for_each: print elements
+  auto [for_each, _] = builder.create_for_each<std::vector<int>>(
+    "PrintElements",
+    {{"Input", "data"}},
+    [](int val) { std::cout << "Element: " << val << "\n"; }
+  );
+
+  // 3. Parallel transform: square elements
+  auto [transform, _] = builder.create_transform<
+    std::vector<int>, std::vector<int>,
+    std::function<int(int)>
+  >(
+    "SquareElements",
+    {{"Input", "data"}},
+    [](int x) { return x * x; },
+    {"squared"}
+  );
+
+  // 4. Parallel reduce: sum squared elements
+  int sum = 0;
+  auto [reduce, _] = builder.create_reduce<int, std::vector<int>>(
+    "SumSquares",
+    {{"SquareElements", "squared"}},
+    sum,
+    [](int acc, int val) { return acc + val; },
+    {"sum"}
+  );
+
+  // 5. Collect result
+  auto [sink, _] = builder.create_any_sink("FinalSink",
+    {{"SumSquares", "sum"}},
+    [](const auto& values) {
+      int result = std::any_cast<int>(values.at("sum"));
+      std::cout << "Sum of squares: " << result << "\n";
+    }
+  );
+
+  // All dependencies auto-inferred!
+  builder.run(executor);
+  return 0;
+}
+```
+
+### Algorithm Node Integration Benefits
+
+1. **Consistent API**: Same declarative pattern as regular nodes
+2. **Automatic Dependencies**: Input specs automatically establish dependencies
+3. **Parallel Execution**: Leverages Taskflow's efficient work-stealing scheduler
+4. **Key-based I/O**: Outputs accessible via string keys for chaining
+5. **Type Safety**: Template-based type checking for containers and operations
+
+### Performance Considerations
+
+- **Parallel Execution**: Algorithms utilize Taskflow's parallel scheduler for multi-core performance
+- **Work-stealing**: Efficient load balancing across worker threads
+- **Zero-copy**: Container references passed efficiently (no unnecessary copies)
+- **Overhead**: Minimal wrapper overhead; execution is dominated by algorithm implementation
+
+### Implementation Notes
+
+Algorithm nodes are implemented as `AnyNode` wrappers that:
+1. Extract container/data from input futures at execution time
+2. Create temporary `tf::Taskflow` instances for algorithm execution
+3. Use `executor_->run(taskflow).wait()` to execute algorithms synchronously
+4. Expose results via string-keyed outputs for seamless chaining
+
+This design allows algorithm nodes to:
+- Work with both typed and any-based nodes via unified interface
+- Leverage Taskflow's efficient parallel algorithms
+- Maintain consistent declarative API patterns
+
 ## 🧪 Test Graphs (DOT Snapshots)
 
 Below are DOT graph snippets from the verified examples (generated via `builder.dump`).
@@ -989,12 +1274,20 @@ auto module_task = builder.create_subgraph("ModuleName", [](wf::GraphBuilder& gb
 
 ## 🔮 Future Enhancements
 
-- Type validation and schema checking for Any-based nodes
-- Visual graph representation with type/key annotations
-- Performance profiling and monitoring
-- Support for optional inputs/outputs
-- Error handling and recovery mechanisms
-- Conditional execution based on data values
+- **Algorithm Nodes**:
+  - Additional algorithm wrappers: `sort`, `find`, `scan`, etc.
+  - Support for custom partitioners in algorithm nodes
+  - Nested algorithm execution within subgraphs
+- **Type System**:
+  - Type validation and schema checking for Any-based nodes
+  - Input type auto-inference from source node types
+- **Tooling**:
+  - Visual graph representation with type/key annotations
+  - Performance profiling and monitoring
+- **Features**:
+  - Support for optional inputs/outputs
+  - Error handling and recovery mechanisms
+  - Conditional execution based on data values
 
 ## 📄 License
 

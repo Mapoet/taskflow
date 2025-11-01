@@ -759,6 +759,187 @@ GraphBuilder::create_for_each(const std::string& name,
   return {node, task};
 }
 
+// for_each with subgraph/subtask builder
+template <typename Container>
+std::pair<std::shared_ptr<AnyNode>, tf::Task>
+GraphBuilder::create_for_each(const std::string& name,
+                              const std::vector<std::pair<std::string, std::string>>& input_specs,
+                              std::function<void(GraphBuilder&, typename Container::value_type)> builder_fn,
+                              const std::vector<std::string>& output_keys) {
+  // Get container future from input
+  if (input_specs.size() != 1) {
+    throw std::runtime_error("create_for_each expects exactly one input (the container)");
+  }
+  
+  auto container_future = get_output(input_specs[0].first, input_specs[0].second);
+  std::string container_key = input_specs[0].second;
+  
+  // Create output promises/futures
+  AnyOutputs outputs;
+  for (const auto& key : output_keys) {
+    auto promise = std::make_shared<std::promise<std::any>>();
+    outputs.promises[key] = promise;
+    outputs.futures[key] = promise->get_future().share();
+  }
+  
+  // Create the node
+  auto node = std::make_shared<AnyNode>(
+    std::unordered_map<std::string, std::shared_future<std::any>>{{container_key, container_future}},
+    output_keys,
+    [builder_fn, container_key, outputs](const std::unordered_map<std::string, std::any>& inputs) mutable -> std::unordered_map<std::string, std::any> {
+      // This won't be used since we handle execution in the task below
+      std::unordered_map<std::string, std::any> result;
+      for (const auto& [key, promise] : outputs.promises) {
+        promise->set_value(std::any{});
+        result[key] = std::any{};
+      }
+      return result;
+    },
+    name
+  );
+  node->out = outputs;
+  
+  // Create task that builds and executes subgraph for each element
+  auto task = taskflow_.emplace([this, node, container_key, builder_fn, name]() mutable {
+    if (executor_ == nullptr) {
+      throw std::runtime_error("create_for_each requires executor to be set. Call run() or run_async() first.");
+    }
+    
+    // Extract container from future
+    auto container_future = node->inputs.at(container_key);
+    const Container& container = std::any_cast<const Container&>(container_future.get());
+    
+    // For each element, build a fresh subgraph and execute it
+    // Note: This is sequential per-element execution; for parallel execution of subgraphs,
+    // users should create tasks within the builder_fn that can run in parallel
+    for (const auto& elem : container) {
+      // Create a fresh Taskflow for this element
+      auto nested = std::make_unique<GraphBuilder>(name + "_elem");
+      
+      // Build subgraph for this element
+      builder_fn(*nested, elem);
+      
+      // Run the nested subgraph synchronously
+      executor_->run(nested->taskflow()).wait();
+      
+      // Keep the builder alive during execution
+      subgraph_builders_.push_back(std::move(nested));
+    }
+    
+    // Clear subgraph builders after all elements processed
+    // (Or keep them if needed for outputs)
+    
+    // Set outputs (if any)
+    for (const auto& [key, promise] : node->out.promises) {
+      promise->set_value(std::any{});
+    }
+  }).name(name);
+  
+  // Store node and task
+  nodes_[name] = node;
+  tasks_[name] = task;
+  
+  // Auto-register dependencies
+  for (const auto& [source_node, source_key] : input_specs) {
+    auto source_task_it = tasks_.find(source_node);
+    if (source_task_it != tasks_.end()) {
+      source_task_it->second.precede(task);
+    }
+  }
+  
+  return {node, task};
+}
+
+// reduce with subgraph/subtask builder
+template <typename T, typename Container>
+std::pair<std::shared_ptr<AnyNode>, tf::Task>
+GraphBuilder::create_reduce(const std::string& name,
+                            const std::vector<std::pair<std::string, std::string>>& input_specs,
+                            T& init,
+                            std::function<void(GraphBuilder&, T&, typename Container::value_type)> builder_fn,
+                            const std::vector<std::string>& output_keys) {
+  // Get container future from input
+  if (input_specs.size() != 1) {
+    throw std::runtime_error("create_reduce expects exactly one input (the container)");
+  }
+  
+  auto container_future = get_output(input_specs[0].first, input_specs[0].second);
+  std::string container_key = input_specs[0].second;
+  
+  // Create output promises/futures
+  AnyOutputs outputs;
+  for (const auto& key : output_keys) {
+    auto promise = std::make_shared<std::promise<std::any>>();
+    outputs.promises[key] = promise;
+    outputs.futures[key] = promise->get_future().share();
+  }
+  
+  // Create the node
+  auto node = std::make_shared<AnyNode>(
+    std::unordered_map<std::string, std::shared_future<std::any>>{{container_key, container_future}},
+    output_keys,
+    [builder_fn, container_key, outputs, &init](const std::unordered_map<std::string, std::any>& inputs) mutable -> std::unordered_map<std::string, std::any> {
+      // This won't be used since we handle execution in the task below
+      std::unordered_map<std::string, std::any> result;
+      for (const auto& [key, promise] : outputs.promises) {
+        promise->set_value(std::any{init});
+        result[key] = std::any{init};
+      }
+      return result;
+    },
+    name
+  );
+  node->out = outputs;
+  
+  // Create task that builds and executes subgraph for each element's reduction
+  // Note: init must remain alive during execution (captured by reference)
+  auto task = taskflow_.emplace([this, node, container_key, builder_fn, name, &init]() mutable {
+    if (executor_ == nullptr) {
+      throw std::runtime_error("create_reduce requires executor to be set. Call run() or run_async() first.");
+    }
+    
+    // Extract container from future
+    auto container_future = node->inputs.at(container_key);
+    const Container& container = std::any_cast<const Container&>(container_future.get());
+    
+    // For each element, build a fresh subgraph that reduces init with element
+    for (const auto& elem : container) {
+      // Create a fresh Taskflow for this element's reduction
+      auto nested = std::make_unique<GraphBuilder>(name + "_reduce_elem");
+      
+      // Build subgraph that processes accumulator and element
+      builder_fn(*nested, init, elem);
+      
+      // Run the nested subgraph synchronously
+      executor_->run(nested->taskflow()).wait();
+      
+      // Keep the builder alive during execution
+      subgraph_builders_.push_back(std::move(nested));
+      
+      // Note: init is modified by the builder_fn through reference
+    }
+    
+    // Set outputs with final reduced value
+    for (const auto& [key, promise] : node->out.promises) {
+      promise->set_value(std::any{init});
+    }
+  }).name(name);
+  
+  // Store node and task
+  nodes_[name] = node;
+  tasks_[name] = task;
+  
+  // Auto-register dependencies
+  for (const auto& [source_node, source_key] : input_specs) {
+    auto source_task_it = tasks_.find(source_node);
+    if (source_task_it != tasks_.end()) {
+      source_task_it->second.precede(task);
+    }
+  }
+  
+  return {node, task};
+}
+
 }  // namespace workflow
 
 #endif  // WORKFLOW_NODEFLOW_IMPL_HPP
