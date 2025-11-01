@@ -1,0 +1,19 @@
+# Agent Framework 第三方库 Submodules
+# 使用与 Taskflow 相同的 3rd-party 目录
+
+[submodule "3rd-party/nlohmann_json"]
+	path = 3rd-party/nlohmann_json
+	url = https://github.com/nlohmann/json.git
+
+[submodule "3rd-party/httplib"]
+	path = 3rd-party/httplib
+	url = https://github.com/yhirose/cpp-httplib.git
+
+[submodule "3rd-party/websocketpp"]
+	path = 3rd-party/websocketpp
+	url = https://github.com/zaphoyd/websocketpp.git
+
+[submodule "3rd-party/faiss"]
+	path = 3rd-party/faiss
+	url = https://github.com/facebookresearch/faiss.git
+
