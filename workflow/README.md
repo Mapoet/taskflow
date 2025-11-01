@@ -1384,7 +1384,7 @@ Behavior: Loop body executes 5 times (counter 1..5) then exits; logging is handl
 
 ```
 digraph Taskflow {
-subgraph cluster_... {
+subgraph cluster_a {
 label="Taskflow: advanced_control_flow";
 A -> B; A -> LoopBody;
 E -> F;
