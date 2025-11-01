@@ -790,6 +790,7 @@ GraphBuilder::create_loop_decl(const std::string& name,
       // Run the nested subgraph synchronously (master's approach)
       //executor_->run(nested.taskflow()).wait();
       executor_->corun(nested->taskflow());
+      //taskflow_.composed_of(nested->taskflow());
       subgraph_builders_.push_back(std::move(nested));
     }
   }).name(name + "_body");
