@@ -23,6 +23,7 @@
 # -DTF_BUILD_PROFILER=OFF/ON          // default OFF
 # -DTF_BUILD_TESTS=OFF/ON             // default ON
 # -DTF_BUILD_WORKFLOW=OFF/ON          // default ON
+# -DTF_BUILD_AGENT_FRAMEWORK=OFF/ON   // default OFF
 # -------------------------------------------------------------------
 
 
@@ -41,6 +42,7 @@ option(TF_BUILD_CUDA "Enables builds of cuda code" OFF)
 option(TF_BUILD_TESTS "Enables builds of tests" ON)
 option(TF_BUILD_EXAMPLES "Enables builds of examples" ON)
 option(TF_BUILD_WORKFLOW "Enables builds of workflow library and examples" ON)
+option(TF_BUILD_AGENT_FRAMEWORK "Enables builds of agent framework" OFF)
 
 # project-specific variables
 set(TF_UTEST_DIR ${PROJECT_SOURCE_DIR}/unittests)
@@ -296,6 +298,7 @@ message(STATUS "TF_BUILD_CUDA: " ${TF_BUILD_CUDA})
 message(STATUS "TF_BUILD_TESTS: " ${TF_BUILD_TESTS})
 message(STATUS "TF_BUILD_EXAMPLES: " ${TF_BUILD_EXAMPLES})
 message(STATUS "TF_BUILD_WORKFLOW: " ${TF_BUILD_WORKFLOW})
+message(STATUS "TF_BUILD_AGENT_FRAMEWORK: " ${TF_BUILD_AGENT_FRAMEWORK})
 message(STATUS "TF_UTEST_DIR: " ${TF_UTEST_DIR})
 message(STATUS "TF_EXAMPLE_DIR: " ${TF_EXAMPLE_DIR})
 message(STATUS "TF_BENCHMARK_DIR: " ${TF_BENCHMARK_DIR})
@@ -361,6 +364,25 @@ endif(TF_BUILD_PROFILER)
 if(TF_BUILD_BENCHMARKS)
   add_subdirectory(benchmarks)
 endif(TF_BUILD_BENCHMARKS)
+
+# -----------------------------------------------------------------------------
+# Agent Framework
+# -----------------------------------------------------------------------------
+
+if(TF_BUILD_AGENT_FRAMEWORK)
+  message(STATUS "Building Agent Framework...")
+  message(STATUS "Agent Framework requires workflow library, ensuring it is enabled...")
+  
+  # 确保 workflow 库已启用
+  if(NOT TF_BUILD_WORKFLOW)
+    message(WARNING "Agent Framework requires workflow library. Setting TF_BUILD_WORKFLOW=ON")
+    set(TF_BUILD_WORKFLOW ON CACHE BOOL "Enables builds of workflow library and examples" FORCE)
+    add_subdirectory(workflow)
+  endif()
+  
+  # 添加 Agent Framework 子目录
+  add_subdirectory(agent_framework)
+endif(TF_BUILD_AGENT_FRAMEWORK)
 
 # -----------------------------------------------------------------------------
 # create find_package(Taskflow CONFIG)

@@ -1,0 +1,322 @@
+# Agent Framework Development Rules
+
+## 项目概述
+
+Agent Framework 是基于 Taskflow `workflow` 库的高性能多模态智能代理框架，采用纯 C++17 实现。
+
+## 核心设计原则
+
+1. **声明式数据流**：基于 `workflow` 的键值驱动 I/O，通过 `input_specs` 自动推断依赖关系
+2. **Agent 与工作流统一抽象**：Agent 和工作流都可以作为独立节点，支持嵌套和组合
+3. **模块化与可组合性**：每个模块（LLM、ToolBus、Memory、VectorStore 等）独立开发、测试和复用
+4. **多线程并行执行**：利用 Taskflow 工作窃取调度器，自动在多核 CPU 上并行执行
+5. **多端适配**：通过统一的 Sink 节点接口，支持 CLI、ImGui 和 Web 客户端
+
+## 代码规范
+
+### 文件组织
+
+- **头文件**：`include/agent/*.hpp`，使用 Doxygen 注释
+- **实现文件**：`src/<module>/*.cpp`，对应模块目录
+- **命名规范**：
+  - 文件名：`snake_case`（如 `llm_client.hpp`）
+  - 类名：`PascalCase`（如 `LLMClient`）
+  - 函数/变量：`snake_case`（如 `invoke_llm`）
+  - 常量：`UPPER_CASE` 或 `kCamelCase`
+  - 布尔变量：以 `is_`, `has_`, `should_` 开头
+
+### 头文件规范
+
+每个头文件必须包含：
+
+```cpp
+/**
+ * @file Agent_ClassName.hpp
+ * @brief 描述该头文件的功能
+ * @author Mapoet
+ * @version 0.1
+ * @date 2025-01-XX
+ */
+#ifndef __AGENT_CLASSNAME_H__
+#define __AGENT_CLASSNAME_H__
+
+// 包含顺序：
+// 1. 本模块头文件
+// 2. C/C++ 标准库
+// 3. 第三方库
+// 4. 本项目其他头文件
+
+#endif // __AGENT_CLASSNAME_H__
+```
+
+### Include Guard
+
+使用 `__AGENT_MODULENAME_FILENAME_H__` 格式的 include guard。
+
+### 注释规范
+
+- **文件头注释**：Doxygen 风格 `/** ... */`
+- **类注释**：使用 `@brief`, `@class`, `@param`, `@return`, `@throws`
+- **行内注释**：使用 `//`
+
+### 代码风格
+
+- **缩进**：4 个空格（不用 Tab）
+- **行宽**：最大 100 字符
+- **括号风格**：大括号独占一行（函数）或同行（控制流）
+- **空格**：操作符两侧、逗号后、冒号后
+- **const 正确性**：优先使用 `const`，参数传递优先按值或 `const&`
+
+```cpp
+// 函数定义示例
+class LLMClient {
+public:
+    // 异步调用 LLM，支持流式输出
+    std::future<LLMOutput> invoke(
+        const LLMInput& input,
+        std::function<void(std::string_view)> on_stream_token = nullptr
+    );
+};
+
+// 控制流示例
+if (condition) {
+    // ...
+} else {
+    // ...
+}
+```
+
+## Workflow API 使用规范
+
+### 节点创建
+
+1. **Source 节点**：使用 `create_typed_source` 或 `create_any_source`
+   ```cpp
+   auto [node, task] = builder.create_any_source("NodeName", [](...) { ... });
+   ```
+
+2. **Process 节点**：使用 `create_typed_node` 或 `create_any_node`
+   ```cpp
+   auto [node, task] = builder.create_any_node(
+       "NodeName",
+       {{"SourceNode", "output_key"}},  // input_specs
+       [](const auto& inputs) { ... },   // functor
+       {"output_key1", "output_key2"}    // output_keys
+   );
+   ```
+
+3. **Sink 节点**：使用 `create_any_sink`
+   ```cpp
+   builder.create_any_sink("SinkName", {{"Node", "output"}}, [](const auto& outputs) { ... });
+   ```
+
+4. **循环节点**：使用 `create_loop_decl` 实现 Agent 循环
+   ```cpp
+   auto [loop_node, loop_task] = builder.create_loop_decl(
+       "AgentLoop",
+       input_specs,
+       body_builder_fn,      // 每次迭代动态构建子图
+       condition_func,       // 返回 0 继续，非 0 退出
+       exit_builder_fn,      // 退出时执行
+       output_keys
+   );
+   ```
+
+5. **并行执行**：使用 `create_for_each` 并行调用工具
+   ```cpp
+   auto [for_each_node, _] = builder.create_for_each<std::vector<CallSpec>>(
+       "ToolCall",
+       {{"CallList", "list"}},
+       [](const CallSpec& spec, auto& shared_params) { ... },
+       {}
+   );
+   ```
+
+### 依赖管理
+
+- **自动依赖推断**：通过 `input_specs` 声明输入，`GraphBuilder` 自动建立依赖关系
+- **键值驱动 I/O**：所有输入输出通过字符串键访问，格式为 `{源节点名, 输出键名}`
+- **不要手动调用 `precede/succeed`**：依赖关系由 `input_specs` 自动推断
+
+### 类型安全
+
+- **编译期类型安全**：优先使用 `TypedSource`/`TypedNode`/`TypedSink`（零运行时开销）
+- **运行时灵活性**：需要时使用 `AnySource`/`AnyNode`/`AnySink`（支持异构数据流）
+- **类型转换**：使用 `std::any_cast` 进行运行时类型转换，确保类型匹配
+
+## 模块实现规范
+
+### LLM Client 模块
+
+- **多模型适配**：通过适配器模式支持 OpenAI、Anthropic、Gemini、vLLM 等
+- **流式输出**：必须支持回调函数实时推送 token
+- **函数调用协议**：实现 OpenAI Function Calling 格式
+- **错误处理**：指数退避重试，超时和异常处理
+
+### ToolBus 模块
+
+- **统一接口**：所有工具通过 `ToolBus::call_tool` 调用
+- **自动路由**：根据工具名称自动选择本地函数、MCP 客户端或外部 API
+- **类型安全**：使用 JSON Schema 验证工具参数和返回值
+- **并发调用**：支持并行调用多个工具
+
+### Memory 模块
+
+- **事件溯源**：所有节点执行事件记录到不可变日志
+- **多级记忆**：区分即时记忆（per request）、短期记忆（per conversation）、长期记忆（knowledge base）
+- **内存窗口**：动态截断长对话历史，避免上下文过长
+
+### VectorStore 模块
+
+- **多模态支持**：支持文本、图像、音频、视频等多种模态
+- **索引优化**：使用 Faiss IVF-PQ 或 Milvus 实现高效近似最近邻搜索
+- **混合检索**：结合语义搜索（向量相似度）和关键词搜索（BM25）
+
+### GraphExecutor 模块
+
+- **图模板**：提供 ReAct 循环、批量工具调用等常用工作流模板
+- **动态图构建**：支持运行时根据配置动态构建工作流图
+- **执行管理**：管理执行器线程池、任务调度和资源分配
+
+## 线程安全规范
+
+### 共享状态管理
+
+在并行工具调用中，使用以下模式管理共享状态：
+
+1. **互斥锁保护**：
+   ```cpp
+   std::shared_ptr<std::vector<json>> shared_results = std::make_shared<std::vector<json>>();
+   std::mutex results_mutex;
+   // 在访问时加锁
+   {
+       std::lock_guard<std::mutex> lock(results_mutex);
+       shared_results->push_back(result);
+   }
+   ```
+
+2. **线程本地存储**（性能更好）：
+   ```cpp
+   thread_local std::vector<json> local_results;
+   // 无需加锁
+   local_results.push_back(result);
+   ```
+
+3. **原子操作**：
+   ```cpp
+   std::atomic<int> completed_count{0};
+   int count = ++completed_count;
+   ```
+
+### 线程池配置
+
+- **CPU 密集型**：线程数 = CPU 核心数
+- **I/O 密集型**：线程数 = CPU 核心数 × 2-4
+- **使用工作窃取**：利用 Taskflow 的自动负载均衡
+
+## 错误处理规范
+
+1. **异常处理**：使用 C++ 异常机制，在节点 functor 中捕获异常
+2. **错误传播**：节点执行失败时，错误信息传播给依赖节点
+3. **日志记录**：所有错误记录到事件日志，便于调试和审计
+4. **重试机制**：对于可重试的错误（网络错误等），实现指数退避重试
+
+## 测试规范
+
+1. **单元测试**：每个模块提供单元测试（`tests/test_*.cpp`）
+2. **集成测试**：端到端工作流测试
+3. **Mock 对象**：隔离外部依赖（LLM API、向量数据库等）
+4. **性能测试**：使用 TFProf 进行性能分析
+
+## 文档规范
+
+1. **API 文档**：使用 Doxygen 生成，保存在 `docs/api/`
+2. **使用指南**：Markdown 格式，保存在 `docs/guides/`
+3. **架构文档**：包含 Mermaid 图表，保存在 `docs/architecture/`
+4. **代码注释**：所有公共接口必须有完整的 Doxygen 注释
+
+## 构建系统
+
+### CMake 配置
+
+- **C++17 标准**：最低要求，推荐 C++20
+- **编译选项**：
+  - Release: `-O2 -march=native -DNDEBUG`
+  - Debug: `-g -O0 -Wall -Wextra`
+- **依赖管理**：Taskflow、workflow、nlohmann/json 等通过 git submodule 或 find_package
+
+### 目录结构
+
+项目采用以下目录结构（与 Taskflow 共享第三方库目录）：
+
+**根目录结构**：
+```
+taskflow/
+├── .cursorrules                # Cursor IDE 开发规则（位于根目录）
+├── .gitmodules                 # Git 子模块配置（位于根目录）
+├── agent_framework/            # Agent Framework 项目目录
+│   ├── CMakeLists.txt
+│   ├── README.md
+│   ├── include/agent/          # 公共头文件
+│   ├── src/<module>/           # 模块实现文件
+│   ├── examples/               # 示例程序
+│   ├── tests/                  # 单元测试
+│   ├── tools/                  # 工具脚本
+│   └── docs/                   # 文档
+├── 3rd-party/                  # 第三方依赖（Git Submodules，与 Taskflow 共享）
+│   ├── nlohmann_json/          # JSON 库
+│   ├── httplib/                # HTTP 服务器库
+│   ├── websocketpp/            # WebSocket 库
+│   └── faiss/                  # Faiss 向量数据库
+├── workflow/                   # Workflow 库
+├── taskflow/                   # Taskflow 核心库
+└── readme/                     # 文档
+    └── guide_agent.md          # Agent Framework 设计文档
+```
+
+**Agent Framework 内部结构**：
+- `agent_framework/include/agent/`：公共头文件
+- `agent_framework/src/<module>/`：模块实现文件（llm_client, toolbus, memory, vectorstore, graph_executor, ui）
+- `agent_framework/examples/`：示例程序
+- `agent_framework/tests/`：单元测试
+- `agent_framework/docs/`：文档
+
+**第三方库路径**：
+- 第三方库位于根目录的 `3rd-party/`，与 Taskflow 共享
+- CMakeLists.txt 中使用 `${CMAKE_CURRENT_SOURCE_DIR}/../3rd-party` 引用
+
+## 禁止事项
+
+1. **不要手动连接节点**：依赖关系通过 `input_specs` 自动推断，不要手动调用 `precede/succeed`
+2. **不要忽略线程安全**：多线程环境下的共享状态必须加锁或使用原子操作
+3. **不要硬编码配置**：使用配置文件或环境变量
+4. **不要忽略错误处理**：所有外部调用（LLM API、工具调用等）必须有错误处理
+5. **不要忽略资源管理**：使用智能指针（`std::shared_ptr`、`std::unique_ptr`）管理资源
+
+## Agent 与工作流嵌套
+
+- **Agent 作为节点**：使用 `create_loop_decl` 将 Agent 封装为可复用的循环节点
+- **工作流作为节点**：使用 `create_subgraph` 将工作流封装为独立的子图节点
+- **多层嵌套**：支持 Agent 内部包含工作流，工作流内部包含 Agent
+
+## 性能优化原则
+
+1. **减少锁竞争**：优先使用线程本地存储或消息传递
+2. **合理配置线程数**：根据任务类型（CPU/I/O 密集型）配置线程池
+3. **任务粒度**：将大任务拆分为多个小任务，提高并行度
+4. **内存优化**：使用对象池、智能指针、移动语义
+5. **I/O 优化**：异步 I/O、连接池、批处理
+
+## 提交规范
+
+1. **代码审查**：所有代码变更必须经过审查
+2. **测试通过**：所有测试必须通过才能合并
+3. **文档更新**：API 变更必须更新文档
+4. **提交信息**：使用清晰的提交信息，遵循 Conventional Commits 规范
+
+## 参考文档
+
+- 详细设计文档：`readme/guide_agent.md`
+- Taskflow 文档：`workflow/README.md`
+- Workflow API：`workflow/include/workflow/nodeflow.hpp`
+

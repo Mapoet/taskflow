@@ -3885,75 +3885,86 @@ public:
 ### 10.3 项目目录结构与文件组织
 
 ```
-agent_framework/
-├── CMakeLists.txt              # 主构建文件
-├── README.md                   # 项目说明
-├── LICENSE                     # 许可证
+taskflow/                       # 项目根目录
+├── .cursorrules                # Cursor IDE 开发规则（位于根目录）
+├── .gitmodules                 # Git 子模块配置（位于根目录）
 │
-├── include/                    # 公共头文件
-│   └── agent/
-│       ├── llm_client.hpp      # LLM 客户端接口
-│       ├── toolbus.hpp         # ToolBus 接口
-│       ├── memory.hpp          # Memory 接口
-│       ├── vectorstore.hpp     # VectorStore 接口
-│       ├── graph_executor.hpp  # GraphExecutor 接口
-│       ├── ui_manager.hpp      # UI 管理器接口
-│       └── types.hpp           # 公共数据结构
+├── agent_framework/            # Agent Framework 项目目录
+│   ├── CMakeLists.txt          # 主构建文件
+│   ├── README.md               # 项目说明
+│   ├── LICENSE                 # 许可证
+│   │
+│   ├── include/                # 公共头文件
+│   │   └── agent/
+│   │       ├── llm_client.hpp  # LLM 客户端接口
+│   │       ├── toolbus.hpp      # ToolBus 接口
+│   │       ├── memory.hpp       # Memory 接口
+│   │       ├── vectorstore.hpp  # VectorStore 接口
+│   │       ├── graph_executor.hpp  # GraphExecutor 接口
+│   │       ├── ui_manager.hpp   # UI 管理器接口
+│   │       └── types.hpp        # 公共数据结构
+│   │
+│   ├── src/                    # 实现文件
+│   │   ├── llm_client/
+│   │   │   ├── llm_client.cpp
+│   │   │   ├── openai_adapter.cpp
+│   │   │   ├── anthropic_adapter.cpp
+│   │   │   └── vllm_adapter.cpp
+│   │   ├── toolbus/
+│   │   │   ├── toolbus.cpp
+│   │   │   ├── local_tool.cpp
+│   │   │   └── mcp_client.cpp
+│   │   ├── memory/
+│   │   │   ├── memory_store.cpp
+│   │   │   └── event_logger.cpp
+│   │   ├── vectorstore/
+│   │   │   ├── vectorstore.cpp
+│   │   │   ├── faiss_adapter.cpp
+│   │   │   └── encoder_manager.cpp
+│   │   ├── graph_executor/
+│   │   │   ├── graph_executor.cpp
+│   │   │   ├── agent_templates.cpp
+│   │   │   └── workflow_builder.cpp
+│   │   └── ui/
+│   │       ├── ui_manager.cpp
+│   │       ├── cli_handler.cpp
+│   │       ├── gui_handler.cpp
+│   │       └── web_handler.cpp
+│   │
+│   ├── examples/               # 示例程序
+│   │   ├── simple_agent.cpp    # 简单 Agent 示例
+│   │   ├── multimodal_agent.cpp  # 多模态 Agent 示例
+│   │   ├── tool_integration.cpp  # 工具集成示例
+│   │   └── workflow_custom.cpp   # 自定义工作流示例
+│   │
+│   ├── tests/                  # 单元测试
+│   │   ├── test_llm_client.cpp
+│   │   ├── test_toolbus.cpp
+│   │   ├── test_memory.cpp
+│   │   ├── test_vectorstore.cpp
+│   │   └── test_graph_executor.cpp
+│   │
+│   ├── tools/                  # 工具脚本
+│   │   ├── build.sh
+│   │   ├── run_tests.sh
+│   │   ├── profile.sh
+│   │   └── init_submodules.sh
+│   │
+│   └── docs/                   # 文档
+│       ├── api/                # API 文档
+│       ├── guides/             # 使用指南
+│       └── architecture/       # 架构文档
 │
-├── src/                        # 实现文件
-│   ├── llm_client/
-│   │   ├── llm_client.cpp
-│   │   ├── openai_adapter.cpp
-│   │   ├── anthropic_adapter.cpp
-│   │   └── vllm_adapter.cpp
-│   ├── toolbus/
-│   │   ├── toolbus.cpp
-│   │   ├── local_tool.cpp
-│   │   └── mcp_client.cpp
-│   ├── memory/
-│   │   ├── memory_store.cpp
-│   │   └── event_logger.cpp
-│   ├── vectorstore/
-│   │   ├── vectorstore.cpp
-│   │   ├── faiss_adapter.cpp
-│   │   └── encoder_manager.cpp
-│   ├── graph_executor/
-│   │   ├── graph_executor.cpp
-│   │   ├── agent_templates.cpp
-│   │   └── workflow_builder.cpp
-│   └── ui/
-│       ├── ui_manager.cpp
-│       ├── cli_handler.cpp
-│       ├── gui_handler.cpp
-│       └── web_handler.cpp
+├── 3rd-party/                  # 第三方依赖（Git Submodules，与 Taskflow 共享）
+│   ├── nlohmann_json/          # JSON 库（Header-Only）
+│   ├── httplib/                # HTTP 服务器库（Header-Only）
+│   ├── websocketpp/            # WebSocket 库（Header-Only）
+│   └── faiss/                  # Faiss 向量数据库（可选，需要编译）
 │
-├── examples/                   # 示例程序
-│   ├── simple_agent.cpp       # 简单 Agent 示例
-│   ├── multimodal_agent.cpp  # 多模态 Agent 示例
-│   ├── tool_integration.cpp   # 工具集成示例
-│   └── workflow_custom.cpp    # 自定义工作流示例
-│
-├── tests/                      # 单元测试
-│   ├── test_llm_client.cpp
-│   ├── test_toolbus.cpp
-│   ├── test_memory.cpp
-│   ├── test_vectorstore.cpp
-│   └── test_graph_executor.cpp
-│
-├── tools/                      # 工具脚本
-│   ├── build.sh
-│   ├── run_tests.sh
-│   └── profile.sh
-│
-├── docs/                       # 文档
-│   ├── api/                    # API 文档
-│   ├── guides/                 # 使用指南
-│   └── architecture/           # 架构文档
-│
-└── third_party/                # 第三方依赖（可选）
-    ├── nlohmann_json/
-    ├── httplib/
-    └── websocketpp/
+├── workflow/                   # Workflow 库
+├── taskflow/                   # Taskflow 核心库
+└── readme/                     # 文档
+    └── guide_agent.md          # Agent Framework 设计文档
 ```
 
 ### 10.4 技术路线与开发计划
