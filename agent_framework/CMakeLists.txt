@@ -89,7 +89,7 @@ if(NLOHMANN_JSON_INCLUDE)
     include_directories(${NLOHMANN_JSON_INCLUDE})
 endif()
 
-if(EXISTS ${HTTPLIB_DIR}/httplib.h)
+if(EXISTS ${HTTPLIB_DIR}/httplib.hpp OR EXISTS ${HTTPLIB_DIR}/httplib.h)
     include_directories(${HTTPLIB_DIR})
 endif()
 
@@ -104,11 +104,24 @@ find_package(CURL QUIET)
 # 源文件
 set(AGENT_SOURCES
     src/llm_client/llm_client.cpp
+    src/llm_client/openai_adapter.cpp
+    src/llm_client/anthropic_adapter.cpp
+    src/llm_client/vllm_adapter.cpp
     src/toolbus/toolbus.cpp
+    src/toolbus/local_tool.cpp
+    src/toolbus/mcp_client.cpp
     src/memory/memory_store.cpp
+    src/memory/event_logger.cpp
     src/vectorstore/vectorstore.cpp
+    src/vectorstore/faiss_adapter.cpp
+    src/vectorstore/encoder_manager.cpp
     src/graph_executor/graph_executor.cpp
+    src/graph_executor/agent_templates.cpp
+    src/graph_executor/workflow_builder.cpp
     src/ui/ui_manager.cpp
+    src/ui/cli_handler.cpp
+    src/ui/gui_handler.cpp
+    src/ui/web_handler.cpp
 )
 
 # 头文件
@@ -159,6 +172,12 @@ target_link_libraries(simple_agent PRIVATE agent_framework)
 
 add_executable(multimodal_agent examples/multimodal_agent.cpp)
 target_link_libraries(multimodal_agent PRIVATE agent_framework)
+
+add_executable(tool_integration examples/tool_integration.cpp)
+target_link_libraries(tool_integration PRIVATE agent_framework)
+
+add_executable(workflow_custom examples/workflow_custom.cpp)
+target_link_libraries(workflow_custom PRIVATE agent_framework)
 
 # 测试（需要 Google Test 或 Catch2）
 if(BUILD_TESTING)

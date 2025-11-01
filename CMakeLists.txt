@@ -42,7 +42,7 @@ option(TF_BUILD_CUDA "Enables builds of cuda code" OFF)
 option(TF_BUILD_TESTS "Enables builds of tests" ON)
 option(TF_BUILD_EXAMPLES "Enables builds of examples" ON)
 option(TF_BUILD_WORKFLOW "Enables builds of workflow library and examples" ON)
-option(TF_BUILD_AGENT_FRAMEWORK "Enables builds of agent framework" OFF)
+option(TF_BUILD_AGENT_FRAMEWORK "Enables builds of agent framework" ON)
 
 # project-specific variables
 set(TF_UTEST_DIR ${PROJECT_SOURCE_DIR}/unittests)
