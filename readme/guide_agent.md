@@ -830,9 +830,223 @@ struct CallSpec {
     };
 ```
 
-### 5.3 LLM 节点实现（基于 workflow API）
+### 5.3 提示词渲染与组装（Prompt Rendering）
 
-在 `workflow` 中，LLM 节点使用 `create_any_node` 创建，通过 `input_specs` 自动建立依赖关系：
+**核心问题**：LLM 节点接收多个输入源（系统提示词、用户提示词、知识库上下文、工具列表、对话记忆、多模态输入），需要将这些输入**渲染并组装**成最终的提示词，传递给 LLM 模型。
+
+#### 5.3.1 提示词渲染的需求分析
+
+提示词渲染是 LLM 节点的核心功能，需要解决以下问题：
+
+1. **多源输入融合**：将 `system_prompt`、`user_prompt`、`context`、`history`、`tools` 等多个输入源组合成统一的提示词
+2. **模板系统**：支持可配置的提示词模板，允许自定义不同输入源的组合方式
+3. **变量替换**：支持在模板中使用变量占位符（如 `{{context}}`、`{{tools}}`），动态替换实际内容
+4. **工具列表格式化**：将 `ToolMeta` 列表转换为符合不同 LLM 提供商标准的格式（OpenAI Function Calling、Anthropic Tool Use 等）
+5. **多模态输入集成**：将图像、音频的 base64 编码以正确格式嵌入到提示词中
+6. **上下文窗口管理**：当输入内容超过模型上下文窗口时，智能截断或摘要
+7. **对话历史格式化**：将对话记忆按照模型要求格式化为消息列表（如 OpenAI 的 messages 格式）
+
+#### 5.3.2 提示词渲染架构设计
+
+```mermaid
+graph TB
+    subgraph "输入源层"
+        SP[SystemPrompt<br/>系统提示词]
+        UP[UserPrompt<br/>用户提示词]
+        CTX[Context<br/>知识库上下文]
+        HIST[History<br/>对话记忆]
+        TOOLS[Tools<br/>工具列表]
+        IMG[ImageData<br/>图像输入]
+        AUD[AudioData<br/>音频输入]
+    end
+    
+    subgraph "提示词渲染层"
+        PR[PromptRenderer<br/>提示词渲染器]
+        PT[PromptTemplate<br/>提示词模板]
+        TF[ToolFormatter<br/>工具格式化器]
+        HM[HistoryFormatter<br/>历史格式化器]
+    end
+    
+    subgraph "输出层"
+        RENDERED[渲染后的提示词<br/>Rendered Prompt]
+        REQUEST[LLM API 请求<br/>JSON 格式]
+    end
+    
+    SP --> PR
+    UP --> PR
+    CTX --> PR
+    HIST --> HM
+    HM --> PR
+    TOOLS --> TF
+    TF --> PR
+    IMG --> PR
+    AUD --> PR
+    
+    PT --> PR
+    
+    PR --> RENDERED
+    RENDERED --> REQUEST
+    
+    style PR fill:#E8F8F5,stroke:#1ABC9C
+    style PT fill:#E8F8F5,stroke:#1ABC9C
+```
+
+#### 5.3.3 提示词渲染流程
+
+提示词渲染的主要步骤：
+
+1. **模板加载**：根据配置加载提示词模板（支持文件、字符串或代码配置）
+2. **变量提取**：从 `LLMInput` 结构体中提取所有输入变量
+3. **工具格式化**：将 `ToolMeta` 列表格式化为模型特定的工具描述格式
+4. **历史格式化**：将对话记忆格式化为消息列表（system/user/assistant 角色）
+5. **变量替换**：在模板中替换所有变量占位符
+6. **上下文截断**：检查总长度，必要时截断或摘要过长内容
+7. **多模态整合**：将图像、音频数据以 base64 格式嵌入到请求中
+
+#### 5.3.4 提示词模板示例
+
+**默认模板**（适用于 OpenAI Chat Completions）：
+
+```
+System Message:
+{{system_prompt}}
+
+Available Tools:
+{{tools}}
+
+Context from Knowledge Base:
+{{context}}
+
+Conversation History:
+{{history}}
+
+User Message:
+{{user_prompt}}
+```
+
+**带引用的模板**（支持知识库引用）：
+
+```
+You are {{system_prompt}}.
+
+Use the following context to answer the user's question. Cite sources when relevant.
+
+Context:
+{{context}}
+
+Citations: {{citations}}
+
+Conversation History:
+{{history}}
+
+Available Tools:
+{{tools}}
+
+User Question:
+{{user_prompt}}
+```
+
+#### 5.3.5 工具列表格式化实现
+
+不同 LLM 提供商对工具列表的格式要求不同，需要实现适配器：
+
+**OpenAI Function Calling 格式**：
+```json
+{
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "calculate",
+        "description": "Perform basic arithmetic operations",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "a": {"type": "number"},
+            "b": {"type": "number"},
+            "op": {"type": "string", "enum": ["+", "-", "*", "/"]}
+          },
+          "required": ["a", "b", "op"]
+        }
+      }
+    }
+  ]
+}
+```
+
+**Anthropic Tool Use 格式**：
+```json
+{
+  "tools": [
+    {
+      "name": "calculate",
+      "description": "Perform basic arithmetic operations",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "a": {"type": "number"},
+          "b": {"type": "number"},
+          "op": {"type": "string", "enum": ["+", "-", "*", "/"]}
+        },
+        "required": ["a", "b", "op"]
+      }
+    }
+  ]
+}
+```
+
+#### 5.3.6 多模态输入整合
+
+对于支持多模态的模型（如 GPT-4o、Claude 3），需要将图像和音频以特定格式嵌入：
+
+**OpenAI 多模态格式**：
+```json
+{
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        {"type": "text", "text": "What's in this image?"},
+        {
+          "type": "image_url",
+          "image_url": {
+            "url": "data:image/png;base64,{{image_data}}"
+          }
+        }
+      ]
+    }
+  ]
+}
+```
+
+**音频输入**（GPT-4o Realtime API）：
+```json
+{
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        {"type": "input_audio", "audio": "{{audio_data}}"}
+      ]
+    }
+  ]
+}
+```
+
+#### 5.3.7 上下文窗口管理
+
+当组合后的提示词超过模型上下文窗口时，需要智能管理：
+
+1. **优先级排序**：系统提示词 > 用户提示词 > 工具列表 > 上下文 > 历史对话
+2. **截断策略**：
+   - 保留所有必需内容（system_prompt、user_prompt、tools）
+   - 优先截断历史对话（保留最近的 N 轮）
+   - 对上下文进行摘要（使用 LLM 或抽取式摘要）
+3. **长度统计**：使用 Tokenizer 估算 token 数，确保不超过模型限制
+
+### 5.4 LLM 节点实现（基于 workflow API）
+
+在 `workflow` 中，LLM 节点使用 `create_any_node` 创建，通过 `input_specs` 自动建立依赖关系。**关键改进**：在 LLM 节点内部使用 `PromptRenderer` 进行提示词渲染：
 
 ```cpp
 #include <workflow/nodeflow.hpp>
@@ -854,15 +1068,20 @@ auto [llm_node, llm_task] = builder.create_any_node(
         {"AudioInput", "audio_data"}     // 可选：音频输入
     },
     // Functor: 接收输入并调用 LLM
-    [&llm_client, &stream_callback](const std::unordered_map<std::string, std::any>& inputs) {
-        // 1. 提取输入数据
+    [&llm_client, &prompt_renderer, &stream_callback](const std::unordered_map<std::string, std::any>& inputs) {
+        // 1. 提取输入数据并构建 LLMInput
         LLMInput llm_input;
         llm_input.system_prompt = std::any_cast<std::string>(inputs.at("prompt"));
         llm_input.user_prompt = std::any_cast<std::string>(inputs.at("query"));
         llm_input.context = std::any_cast<std::string>(inputs.at("context"));
         llm_input.tools = std::any_cast<std::vector<ToolMeta>>(inputs.at("tools"));
         
-        // 2. 处理可选的多模态输入
+        // 2. 处理对话历史（可选）
+        if (inputs.find("history") != inputs.end()) {
+            llm_input.history = std::any_cast<std::vector<Message>>(inputs.at("history"));
+        }
+        
+        // 3. 处理可选的多模态输入
         if (inputs.find("image_data") != inputs.end()) {
             llm_input.image_data = std::any_cast<std::string>(inputs.at("image_data"));
         }
@@ -870,8 +1089,17 @@ auto [llm_node, llm_task] = builder.create_any_node(
             llm_input.audio_data = std::any_cast<std::string>(inputs.at("audio_data"));
         }
         
-        // 3. 调用 LLM（支持流式输出）
-        LLMOutput output = llm_client.invoke(llm_input, stream_callback);
+        // 4. **关键步骤**：使用 PromptRenderer 渲染提示词
+        // PromptRenderer 负责：
+        // - 将多个输入源组合成统一的提示词
+        // - 格式化工具列表（OpenAI/Anthropic/Gemini 格式）
+        // - 格式化对话历史（messages 格式）
+        // - 处理多模态输入（图像、音频的 base64 嵌入）
+        // - 上下文窗口管理和截断
+        RenderedPrompt rendered = prompt_renderer.render(llm_input, llm_client.get_model_name());
+        
+        // 5. 调用 LLM（传入渲染后的提示词，支持流式输出）
+        LLMOutput output = llm_client.invoke_with_rendered_prompt(rendered, stream_callback);
         
         // 4. 返回输出（自动转换为 shared_future<any>）
         return std::unordered_map<std::string, std::any>{
@@ -891,10 +1119,251 @@ auto [llm_node, llm_task] = builder.create_any_node(
 
 1. **自动依赖推断**：`input_specs` 中的 `{"SystemPrompt", "prompt"}` 会自动建立 `SystemPrompt` 节点到 `LLM` 节点的依赖关系，无需手动调用 `precede`。
 2. **多源输入融合**：LLM 节点从多个源节点接收数据，包括系统提示词、用户输入、知识库上下文、记忆和工具列表。
-3. **流式输出回调**：`stream_callback` 在 LLM 生成每个 token 时触发，可以立即推送到 SSE/WebSocket 或 GUI 界面。
-4. **类型安全**：输入数据结构化，使用 `std::any_cast` 进行类型转换，在运行时检查类型匹配。
+3. **提示词渲染**：**核心创新**：使用 `PromptRenderer` 将多个输入源渲染成最终的提示词，支持模板化、变量替换、工具格式化、多模态整合等功能。
+4. **流式输出回调**：`stream_callback` 在 LLM 生成每个 token 时触发，可以立即推送到 SSE/WebSocket 或 GUI 界面。
+5. **类型安全**：输入数据结构化，使用 `std::any_cast` 进行类型转换，在运行时检查类型匹配。
 
-### 5.4 知识库 Source 节点设计
+### 5.5 提示词渲染器实现示例
+
+以下展示 `PromptRenderer` 的核心实现：
+
+```cpp
+/**
+ * @brief 渲染后的提示词结构
+ * 包含渲染后的文本内容和多模态数据
+ */
+struct RenderedPrompt {
+    std::string rendered_text;              // 渲染后的文本提示词
+    std::vector<json> messages;             // 格式化后的消息列表（OpenAI messages 格式）
+    json tools_json;                        // 格式化后的工具列表（JSON）
+    std::optional<std::string> image_data;  // 图像 base64（已嵌入 messages）
+    std::optional<std::string> audio_data;  // 音频 base64（已嵌入 messages）
+    int total_tokens;                       // 估算的总 token 数
+};
+
+/**
+ * @brief 提示词渲染器
+ * 负责将 LLMInput 渲染成最终的提示词
+ */
+class PromptRenderer {
+private:
+    std::shared_ptr<PromptTemplate> template_;  // 提示词模板
+    std::map<std::string, std::shared_ptr<ToolFormatter>> tool_formatters_;  // 工具格式化器
+    
+public:
+    /**
+     * @brief 渲染提示词
+     * @param input LLM 输入（包含所有输入源）
+     * @param model_name 模型名称（用于选择格式化策略）
+     * @return 渲染后的提示词
+     */
+    RenderedPrompt render(const LLMInput& input, const std::string& model_name) {
+        RenderedPrompt rendered;
+        
+        // 1. 格式化工具列表（根据模型选择不同的格式化器）
+        std::shared_ptr<ToolFormatter> formatter = get_tool_formatter(model_name);
+        rendered.tools_json = formatter->format_tools(input.tools);
+        std::string tools_text = formatter->format_tools_as_text(input.tools);
+        
+        // 2. 格式化对话历史
+        std::string history_text = format_history(input.history, model_name);
+        rendered.messages = format_history_as_messages(input.history);
+        
+        // 3. 应用模板并替换变量
+        std::map<std::string, std::string> variables = {
+            {"system_prompt", input.system_prompt},
+            {"user_prompt", input.user_prompt},
+            {"context", input.context},
+            {"history", history_text},
+            {"tools", tools_text}
+        };
+        rendered.rendered_text = template_->render(variables);
+        
+        // 4. 整合多模态输入
+        if (input.image_data.has_value()) {
+            rendered.image_data = input.image_data;
+            add_image_to_messages(rendered.messages, *input.image_data);
+        }
+        if (input.audio_data.has_value()) {
+            rendered.audio_data = input.audio_data;
+            add_audio_to_messages(rendered.messages, *input.audio_data);
+        }
+        
+        // 5. 估算 token 数并检查上下文窗口
+        rendered.total_tokens = estimate_tokens(rendered);
+        if (rendered.total_tokens > get_max_tokens(model_name)) {
+            rendered = truncate_prompt(rendered, model_name);
+        }
+        
+        return rendered;
+    }
+    
+private:
+    // 获取工具格式化器（根据模型选择）
+    std::shared_ptr<ToolFormatter> get_tool_formatter(const std::string& model_name) {
+        if (model_name.find("gpt") != std::string::npos || 
+            model_name.find("openai") != std::string::npos) {
+            return tool_formatters_["openai"];
+        } else if (model_name.find("claude") != std::string::npos ||
+                 model_name.find("anthropic") != std::string::npos) {
+            return tool_formatters_["anthropic"];
+        } else if (model_name.find("gemini") != std::string::npos) {
+            return tool_formatters_["gemini"];
+        }
+        return tool_formatters_["default"];  // 默认格式
+    }
+    
+    // 格式化对话历史为文本
+    std::string format_history(const std::vector<Message>& history, const std::string& model_name) {
+        std::ostringstream oss;
+        for (const auto& msg : history) {
+            oss << msg.role << ": " << msg.content << "\n";
+        }
+        return oss.str();
+    }
+    
+    // 格式化对话历史为消息列表（OpenAI messages 格式）
+    std::vector<json> format_history_as_messages(const std::vector<Message>& history) {
+        std::vector<json> messages;
+        for (const auto& msg : history) {
+            messages.push_back({
+                {"role", msg.role},
+                {"content", msg.content}
+            });
+        }
+        return messages;
+    }
+    
+    // 将图像添加到消息列表
+    void add_image_to_messages(std::vector<json>& messages, const std::string& image_data) {
+        if (!messages.empty()) {
+            // 在最后一个用户消息中添加图像
+            if (messages.back()["role"] == "user") {
+                if (messages.back()["content"].is_string()) {
+                    // 转换为数组格式
+                    std::string text = messages.back()["content"];
+                    messages.back()["content"] = json::array({
+                        {"type", "text"}, {"text", text},
+                        {"type", "image_url"},
+                        {"image_url", {{"url", "data:image/png;base64," + image_data}}}
+                    });
+                } else if (messages.back()["content"].is_array()) {
+                    messages.back()["content"].push_back({
+                        {"type", "image_url"},
+                        {"image_url", {{"url", "data:image/png;base64," + image_data}}}
+                    });
+                }
+            }
+        }
+    }
+    
+    // 估算 token 数（简化实现，实际应使用 Tokenizer）
+    int estimate_tokens(const RenderedPrompt& rendered) {
+        // 简单估算：平均每个字符 0.25 个 token（中文约 2 字符/token，英文约 4 字符/token）
+        return rendered.rendered_text.size() / 4;
+    }
+    
+    // 截断提示词（保留优先级高的内容）
+    RenderedPrompt truncate_prompt(const RenderedPrompt& rendered, const std::string& model_name) {
+        RenderedPrompt truncated = rendered;
+        int max_tokens = get_max_tokens(model_name);
+        
+        // 保留 system_prompt 和 user_prompt，截断 context 和 history
+        // 实际实现应根据优先级智能截断
+        // ...
+        
+        return truncated;
+    }
+};
+
+/**
+ * @brief 提示词模板（支持变量替换）
+ */
+class PromptTemplate {
+private:
+    std::string template_str_;
+    std::regex var_pattern_{R"(\{\{(\w+)\}\})"};  // 匹配 {{variable}}
+    
+public:
+    explicit PromptTemplate(const std::string& template_str) : template_str_(template_str) {}
+    
+    /**
+     * @brief 渲染模板，替换所有变量
+     */
+    std::string render(const std::map<std::string, std::string>& variables) {
+        std::string result = template_str_;
+        
+        std::sregex_iterator iter(result.begin(), result.end(), var_pattern_);
+        std::sregex_iterator end;
+        
+        std::vector<std::pair<size_t, size_t>> replacements;
+        for (; iter != end; ++iter) {
+            std::smatch match = *iter;
+            std::string var_name = match[1].str();
+            
+            if (variables.find(var_name) != variables.end()) {
+                replacements.push_back({match.position(), match.length()});
+            }
+        }
+        
+        // 从后往前替换（避免位置偏移）
+        for (auto it = replacements.rbegin(); it != replacements.rend(); ++it) {
+            std::string var_name = result.substr(it->first + 2, it->second - 4);
+            std::string value = variables.at(var_name);
+            result.replace(it->first, it->second, value);
+        }
+        
+        return result;
+    }
+};
+
+/**
+ * @brief 工具格式化器虚基类
+ */
+class ToolFormatter {
+public:
+    virtual ~ToolFormatter() = default;
+    
+    // 格式化为 JSON（供 API 使用）
+    virtual json format_tools(const std::vector<ToolMeta>& tools) = 0;
+    
+    // 格式化为文本（供模板使用）
+    virtual std::string format_tools_as_text(const std::vector<ToolMeta>& tools) = 0;
+};
+
+/**
+ * @brief OpenAI 工具格式化器
+ */
+class OpenAIToolFormatter : public ToolFormatter {
+public:
+    json format_tools(const std::vector<ToolMeta>& tools) override {
+        json tools_json = json::array();
+        for (const auto& tool : tools) {
+            tools_json.push_back({
+                {"type", "function"},
+                {"function", {
+                    {"name", tool.name},
+                    {"description", tool.description},
+                    {"parameters", tool.schema}
+                }}
+            });
+        }
+        return tools_json;
+    }
+    
+    std::string format_tools_as_text(const std::vector<ToolMeta>& tools) override {
+        std::ostringstream oss;
+        oss << "Available tools:\n";
+        for (const auto& tool : tools) {
+            oss << "- " << tool.name << ": " << tool.description << "\n";
+            oss << "  Parameters: " << tool.schema.dump(2) << "\n";
+        }
+        return oss.str();
+    }
+};
+```
+
+### 5.6 知识库 Source 节点设计
 
 知识库节点作为 **Source 节点**，为后续节点提供查询 API。这种设计使得知识库成为一个可复用的数据源，可以被多个节点（如 LLM 节点、工具调用节点）查询：
 
@@ -929,43 +1398,95 @@ auto [kb_source, kb_task] = builder.create_any_source(
 3. **多模态支持**：知识库节点可以同时检索文本、图像、音频等多种模态，并返回融合后的上下文。
 4. **引用追踪**：知识库节点可以返回引文信息（citations），供 LLM 节点在生成答案时引用。
 
-### 5.5 LLM 客户端实现示例
+### 5.7 LLM 客户端实现示例
 
-LLM 客户端负责与模型服务通信，支持流式输出和多模态输入：
+LLM 客户端负责与模型服务通信，支持流式输出和多模态输入。**关键改进**：使用 `RenderedPrompt` 构建 API 请求，而非直接使用 `LLMInput`。
+
+#### 5.7.1 LLMClient 实现
 
 ```cpp
 class LLMClient {
 private:
-    std::string api_endpoint_;
+    std::shared_ptr<PromptRenderer> prompt_renderer_;  // 提示词渲染器
+    std::map<std::string, std::shared_ptr<ModelAdapter>> adapters_;
+    std::string default_provider_;
+    
+public:
+    // 设置提示词渲染器
+    void set_prompt_renderer(std::shared_ptr<PromptRenderer> renderer) {
+        prompt_renderer_ = renderer;
+    }
+    
+    // 调用 LLM（内部自动渲染提示词）
+    LLMOutput invoke(const LLMInput& input, 
+                    std::function<void(std::string_view)> on_stream) {
+        // 1. 使用 PromptRenderer 渲染提示词
+        if (!prompt_renderer_) {
+            throw std::runtime_error("PromptRenderer not set");
+        }
+        
+        std::string model_name = get_model_name();
+        RenderedPrompt rendered = prompt_renderer_->render(input, model_name);
+        
+        // 2. 使用渲染后的提示词调用适配器
+        return invoke_with_rendered(rendered, on_stream);
+    }
+    
+    // 使用已渲染的提示词调用 LLM（高级接口）
+    LLMOutput invoke_with_rendered(const RenderedPrompt& rendered,
+                                   std::function<void(std::string_view)> on_stream) {
+        auto adapter = adapters_[default_provider_];
+        
+        // 调用适配器的 invoke_with_rendered 方法
+        auto future = adapter->invoke_with_rendered(rendered, on_stream);
+        return future.get();  // 同步等待（实际应使用异步）
+    }
+    
+private:
+    std::string get_model_name() const {
+        return adapters_.at(default_provider_)->get_model_name();
+    }
+};
+```
+
+#### 5.7.2 ModelAdapter 实现（以 OpenAI 为例）
+
+```cpp
+class OpenAIAdapter : public ModelAdapter {
+private:
     std::string api_key_;
+    std::string base_url_;
     HTTPClient http_client_;
     
 public:
-    LLMOutput invoke(const LLMInput& input, 
-                    std::function<void(std::string_view)> on_stream) {
-        // 1. 构建请求（OpenAI Chat Completions 格式）
-        json request = build_openai_request(input);
+    // 使用已渲染的提示词调用 LLM
+    std::future<LLMOutput> invoke_with_rendered(
+        const RenderedPrompt& rendered,
+        std::function<void(std::string_view)> stream_callback = nullptr
+    ) override {
+        // 1. 构建 OpenAI API 请求（使用 RenderedPrompt）
+        json request = build_openai_request(rendered);
         
         // 2. 发送流式请求
         auto response = http_client_.post_stream("/v1/chat/completions", request);
         
-        // 3. 处理流式响应
+        // 3. 处理流式响应（同之前实现）
         LLMOutput output;
         std::string accumulated_text;
         std::vector<json> tool_calls_buffer;
         
         for (auto& chunk : response.stream()) {
-            // 提取 token
             if (chunk.contains("choices") && chunk["choices"].is_array()) {
                 auto& delta = chunk["choices"][0]["delta"];
                 
                 if (delta.contains("content")) {
                     std::string token = delta["content"].get<std::string>();
                     accumulated_text += token;
-                    on_stream(token);  // 实时推送 token
+                    if (stream_callback) {
+                        stream_callback(token);  // 实时推送 token
+                    }
                 }
                 
-                // 检查工具调用
                 if (delta.contains("tool_calls")) {
                     auto& tool_call = delta["tool_calls"][0];
                     tool_calls_buffer.push_back(tool_call);
@@ -986,52 +1507,64 @@ public:
         }
         
         output.final_answer = accumulated_text;
-        output.is_final = output.tool_calls.empty();  // 无工具调用则视为最终答案
+        output.is_final = output.tool_calls.empty();
         output.reasoning = extract_reasoning(accumulated_text);
         
-        return output;
+        return std::async(std::launch::deferred, [output]() { return output; });
     }
     
 private:
-    json build_openai_request(const LLMInput& input) {
+    // **关键改进**：使用 RenderedPrompt 构建请求
+    json build_openai_request(const RenderedPrompt& rendered) {
         json request = {
             {"model", "gpt-4o"},
-            {"messages", json::array({
-                {{"role", "system"}, {"content", input.system_prompt}},
-                {{"role", "user"}, {"content", input.user_prompt}}
-            })},
+            {"messages", rendered.messages},  // 直接使用渲染后的 messages
+            {"tools", rendered.tools_json},     // 直接使用渲染后的 tools_json
             {"stream", true},
             {"temperature", 0.7}
         };
         
-        // 添加工具列表
-        json tools = json::array();
-        for (const auto& tool : input.tools) {
-            tools.push_back({
-                {"type", "function"},
-                {"function", {
-                    {"name", tool.name},
-                    {"description", tool.description},
-                    {"parameters", tool.schema}
-                }}
-            });
-        }
-        request["tools"] = tools;
-        
-        // 添加多模态输入（如果是 GPT-4o 等支持多模态的模型）
-        if (input.image_data.has_value()) {
-            request["messages"][1]["content"].push_back({
-                {"type", "image_url"},
-                {"image_url", {{"url", "data:image/png;base64," + *input.image_data}}}
-            });
-        }
+        // 注意：image_data 和 audio_data 已经嵌入到 rendered.messages 中
+        // 无需额外处理
         
         return request;
     }
 };
 ```
 
-`call_llm_model` 函数内部使用 OpenAI 或其他模型的客户端，通过接口参数控制温度、Top P 等生成参数，并将检索内容和工具列表拼接到提示中。若模型支持视觉或音频输入，则在 `multimodal_inputs` 字段中传递预编码的向量，并在 prompt 中引用相关标记。
+#### 5.7.3 数据流总结
+
+**完整数据流**：
+
+1. **Workflow 节点层** → **LLMInput**：
+   - SystemPrompt 节点 → `system_prompt: string`
+   - UserInput 节点 → `user_prompt: string`
+   - KnowledgeBase 节点 → `context: string`
+   - Memory 节点 → `history: vector<Message>`
+   - ToolList 节点 → `tools: vector<ToolMeta>`
+   - ImageInput/AudioInput 节点 → `image_data/audio_data: optional<string>`
+
+2. **LLMInput** → **RenderedPrompt**（在 LLM 节点或 LLMClient 中）：
+   - `PromptRenderer::render()` 执行：
+     - `ToolFormatter::format_tools()` → `tools_json` + `tools_text`
+     - `HistoryFormatter::format_as_messages()` → `messages` + `history_text`
+     - `PromptTemplate::render()` → `rendered_text`
+     - 多模态整合 → `messages` 中包含图像/音频
+     - 上下文窗口管理 → 截断过长内容
+
+3. **RenderedPrompt** → **LLM API Request**（在 ModelAdapter 中）：
+   - **主要使用**：`RenderedPrompt.messages`（包含系统提示词、用户提示词、历史对话、多模态内容）
+   - **主要使用**：`RenderedPrompt.tools_json`（工具定义，用于 Function Calling）
+   - **可选使用**：`RenderedPrompt.rendered_text`（部分模型可能直接使用文本）
+
+4. **LLM API Request** → **LLM 模型**：
+   - 最终发送给 LLM 服务的是 JSON 格式的 API 请求
+   - 包含格式化后的 `messages` 和 `tools` 字段
+
+**关键要点**：
+- **传入 LLM 的是**：`RenderedPrompt.messages`（主要）和 `RenderedPrompt.tools_json`（工具定义）
+- **`rendered_text`**：主要用于日志和调试，部分模型可能直接使用文本格式
+- **多模态数据**：已嵌入到 `messages` 中，适配器无需额外处理
 
 ## 六、多模态支持与融合实现
 
