@@ -142,17 +142,33 @@ set(AGENT_SOURCES
     src/ui/cli_handler.cpp
     src/ui/gui_handler.cpp
     src/ui/web_handler.cpp
+    src/node/node_factory.cpp
+    src/node/llm_node.cpp
+    src/node/knowledge_base_node.cpp
+    src/node/tool_call_node.cpp
+    src/node/agent_loop_node.cpp
+    src/node/ui_sink_node.cpp
 )
 
 # 头文件
 set(AGENT_HEADERS
     include/agent/types.hpp
     include/agent/llm_client.hpp
+    include/agent/prompt_renderer.hpp
     include/agent/toolbus.hpp
+    include/agent/mcp_client.hpp
     include/agent/memory.hpp
     include/agent/vectorstore.hpp
+    include/agent/encoder.hpp
     include/agent/graph_executor.hpp
     include/agent/ui_manager.hpp
+    include/node/node_factory.hpp
+    include/node/llm_node.hpp
+    include/node/knowledge_base_node.hpp
+    include/node/tool_call_node.hpp
+    include/node/agent_loop_node.hpp
+    include/node/ui_sink_node.hpp
+    include/node/nodes.hpp
 )
 
 # 创建库
