@@ -1020,37 +1020,45 @@ GraphBuilder::create_loop_decl(const std::string& name,
   return {node, body_task};
 }
 
-// Master-style create_loop_decl: accepts pre-created body_task
-tf::Task GraphBuilder::create_loop_decl(const std::string& name,
+// Declarative loop with pre-created body_task (master mode)
+// input_specs are used for condition_func inputs but dependencies are NOT automatically set
+tf::Task
+GraphBuilder::create_loop_decl(const std::string& name,
+                               const std::vector<std::pair<std::string, std::string>>& input_specs,
                                         tf::Task& body_task,
-                                        std::function<int()> condition_func,
+                               std::function<int(const std::unordered_map<std::string, std::any>&)> condition_func,
                                         tf::Task exit_task) {
-  // Create the condition controller
-  auto cond_task = taskflow_.emplace(std::move(condition_func)).name(name);
+  // Get futures from source nodes for condition function inputs
+  std::unordered_map<std::string, std::shared_future<std::any>> input_futures;
+  for (const auto& [source_node, source_key] : input_specs) {
+    input_futures[source_key] = get_output(source_node, source_key);
+  }
+  
+  // Create condition task that receives inputs from input_specs and calls condition function
+  // Note: We do NOT automatically set dependencies here - user must set them manually
+  tf::Task cond_task = taskflow_.emplace([fin = std::move(input_futures), fn = std::move(condition_func)]() mutable -> int {
+    // Extract input values from futures
+    std::unordered_map<std::string, std::any> in_vals;
+    for (const auto& [key, fut] : fin) {
+      in_vals[key] = fut.get();
+    }
+    // Call condition function with inputs from input_specs
+    return fn(in_vals);
+  }).name(name + "_condition");
+  
   // Wire loop: body -> cond
   // cond returns 0 for loop-back (body), non-zero for exit
-  // Use separate precede calls (like examples/condition.cpp)
-  // Return 0 executes first precede (body), return 1 executes second precede (exit)
   body_task.precede(cond_task);
-  cond_task.precede(body_task, exit_task);  // Index 0: continue loop
-  tasks_[name] = cond_task;
-  return cond_task;
-}
-
-// Master-style create_loop_decl with depend_on_nodes
-tf::Task GraphBuilder::create_loop_decl(const std::string& name,
-                                        const std::vector<std::string>& depend_on_nodes,
-                                        tf::Task& body_task,
-                                        std::function<int()> condition_func,
-                                        tf::Task exit_task) {
-  auto cond_task = create_loop_decl(name, body_task, std::move(condition_func), exit_task);
-  for (const auto& n : depend_on_nodes) {
-    auto it = tasks_.find(n);
-    if(it != tasks_.end() && it->second != body_task) {
-      // Only body depends on predecessors; condition is triggered by body
-      it->second.precede(body_task);
-    }
+  // Check if exit_task is valid using empty() method
+  if (!exit_task.empty()) {
+    cond_task.precede(body_task, exit_task);  // Index 0: continue loop, Index 1: exit
+  } else {
+    cond_task.precede(body_task);  // Only body as successor
   }
+  
+  // Store condition task in tasks_ map for potential future reference
+  tasks_[name] = cond_task;
+  
   return cond_task;
 }
 
