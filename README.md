@@ -378,6 +378,12 @@ The **Workflow** library is a high-level **declarative dataflow** abstraction bu
 
 ### What's New (Workflow)
 
+- **✨ NEW: Taskflow Algorithm Nodes** - Declarative API wrappers for Taskflow's parallel algorithms:
+  - `create_for_each` - Parallel iteration over containers with shared parameter support
+  - `create_for_each_index` - Parallel iteration over index ranges (range passed as function parameters)
+  - `create_reduce` - Parallel reduction operations with shared parameter support
+  - `create_transform` - Parallel transformation operations
+  - All algorithms use `std::function` for explicit function signatures and support automatic dependency inference
 - `create_subtask(name, builder_fn)`: build-and-run a fresh subgraph at task execution (recommended for loop bodies).
 - Sink callbacks: `create_any_sink(..., callback)` and `create_typed_sink<...>(..., callback)` to collect/process final results.
 - Cleaner console: internal node prints removed; use callbacks for precise logs.
@@ -446,6 +452,7 @@ int main() {
 - ✅ **Automatic Dependencies**: Dependencies inferred from input specifications
 - ✅ **Type Inference**: Output types auto-inferred from functor return type
 - ✅ **Adapter Tasks**: Automatically created for Typed → Any connections
+- ✅ **Parallel Algorithms**: Declarative wrappers for Taskflow's parallel algorithms (`for_each`, `reduce`, `transform`, `for_each_index`)
 
 ## Building Workflow Examples
 
@@ -460,9 +467,15 @@ cmake --build . --target declarative_example
 # Or build advanced control flow example
 cmake --build . --target advanced_control_flow
 ./workflow/advanced_control_flow
+
+# Or build algorithm nodes example
+cmake --build . --target algorithm_example
+./workflow/algorithm_example
 ```
 
 **Advanced Control Flow**: The workflow library also supports condition nodes, multi-condition nodes, pipeline nodes, and loop nodes with declarative API. See `workflow/examples/advanced_control_flow.cpp` for examples.
+
+**Parallel Algorithms**: The workflow library provides declarative API wrappers for Taskflow's parallel algorithms (`create_for_each`, `create_for_each_index`, `create_reduce`, `create_transform`) with support for shared parameters and automatic dependency inference. See `workflow/examples/algorithm_example.cpp` for examples.
 
 DOT snapshots (examples):
 

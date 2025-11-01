@@ -996,7 +996,7 @@ The Workflow library provides declarative wrappers for Taskflow's parallel algor
 
 ### Parallel Iteration: `create_for_each`
 
-Iterate over container elements in parallel:
+Iterate over container elements in parallel with support for shared parameters:
 
 ```cpp
 std::vector<int> numbers = {1, 2, 3, 4, 5};
@@ -1006,51 +1006,108 @@ auto [input, _] = builder.create_any_source("Input",
   {{"data", std::any{numbers}}}
 );
 
+// Optional: Create shared parameter source
+auto [shared_params, _] = builder.create_any_source("SharedParams",
+  {{"multiplier", std::any{2}}}
+);
+
 // Parallel for_each: apply function to each element
+// Function signature: void(ElementType, shared_params&)
 auto [for_each_node, for_each_task] = builder.create_for_each<std::vector<int>>(
   "PrintElements",
-  {{"Input", "data"}},  // Input: container from Input node
-  [](int value) {
-    std::cout << "Processing: " << value << "\n";
-  },
+  {{"Input", "data"}, {"SharedParams", "multiplier"}},  // Container + shared params
+  std::function<void(int, std::unordered_map<std::string, std::any>&)>(
+    [](int value, std::unordered_map<std::string, std::any>& shared_params) {
+      int multiplier = std::any_cast<int>(shared_params.at("multiplier"));
+      std::cout << "Processing: " << value << " * " << multiplier 
+                << " = " << (value * multiplier) << "\n";
+      // shared_params is modifiable and shared across all iterations
+    }
+  ),
   {}  // No outputs
 );
 ```
+
+**API Signature**:
+```cpp
+template <typename Container>
+std::pair<std::shared_ptr<AnyNode>, tf::Task>
+create_for_each(const std::string& name,
+                const std::vector<std::pair<std::string, std::string>>& input_specs,
+                std::function<void(typename Container::value_type, 
+                                  std::unordered_map<std::string, std::any>&)> callable,
+                const std::vector<std::string>& output_keys = {});
+```
+
+**Parameters**:
+- `input_specs`: First element is the container, rest are shared parameters (optional)
+- `callable`: Function receiving `(element, shared_params)` where `shared_params` is modifiable
+- `output_keys`: Optional output keys for chaining
 
 **Use Cases**:
 - Processing each element independently
 - Printing/logging container elements
 - Side-effect operations on elements
+- Custom processing with shared state modification
 
 ### Parallel Iteration by Index: `create_for_each_index`
 
-Iterate over index ranges in parallel:
+Iterate over index ranges in parallel with index range passed as function parameters:
 
 ```cpp
-// Create source with index range parameters
-auto [index_input, _] = builder.create_typed_source("IndexInput",
-  std::make_tuple(0, 20, 2),  // first=0, last=20, step=2
-  {"first", "last", "step"}
+// Optional: Create shared parameter source
+auto [shared_params, _] = builder.create_any_source("SharedParams",
+  {{"multiplier", std::any{2}}}
 );
 
 // Parallel for_each_index: iterate over indices
-auto [index_node, index_task] = builder.create_for_each_index<int, int, int>(
+// Index range is passed as function arguments, not from input_specs
+auto [index_node, index_task] = builder.create_for_each_index<int>(
   "ProcessIndices",
-  {{"IndexInput", "first"}, {"IndexInput", "last"}, {"IndexInput", "step"}},
-  [](int i) {
-    std::cout << "Index: " << i << "\n";
-  }
+  {{"SharedParams", "multiplier"}},  // Optional shared parameters
+  0,   // first: beginning index (inclusive)
+  20,  // last: ending index (exclusive)
+  2,   // step: step size
+  std::function<void(int, std::unordered_map<std::string, std::any>&)>(
+    [](int index, std::unordered_map<std::string, std::any>& shared_params) {
+      int multiplier = std::any_cast<int>(shared_params.at("multiplier"));
+      std::cout << "Index: " << index << ", multiplied: " 
+                << (index * multiplier) << "\n";
+    }
+  ),
+  {}  // No outputs
 );
 ```
+
+**API Signature**:
+```cpp
+template <typename IndexType>
+std::pair<std::shared_ptr<AnyNode>, tf::Task>
+create_for_each_index(const std::string& name,
+                      const std::vector<std::pair<std::string, std::string>>& input_specs,
+                      IndexType first,      // Beginning index (inclusive)
+                      IndexType last,       // Ending index (exclusive)
+                      IndexType step,      // Step size
+                      std::function<void(IndexType, 
+                                        std::unordered_map<std::string, std::any>&)> callable,
+                      const std::vector<std::string>& output_keys = {});
+```
+
+**Parameters**:
+- `input_specs`: Optional shared parameters (index range is NOT from input_specs)
+- `first`, `last`, `step`: Index range parameters passed directly
+- `callable`: Function receiving `(index, shared_params)` where `shared_params` is modifiable
+- `output_keys`: Optional output keys for chaining
 
 **Use Cases**:
 - Numeric range processing
 - Array index-based operations
 - Generating sequences in parallel
+- Custom processing with shared state modification
 
 ### Parallel Reduction: `create_reduce`
 
-Reduce a container to a single value using a binary operator:
+Reduce a container to a single value using a binary operator with support for shared parameters:
 
 ```cpp
 std::vector<int> numbers = {1, 2, 3, 4, 5};
@@ -1060,28 +1117,59 @@ auto [input, _] = builder.create_any_source("Input",
   {{"data", std::any{numbers}}}
 );
 
-// Parallel reduce: compute sum
+// Optional: Create shared parameter source
+auto [shared_params, _] = builder.create_any_source("SharedParams",
+  {{"weight", std::any{2}}}
+);
+
+// Parallel reduce: compute weighted sum
+// Function signature: T(T, ElementType, shared_params&)
 int sum_result = 0;
 auto [reduce_node, reduce_task] = builder.create_reduce<int, std::vector<int>>(
   "SumElements",
-  {{"Input", "data"}},
-  sum_result,  // Initial value (captured by reference)
-  [](int acc, int val) { return acc + val; },  // Binary operator
+  {{"Input", "data"}, {"SharedParams", "weight"}},  // Container + shared params
+  sum_result,  // Initial value (captured by reference - must remain alive)
+  std::function<int(int, int, std::unordered_map<std::string, std::any>&)>(
+    [](int acc, int val, std::unordered_map<std::string, std::any>& shared_params) -> int {
+      int weight = std::any_cast<int>(shared_params.at("weight"));
+      return acc + (val * weight);  // Weighted reduction
+    }
+  ),
   {"sum"}  // Output key
 );
 
 // Access result via output key or sum_result variable
 ```
 
+**API Signature**:
+```cpp
+template <typename T, typename Container>
+std::pair<std::shared_ptr<AnyNode>, tf::Task>
+create_reduce(const std::string& name,
+              const std::vector<std::pair<std::string, std::string>>& input_specs,
+              T& init,  // Initial value (by reference - must remain alive)
+              std::function<T(T, typename Container::value_type,
+                             std::unordered_map<std::string, std::any>&)> bop,
+              const std::vector<std::string>& output_keys = {"result"});
+```
+
+**Parameters**:
+- `input_specs`: First element is the container, rest are shared parameters (optional)
+- `init`: Initial value captured by reference - must remain alive during execution
+- `bop`: Binary operator receiving `(accumulator, element, shared_params)` where `shared_params` is modifiable
+- `output_keys`: Output key for the reduced result (default: "result")
+
 **Important Notes**:
 - `init` is captured **by reference** - must remain alive during execution
 - Result is stored in `init` AND exposed via output key
 - Binary operator must be associative and commutative for correctness
+- Shared parameters are extracted once and passed to each reduction operation
 
 **Use Cases**:
 - Sum, product, min, max operations
 - Aggregating container values
 - Statistical computations
+- Custom reduction with shared state
 
 ### Parallel Transformation: `create_transform`
 
@@ -1096,14 +1184,16 @@ auto [input_node, _] = builder.create_any_source("Input",
 );
 
 // Parallel transform: square each element
+// Function signature: OutputElement(InputElement)
 auto [transform_node, transform_task] = builder.create_transform<
   std::vector<int>,      // Input container type
-  std::vector<int>,      // Output container type
-  std::function<int(int)> // Unary operation type
+  std::vector<int>       // Output container type
 >(
   "SquareElements",
   {{"Input", "data"}},
-  [](int x) { return x * x; },  // Unary operation
+  std::function<int(int)>([](int x) -> int {
+    return x * x;  // Unary operation
+  }),
   {"squared"}  // Output key
 );
 
@@ -1112,6 +1202,22 @@ auto [sink, _] = builder.create_any_sink("Sink",
   {{"SquareElements", "squared"}}
 );
 ```
+
+**API Signature**:
+```cpp
+template <typename InputContainer, typename OutputContainer>
+std::pair<std::shared_ptr<AnyNode>, tf::Task>
+create_transform(const std::string& name,
+                const std::vector<std::pair<std::string, std::string>>& input_specs,
+                std::function<typename OutputContainer::value_type(
+                  typename InputContainer::value_type)> unary_op,
+                const std::vector<std::string>& output_keys = {"result"});
+```
+
+**Parameters**:
+- `input_specs`: Input specification for the container (exactly one input)
+- `unary_op`: Unary operation receiving `InputElement` and returning `OutputElement`
+- `output_keys`: Output key for the transformed container (default: "result")
 
 **Use Cases**:
 - Element-wise mathematical operations
@@ -1141,17 +1247,24 @@ int main() {
   auto [for_each, _] = builder.create_for_each<std::vector<int>>(
     "PrintElements",
     {{"Input", "data"}},
-    [](int val) { std::cout << "Element: " << val << "\n"; }
+    std::function<void(int, std::unordered_map<std::string, std::any>&)>(
+      [](int val, std::unordered_map<std::string, std::any>& shared_params) {
+        (void)shared_params;  // Suppress unused parameter warning
+        std::cout << "Element: " << val << "\n";
+      }
+    ),
+    {}
   );
 
   // 3. Parallel transform: square elements
   auto [transform, _] = builder.create_transform<
-    std::vector<int>, std::vector<int>,
-    std::function<int(int)>
+    std::vector<int>, std::vector<int>
   >(
     "SquareElements",
     {{"Input", "data"}},
-    [](int x) { return x * x; },
+    std::function<int(int)>([](int x) -> int {
+      return x * x;
+    }),
     {"squared"}
   );
 
@@ -1161,7 +1274,12 @@ int main() {
     "SumSquares",
     {{"SquareElements", "squared"}},
     sum,
-    [](int acc, int val) { return acc + val; },
+    std::function<int(int, int, std::unordered_map<std::string, std::any>&)>(
+      [](int acc, int val, std::unordered_map<std::string, std::any>& shared_params) -> int {
+        (void)shared_params;  // Suppress unused parameter warning
+        return acc + val;
+      }
+    ),
     {"sum"}
   );
 

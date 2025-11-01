@@ -915,32 +915,55 @@ builder
 **声明式 API**：
 
 ```cpp
-// for_each - 并行迭代容器
+// for_each - 并行迭代容器（支持共享参数）
 builder.create_for_each<Container>("Name",
-  {{"SourceNode", "container_key"}},
-  [](ElementType elem) { /* process */ },
+  {{"SourceNode", "container_key"}, {"SharedParams", "param_key"}},  // 第一个是容器，其余是共享参数
+  std::function<void(ElementType, std::unordered_map<std::string, std::any>&)>(
+    [](ElementType elem, std::unordered_map<std::string, std::any>& shared_params) {
+      // shared_params 可修改，在所有迭代间共享
+      /* process */
+    }
+  ),
   {"output_keys"}  // 可选
 );
 
-// for_each_index - 并行迭代索引范围
-builder.create_for_each_index<B, E, S>("Name",
-  {{"SourceNode", "first"}, {"SourceNode", "last"}, {"SourceNode", "step"}},
-  [](IndexType idx) { /* process */ }
+// for_each_index - 并行迭代索引范围（索引范围作为函数参数）
+builder.create_for_each_index<IndexType>("Name",
+  {{"SharedParams", "param_key"}},  // 可选的共享参数（索引范围不在 input_specs 中）
+  0,   // first: 起始索引（包含）
+  20,  // last: 结束索引（不包含）
+  2,   // step: 步长
+  std::function<void(IndexType, std::unordered_map<std::string, std::any>&)>(
+    [](IndexType idx, std::unordered_map<std::string, std::any>& shared_params) {
+      // shared_params 可修改，在所有迭代间共享
+      /* process */
+    }
+  ),
+  {}  // 无输出
 );
 
-// reduce - 并行归约
-T init = /* initial value */;
+// reduce - 并行归约（支持共享参数）
+T init = /* initial value */;  // 必须保持存活（通过引用捕获）
 builder.create_reduce<T, Container>("Name",
-  {{"SourceNode", "container_key"}},
-  init,  // 通过引用捕获
-  [](T acc, ElementType val) { return acc + val; },
+  {{"SourceNode", "container_key"}, {"SharedParams", "param_key"}},  // 第一个是容器，其余是共享参数
+  init,  // 通过引用捕获，必须保持存活
+  std::function<T(T, ElementType, std::unordered_map<std::string, std::any>&)>(
+    [](T acc, ElementType val, std::unordered_map<std::string, std::any>& shared_params) -> T {
+      // shared_params 可修改，在所有归约操作间共享
+      return /* reduction */;
+    }
+  ),
   {"result"}
 );
 
 // transform - 并行变换
 builder.create_transform<InputContainer, OutputContainer>("Name",
-  {{"SourceNode", "container_key"}},
-  [](InputElement elem) { return /* transform */; },
+  {{"SourceNode", "container_key"}},  // 容器输入（仅一个）
+  std::function<OutputElement(InputElement)>(
+    [](InputElement elem) -> OutputElement {
+      return /* transform */;
+    }
+  ),
   {"result"}
 );
 ```
@@ -951,6 +974,9 @@ builder.create_transform<InputContainer, OutputContainer>("Name",
 - ✅ 自动依赖推断
 - ✅ 并行执行（Taskflow 调度器）
 - ✅ 无缝集成到现有工作流中
+- ✅ 支持共享参数（`for_each`, `for_each_index`, `reduce`）
+- ✅ 使用 `std::function` 明确函数签名
+- ✅ `for_each_index` 的索引范围作为函数参数传递，而非从 `input_specs` 提取
 
 ## 📚 相关文档
 
