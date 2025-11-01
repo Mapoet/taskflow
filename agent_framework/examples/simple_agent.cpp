@@ -16,26 +16,30 @@ namespace wf = workflow;
 
 int main() {
     // 创建执行器和图构建器
-    tf::Executor executor(std::thread::hardware_concurrency());
+    // 使用默认线程数（Taskflow 会自动检测）
+    tf::Executor executor;
     wf::GraphBuilder builder("simple_agent");
 
-    // 创建系统提示词源节点
-    auto [sys_node, _] = builder.create_typed_source(
+    // 创建系统提示词源节点（统一使用 any_source 以避免类型混合问题）
+    auto [sys_node, sys_task] = builder.create_any_source(
         "SystemPrompt",
-        std::make_tuple(std::string("你是一个有用的助手。")),
-        {"prompt"}
+        std::unordered_map<std::string, std::any>{
+            {"prompt", std::any{std::string("你是一个有用的助手。")}}
+        }
     );
+    (void)sys_task;  // 未使用的任务句柄
 
     // 创建用户输入源节点
-    auto [user_node, _] = builder.create_any_source(
+    auto [user_node, user_task] = builder.create_any_source(
         "UserInput",
         std::unordered_map<std::string, std::any>{
             {"query", std::any{std::string("你好")}}
         }
     );
+    (void)user_task;  // 未使用的任务句柄
 
     // 创建 LLM 节点（简化示例，实际需要实现 LLM 客户端）
-    auto [llm_node, _] = builder.create_any_node(
+    auto [llm_node, llm_task] = builder.create_any_node(
         "LLM",
         {{"SystemPrompt", "prompt"}, {"UserInput", "query"}},
         [](const std::unordered_map<std::string, std::any>& inputs) {
@@ -51,20 +55,47 @@ int main() {
         },
         {"final_answer"}
     );
+    (void)llm_task;  // 未使用的任务句柄
 
     // 创建输出 Sink
-    builder.create_any_sink(
+    auto [sink_node, sink_task] = builder.create_any_sink(
         "Output",
         {{"LLM", "final_answer"}},
         [](const std::unordered_map<std::string, std::any>& outputs) {
-            std::string answer = std::any_cast<std::string>(outputs.at("final_answer"));
-            std::cout << "Answer: " << answer << std::endl;
+            try {
+                std::string answer = std::any_cast<std::string>(outputs.at("final_answer"));
+                std::cout << "Answer: " << answer << std::endl;
+            } catch (const std::exception& e) {
+                std::cerr << "Error in sink callback: " << e.what() << std::endl;
+            }
         }
     );
+    (void)sink_task;  // 未使用的任务句柄
 
     // 执行工作流
     std::cout << "Starting simple agent workflow..." << std::endl;
-    builder.run(executor);
+    
+    // 调试：输出图信息
+    std::cout << "Dumping workflow graph:" << std::endl;
+    builder.dump(std::cout);
+    std::cout << std::endl;
+    
+    // 检查任务流是否为空（暂时注释掉，GraphBuilder 可能没有 name() 方法）
+    std::cout << "Checking taskflow status..." << std::endl;
+    
+    try {
+        std::cout << "About to run executor..." << std::endl;
+        auto future = builder.run_async(executor);
+        std::cout << "Executor started, waiting for completion..." << std::endl;
+        future.wait();
+        std::cout << "Workflow completed successfully!" << std::endl;
+    } catch (const std::exception& e) {
+        std::cerr << "Error: " << e.what() << std::endl;
+        return 1;
+    } catch (...) {
+        std::cerr << "Unknown error occurred!" << std::endl;
+        return 1;
+    }
     
     return 0;
 }
