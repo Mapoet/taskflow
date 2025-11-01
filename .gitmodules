@@ -1,8 +1,8 @@
 # Agent Framework 第三方库 Submodules
 # 使用与 Taskflow 相同的 3rd-party 目录
 
-[submodule "3rd-party/nlohmann_json"]
-	path = 3rd-party/nlohmann_json
+[submodule "3rd-party/nlohmann"]
+	path = 3rd-party/nlohmann
 	url = https://github.com/nlohmann/json.git
 
 [submodule "3rd-party/httplib"]

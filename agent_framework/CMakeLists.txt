@@ -38,24 +38,44 @@ endif()
 set(THIRD_PARTY_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../3rd-party)
 
 # nlohmann/json (Header-Only, single header file)
-set(NLOHMANN_JSON_DIR ${THIRD_PARTY_DIR}/nlohmann_json)
-if(EXISTS ${NLOHMANN_JSON_DIR}/include/nlohmann/json.hpp)
-    # nlohmann/json is a single header file, just add include path
-    set(NLOHMANN_JSON_INCLUDE ${NLOHMANN_JSON_DIR}/include)
-elseif(EXISTS ${NLOHMANN_JSON_DIR}/single_include/nlohmann/json.hpp)
-    # Alternative location for single header
-    set(NLOHMANN_JSON_INCLUDE ${NLOHMANN_JSON_DIR}/single_include)
+# 检查多个可能的位置
+set(NLOHMANN_JSON_INCLUDE "")
+
+# 优先检查 nlohmann_json (submodule)
+if(EXISTS ${THIRD_PARTY_DIR}/nlohmann_json/include/nlohmann/json.hpp)
+    set(NLOHMANN_JSON_INCLUDE ${THIRD_PARTY_DIR}/nlohmann_json/include)
+    message(STATUS "Found nlohmann/json at: ${NLOHMANN_JSON_INCLUDE}")
+elseif(EXISTS ${THIRD_PARTY_DIR}/nlohmann_json/single_include/nlohmann/json.hpp)
+    set(NLOHMANN_JSON_INCLUDE ${THIRD_PARTY_DIR}/nlohmann_json/single_include)
+    message(STATUS "Found nlohmann/json at: ${NLOHMANN_JSON_INCLUDE}")
+# 检查 nlohmann (可能已存在的目录)
+elseif(EXISTS ${THIRD_PARTY_DIR}/nlohmann/include/nlohmann/json.hpp)
+    set(NLOHMANN_JSON_INCLUDE ${THIRD_PARTY_DIR}/nlohmann/include)
+    message(STATUS "Found nlohmann/json at: ${NLOHMANN_JSON_INCLUDE}")
+elseif(EXISTS ${THIRD_PARTY_DIR}/nlohmann/single_include/nlohmann/json.hpp)
+    set(NLOHMANN_JSON_INCLUDE ${THIRD_PARTY_DIR}/nlohmann/single_include)
+    message(STATUS "Found nlohmann/json at: ${NLOHMANN_JSON_INCLUDE}")
+# 检查单文件 json.hpp（在 nlohmann/ 目录下直接）
+elseif(EXISTS ${THIRD_PARTY_DIR}/nlohmann/json.hpp)
+    # 文件在 nlohmann/json.hpp，但代码使用 #include <nlohmann/json.hpp>
+    # 所以需要包含 nlohmann 的父目录
+    set(NLOHMANN_JSON_INCLUDE ${THIRD_PARTY_DIR})
+    message(STATUS "Found nlohmann/json at: ${NLOHMANN_JSON_INCLUDE} (single file in nlohmann/)")
 else()
-    message(WARNING "nlohmann/json not found in ${NLOHMANN_JSON_DIR}. Run: git submodule update --init --recursive")
+    message(STATUS "nlohmann/json not found (optional). Run: git submodule update --init --recursive")
     set(NLOHMANN_JSON_INCLUDE "")
 endif()
 
 # httplib (Header-Only)
 set(HTTPLIB_DIR ${THIRD_PARTY_DIR}/httplib)
-if(EXISTS ${HTTPLIB_DIR}/httplib.h)
+if(EXISTS ${HTTPLIB_DIR}/httplib.hpp)
+    message(STATUS "Found httplib at: ${HTTPLIB_DIR}")
+    # httplib is header-only, just add include path
+elseif(EXISTS ${HTTPLIB_DIR}/httplib.h)
+    message(STATUS "Found httplib at: ${HTTPLIB_DIR}")
     # httplib is header-only, just add include path
 else()
-    message(WARNING "httplib not found in ${HTTPLIB_DIR}. Run: git submodule update --init --recursive")
+    message(STATUS "httplib not found (optional). Run: git submodule update --init --recursive")
 endif()
 
 # websocketpp (Header-Only)
