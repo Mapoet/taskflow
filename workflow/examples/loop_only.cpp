@@ -11,7 +11,7 @@ int main() {
 
   // Input trigger
   auto input_task = builder.create_typed_source("Input", std::make_tuple(counter), std::vector<std::string>{"input"});
-#if 1
+#if 0
 
   // Loop: continue while counter < 5
   // Using declarative API with string-keyed inputs
@@ -88,9 +88,8 @@ int main() {
       auto [process, tProc] = gb.create_typed_node<int>(
         "loop_iteration",
         {{"loop_trigger", "trigger"}},
-        [&counter](const std::tuple<int>& in) {
+        [](const std::tuple<int>& in) {
           auto out = std::get<0>(in) + 1;
-          counter = out;
           return std::make_tuple(out);
         },
         {"result"}
@@ -132,15 +131,23 @@ int main() {
     });
   
     // Loop: continue while counter < 5
-    builder.create_loop_decl(
+    // Using master mode: input_specs are used for condition_func inputs, but dependencies are NOT auto-set
+    auto cond_task = builder.create_loop_decl(
       "Loop",
-      {"Input"},
+      {{"Input", "input"}},  // input_specs: inputs available to condition_func
       loop_body_task,
-      [&counter]() -> int { 
-        return (counter < 5) ? 0 : 1; 
+      [&counter](const std::unordered_map<std::string, std::any>& inputs) -> int {
+        // inputs from input_specs are available here
+        return (++counter < 5) ? 0 : 1; 
       },
       loop_exit_task
-    );  
+    );
+    
+    // Manually set dependencies (master mode - explicit control)
+    // Initial trigger: Input -> body_task (first iteration)
+    // Subsequent iterations: cond_task -> body_task (when cond returns 0)
+    // Note: We need to get the Input task - in master mode, we access it directly from input_task
+    std::get<1>(input_task).precede(loop_body_task);  
 
 #endif
   std::cout << "=== Running loop_only example ===\n";

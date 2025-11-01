@@ -835,26 +835,26 @@ class GraphBuilder {
                    const std::vector<std::string>& output_keys = {});
 
   /**
-   * @brief Declarative loop using an existing body task (e.g., from create_subgraph)
+   * @brief Declarative loop using an existing body task (master mode)
    * @param name Loop name
-   * @param body_task Task representing the loop body
-   * @param condition_func Returns 0 to continue (loop back), non-zero to exit
+   * @param input_specs Vector of {source_node_name, source_output_key} pairs for condition function inputs
+   *                    These inputs are passed to condition_func but dependencies are NOT automatically set
+   * @param body_task Task representing the loop body (must already exist)
+   * @param condition_func Function that receives inputs from input_specs and returns 0 to continue (loop back), non-zero to exit
    * @param exit_task Optional task to run when exiting the loop (non-zero)
-   * @return The created condition task controlling the loop
+   * @return Condition task handle
+   * @details 
+   * - The body_task and exit_task must be pre-created
+   * - Dependencies must be set manually (e.g., source_node -> body_task for initial trigger)
+   * - input_specs are used to extract values for condition_func but do NOT automatically create dependencies
+   * - This follows the master branch pattern where dependencies are explicitly controlled by the user
    */
-  tf::Task create_loop_decl(const std::string& name,
-                            tf::Task& body_task,
-                            std::function<int()> condition_func,
-                            tf::Task exit_task = tf::Task{});
-
-  /**
-   * @brief Declarative loop with auto predecessors by node names
-   */
-  tf::Task create_loop_decl(const std::string& name,
-                            const std::vector<std::string>& depend_on_nodes,
-                            tf::Task& body_task,
-                            std::function<int()> condition_func,
-                            tf::Task exit_task = tf::Task{});
+  tf::Task
+  create_loop_decl(const std::string& name,
+                   const std::vector<std::pair<std::string, std::string>>& input_specs,
+                   tf::Task& body_task,
+                   std::function<int(const std::unordered_map<std::string, std::any>&)> condition_func,
+                   tf::Task exit_task = tf::Task{});
 
   // ============================================================================
   // Taskflow Algorithm Nodes: Parallel Iterations, Reductions, Transforms
