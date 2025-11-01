@@ -3,6 +3,7 @@
 #include <workflow/nodeflow.hpp>
 #include <stdexcept>
 #include <optional>
+#include <unordered_set>
 
 namespace workflow {
 
@@ -1054,6 +1055,39 @@ GraphBuilder::create_loop_decl(const std::string& name,
     cond_task.precede(body_task, exit_task);  // Index 0: continue loop, Index 1: exit
   } else {
     cond_task.precede(body_task);  // Only body as successor
+  }
+  
+  // Auto-set initial dependencies based on input_specs
+  // If input_specs exist, connect source nodes to body_task (initial trigger)
+  // If no input_specs, create an empty start task to trigger the loop
+  if (!input_specs.empty()) {
+    // Connect all unique source nodes from input_specs to body_task
+    std::unordered_set<std::string> processed_nodes;
+    for (const auto& [source_node, source_key] : input_specs) {
+      // Only process each source node once
+      if (processed_nodes.find(source_node) != processed_nodes.end()) {
+        continue;
+      }
+      processed_nodes.insert(source_node);
+      
+      // Find the source task in tasks_ map
+      auto source_task_it = tasks_.find(source_node);
+      if (source_task_it != tasks_.end()) {
+        // Connect source -> body_task (initial trigger for first iteration)
+        source_task_it->second.precede(body_task);
+      }
+    }
+  } else {
+    // No input_specs: create an empty start task to trigger the loop
+    tf::Task start_task = taskflow_.emplace([]() {
+      // Empty task - just triggers the loop body
+    }).name(name + "_start");
+    
+    // Connect start -> body_task
+    start_task.precede(body_task);
+    
+    // Store start task for potential future reference
+    tasks_[name + "_start"] = start_task;
   }
   
   // Store condition task in tasks_ map for potential future reference

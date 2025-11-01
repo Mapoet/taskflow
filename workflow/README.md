@@ -17,10 +17,11 @@ The Workflow library provides a powerful abstraction for building dataflow graph
 
 - **✨ NEW: Taskflow Algorithm Nodes** - Declarative API wrappers for Taskflow's parallel algorithms:
   - `create_for_each` - Parallel iteration over containers
-  - `create_for_each_index` - Parallel iteration over index ranges  
+  - `create_for_each_index` - Parallel iteration over index ranges with **return value collection**
   - `create_reduce` - Parallel reduction operations
   - `create_transform` - Parallel transformation operations
   - All algorithms support string-keyed inputs/outputs and automatic dependency inference
+  - `create_loop_decl` (body_task version) uses master mode: `input_specs` for condition inputs, manual dependency setup
 - Added `create_subtask(name, builder_fn)`: builds and runs a fresh subgraph at task execution time. Ideal for loop bodies to avoid module-task single-run semantics.
 - Enhanced sinks with callbacks:
   - `create_any_sink(..., callback)` where callback receives `std::unordered_map<std::string, std::any>`
@@ -972,23 +973,36 @@ auto loop_exit_task = builder.create_subgraph("LoopExit", [](wf::GraphBuilder& g
 });
 
 // Create loop: condition returns 0 to continue, non-zero to exit
-builder.create_loop_decl(
+// Note: Returns tf::Task (condition task) in master mode
+// input_specs are used for condition_func inputs but dependencies are NOT auto-set
+auto cond_task = builder.create_loop_decl(
   "Loop",
-  {"A"},  // Depend on node A first
+  {{"A", "value"}},  // input_specs: inputs available to condition_func (not auto-dependencies)
   loop_body_task,
-  [&counter]() -> int { 
+  [&counter](const std::unordered_map<std::string, std::any>& inputs) -> int {
+    // inputs from input_specs are available here
+    (void)inputs;  // Can use inputs if needed
     return (counter < 5) ? 0 : 1;  // Continue if counter < 5
   },
   loop_exit_task
 );
+
+// Dependencies are automatically set by create_loop_decl:
+// - All unique source nodes from input_specs -> body_task (initial trigger)
+// - body_task -> cond_task -> body_task (when cond returns 0, continue loop)
+// - body_task -> cond_task -> exit_task (when cond returns non-zero, exit loop)
+// If input_specs is empty, an empty start task is created to trigger the loop
 ```
 
 **Key Features**:
 - ✅ Loop body uses declarative API for clean structure
 - ✅ Parameter passing via lambda capture
-- ✅ Condition function decides loop continuation
+- ✅ Condition function receives inputs from `input_specs`
 - ✅ Subgraphs support nested declarative workflows
- - ✅ For iterative execution, prefer `create_subtask` over `create_subgraph`
+- ✅ For iterative execution, prefer `create_subtask` over `create_subgraph`
+- ✅ **Automatic dependency setup**: source nodes from `input_specs` are automatically connected to `body_task`
+- ✅ If `input_specs` is empty, an empty start task is created to trigger the loop
+- ✅ `input_specs` provide inputs to `condition_func` and auto-connect initial dependencies
 
 ## 🔢 Taskflow Algorithm Nodes
 
@@ -1052,7 +1066,7 @@ create_for_each(const std::string& name,
 
 ### Parallel Iteration by Index: `create_for_each_index`
 
-Iterate over index ranges in parallel with index range passed as function parameters:
+Iterate over index ranges in parallel with index range passed as function parameters and **return value collection**:
 
 ```cpp
 // Optional: Create shared parameter source
@@ -1060,50 +1074,69 @@ auto [shared_params, _] = builder.create_any_source("SharedParams",
   {{"multiplier", std::any{2}}}
 );
 
-// Parallel for_each_index: iterate over indices
+// Parallel for_each_index: iterate over indices and collect return values
 // Index range is passed as function arguments, not from input_specs
-auto [index_node, index_task] = builder.create_for_each_index<int>(
+auto [index_node, index_task] = builder.create_for_each_index<int, int>(
   "ProcessIndices",
   {{"SharedParams", "multiplier"}},  // Optional shared parameters
   0,   // first: beginning index (inclusive)
   20,  // last: ending index (exclusive)
   2,   // step: step size
-  std::function<void(int, std::unordered_map<std::string, std::any>&)>(
-    [](int index, std::unordered_map<std::string, std::any>& shared_params) {
+  std::function<int(int, std::unordered_map<std::string, std::any>&)>(
+    [](int index, std::unordered_map<std::string, std::any>& shared_params) -> int {
       int multiplier = std::any_cast<int>(shared_params.at("multiplier"));
-      std::cout << "Index: " << index << ", multiplied: " 
-                << (index * multiplier) << "\n";
+      int result = index * multiplier;
+      std::cout << "Index: " << index << ", multiplied: " << result << "\n";
+      return result;  // Return value collected into vector
     }
   ),
-  {}  // No outputs
+  {"results"}  // Output key: stores std::vector<int> of collected results
+);
+
+// Access collected results from subsequent nodes
+auto [display_node, display_task] = builder.create_any_sink("DisplayResults",
+  {{"ProcessIndices", "results"}},
+  [](const std::unordered_map<std::string, std::any>& inputs) {
+    const std::vector<int>& results = std::any_cast<const std::vector<int>&>(inputs.at("results"));
+    std::cout << "Collected " << results.size() << " results\n";
+  }
 );
 ```
 
 **API Signature**:
 ```cpp
-template <typename IndexType>
+template <typename IndexType, typename ReturnType = std::any>
 std::pair<std::shared_ptr<AnyNode>, tf::Task>
 create_for_each_index(const std::string& name,
                       const std::vector<std::pair<std::string, std::string>>& input_specs,
                       IndexType first,      // Beginning index (inclusive)
                       IndexType last,       // Ending index (exclusive)
                       IndexType step,      // Step size
-                      std::function<void(IndexType, 
+                      std::function<ReturnType(IndexType, 
                                         std::unordered_map<std::string, std::any>&)> callable,
-                      const std::vector<std::string>& output_keys = {});
+                      const std::vector<std::string>& output_keys = {"result"});
 ```
 
 **Parameters**:
 - `input_specs`: Optional shared parameters (index range is NOT from input_specs)
 - `first`, `last`, `step`: Index range parameters passed directly
-- `callable`: Function receiving `(index, shared_params)` where `shared_params` is modifiable
-- `output_keys`: Optional output keys for chaining
+- `callable`: Function receiving `(index, shared_params)` and **returning `ReturnType`**
+  - Return values are collected into `std::vector<ReturnType>` and stored in the first `output_key`
+  - Supports both `std::any` (default) and typed return values (e.g., `int`, `double`)
+- `output_keys`: Output keys - first key (default: "result") stores the collected results vector
+
+**Key Features**:
+- ✅ Return value collection: all return values collected into `std::vector<ReturnType>`
+- ✅ Thread-safe parallel collection using mutex protection
+- ✅ Supports both `std::any` and typed return values
+- ✅ Shared parameters modifiable across iterations
 
 **Use Cases**:
-- Numeric range processing
-- Array index-based operations
-- Generating sequences in parallel
-- Custom processing with shared state modification
+- Numeric range processing with result collection
+- Array index-based operations with return values
+- Generating sequences in parallel and collecting results
+- Custom processing with shared state modification and return value aggregation
+- Parallel computation where each index produces a value to be collected
 
 ### Parallel Reduction: `create_reduce`
 

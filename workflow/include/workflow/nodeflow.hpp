@@ -845,9 +845,9 @@ class GraphBuilder {
    * @return Condition task handle
    * @details 
    * - The body_task and exit_task must be pre-created
-   * - Dependencies must be set manually (e.g., source_node -> body_task for initial trigger)
-   * - input_specs are used to extract values for condition_func but do NOT automatically create dependencies
-   * - This follows the master branch pattern where dependencies are explicitly controlled by the user
+   * - Initial dependencies are automatically set from input_specs: all unique source nodes -> body_task
+   * - If input_specs is empty, an empty start task is created to trigger the loop
+   * - input_specs are used to extract values for condition_func and to auto-connect initial dependencies
    */
   tf::Task
   create_loop_decl(const std::string& name,

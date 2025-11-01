@@ -129,23 +129,35 @@ auto loop_exit_task = builder.create_subgraph("LoopExit", [](wf::GraphBuilder& g
 });
 
 // 创建循环：条件返回 0 继续，非 0 退出
-builder.create_loop_decl(
+// 注意：master 模式下返回 tf::Task（条件任务）
+// input_specs 用于 condition_func 的输入，但不自动设置依赖
+auto cond_task = builder.create_loop_decl(
   "Loop",
-  {"A"},  // 先依赖节点 A
+  {{"A", "value"}},  // input_specs: condition_func 可用的输入（不自动设置依赖）
   loop_body_task,
-  [&counter]() -> int { 
-    // 只读取 counter，不修改（修改在循环体中完成）
+  [&counter](const std::unordered_map<std::string, std::any>& inputs) -> int {
+    // inputs 从 input_specs 可用，但也可以使用捕获的 counter
+    (void)inputs;  // 如果不需要可以从 input_specs 获取值
     return (counter < 5) ? 0 : 1;
   },
   loop_exit_task
 );
+
+// 依赖由 create_loop_decl 自动设置：
+// - 来自 input_specs 的所有唯一源节点 -> body_task（初始触发）
+// - body_task -> cond_task -> body_task（当 cond 返回 0 时，继续循环）
+// - body_task -> cond_task -> exit_task（当 cond 返回非 0 时，退出循环）
+// 如果 input_specs 为空，会创建一个空的开始任务来触发循环
 ```
 
 **关键特性**：
 - ✅ 循环体使用 `create_subtask` 支持多次迭代
 - ✅ 参数通过 lambda 捕获传递
-- ✅ 条件函数决定循环是否继续
+- ✅ 条件函数接收来自 `input_specs` 的输入
 - ✅ 子图内部依赖自动推断
+- ✅ **自动依赖设置**：来自 `input_specs` 的源节点自动连接到 `body_task`
+- ✅ 如果 `input_specs` 为空，会创建一个空的开始任务来触发循环
+- ✅ `input_specs` 为 `condition_func` 提供输入并自动连接初始依赖
 
 ### Sink 回调（结果收集/处理）
 
@@ -231,29 +243,70 @@ auto [for_each_node, for_each_task] = builder.create_for_each<std::vector<int>>(
 
 ### 并行索引迭代：`create_for_each_index`
 
-并行迭代索引范围：
+并行迭代索引范围，并**收集返回值**：
 
 ```cpp
-// 创建包含索引范围参数的源节点
-auto [index_input, _] = builder.create_typed_source("IndexInput",
-  std::make_tuple(0, 20, 2),  // first=0, last=20, step=2
-  {"first", "last", "step"}
+// 可选：创建共享参数源
+auto [shared_params, _] = builder.create_any_source("SharedParams",
+  {{"multiplier", std::any{2}}}
 );
 
-// 并行 for_each_index：迭代索引
-auto [index_node, index_task] = builder.create_for_each_index<int, int, int>(
+// 并行 for_each_index：迭代索引并收集返回值
+// 索引范围作为函数参数传递，而非从 input_specs 获取
+auto [index_node, index_task] = builder.create_for_each_index<int, int>(
   "ProcessIndices",
-  {{"IndexInput", "first"}, {"IndexInput", "last"}, {"IndexInput", "step"}},
-  [](int i) {
-    std::cout << "索引: " << i << "\n";
+  {{"SharedParams", "multiplier"}},  // 可选的共享参数
+  0,   // first: 起始索引（包含）
+  20,  // last: 结束索引（不包含）
+  2,   // step: 步长
+  std::function<int(int, std::unordered_map<std::string, std::any>&)>(
+    [](int index, std::unordered_map<std::string, std::any>& shared_params) -> int {
+      int multiplier = std::any_cast<int>(shared_params.at("multiplier"));
+      int result = index * multiplier;
+      std::cout << "索引: " << index << ", 乘积: " << result << "\n";
+      return result;  // 返回值收集到 vector 中
+    }
+  ),
+  {"results"}  // 输出键：存储收集的 std::vector<int> 结果
+);
+
+// 从后续节点访问收集的结果
+auto [display_node, display_task] = builder.create_any_sink("DisplayResults",
+  {{"ProcessIndices", "results"}},
+  [](const std::unordered_map<std::string, std::any>& inputs) {
+    const std::vector<int>& results = std::any_cast<const std::vector<int>&>(inputs.at("results"));
+    std::cout << "收集了 " << results.size() << " 个结果\n";
   }
 );
 ```
 
-**使用场景**：
-- 数值范围处理
-- 基于数组索引的操作
-- 并行生成序列
+**API 签名**：
+```cpp
+template <typename IndexType, typename ReturnType = std::any>
+std::pair<std::shared_ptr<AnyNode>, tf::Task>
+create_for_each_index(const std::string& name,
+                      const std::vector<std::pair<std::string, std::string>>& input_specs,
+                      IndexType first,      // 起始索引（包含）
+                      IndexType last,       // 结束索引（不包含）
+                      IndexType step,      // 步长
+                      std::function<ReturnType(IndexType, 
+                                        std::unordered_map<std::string, std::any>&)> callable,
+                      const std::vector<std::string>& output_keys = {"result"});
+```
+
+**参数说明**：
+- `input_specs`: 可选的共享参数（索引范围**不**从 input_specs 获取）
+- `first`, `last`, `step`: 索引范围参数直接传递
+- `callable`: 函数接收 `(index, shared_params)` 并**返回 `ReturnType`**
+  - 返回值收集到 `std::vector<ReturnType>` 并存储在第一个 `output_key` 中
+  - 支持 `std::any`（默认）和类型化返回值（如 `int`, `double`）
+- `output_keys`: 输出键 - 第一个键（默认："result"）存储收集的结果向量
+
+**关键特性**：
+- ✅ 返回值收集：所有返回值收集到 `std::vector<ReturnType>`
+- ✅ 线程安全的并行收集（使用互斥锁保护）
+- ✅ 支持 `std::any` 和类型化返回值
+- ✅ 共享参数可在迭代间修改
 
 ### 并行归约：`create_reduce`
 
@@ -928,18 +981,20 @@ builder.create_for_each<Container>("Name",
 );
 
 // for_each_index - 并行迭代索引范围（索引范围作为函数参数）
-builder.create_for_each_index<IndexType>("Name",
+builder.create_for_each_index<IndexType, ReturnType>("Name",
   {{"SharedParams", "param_key"}},  // 可选的共享参数（索引范围不在 input_specs 中）
   0,   // first: 起始索引（包含）
   20,  // last: 结束索引（不包含）
   2,   // step: 步长
-  std::function<void(IndexType, std::unordered_map<std::string, std::any>&)>(
-    [](IndexType idx, std::unordered_map<std::string, std::any>& shared_params) {
+  std::function<ReturnType(IndexType, std::unordered_map<std::string, std::any>&)>(
+    [](IndexType idx, std::unordered_map<std::string, std::any>& shared_params) -> ReturnType {
       // shared_params 可修改，在所有迭代间共享
       /* process */
+      ReturnType result = /* ... */;
+      return result;  // 返回值收集到 vector
     }
   ),
-  {}  // 无输出
+  {"result"}  // 输出键：存储收集的 std::vector<ReturnType>
 );
 
 // reduce - 并行归约（支持共享参数）
