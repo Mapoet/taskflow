@@ -155,6 +155,29 @@ endif()
 #endif()
 
 # -----------------------------------------------------------------------------
+# Set C++ standard (default to C++20 if not specified, required for workflow template lambdas)
+# -----------------------------------------------------------------------------
+if(NOT DEFINED CMAKE_CXX_STANDARD)
+  set(CMAKE_CXX_STANDARD 20 CACHE STRING "C++ standard to use")
+  set(CMAKE_CXX_STANDARD_REQUIRED ON)
+  message(STATUS "CMAKE_CXX_STANDARD not set, defaulting to C++20 (required for workflow)")
+elseif(CMAKE_CXX_STANDARD VERSION_LESS "20")
+  # Warn if C++ standard is less than 20 and workflow is enabled
+  if(TF_BUILD_WORKFLOW)
+    message(WARNING "CMAKE_CXX_STANDARD is ${CMAKE_CXX_STANDARD}, but workflow requires C++20 for template lambdas. "
+            "Workflow targets will be built with C++20.")
+  endif()
+endif()
+
+# For MSVC, ensure /std:c++20 flag is set explicitly
+if(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
+  if(CMAKE_CXX_STANDARD GREATER_EQUAL 20)
+    add_compile_options(/std:c++20)
+    message(STATUS "MSVC: Enabling /std:c++20 for template lambda support")
+  endif()
+endif()
+
+# -----------------------------------------------------------------------------
 # default to release build, unless explicitly specified
 # -----------------------------------------------------------------------------
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
