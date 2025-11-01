@@ -816,6 +816,7 @@ class GraphBuilder {
    * @param name Loop name
    * @param input_specs Vector of {source_node_name, source_output_key} pairs
    * @param body_func Native function to execute as loop body: (inputs) -> outputs
+   *                  Similar to create_any_node, receives inputs and returns outputs
    * @param condition_func Function that receives inputs and returns 0 to continue (loop back), non-zero to exit
    * @param exit_func Optional native function to execute on exit: (inputs) -> outputs
    * @param output_keys Output key names
@@ -862,99 +863,87 @@ class GraphBuilder {
   /**
    * @brief Create a parallel for_each node that iterates over a container
    * @tparam Container Container type (auto-deduced)
-   * @tparam C Callable type
    * @param name Node name
-   * @param input_specs Vector of {source_node_name, source_output_key} to get the container
-   * @param callable Function to apply to each element: (element) -> void
-   * @param output_keys Optional output keys (for chaining)
-   * @return Pair of (node_ptr, task_handle)
-   * @details The container is extracted from the input at execution time
-   */
-  template <typename Container, typename C>
-  std::pair<std::shared_ptr<AnyNode>, tf::Task>
-  create_for_each(const std::string& name,
-                  const std::vector<std::pair<std::string, std::string>>& input_specs,
-                  C callable,
-                  const std::vector<std::string>& output_keys = {});
-
-  /**
-   * @brief Create a parallel for_each node with shared parameters from dependency nodes
-   * @tparam Container Container type (auto-deduced)
-   * @tparam C Callable type
-   * @param name Node name
-   * @param input_specs Vector of {source_node_name, source_output_key} to get the container
-   * @param shared_input_specs Vector of {source_node_name, source_output_key} to get shared parameters
+   * @param input_specs Vector of {source_node_name, source_output_key}: 
+   *                    First element is the container, rest are shared parameters
    * @param callable Function to apply to each element: (element, shared_params) -> void
-   *                  where shared_params is std::unordered_map<std::string, std::any>& (modifiable)
+   *                 where shared_params is std::unordered_map<std::string, std::any>& (modifiable)
    * @param output_keys Optional output keys (for chaining)
    * @return Pair of (node_ptr, task_handle)
-   * @details Shared parameters are extracted once and passed to each element processing, allowing modification
-   */
-  template <typename Container, typename C>
-  std::pair<std::shared_ptr<AnyNode>, tf::Task>
-  create_for_each(const std::string& name,
-                  const std::vector<std::pair<std::string, std::string>>& input_specs,
-                  const std::vector<std::pair<std::string, std::string>>& shared_input_specs,
-                  C callable,
-                  const std::vector<std::string>& output_keys = {});
-
-  /**
-   * @brief Create a parallel for_each node with subgraph/subtask builder for each element
-   * @tparam Container Container type (auto-deduced)
-   * @tparam ElementType Element type from container
-   * @param name Node name
-   * @param input_specs Vector of {source_node_name, source_output_key} to get the container
-   * @param builder_fn Function that receives GraphBuilder and element value to build a subgraph/subtask
-   * @param output_keys Optional output keys (for chaining)
-   * @return Pair of (node_ptr, task_handle)
-   * @details For each element, a fresh subgraph is built and executed. Suitable for complex per-element processing.
+   * @details Shared parameters (from input_specs[1..]) are extracted once and passed to each element processing, allowing modification
    */
   template <typename Container>
   std::pair<std::shared_ptr<AnyNode>, tf::Task>
   create_for_each(const std::string& name,
                   const std::vector<std::pair<std::string, std::string>>& input_specs,
-                  std::function<void(GraphBuilder&, typename Container::value_type)> builder_fn,
+                  std::function<void(typename Container::value_type, std::unordered_map<std::string, std::any>&)> callable,
+                  const std::vector<std::string>& output_keys = {});
+
+  /**
+   * @brief Create a parallel for_each node with subgraph/subtask builder for each element
+   * @tparam Container Container type (auto-deduced)
+   * @param name Node name
+   * @param input_specs Vector of {source_node_name, source_output_key}: 
+   *                    First element is the container, rest are shared parameters
+   * @param builder_fn Function that receives GraphBuilder, element value, and shared_params to build a subgraph
+   * @param output_keys Optional output keys (for chaining)
+   * @return Pair of (node_ptr, task_handle)
+   * @details Shared parameters (from input_specs[1..]) are extracted once and passed to each element's builder, allowing modification
+   */
+  template <typename Container>
+  std::pair<std::shared_ptr<AnyNode>, tf::Task>
+  create_for_each(const std::string& name,
+                  const std::vector<std::pair<std::string, std::string>>& input_specs,
+                  std::function<void(GraphBuilder&, typename Container::value_type, 
+                                     std::unordered_map<std::string, std::any>&)> builder_fn,
                   const std::vector<std::string>& output_keys = {});
 
   /**
    * @brief Create a parallel for_each_index node that iterates over an index range
-   * @tparam B Beginning index type (integral)
-   * @tparam E Ending index type (integral)
-   * @tparam S Step type (integral)
-   * @tparam C Callable type
+   * @tparam IndexType Index type (integral)
    * @param name Node name
-   * @param input_specs Vector of {source_node_name, source_output_key} to get first, last, step
-   * @param callable Function to apply to each index: (index) -> void
+   * @param input_specs Vector of {source_node_name, source_output_key} for shared parameters
+   *                    (optional, for passing shared state to each iteration)
+   * @param first Beginning index (inclusive)
+   * @param last Ending index (exclusive)
+   * @param step Step size (default: 1)
+   * @param callable Function to apply to each index: (index, shared_params) -> void
+   *                 where shared_params is std::unordered_map<std::string, std::any>& (modifiable)
    * @param output_keys Optional output keys
    * @return Pair of (node_ptr, task_handle)
-   * @details Expects inputs: "first", "last", "step" (optional, defaults to 1)
+   * @details The index range is passed as function parameters, not extracted from input_specs.
+   *          Shared parameters (from input_specs) are extracted once and passed to each iteration, allowing modification.
    */
-  template <typename B, typename E, typename S = int, typename C>
+  template <typename IndexType>
   std::pair<std::shared_ptr<AnyNode>, tf::Task>
   create_for_each_index(const std::string& name,
                         const std::vector<std::pair<std::string, std::string>>& input_specs,
-                        C callable,
+                        IndexType first,
+                        IndexType last,
+                        IndexType step,
+                        std::function<void(IndexType, std::unordered_map<std::string, std::any>&)> callable,
                         const std::vector<std::string>& output_keys = {});
 
   /**
    * @brief Create a parallel reduce node
    * @tparam T Result type
    * @tparam Container Container type (auto-deduced)
-   * @tparam BinaryOp Binary operation type
    * @param name Node name
-   * @param input_specs Vector of {source_node_name, source_output_key} to get the container
+   * @param input_specs Vector of {source_node_name, source_output_key}: 
+   *                    First element is the container, rest are shared parameters
    * @param init Initial value (captured by reference - must remain alive)
-   * @param bop Binary operator: (T, element_type) -> T
+   * @param bop Binary operator: (T, element_type, shared_params) -> T
+   *            where shared_params is std::unordered_map<std::string, std::any>& (modifiable)
    * @param output_keys Output key for the reduced result (default: "result")
    * @return Pair of (node_ptr, task_handle)
-   * @details The reduced result is stored in init and also exposed via output key
+   * @details Shared parameters (from input_specs[1..]) are extracted once and passed to each reduction operation, allowing modification
    */
-  template <typename T, typename Container, typename BinaryOp>
+  template <typename T, typename Container>
   std::pair<std::shared_ptr<AnyNode>, tf::Task>
   create_reduce(const std::string& name,
                 const std::vector<std::pair<std::string, std::string>>& input_specs,
                 T& init,
-                BinaryOp bop,
+                std::function<T(T, typename Container::value_type, std::unordered_map<std::string, std::any>&)> bop,
                 const std::vector<std::string>& output_keys = {"result"});
 
   /**
@@ -962,26 +951,27 @@ class GraphBuilder {
    * @tparam T Result type
    * @tparam Container Container type (auto-deduced)
    * @param name Node name
-   * @param input_specs Vector of {source_node_name, source_output_key} to get the container
+   * @param input_specs Vector of {source_node_name, source_output_key}: 
+   *                    First element is the container, rest are shared parameters
    * @param init Initial value (captured by reference - must remain alive)
-   * @param builder_fn Function that receives GraphBuilder, accumulator (T&), and element value to build reduction subgraph
+   * @param builder_fn Function that receives GraphBuilder, accumulator (T&), element value, and shared_params to build reduction subgraph
    * @param output_keys Output key for the reduced result (default: "result")
    * @return Pair of (node_ptr, task_handle)
-   * @details The builder function can create a subgraph that processes the accumulator and element to produce the new accumulator value
+   * @details Shared parameters are extracted once and passed to each element's builder, allowing modification
    */
   template <typename T, typename Container>
   std::pair<std::shared_ptr<AnyNode>, tf::Task>
   create_reduce(const std::string& name,
                 const std::vector<std::pair<std::string, std::string>>& input_specs,
                 T& init,
-                std::function<void(GraphBuilder&, T&, typename Container::value_type)> builder_fn,
+                std::function<void(GraphBuilder&, T&, typename Container::value_type,
+                                   std::unordered_map<std::string, std::any>&)> builder_fn,
                 const std::vector<std::string>& output_keys = {"result"});
 
   /**
    * @brief Create a parallel transform node
    * @tparam InputContainer Input container type (auto-deduced)
    * @tparam OutputContainer Output container type (auto-deduced)
-   * @tparam UnaryOp Unary operation type
    * @param name Node name
    * @param input_specs Vector of {source_node_name, source_output_key} to get the input container
    * @param unary_op Unary operation: (input_element) -> output_element
@@ -989,11 +979,11 @@ class GraphBuilder {
    * @return Pair of (node_ptr, task_handle)
    * @details Creates a new output container with transformed elements
    */
-  template <typename InputContainer, typename OutputContainer, typename UnaryOp>
+  template <typename InputContainer, typename OutputContainer>
   std::pair<std::shared_ptr<AnyNode>, tf::Task>
   create_transform(const std::string& name,
                   const std::vector<std::pair<std::string, std::string>>& input_specs,
-                  UnaryOp unary_op,
+                  std::function<typename OutputContainer::value_type(typename InputContainer::value_type)> unary_op,
                   const std::vector<std::string>& output_keys = {"result"});
 
                    
