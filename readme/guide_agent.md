@@ -1,21 +1,100 @@
 ## 一、背景与动机
 
-随着大型语言模型（Large Language Model，LLM）的快速发展，人工智能应用从静态对话助手逐步过渡到具备自主规划、决策和执行能力的代理系统。新一代代理不仅能理解自然语言，还能够调用外部工具、检索知识库、处理多模态输入，并实时输出推理过程【437883083434672†L65-L79】。例如，OpenAI 在 2025 年推出的实时 API 可以以 200 至 300 毫秒的延迟持续输出语音和文本，并支持函数调用、WebRTC / WebSocket 传输等特性【621311804125779†L140-L166】。用户体验不再局限于等待完整结果，而是需要看到模型逐字生成的内容，甚至在音频输入时实时打断并修改指令【621311804125779†L174-L214】【621311804125779†L245-L258】。
+### 1.1 项目背景：Taskflow 与 workflow 库
 
-另一方面，多模态大模型在 2024-2025 年取得显著突破，能够同时理解文本、图像、音频、视频等信息。多模态模型通过共享架构将不同模态编码为统一的语义嵌入，使系统能够跨模态推理和生成【927160657251235†L169-L226】。例如 GPT-4V 可同时处理视觉和文本输入，并通过自回归方式生成文字解释，而 Sora 则采用扩散模型以文本生成视频【918647955484138†L115-L127】。多模态能力要求代理框架不仅在内部处理不同类型的数据，还要支持在知识检索和工具调用过程中混合文本、图片、音频等源数据，提高回答的丰富性和准确性【927160657251235†L136-L151】。
+**Taskflow** 是一个高性能、现代化的 C++ 任务并行编程框架，由 Tsung-Wei Huang 等人在 IEEE TPDS 期刊发表【TPDS22】。其核心特点包括：
 
-此外，传统检索增强生成（RAG）系统只能处理文本，难以应对图片、音频等多模态知识的检索与整合。多模态 RAG 通过向量数据库保存文本、图像、音频的嵌入，并在检索后利用融合层将不同模态的信息整合到统一上下文，以支持面向复杂场景的解答【253686691880274†L242-L306】。针对客服场景，当用户提供照片、语音描述和错误截图时，多模态 RAG 能够同时检索这些信息并生成精准回复【253686691880274†L242-L261】。
+- **工作窃取调度器（Work-Stealing Scheduler）**：采用高效的线程池和任务队列机制，在多核 CPU 上实现自动负载均衡
+- **声明式任务图构建**：支持静态任务图、动态子图（Subflow）、条件分支和循环控制流
+- **异构计算支持**：通过 CUDA Flow 支持 CPU-GPU 协同计算
+- **Header-Only 设计**：零依赖、易于集成，支持 C++17 及以上标准
+- **丰富的并行算法**：提供 `for_each`、`reduce`、`transform`、`sort` 等并行算法，可直接嵌入任务图
+
+**Workflow** 是 Taskflow 项目在 `dev` 分支提供的高级数据流库（`workflow/` 目录），是对 Taskflow 的进一步抽象，专为声明式数据流编程设计：
+
+- **键值驱动 I/O**：所有输入输出通过字符串键访问，替代传统的元组索引，提升代码可读性
+- **自动依赖推断**：通过 `input_specs` 声明节点输入，`GraphBuilder` 自动推断并建立依赖关系，无需手动调用 `precede/succeed`
+- **类型安全与灵活性并存**：
+  - `TypedNode`/`TypedSource`/`TypedSink`：编译期类型检查，零运行时开销
+  - `AnyNode`/`AnySource`/`AnySink`：运行时类型擦除，支持异构数据流
+- **统一节点接口**：所有节点继承自 `INode`，提供多态访问和查询接口
+- **高级控制流节点**：
+  - `create_loop_decl`：支持通过 `body_builder_fn` 在每次迭代时动态构建子图
+  - `create_condition_decl`、`create_multi_condition_decl`：条件分支节点
+  - `create_pipeline_node`：流水线节点
+  - `create_for_each`、`create_reduce` 等：并行算法节点封装
+
+**项目优势**：
+- **纯 C++ 实现**：无外部运行时依赖，适合高性能场景
+- **多线程并行执行**：充分利用多核 CPU，自动负载均衡
+- **声明式 API**：代码简洁，易于维护和扩展
+- **可视化支持**：内置 DOT 图导出和 TFProf 性能分析工具
+
+### 1.2 智能代理系统的技术趋势
+
+随着大型语言模型（Large Language Model，LLM）的快速发展，人工智能应用从静态对话助手逐步过渡到具备自主规划、决策和执行能力的代理系统。新一代代理不仅能理解自然语言，还能够调用外部工具、检索知识库、处理多模态输入，并实时输出推理过程【437883083434672†L65-L79】。
+
+**关键技术创新**：
+
+1. **实时流式输出**：OpenAI 在 2025 年推出的实时 API 可以以 200 至 300 毫秒的延迟持续输出语音和文本，并支持函数调用、WebRTC / WebSocket 传输等特性【621311804125779†L140-L166】。用户体验不再局限于等待完整结果，而是需要看到模型逐字生成的内容，甚至在音频输入时实时打断并修改指令【621311804125779†L174-L214】【621311804125779†L245-L258】。
+
+2. **多模态大模型突破**：多模态大模型在 2024-2025 年取得显著突破，能够同时理解文本、图像、音频、视频等信息。多模态模型通过共享架构将不同模态编码为统一的语义嵌入，使系统能够跨模态推理和生成【927160657251235†L169-L226】。例如 GPT-4V 可同时处理视觉和文本输入，并通过自回归方式生成文字解释，而 Sora 则采用扩散模型以文本生成视频【918647955484138†L115-L127】。
+
+3. **多模态 RAG（检索增强生成）**：传统 RAG 系统只能处理文本，难以应对图片、音频等多模态知识的检索与整合。多模态 RAG 通过向量数据库保存文本、图像、音频的嵌入，并在检索后利用融合层将不同模态的信息整合到统一上下文，以支持面向复杂场景的解答【253686691880274†L242-L306】。针对客服场景，当用户提供照片、语音描述和错误截图时，多模态 RAG 能够同时检索这些信息并生成精准回复【253686691880274†L242-L261】。
+
+4. **MCP（Model Context Protocol）工具集成**：MCP 是开放标准，允许 LLM 应用与外部工具和服务集成，实现统一的工具调用接口。支持本地函数、MCP 服务和外部 API 的统一管理。
+
+### 1.3 基于 Taskflow workflow 的解决方案优势
 
 构建具有上述能力的高性能代理框架需要解决多方面挑战：
 
 1. **高并发调度与实时反馈**：代理往往需要并行调用多个工具和检索服务，合理安排依赖和控制流以减少等待时间，并通过流式协议实时向用户展示思考和结果【825014821319660†L64-L109】【723136666980538†L480-L599】。
+
 2. **多模态融合**：为文本、图片、音频等不同数据设计统一的处理与融合机制，从编码、检索、注意力融合到生成全过程都要考虑模态差异【219518602455228†L164-L170】【803420306546639†L86-L90】。
+
 3. **灵活的控制流和循环**：代理执行过程中可能需要多轮规划和工具调用，需要支持条件分支、循环迭代以及动态子图创建等功能【631946224216190†L1225-L1336】。
+
 4. **可观察性与可维护性**：代理的行为和历史应被完整记录，支持回溯和重放；系统要具有清晰的模块边界、易于调试和扩展【269917138825994†L76-L123】。
 
-为应对这些挑战，本报告基于 Taskflow 项目在 dev 分支提供的 `workflow` 库，设计了一套纯 C++ 实现的多模态智能代理框架。`workflow` 提供声明式图构造、控制流节点、并行算法节点以及动态子图等特性，可在多核环境下高效调度复杂工作流【631946224216190†L338-L352】。本报告将深入介绍 LLM 节点设计、多模态支持、实时输出方案，以及如何利用 Taskflow 构建灵活高效的循环子图，从而实现具备自主规划与执行能力的智能代理。
+**Taskflow workflow 的适配性**：
 
-### 1.1 框架核心设计理念
+- **声明式构图降低复杂度**：`workflow` 的键值驱动 I/O 和自动依赖推断，使得复杂代理工作流的构建变得直观简洁。开发者只需声明节点输入输出关系，无需手动管理连接。
+
+- **高性能并行执行**：Taskflow 的工作窃取调度器自动在多核 CPU 上并行执行工具调用、知识检索等任务，充分利用硬件资源。
+
+- **动态子图支持 Agent 循环**：`create_loop_decl` 的 `body_builder_fn` 允许在每次迭代时动态构建子图，完美适配 Agent 的"规划-执行-观察-反思"循环模式。
+
+- **模块化与可组合性**：Agent 和工作流都可以作为独立节点嵌入到更大的工作流中，支持多层嵌套和组合，实现复杂的多代理协作场景。
+
+- **类型安全与灵活性**：`TypedNode` 提供编译期类型检查，`AnyNode` 支持运行时异构数据流，在性能和灵活性之间取得平衡。
+
+- **统一接口便于扩展**：所有节点继承自 `INode`，提供统一的查询和访问接口，便于实现监控、调试和可视化工具。
+
+### 1.4 本报告的目标与结构
+
+本报告基于 Taskflow 项目的 `workflow` 库，设计了一套**纯 C++ 实现的多模态智能代理框架**。该框架充分利用 `workflow` 的声明式 API、控制流节点和并行执行能力，实现了：
+
+- **LLM 节点多源输入融合**：系统提示词、用户提示词、知识库上下文、记忆、工具列表、多模态输入的统一整合
+- **Agent 循环子图封装**：使用 `create_loop_decl` 将 Agent 的决策-执行循环封装为可复用的节点
+- **知识库作为 Source 节点**：提供统一的查询 API，支持延迟加载和按需检索
+- **并行工具调用**：通过 `create_for_each` 实现工具调用的并行执行
+- **多端输出适配**：统一的 Sink 节点接口，支持 CLI、ImGui 和 Web 客户端
+- **事件溯源与监控**：完整的事件日志和性能分析支持
+
+**报告结构**：
+
+- **第二章**：LLM 代理与多模态框架综述，介绍代理系统的组成和工作流设计模式
+- **第三章**：Taskflow 与 workflow 库综述，详细说明 workflow 的特性和 API
+- **第四章**：整体设计与技术框架，明确核心模块与节点，强调 Agent 和工作流的嵌套能力
+- **第五章**：LLM 节点设计与实现，包括数据结构、API 使用和客户端实现
+- **第六章**：多模态支持与融合实现，涵盖编码器节点、检索流程和融合策略
+- **第七章**：实时输出与流式传输实现，包括 SSE、WebSocket 和中断控制
+- **第八章**：基于 workflow 构建代理工作流，完整的端到端实现示例
+- **第九章**：关键算法与技术实现，包括多线程调度、跨模态检索、计划解析和事件溯源
+- **第十章**：系统架构与技术路线，模块划分和开发路线图
+- **第十一、十二章**：未来展望与结论
+
+### 1.5 框架核心设计理念
 
 本框架基于以下核心设计理念：
 
@@ -143,9 +222,412 @@ Taskflow `workflow` 库是在 dev 分支上开发的高级数据流建模工具�
 
 因为 `workflow` 会根据输入规格自动连接依赖，开发者无需显式调用 `precede/succeed`，极大简化了图结构构建。这种声明式风格不仅提升了代码可读性，也降低了连接错误的概率，并使得流程容易可视化和维护【631946224216190†L609-L643】。
 
-## 四、LLM 节点设计与实现
+## 四、整体设计与技术框架
 
-### 4.1 LLM 节点功能需求
+### 4.1 核心设计原则
+
+本框架遵循以下核心设计原则，确保系统的高性能、可扩展性和灵活性：
+
+1. **声明式数据流**：基于 `workflow` 的键值驱动 I/O 系统，通过 `input_specs` 自动推断依赖关系，无需手动连接节点。
+2. **Agent 与工作流统一抽象**：Agent 和工作流都可以作为独立节点嵌入到更大的工作流中，支持嵌套和组合。
+3. **模块化与可组合性**：每个模块（LLM 节点、工具调用、知识检索等）都可以独立开发、测试和复用。
+4. **多线程并行执行**：利用 Taskflow 的工作窃取调度器，自动在多核 CPU 上并行执行任务。
+5. **多端适配**：通过统一的 Sink 节点接口，支持 CLI、ImGui 和 Web 客户端。
+
+### 4.2 核心模块架构
+
+```mermaid
+graph TB
+    subgraph "核心抽象层"
+        NODE[INode<br/>节点基类<br/>统一接口]
+        AGENT[Agent<br/>代理节点<br/>可嵌套]
+        WORKFLOW[Workflow<br/>工作流节点<br/>可嵌套]
+        SUBGRAPH[Subgraph<br/>子图节点<br/>动态构建]
+    end
+    
+    subgraph "数据流层"
+        SOURCE[Source Nodes<br/>create_typed_source<br/>create_any_source]
+        PROCESS[Process Nodes<br/>create_typed_node<br/>create_any_node]
+        CONTROL[Control Nodes<br/>create_loop_decl<br/>create_condition_decl<br/>create_for_each]
+        SINK[Sink Nodes<br/>create_any_sink<br/>create_typed_sink]
+    end
+    
+    subgraph "业务逻辑层"
+        LLM_MOD[LLM Module<br/>多模态推理]
+        TOOL_MOD[ToolBus Module<br/>工具管理]
+        KB_MOD[KnowledgeBase Module<br/>多模态检索]
+        MEM_MOD[Memory Module<br/>记忆管理]
+    end
+    
+    subgraph "执行层"
+        EXEC[Executor<br/>多线程调度]
+        SCHEDULER[Work Stealing<br/>Scheduler]
+    end
+    
+    NODE --> SOURCE
+    NODE --> PROCESS
+    NODE --> CONTROL
+    NODE --> SINK
+    
+    AGENT --> CONTROL
+    WORKFLOW --> AGENT
+    WORKFLOW --> WORKFLOW
+    SUBGRAPH --> AGENT
+    SUBGRAPH --> WORKFLOW
+    
+    PROCESS --> LLM_MOD
+    PROCESS --> TOOL_MOD
+    PROCESS --> KB_MOD
+    PROCESS --> MEM_MOD
+    
+    CONTROL --> EXEC
+    EXEC --> SCHEDULER
+```
+
+### 4.3 核心节点类型与职责
+
+#### 4.3.1 Source 节点（数据源）
+
+Source 节点是数据流的起点，负责提供初始数据：
+
+| 节点类型 | API | 用途 | 示例 |
+|---------|-----|------|------|
+| `TypedSource` | `create_typed_source` | 类型安全的源节点，编译期检查 | 系统提示词、用户输入 |
+| `AnySource` | `create_any_source` | 动态类型的源节点，运行时灵活 | 知识库查询、工具列表、多模态输入 |
+| `KnowledgeBase Source` | `create_any_source` | **知识库作为 Source 节点，提供统一查询 API** | 向量检索、多模态检索 |
+
+**关键设计**：知识库作为 Source 节点，可以被多个节点引用，实现延迟加载和按需检索。
+
+#### 4.3.2 Process 节点（处理节点）
+
+Process 节点执行计算逻辑，接收输入并产生输出：
+
+| 节点类型 | API | 用途 | 示例 |
+|---------|-----|------|------|
+| `TypedNode` | `create_typed_node` | 类型安全的处理节点 | 数值计算、类型转换 |
+| `AnyNode` | `create_any_node` | 动态类型的处理节点 | LLM 节点、PlanParser、Aggregator |
+| `LLM Node` | `create_any_node` | **核心决策节点，多源输入融合** | 接收 system_prompt、user_prompt、context、tools、image、audio |
+
+**LLM 节点输入设计**：
+- `system_prompt`：系统提示词（角色定义）
+- `user_prompt`：用户提示词（问题或指令）
+- `context`：知识库检索结果（多模态 RAG）
+- `tools`：可用工具列表（ToolBus 导出）
+- `image_data`/`audio_data`：多模态输入（可选）
+
+#### 4.3.3 Control 节点（控制流节点）
+
+Control 节点实现条件分支、循环和并行执行：
+
+| 节点类型 | API | 用途 | 示例 |
+|---------|-----|------|------|
+| `Loop Node` | `create_loop_decl` | **Agent 循环，动态构建子图** | 代理决策-执行循环 |
+| `Condition Node` | `create_condition_decl` | 条件分支 | 判断是否继续循环 |
+| `ForEach Node` | `create_for_each` | 并行遍历 | 并行工具调用 |
+| `Subgraph Node` | `create_subgraph` | 子图模块 | 可复用的 Agent 或 Workflow |
+
+**关键设计**：
+- **Agent 以循环子图封装**：使用 `create_loop_decl` 的 `body_builder_fn` 在每次迭代时动态构建子图
+- **Agent 和工作流可嵌套**：Agent 或 Workflow 可以作为独立节点嵌入到更大的工作流中
+
+#### 4.3.4 Sink 节点（输出节点）
+
+Sink 节点处理最终输出，支持多端适配：
+
+| 节点类型 | API | 用途 | 示例 |
+|---------|-----|------|------|
+| `AnySink` | `create_any_sink` | 统一输出接口 | CLI、ImGui、Web 输出 |
+| `TypedSink` | `create_typed_sink` | 类型安全的输出 | 数值结果输出 |
+
+**关键设计**：所有输出都通过 Sink 节点统一处理，实现 CLI、ImGui 和 Web 的多端适配。
+
+### 4.4 Agent 与工作流的嵌套设计
+
+本框架的核心创新在于 **Agent 和工作流都可以作为独立节点**，支持多层嵌套和组合：
+
+```mermaid
+graph TB
+    subgraph "顶层工作流 (Main Workflow)"
+        MAIN_START[Start Node]
+        MAIN_LLM[Main LLM Node]
+        
+        subgraph "Agent 节点 (可嵌套)"
+            AGENT_LOOP[Agent Loop<br/>create_loop_decl]
+            
+            subgraph "循环体内部 (动态构建)"
+                AGENT_LLM[Agent LLM]
+                AGENT_TOOLS[Agent Tools]
+                
+                subgraph "子工作流节点 (可嵌套)"
+                    SUB_WF[Sub Workflow<br/>create_subgraph]
+                    
+                    subgraph "子工作流内部"
+                        SUB_NODE1[Node 1]
+                        SUB_NODE2[Node 2]
+                    end
+                end
+            end
+        end
+        
+        MAIN_SINK[Output Sink]
+    end
+    
+    MAIN_START --> MAIN_LLM
+    MAIN_LLM --> AGENT_LOOP
+    AGENT_LOOP --> AGENT_LLM
+    AGENT_LLM --> AGENT_TOOLS
+    AGENT_TOOLS --> SUB_WF
+    SUB_WF --> SUB_NODE1
+    SUB_NODE1 --> SUB_NODE2
+    AGENT_LOOP --> MAIN_SINK
+    
+    style AGENT_LOOP fill:#FDEDEC,stroke:#EC7063
+    style SUB_WF fill:#E8F8F5,stroke:#1ABC9C
+```
+
+#### 4.4.1 Agent 作为节点
+
+Agent 可以通过 `create_loop_decl` 封装为一个独立的循环节点：
+
+```cpp
+// Agent 节点封装：将 Agent 封装为可复用的节点
+auto create_agent_node(
+    wf::GraphBuilder& builder,
+    const std::string& name,
+    const std::vector<std::pair<std::string, std::string>>& input_specs,
+    const AgentConfig& config
+) {
+    // Agent 内部是一个循环子图
+    auto [agent_node, agent_task] = builder.create_loop_decl(
+        name,
+        input_specs,
+        // body_builder_fn: Agent 的决策-执行循环
+        [config](wf::GraphBuilder& gb, const auto& inputs) {
+            // 构建 Agent 循环体（LLM + 工具调用 + 知识检索）
+            // ... 见 7.2 节的完整实现 ...
+        },
+        // condition_func: Agent 的终止条件
+        [](const auto& inputs) -> int {
+            bool is_final = std::any_cast<bool>(inputs.at("is_final"));
+            return is_final ? 1 : 0;
+        },
+        // exit_builder_fn: Agent 的输出处理
+        [](wf::GraphBuilder& gb, const auto& inputs) {
+            gb.create_any_sink(
+                "AgentOutput",
+                {{"LLM", "final_answer"}},
+                [](const auto& outputs) {
+                    // 输出 Agent 的最终结果
+                }
+            );
+        },
+        {"agent_output"}  // Agent 的输出键
+    );
+    
+    return std::make_pair(agent_node, agent_task);
+}
+
+// 使用 Agent 节点（嵌入到更大的工作流中）
+auto [agent1, _] = create_agent_node(builder, "PlanningAgent", 
+    {{"Input", "task"}}, planning_config);
+auto [agent2, _] = create_agent_node(builder, "ExecutionAgent",
+    {{"PlanningAgent", "agent_output"}}, execution_config);
+
+// Agent1 的输出作为 Agent2 的输入，实现了 Agent 的链式组合
+```
+
+#### 4.4.2 工作流作为节点
+
+工作流可以通过 `create_subgraph` 封装为一个独立的节点：
+
+```cpp
+// 工作流节点封装：将工作流封装为可复用的节点
+auto create_workflow_node(
+    wf::GraphBuilder& builder,
+    const std::string& name,
+    const std::vector<std::pair<std::string, std::string>>& input_specs,
+    const WorkflowConfig& config
+) {
+    // 工作流是一个子图模块
+    auto workflow_task = builder.create_subgraph(name, 
+        [config, input_specs](wf::GraphBuilder& gb) {
+            // 构建工作流内部结构
+            // 1. 创建内部 Source 节点
+            auto [src, _] = gb.create_any_source("InternalSource", 
+                [input_specs](const auto& inputs) {
+                    // 从外部输入构造内部数据
+                    return std::unordered_map<std::string, std::any>{/* ... */};
+                });
+            
+            // 2. 创建工作流内部节点（可以包含 Agent）
+            // ...
+            
+            // 3. 创建工作流输出 Sink
+            gb.create_any_sink("InternalSink", 
+                {{"LastNode", "output"}},
+                [](const auto& outputs) {
+                    // 工作流的最终输出
+                });
+        }
+    );
+    
+    return workflow_task;
+}
+
+// 使用工作流节点（可以包含 Agent）
+auto workflow1 = create_workflow_node(builder, "DataProcessingWorkflow",
+    {{"Input", "data"}}, data_config);
+    
+// 工作流内部可以包含 Agent
+auto workflow2 = create_workflow_node(builder, "AgentOrchestrationWorkflow",
+    {{"DataProcessingWorkflow", "output"}}, orchestration_config);
+```
+
+#### 4.4.3 Agent 与工作流的嵌套组合
+
+Agent 和工作流可以互相嵌套，形成复杂的分层架构：
+
+```cpp
+// 示例：Agent 内部包含工作流，工作流内部包含 Agent
+auto [top_level_agent, _] = builder.create_loop_decl(
+    "TopLevelAgent",
+    {{"Input", "task"}},
+    // Agent 循环体
+    [](wf::GraphBuilder& gb, const auto& inputs) {
+        // 1. Agent 内部的 LLM 节点
+        auto [llm, _] = gb.create_any_node("LLM", /* ... */);
+        
+        // 2. Agent 内部的工作流节点（嵌套）
+        auto sub_workflow = gb.create_subgraph("SubWorkflow", [](wf::GraphBuilder& sub_gb) {
+            // 工作流内部的 Agent 节点（嵌套）
+            auto [sub_agent, _] = sub_gb.create_loop_decl(
+                "SubAgent",
+                {{"ParentLLM", "output"}},
+                // 子 Agent 的循环体
+                [](wf::GraphBuilder& agent_gb, const auto& agent_inputs) {
+                    // 子 Agent 的逻辑
+                },
+                // ...
+            );
+        });
+        
+        // 3. Agent 内部的其他节点
+        // ...
+    },
+    // ...
+);
+
+// 这种嵌套设计支持：
+// 1. Agent 内部可以调用工作流处理复杂子任务
+// 2. 工作流内部可以包含 Agent 实现智能决策
+// 3. 多层嵌套形成复杂的分层架构
+```
+
+### 4.5 技术框架分层架构
+
+```mermaid
+graph TB
+    subgraph "应用层 (Application Layer)"
+        CLI_APP[CLI 应用]
+        GUI_APP[ImGui 应用]
+        WEB_APP[Web 应用]
+    end
+    
+    subgraph "工作流层 (Workflow Layer)"
+        WF_BUILDER[GraphBuilder<br/>声明式构图]
+        WF_EXEC[Executor<br/>多线程执行]
+        WF_NODES[Node Library<br/>节点库]
+    end
+    
+    subgraph "业务模块层 (Business Module Layer)"
+        LLM_MOD[LLM Module<br/>多模态推理]
+        TOOL_MOD[ToolBus Module<br/>工具管理]
+        KB_MOD[KnowledgeBase Module<br/>向量检索]
+        MEM_MOD[Memory Module<br/>记忆管理]
+        ENC_MOD[Encoder Module<br/>多模态编码]
+    end
+    
+    subgraph "基础设施层 (Infrastructure Layer)"
+        TASKFLOW[Taskflow<br/>任务调度]
+        VECTOR_DB[(Vector DB<br/>Faiss/Milvus)]
+        EVENT_LOG[(Event Log<br/>事件溯源)]
+        HTTP_SRV[HTTP Server<br/>SSE/WebSocket]
+    end
+    
+    CLI_APP --> WF_BUILDER
+    GUI_APP --> WF_BUILDER
+    WEB_APP --> WF_BUILDER
+    
+    WF_BUILDER --> WF_EXEC
+    WF_EXEC --> WF_NODES
+    WF_NODES --> LLM_MOD
+    WF_NODES --> TOOL_MOD
+    WF_NODES --> KB_MOD
+    WF_NODES --> MEM_MOD
+    WF_NODES --> ENC_MOD
+    
+    KB_MOD --> VECTOR_DB
+    MEM_MOD --> EVENT_LOG
+    WEB_APP --> HTTP_SRV
+    WF_EXEC --> TASKFLOW
+```
+
+### 4.6 节点生命周期与状态管理
+
+每个节点在执行过程中都有明确的生命周期：
+
+```mermaid
+stateDiagram-v2
+    [*] --> Created: create_xxx_node
+    Created --> Waiting: 等待依赖就绪
+    Waiting --> Ready: 所有依赖完成
+    Ready --> Executing: Executor 调度
+    Executing --> Success: 执行成功
+    Executing --> Failed: 执行失败
+    Success --> Emitting: 设置输出值
+    Failed --> Error: 错误处理
+    Emitting --> [*]: 完成
+    Error --> [*]: 完成或重试
+```
+
+**节点状态管理要点**：
+
+1. **依赖检查**：节点在 `Waiting` 状态等待所有输入就绪（通过 `shared_future` 检查）
+2. **并行执行**：多个独立节点可以同时处于 `Executing` 状态，由 Taskflow 调度器并行执行
+3. **错误处理**：失败的节点进入 `Error` 状态，可以选择重试或向上传播错误
+4. **输出传播**：成功的节点通过 `promise/future` 机制将输出传播给依赖节点
+
+### 4.7 关键技术路线图
+
+```mermaid
+gantt
+    title 框架开发技术路线图
+    dateFormat  YYYY-MM-DD
+    section 核心框架
+    基础节点实现           :a1, 2024-01-01, 30d
+    Agent 循环封装         :a2, after a1, 30d
+    工作流嵌套支持         :a3, after a2, 20d
+    section 业务模块
+    LLM 模块集成           :b1, after a1, 40d
+    ToolBus 实现           :b2, after a1, 35d
+    知识库 Source 节点     :b3, after a2, 25d
+    section 多模态支持
+    编码器集成             :c1, after b3, 30d
+    多模态 RAG 实现        :c2, after c1, 25d
+    融合层优化             :c3, after c2, 20d
+    section 实时输出
+    SSE 实现               :d1, after b1, 15d
+    WebSocket 实现         :d2, after d1, 20d
+    ImGui 适配             :d3, after d1, 15d
+    section 性能优化
+    多线程优化             :e1, after a3, 25d
+    内存管理优化           :e2, after e1, 20d
+    监控与调试             :e3, after e2, 15d
+```
+
+## 五、LLM 节点设计与实现
+
+### 5.1 LLM 节点功能需求
 
 LLM 节点是代理框架的核心决策节点，负责整合多源输入并生成推理结果。其设计需满足以下需求：
 
@@ -161,7 +643,7 @@ LLM 节点是代理框架的核心决策节点，负责整合多源输入并生�
 
 6. **流式输出**：为了实时呈现模型的推理过程，LLM 节点的底层客户端应支持流式 token 输出，并在每个 token 生成后通过 Sink 节点发送给前端【621311804125779†L174-L214】。
 
-### 4.2 LLM 节点数据结构
+### 5.2 LLM 节点数据结构
 
 为在 `workflow` 中以类型安全方式传递 LLM 的输入和输出，本框架定义了以下结构：
 
@@ -206,7 +688,7 @@ struct CallSpec {
     };
 ```
 
-### 4.3 LLM 节点实现（基于 workflow API）
+### 5.3 LLM 节点实现（基于 workflow API）
 
 在 `workflow` 中，LLM 节点使用 `create_any_node` 创建，通过 `input_specs` 自动建立依赖关系：
 
@@ -270,7 +752,7 @@ auto [llm_node, llm_task] = builder.create_any_node(
 3. **流式输出回调**：`stream_callback` 在 LLM 生成每个 token 时触发，可以立即推送到 SSE/WebSocket 或 GUI 界面。
 4. **类型安全**：输入数据结构化，使用 `std::any_cast` 进行类型转换，在运行时检查类型匹配。
 
-### 4.4 知识库 Source 节点设计
+### 5.4 知识库 Source 节点设计
 
 知识库节点作为 **Source 节点**，为后续节点提供查询 API。这种设计使得知识库成为一个可复用的数据源，可以被多个节点（如 LLM 节点、工具调用节点）查询：
 
@@ -305,7 +787,7 @@ auto [kb_source, kb_task] = builder.create_any_source(
 3. **多模态支持**：知识库节点可以同时检索文本、图像、音频等多种模态，并返回融合后的上下文。
 4. **引用追踪**：知识库节点可以返回引文信息（citations），供 LLM 节点在生成答案时引用。
 
-### 4.5 LLM 客户端实现示例
+### 5.5 LLM 客户端实现示例
 
 LLM 客户端负责与模型服务通信，支持流式输出和多模态输入：
 
@@ -409,79 +891,688 @@ private:
 
 `call_llm_model` 函数内部使用 OpenAI 或其他模型的客户端，通过接口参数控制温度、Top P 等生成参数，并将检索内容和工具列表拼接到提示中。若模型支持视觉或音频输入，则在 `multimodal_inputs` 字段中传递预编码的向量，并在 prompt 中引用相关标记。
 
-### 4.3 多模态 LLM 节点实现
+## 六、多模态支持与融合实现
 
-在多模态场景中，LLM 节点需要结合视觉模型和语音模型，以支持图片理解和语音转写。例如，若用户上传一张卫星图像并提问“请分析这张照片中的卫星型号”，框架应在 LLM 节点之前调用图像编码器（如 CLIP）将图片转换为文本描述或嵌入向量，然后将该描述插入 LLM 的提示。在 Dify 文档中，LLM 节点支持配置“文件变量”，可直接将文件内容引入 prompt 【449621660025648†L268-L273】；这种思路也适用于我们框架，通过 `multimodal_inputs` 字段传递图片嵌入或转写文本，并在提示中使用占位符引用。
+### 6.1 模态编码与向量化实现
 
-为支持多模态，我们定义以下辅助节点：
+在多模态代理中，各种输入（文本、图像、音频、视频、结构化数据）需要通过专门的编码器转换为向量或文本描述。本框架通过 `workflow` 节点封装各个编码器，实现统一的编码接口：
 
-* **ImageEncoder 节点**：输入为图片文件或路径，输出为文本描述或向量嵌入。可调用 CLIP 或 BLIP‑2 模型，对图片进行编码，并返回文本说明供 LLM 引用。
-* **AudioTranscriber 节点**：输入为音频文件，输出为转录文本和音频嵌入。可调用 Whisper 模型，将语音转成文字，同时保留音频向量用于匹配。
-* **VectorStoreRetriever 节点**：根据查询向量在多模态向量数据库中检索相关记录，返回文本段、图片、音频等文档，并带有位置或引用信息，以便在 LLM 提示中引入。
+```mermaid
+graph LR
+    subgraph "输入层"
+        TEXT_IN[文本输入]
+        IMG_IN[图像输入]
+        AUD_IN[音频输入]
+        VID_IN[视频输入]
+    end
+    
+    subgraph "编码器节点层"
+        TEXT_ENC[TextEncoder<br/>create_any_node<br/>BERT/LLM]
+        IMG_ENC[ImageEncoder<br/>create_any_node<br/>CLIP/BLIP-2]
+        AUD_ENC[AudioEncoder<br/>create_any_node<br/>Whisper]
+        VID_ENC[VideoEncoder<br/>create_any_node<br/>ViViT]
+    end
+    
+    subgraph "向量数据库"
+        VDB[(Vector DB<br/>Faiss/Milvus<br/>多模态索引)]
+    end
+    
+    TEXT_IN --> TEXT_ENC
+    IMG_IN --> IMG_ENC
+    AUD_IN --> AUD_ENC
+    VID_IN --> VID_ENC
+    
+    TEXT_ENC -->|文本向量| VDB
+    IMG_ENC -->|图像向量| VDB
+    AUD_ENC -->|音频向量| VDB
+    VID_ENC -->|视频向量| VDB
+```
 
-这些节点可以通过 `create_typed_node` 或 `create_any_node` 加入工作流，并在 LLM 节点执行前完成多模态转换和检索。得到的多模态描述通过 `context` 变量拼接进 LLM 提示，赋予模型跨模态推理的能力。
+#### 6.1.1 文本编码器节点实现
 
-## 五、多模态支持与融合实现
+```cpp
+// 文本编码器节点：使用 Sentence Transformers 或 BERT
+auto [text_encoder, _] = builder.create_any_node(
+    "TextEncoder",
+    {{"Input", "text"}},
+    [&sentence_model](const std::unordered_map<std::string, std::any>& inputs) {
+        std::string text = std::any_cast<std::string>(inputs.at("text"));
+        
+        // 调用 Sentence Transformers 模型
+        std::vector<float> embedding = sentence_model.encode(text);
+        
+        // 归一化向量（用于余弦相似度）
+        float norm = 0.0f;
+        for (float val : embedding) {
+            norm += val * val;
+        }
+        norm = std::sqrt(norm);
+        for (float& val : embedding) {
+            val /= norm;
+        }
+        
+        return std::unordered_map<std::string, std::any>{
+            {"embedding", std::any{embedding}},
+            {"text", std::any{text}},  // 保留原始文本用于检索后展示
+            {"modality", std::any{std::string("text")}}
+        };
+    },
+    {"embedding", "text", "modality"}
+);
+```
 
-### 5.1 模态编码与向量化
+#### 6.1.2 图像编码器节点实现
 
-在多模态代理中，各种输入（文本、图像、音频、视频、结构化数据）需要通过专门的编码器转换为向量或文本描述：
+```cpp
+// 图像编码器节点：使用 CLIP 或 BLIP-2
+auto [image_encoder, _] = builder.create_any_node(
+    "ImageEncoder",
+    {{"Input", "image_data"}},
+    [&clip_model](const std::unordered_map<std::string, std::any>& inputs) {
+        std::string image_base64 = std::any_cast<std::string>(inputs.at("image_data"));
+        
+        // 解码 base64 图像
+        cv::Mat image = decode_base64_image(image_base64);
+        
+        // 调用 CLIP 图像编码器
+        std::vector<float> embedding = clip_model.encode_image(image);
+        
+        // 可选：生成图像描述（用于文本检索）
+        std::string description = clip_model.generate_caption(image);
+        
+        // 归一化向量
+        normalize_vector(embedding);
+        
+        return std::unordered_map<std::string, std::any>{
+            {"embedding", std::any{embedding}},
+            {"description", std::any{description}},
+            {"image_data", std::any{image_base64}},
+            {"modality", std::any{std::string("image")}}
+        };
+    },
+    {"embedding", "description", "image_data", "modality"}
+);
+```
 
-* **文本编码**：使用 BERT、LLM 或 Sentence Transformers 等模型将文本映射到向量空间，作为检索和融合的基础。
-* **图像编码**：使用视觉语言模型（如 CLIP、BLIP‑2、Q‑Former）将图片转换为文本描述或视觉特征向量。CLIP 的图像编码器可以生成统一的视觉嵌入，适合与文本向量比较【253686691880274†L320-L326】。
-* **音频编码**：采用 Whisper 等端到端语音识别模型将音频转写成文本，并可输出声学嵌入，用于匹配音频特征【253686691880274†L330-L334】。
-* **视频编码**：利用时序模型（如 ViViT 或 VideoMAE）结合图像编码器和音频编码器提取关键帧和声音特征，生成跨模态向量用于检索【253686691880274†L336-L342】。
-* **结构化数据编码**：对于表格、数据库记录等结构化数据，可通过行列嵌入或语义模型将其转换为向量【253686691880274†L344-L350】。
+#### 6.1.3 音频编码器节点实现
+
+```cpp
+// 音频编码器节点：使用 Whisper
+auto [audio_encoder, _] = builder.create_any_node(
+    "AudioEncoder",
+    {{"Input", "audio_data"}},
+    [&whisper_model](const std::unordered_map<std::string, std::any>& inputs) {
+        std::string audio_base64 = std::any_cast<std::string>(inputs.at("audio_data"));
+        
+        // 解码 base64 音频
+        std::vector<float> audio_samples = decode_base64_audio(audio_base64);
+        
+        // Whisper 转写和编码
+        std::string transcription = whisper_model.transcribe(audio_samples);
+        std::vector<float> audio_embedding = whisper_model.encode_audio(audio_samples);
+        
+        // 可选：从转录文本生成文本嵌入（用于文本检索）
+        std::vector<float> text_embedding = sentence_model.encode(transcription);
+        
+        normalize_vector(audio_embedding);
+        normalize_vector(text_embedding);
+        
+        return std::unordered_map<std::string, std::any>{
+            {"audio_embedding", std::any{audio_embedding}},
+            {"text_embedding", std::any{text_embedding}},  // 用于跨模态检索
+            {"transcription", std::any{transcription}},
+            {"audio_data", std::any{audio_base64}},
+            {"modality", std::any{std::string("audio")}}
+        };
+    },
+    {"audio_embedding", "text_embedding", "transcription", "audio_data", "modality"}
+);
+```
+
+#### 6.1.4 向量数据库存储节点
+
+编码后的向量需要存储到向量数据库中，供后续检索使用：
+
+```cpp
+// 向量数据库存储节点（Sink）
+auto [vector_store_sink, _] = builder.create_any_sink(
+    "VectorStoreSink",
+    {
+        {"TextEncoder", "embedding"},
+        {"ImageEncoder", "embedding"},
+        {"AudioEncoder", "audio_embedding"}
+    },
+    [&vector_db](const std::unordered_map<std::string, std::any>& inputs) {
+        // 收集所有模态的嵌入
+        std::vector<std::pair<std::vector<float>, DocumentMetadata>> documents;
+        
+        if (inputs.find("embedding") != inputs.end()) {
+            auto embedding = std::any_cast<std::vector<float>>(inputs.at("embedding"));
+            std::string text = std::any_cast<std::string>(inputs.at("text"));
+            std::string modality = std::any_cast<std::string>(inputs.at("modality"));
+            
+            DocumentMetadata meta;
+            meta.modality = modality;
+            meta.content = text;
+            meta.timestamp = std::time(nullptr);
+            
+            documents.push_back({embedding, meta});
+        }
+        
+        // 批量插入向量数据库
+        vector_db.insert_batch(documents);
+    }
+);
+```
 
 编码后，所有向量存入统一的向量数据库（如 Faiss 或 Milvus），并将原始文档的引用信息存储在元数据中，便于检索后输出引用。系统还需要维护模态标签，以便在检索时根据用户的查询类型选择合适的编码器和相似度函数。
 
-### 5.2 检索与融合流程
+### 6.2 多模态检索与融合流程实现
 
-在执行多模态查询时，工作流遵循以下步骤：
+在执行多模态查询时，工作流通过 KnowledgeBase Source 节点和检索节点实现。以下是详细的技术实现路线：
 
-1. **查询编码**：根据用户输入的模态，调用相应编码器得到查询向量。例如，文字问题使用文本编码器，图片问题使用图像编码器。对于组合查询，可以将不同模态的向量拼接或融合后进行检索。
+#### 6.2.1 查询编码节点实现
+
+```cpp
+// 查询编码节点：根据输入模态选择合适的编码器
+auto [query_encoder, _] = builder.create_any_node(
+    "QueryEncoder",
+    {{"UserInput", "query"}, {"ImageInput", "image_data"}, {"AudioInput", "audio_data"}},
+    [&text_encoder, &image_encoder, &audio_encoder](
+        const std::unordered_map<std::string, std::any>& inputs
+    ) {
+        std::vector<std::pair<std::vector<float>, std::string>> query_vectors;
+        
+        // 文本查询编码
+        if (inputs.find("query") != inputs.end()) {
+            std::string text = std::any_cast<std::string>(inputs.at("query"));
+            auto embedding = text_encoder.encode(text);
+            query_vectors.push_back({embedding, "text"});
+        }
+        
+        // 图像查询编码
+        if (inputs.find("image_data") != inputs.end()) {
+            std::string image = std::any_cast<std::string>(inputs.at("image_data"));
+            auto embedding = image_encoder.encode_image(image);
+            query_vectors.push_back({embedding, "image"});
+        }
+        
+        // 音频查询编码
+        if (inputs.find("audio_data") != inputs.end()) {
+            std::string audio = std::any_cast<std::string>(inputs.at("audio_data"));
+            auto embedding = audio_encoder.encode_audio(audio);
+            query_vectors.push_back({embedding, "audio"});
+        }
+        
+        return std::unordered_map<std::string, std::any>{
+            {"query_vectors", std::any{query_vectors}},
+            {"query_type", std::any{determine_query_type(inputs)}}
+        };
+    },
+    {"query_vectors", "query_type"}
+    );
+```
+
+#### 6.2.2 向量检索节点实现（基于 KnowledgeBase Source）
+
+```cpp
+// 知识库检索节点：查询向量数据库
+auto [retriever, _] = builder.create_any_node(
+    "VectorRetriever",
+    {
+        {"QueryEncoder", "query_vectors"},
+        {"KnowledgeBase", "context"}  // 从 KnowledgeBase Source 节点获取上下文
+    },
+    [&vector_db](const std::unordered_map<std::string, std::any>& inputs) {
+        auto query_vectors = std::any_cast<std::vector<std::pair<std::vector<float>, std::string>>>(
+            inputs.at("query_vectors"));
+        
+        std::vector<RetrievalResult> all_results;
+        const int top_k = 5;
+        
+        // 对每个查询向量执行检索
+        for (const auto& [query_vec, modality] : query_vectors) {
+            // 在向量数据库中检索（支持跨模态检索）
+            auto results = vector_db.search(query_vec, top_k, modality);
+            
+            // 合并结果（去重并排序）
+            for (const auto& result : results) {
+                all_results.push_back(result);
+            }
+        }
+        
+        // 按相似度分数排序并去重
+        std::sort(all_results.begin(), all_results.end(), 
+            [](const RetrievalResult& a, const RetrievalResult& b) {
+                return a.score > b.score;
+            });
+        
+        // 去重（相同文档 ID 只保留最高分）
+        std::unordered_map<std::string, RetrievalResult> unique_results;
+        for (const auto& result : all_results) {
+            if (unique_results.find(result.doc_id) == unique_results.end() ||
+                unique_results[result.doc_id].score < result.score) {
+                unique_results[result.doc_id] = result;
+            }
+        }
+        
+        // 转换为向量并返回前 top_k
+        std::vector<RetrievalResult> final_results;
+        for (const auto& [_, result] : unique_results) {
+            final_results.push_back(result);
+            if (final_results.size() >= top_k) break;
+        }
+        
+        return std::unordered_map<std::string, std::any>{
+            {"retrieved_docs", std::any{final_results}},
+            {"count", std::any{static_cast<int>(final_results.size())}}
+        };
+    },
+    {"retrieved_docs", "count"}
+    );
+```
+
+#### 6.2.3 跨模态注意力融合节点实现
+
+```cpp
+// 跨模态注意力融合节点：对齐文本和图像/音频
+auto [fusion_node, _] = builder.create_any_node(
+    "CrossModalFusion",
+    {{"VectorRetriever", "retrieved_docs"}},
+    [&attention_model](const std::unordered_map<std::string, std::any>& inputs) {
+        auto docs = std::any_cast<std::vector<RetrievalResult>>(
+            inputs.at("retrieved_docs"));
+        
+        // 分离不同模态的文档
+        std::vector<RetrievalResult> text_docs, image_docs, audio_docs;
+        for (const auto& doc : docs) {
+            if (doc.modality == "text") text_docs.push_back(doc);
+            else if (doc.modality == "image") image_docs.push_back(doc);
+            else if (doc.modality == "audio") audio_docs.push_back(doc);
+        }
+        
+        // 跨模态注意力对齐
+        std::vector<AlignedDocument> aligned_docs;
+        
+        // 文本-图像对齐
+        for (const auto& text_doc : text_docs) {
+            for (const auto& image_doc : image_docs) {
+                float alignment_score = attention_model.compute_alignment(
+                    text_doc.embedding, image_doc.embedding);
+                
+                if (alignment_score > 0.7f) {  // 阈值可配置
+                    AlignedDocument aligned;
+                    aligned.text = text_doc.content;
+                    aligned.image = image_doc.content;
+                    aligned.score = (text_doc.score + image_doc.score) / 2.0f;
+                    aligned.score *= alignment_score;  // 加权
+                    aligned_docs.push_back(aligned);
+                }
+            }
+        }
+        
+        // 生成融合后的上下文摘要
+        std::string fused_context = generate_fused_summary(aligned_docs);
+        
+        return std::unordered_map<std::string, std::any>{
+            {"fused_context", std::any{fused_context}},
+            {"aligned_docs", std::any{aligned_docs}},
+            {"citations", std::any{extract_citations(aligned_docs)}}
+        };
+    },
+    {"fused_context", "aligned_docs", "citations"}
+    );
+```
+
+#### 6.2.4 融合策略实现
+
+根据任务需求，可以选择不同的融合策略：
+
+```cpp
+// 融合策略选择节点
+auto [fusion_strategy, _] = builder.create_condition_decl(
+    "FusionStrategy",
+    {{"QueryEncoder", "query_type"}},
+    [](const std::unordered_map<std::string, std::any>& inputs) {
+        std::string query_type = std::any_cast<std::string>(inputs.at("query_type"));
+        
+        // 根据查询类型选择融合策略
+        if (query_type == "text_only") return 0;  // 早期融合
+        else if (query_type == "multimodal_simple") return 1;  // 中期融合
+        else return 2;  // 晚期融合
+    },
+    {
+        // 分支 0: 早期融合（文本直接拼接）
+        builder.create_subgraph("EarlyFusion", [](wf::GraphBuilder& gb) {
+            // 直接拼接所有模态的文本描述
+        }),
+        // 分支 1: 中期融合（交叉注意力）
+        builder.create_subgraph("IntermediateFusion", [](wf::GraphBuilder& gb) {
+            // 使用 CrossModalFusion 节点
+        }),
+        // 分支 2: 晚期融合（分别检索后合并）
+        builder.create_subgraph("LateFusion", [](wf::GraphBuilder& gb) {
+            // 分别检索各模态，最后加权合并
+        })
+    },
+    {"fused_context"}
+);
+```
+
+**检索与融合流程总结**：
+
+1. **查询编码**：根据用户输入的模态，调用相应编码器得到查询向量。对于组合查询，可以将不同模态的向量拼接或融合后进行检索。
 2. **向量检索**：在向量数据库中执行相似度搜索，返回一组 (k 个) 最相关的文档。为了兼顾语义匹配和关键词精确度，可采用混合检索策略，通过语义搜索和符号搜索结合【253686691880274†L289-L292】。
-3. **跨模态注意力**：如果检索到的文档包含多模态内容，需要通过跨模态注意力机制将文本与图片、音频之间建立对齐关系。例如，将文本描述与图像区域匹配，或者将语音描述与文本段关联【253686691880274†L296-L299】。
+3. **跨模态注意力**：如果检索到的文档包含多模态内容，需要通过跨模态注意力机制将文本与图片、音频之间建立对齐关系【253686691880274†L296-L299】。
 4. **融合层**：将检索结果融合到统一的上下文向量或文本中，为 LLM 生成提供完整的语义信息。融合过程应考虑各模态的重要性，通过注意力或加权平均等策略平衡不同来源【253686691880274†L301-L304】。
 5. **结果集成**：最终将融合后的多模态内容嵌入 LLM 提示词，或在模型生成后由后处理模块输出多模态解释（例如图文并茂的答案）。
 
-### 5.3 融合策略与算法
+### 6.3 融合策略与算法实现
 
-如第二节所述，融合策略主要包括早期、中期、晚期和混合融合【219518602455228†L164-L170】。在本框架中，我们可以根据任务需求选择合适策略：
+如第二节所述，融合策略主要包括早期、中期、晚期和混合融合【219518602455228†L164-L170】。本框架通过条件节点和工作流组合实现灵活的融合策略选择：
 
-* 对于需要紧密结合文本和图片的任务（例如图片描述和问答），可采用中期融合。首先使用专用编码器分别提取特征，然后通过 Q‑Former 或跨注意力层将视觉特征映射到语言空间，再由 LLM 生成答案。
-* 对于检索任务，可使用晚期融合。分别检索文本和图片结果，再由融合层根据查询意图将两个结果集合并或重排序。
-* 在复杂场景下，可以采用混合融合：早期在输入层融合图片和音频信息用于检索，中期在 LLM 中融合文本和图像描述用于理解，晚期将不同模态结果排序或拼接输出。
+```cpp
+// 混合融合策略：在不同阶段采用不同的融合方式
+auto [hybrid_fusion, _] = builder.create_any_node(
+    "HybridFusion",
+    {
+        {"TextEncoder", "embedding"},
+        {"ImageEncoder", "embedding"},
+        {"AudioEncoder", "audio_embedding"},
+        {"QueryEncoder", "query_vectors"}
+    },
+    [](const std::unordered_map<std::string, std::any>& inputs) {
+        // 阶段1：早期融合（输入层）- 用于检索
+        auto text_emb = std::any_cast<std::vector<float>>(inputs.at("embedding"));
+        auto image_emb = std::any_cast<std::vector<float>>(inputs.at("embedding"));
+        
+        // 拼接向量用于检索（简单的早期融合）
+        std::vector<float> early_fused;
+        early_fused.insert(early_fused.end(), text_emb.begin(), text_emb.end());
+        early_fused.insert(early_fused.end(), image_emb.begin(), image_emb.end());
+        
+        // 阶段2：中期融合（检索后）- 交叉注意力对齐
+        // 通过 CrossModalFusion 节点实现
+        
+        // 阶段3：晚期融合（LLM 输入前）- 加权合并
+        // 通过 Aggregator 节点实现
+        
+        return std::unordered_map<std::string, std::any>{
+            {"early_fused", std::any{early_fused}},
+            {"fusion_strategy", std::any{std::string("hybrid")}}
+        };
+    },
+    {"early_fused", "fusion_strategy"}
+);
+```
+
+**融合策略选择指南**：
+
+* **早期融合**：适用于模态密切相关、数据量小的场景。实现简单，但计算复杂度高。
+* **中期融合**：适用于图片描述和问答任务。通过 Q‑Former 或跨注意力层将视觉特征映射到语言空间，再由 LLM 生成答案。
+* **晚期融合**：适用于检索任务。分别检索各模态结果，再由融合层根据查询意图合并或重排序。
+* **混合融合**：在复杂场景下，早期用于检索，中期用于理解，晚期用于输出。
 
 此外，工程实现应考虑数据稀缺、推理开销和训练策略。现有研究表明，单阶段训练和两阶段训练均可用于多模态模型；采用联合或协调嵌入可以更好地学习跨模态联系【803420306546639†L121-L127】。
 
-## 六、实时输出与流式传输实现
+## 七、实时输出与流式传输实现
 
-### 6.1 SSE 和 WebSocket 比较
+### 7.1 SSE 和 WebSocket 技术选型
 
-在 Web 环境下实现实时输出有多种技术方案。Server‑Sent Events (SSE) 是一种基于 HTTP 的单向流式通信技术，可以让服务器不断向客户端推送事件，并由浏览器自动重连【723136666980538†L480-L599】。SSE 具有以下优点：
+在 Web 环境下实现实时输出有多种技术方案。本框架支持 SSE 和 WebSocket 两种方式，根据应用场景选择：
 
-* **实现简单**：仅依赖标准 HTTP 协议，后端实现和部署成本低，前端可使用 `EventSource` 对象直接接收消息【723136666980538†L517-L521】。
-* **自动重连**：浏览器在连接断开时会自动尝试重新建立连接【723136666980538†L536-L538】。
-* **防火墙友好**：由于使用标准 HTTP 端口 80/443，较少受防火墙限制【723136666980538†L540-L542】。
-* **易于负载均衡**：与长连接不同，SSE 可以通过传统的 HTTP 负载均衡器处理请求和转发。
+| 特性 | SSE | WebSocket |
+|------|-----|-----------|
+| 协议 | HTTP/1.1 | WS/WSS |
+| 方向 | 单向（服务器→客户端） | 全双工 |
+| 实现复杂度 | 低 | 中 |
+| 自动重连 | 支持 | 需手动实现 |
+| 二进制数据 | 不支持 | 支持 |
+| 适用场景 | 文本流式输出 | 实时双向交互、音频/视频 |
 
-缺点是 SSE 仅支持单向文本流，不适合需要双向通信或传输二进制数据的场景【723136666980538†L546-L557】。WebSocket 则建立全双工连接，适用于需要客户端主动发送数据的场景，如实时协作或在线游戏。对于 LLM 流式输出，如果无需客户端实时发送指令，SSE 是更简单的选择【825014821319660†L64-L109】。
+**SSE 的优势**【723136666980538†L480-L599】：
+* **实现简单**：仅依赖标准 HTTP 协议，后端实现和部署成本低
+* **自动重连**：浏览器自动处理连接断开和重连
+* **防火墙友好**：使用标准 HTTP 端口 80/443
+* **易于负载均衡**：可通过传统 HTTP 负载均衡器处理
 
-### 6.2 流式输出设计
+**WebSocket 的优势**【825014821319660†L64-L109】：
+* **全双工通信**：支持客户端主动发送数据
+* **二进制支持**：可以传输音频、视频等二进制数据
+* **低延迟**：协议开销小，延迟更低
 
-在我们的代理框架中，LLM 节点和工具节点需要支持流式输出。设计方案包括：
+**技术选型建议**：
+- **纯文本流式输出**：优先使用 SSE，实现简单且足够
+- **需要双向交互**：使用 WebSocket，支持用户中断、实时反馈
+- **音频/视频传输**：必须使用 WebSocket 或 WebRTC
 
-1. **分块输出**：在 LLM 调用过程中，每生成一个 token 或一段文本，就立即通过 Sink 节点推送到前端。工具节点在执行过程中也可逐步输出中间状态。
-2. **Sink 节点**：通过 `create_any_sink` 定义终端节点，内部实现 SSE 或 WebSocket 推送逻辑。Sink 节点接收来自上游节点的文本块或事件对象，将其序列化为 `data:` 格式的 SSE 消息，然后发送给客户端。
-3. **客户端处理**：前端（CLI、ImGui 或 Web）通过事件流监听器逐步显示收到的 token，实现流畅的用户体验。对于 Web 客户端，可以在消息到达时更新文本区域或状态条。
-4. **中断与控制**：在音频输入场景下，代理可以在 LLM 节点接收用户的中断信号，立即停止当前生成并重新规划。实时 API 的案例表明，适当的抖动缓冲和小块音频上传能降低延迟【621311804125779†L245-L258】。
+### 7.2 流式输出架构设计
+
+在我们的代理框架中，LLM 节点和工具节点通过回调机制支持流式输出：
+
+```mermaid
+graph TB
+    subgraph "LLM 节点"
+        LLM_FUNC[LLM Functor]
+        STREAM_CB[on_stream_token<br/>回调函数]
+    end
+    
+    subgraph "流式输出分发"
+        DISPATCH[Stream Dispatcher<br/>分发器]
+        CLI_HANDLER[CLI Handler<br/>stdout]
+        GUI_HANDLER[GUI Handler<br/>消息队列]
+        WEB_HANDLER[Web Handler<br/>SSE/WebSocket]
+    end
+    
+    subgraph "输出通道"
+        TERM_OUT[终端输出]
+        GUI_OUT[GUI 界面]
+        WEB_OUT[Web 浏览器]
+    end
+    
+    LLM_FUNC --> STREAM_CB
+    STREAM_CB --> DISPATCH
+    
+    DISPATCH --> CLI_HANDLER
+    DISPATCH --> GUI_HANDLER
+    DISPATCH --> WEB_HANDLER
+    
+    CLI_HANDLER --> TERM_OUT
+    GUI_HANDLER --> GUI_OUT
+    WEB_HANDLER --> WEB_OUT
+```
+
+#### 7.2.1 流式输出回调机制实现
+
+```cpp
+// 流式输出分发器
+class StreamDispatcher {
+private:
+    std::vector<std::function<void(std::string_view)>> handlers_;
+    std::mutex handlers_mutex_;
+    
+public:
+    void register_handler(std::function<void(std::string_view)> handler) {
+        std::lock_guard<std::mutex> lock(handlers_mutex_);
+        handlers_.push_back(handler);
+    }
+    
+    void dispatch(std::string_view token) {
+        std::lock_guard<std::mutex> lock(handlers_mutex_);
+        for (auto& handler : handlers_) {
+            handler(token);  // 同步调用所有处理器
+        }
+    }
+};
+
+// 在 LLM 节点中使用
+StreamDispatcher dispatcher;
+
+// 注册多个输出处理器
+dispatcher.register_handler([](std::string_view token) {
+    std::cout << token << std::flush;  // CLI 输出
+});
+
+dispatcher.register_handler([&gui_queue](std::string_view token) {
+    gui_queue.push("STREAM:" + std::string(token));  // GUI 输出
+});
+
+dispatcher.register_handler([&sse_connections](std::string_view token) {
+    for (auto& conn : sse_connections) {
+        send_sse_message(conn, "data: " + std::string(token) + "\n\n");
+    }
+});
+
+// LLM 节点的流式回调
+std::function<void(std::string_view)> on_stream = 
+    [&dispatcher](std::string_view token) {
+        dispatcher.dispatch(token);  // 分发到所有处理器
+    };
+```
+
+#### 7.2.2 SSE 服务器实现
+
+```cpp
+#include <httplib.h>
+
+httplib::Server srv;
+std::unordered_map<std::string, httplib::Response*> active_connections;
+
+// SSE 端点
+srv.Get("/api/stream/:session_id", [&](const httplib::Request& req, httplib::Response& res) {
+    std::string session_id = req.matches[1];
+    
+    // 设置 SSE 响应头
+    res.set_header("Content-Type", "text/event-stream");
+    res.set_header("Cache-Control", "no-cache");
+    res.set_header("Connection", "keep-alive");
+    res.set_header("Access-Control-Allow-Origin", "*");
+    
+    // 保存连接（用于后续推送）
+    active_connections[session_id] = &res;
+    
+    // 发送初始连接确认
+    res.set_content("data: {\"type\":\"connected\"}\n\n", "text/event-stream");
+    res.flush();
+    
+    // 保持连接（在实际实现中，这应该在后台线程中处理）
+    // 这里简化处理，实际需要使用异步 I/O
+});
+
+// SSE 消息发送函数
+void send_sse_message(const std::string& session_id, const std::string& data) {
+    if (active_connections.find(session_id) != active_connections.end()) {
+        auto* res = active_connections[session_id];
+        res->set_content("data: " + data + "\n\n", "text/event-stream");
+        res->flush();
+    }
+}
+
+// 在 Sink 节点中推送流式数据
+auto [sse_sink, _] = builder.create_any_sink(
+    "SSESink",
+    {{"LLM", "final_answer"}},
+    [&](const std::unordered_map<std::string, std::any>& outputs) {
+        // 最终结果推送（流式输出通过回调处理）
+    }
+);
+```
+
+#### 7.2.3 WebSocket 服务器实现
+
+```cpp
+#include <websocketpp/config/asio_no_tls.hpp>
+#include <websocketpp/server.hpp>
+
+typedef websocketpp::server<websocketpp::config::asio> server_t;
+server_t ws_server;
+
+std::unordered_map<std::string, websocketpp::connection_hdl> ws_connections;
+
+// WebSocket 连接处理
+ws_server.set_message_handler([&](websocketpp::connection_hdl hdl, server_t::message_ptr msg) {
+    // 处理客户端消息（如中断信号）
+    std::string payload = msg->get_payload();
+    json message = json::parse(payload);
+    
+    if (message["type"] == "interrupt") {
+        // 中断当前 LLM 生成
+        interrupt_llm_generation(message["session_id"]);
+    }
+});
+
+// WebSocket 消息发送函数
+void send_ws_message(const std::string& session_id, const json& data) {
+    if (ws_connections.find(session_id) != ws_connections.end()) {
+        auto hdl = ws_connections[session_id];
+        ws_server.send(hdl, data.dump(), websocketpp::frame::opcode::text);
+    }
+}
+
+// 音频数据推送（二进制）
+void send_ws_audio(const std::string& session_id, const std::vector<uint8_t>& audio_data) {
+    if (ws_connections.find(session_id) != ws_connections.end()) {
+        auto hdl = ws_connections[session_id];
+        ws_server.send(hdl, audio_data.data(), audio_data.size(), 
+                       websocketpp::frame::opcode::binary);
+    }
+}
+```
+
+#### 7.2.4 中断与控制机制
+
+在音频输入场景下，代理需要在 LLM 节点接收用户的中断信号，立即停止当前生成并重新规划【621311804125779†L245-L258】：
+
+```cpp
+// 中断控制管理器
+class InterruptManager {
+private:
+    std::atomic<bool> interrupt_flag_{false};
+    std::string interrupt_session_id_;
+    std::mutex mutex_;
+    
+public:
+    void request_interrupt(const std::string& session_id) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        interrupt_flag_ = true;
+        interrupt_session_id_ = session_id;
+    }
+    
+    bool should_interrupt(const std::string& session_id) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return interrupt_flag_ && interrupt_session_id_ == session_id;
+    }
+    
+    void clear_interrupt() {
+        std::lock_guard<std::mutex> lock(mutex_);
+        interrupt_flag_ = false;
+        interrupt_session_id_.clear();
+    }
+};
+
+// 在 LLM 节点的流式回调中检查中断
+std::function<void(std::string_view)> on_stream_with_interrupt = 
+    [&dispatcher, &interrupt_manager, session_id](std::string_view token) {
+        if (interrupt_manager.should_interrupt(session_id)) {
+            // 停止生成并返回
+            return;
+        }
+        dispatcher.dispatch(token);
+    };
+```
+
+**流式输出设计总结**：
+
+1. **分块输出**：在 LLM 调用过程中，每生成一个 token 就立即通过回调推送到前端。
+2. **Sink 节点**：通过 `create_any_sink` 定义终端节点，内部实现 SSE 或 WebSocket 推送逻辑。
+3. **客户端处理**：前端通过事件流监听器逐步显示收到的 token，实现流畅的用户体验。
+4. **中断与控制**：支持用户中断当前生成，立即停止并重新规划。
 
 SSE 的实现还需要处理浏览器同时连接数限制（通常为 6），因此在前端需要复用连接或对会话进行排队【723136666980538†L549-L551】。对于需要双向实时交互的场景，可在后端提供同时支持 SSE 和 WebSocket 的接口，由前端根据需求选择连接方式。
 
-## 七、基于 workflow 构建代理工作流
+## 八、基于 workflow 构建代理工作流
 
-### 7.1 总体架构
+### 8.1 总体架构
 
 结合第二节的代理工作流原则和第三节的 workflow 特性，我们设计了如下多模态智能代理框架。该框架基于 Taskflow `workflow` 的声明式 API，通过键值驱动的数据流实现所有模块的连接：
 
@@ -610,11 +1701,11 @@ graph TB
 
 7. **Sink 节点**：使用 `create_any_sink` 创建，支持回调函数实时处理输出，适配 CLI、ImGui 和 Web 客户端。
 
-### 7.2 循环子图实现（基于 workflow API）
+### 8.2 循环子图实现（基于 workflow API）
 
 循环体是代理逻辑的核心，需要在每次迭代中动态构建子图并并行调用多个工具。我们利用 `create_loop_decl` 提供的 `body_builder_fn` 在每次迭代时动态构建子图。**重要**：循环体使用 `body_builder_fn` 参数，该函数接收 `GraphBuilder&` 和输入数据，在每次迭代时重建子图，避免状态污染。
 
-#### 7.2.1 完整的循环子图实现
+#### 8.2.1 完整的循环子图实现
 
 ```cpp
 #include <workflow/nodeflow.hpp>
@@ -634,8 +1725,8 @@ static int loop_iteration = 0;
 const int MAX_ITERATIONS = 10;
 
 // 创建代理循环
-auto [loop_node, loop_task] = builder.create_loop_decl(
-    "AgentLoop",
+    auto [loop_node, loop_task] = builder.create_loop_decl(
+        "AgentLoop",
     // input_specs: 从 LLM 和 PlanParser 获取输入（自动建立依赖）
     {
         {"LLM", "is_final"},           // LLM 输出的完成标志
@@ -736,7 +1827,7 @@ auto [loop_node, loop_task] = builder.create_loop_decl(
         
         // 6. 聚合节点：合并工具结果、知识检索结果和 LLM 推理
         auto [agg_node, _] = gb.create_any_node(
-            "Aggregator",
+                "Aggregator",
             {
                 {"LLM", "reasoning"},          // LLM 推理过程
                 {"ToolResults", "results"},     // 工具调用结果
@@ -811,7 +1902,7 @@ auto [loop_node, loop_task] = builder.create_loop_decl(
     );
 ```
 
-#### 7.2.2 循环体执行流程图
+#### 8.2.2 循环体执行流程图
 
 ```mermaid
 sequenceDiagram
@@ -863,11 +1954,11 @@ sequenceDiagram
 
 在此实现中，循环体从 `Parser` 节点接收工具调用列表，将其传入 for_each 节点并行执行。工具结果通过共享状态暂存，然后调用 KnowledgeQuery 节点检索新知识，再由 Aggregator 节点合并生成新的上下文。条件函数检查 LLM 是否已输出最终答案，若未完成则继续循环。本框架的并行工具调用利用 Taskflow 的并行算法，自动使用工作窃取调度多个线程执行任务【201813784348343†L193-L210】。
 
-### 7.3 完整的端到端工作流构建示例
+### 8.3 完整的端到端工作流构建示例
 
 以下展示如何使用 Taskflow `workflow` 的声明式 API 构建完整的代理工作流。所有代码示例基于实际的 `workflow` API 实现：
 
-#### 7.3.1 创建源节点（Source Nodes）
+#### 8.3.1 创建源节点（Source Nodes）
 
 源节点负责注入初始数据，包括系统提示词、用户输入、对话记忆、工具列表和多模态输入：
 
@@ -963,7 +2054,7 @@ int main() {
     );
 ```
 
-#### 7.3.2 创建 LLM 节点
+#### 8.3.2 创建 LLM 节点
 
 LLM 节点是代理的核心决策节点，接收多个输入并输出推理结果：
 
@@ -1018,7 +2109,7 @@ LLM 节点是代理的核心决策节点，接收多个输入并输出推理结�
     );
 ```
 
-#### 7.3.3 创建 PlanParser 节点
+#### 8.3.3 创建 PlanParser 节点
 
 PlanParser 节点解析 LLM 输出的工具调用指令，生成 `CallSpec` 列表：
 
@@ -1050,7 +2141,7 @@ PlanParser 节点解析 LLM 输出的工具调用指令，生成 `CallSpec` 列�
     );
 ```
 
-#### 7.3.4 构建代理循环（Agent Loop）
+#### 8.3.4 构建代理循环（Agent Loop）
 
 代理循环是框架的核心，使用 `create_loop_decl` 构建，循环体在每次迭代时动态构建子图：
 
@@ -1102,9 +2193,9 @@ PlanParser 节点解析 LLM 输出的工具调用指令，生成 `CallSpec` 列�
                     }
                 }
             );
-                },
-                {"context"}
-            );
+        },
+        {"context"}
+    );
 
     // 12. 创建输出 Sink 节点（CLI、ImGui、Web）
     auto [cli_sink, _] = builder.create_any_sink(
@@ -1127,7 +2218,7 @@ PlanParser 节点解析 LLM 输出的工具调用指令，生成 `CallSpec` 列�
 }
 ```
 
-### 7.4 回溯和记忆管理
+### 8.4 回溯和记忆管理
 
 代理的记忆系统由 Memory 节点和事件日志组成。根据事件溯源模式，每次节点执行的输入、输出以及中间状态都作为事件写入不可变的日志【269917138825994†L140-L165】。Memory 节点负责从日志中读取相关历史并在下一轮提供给 LLM 节点。记忆分为：
 
@@ -1137,11 +2228,11 @@ PlanParser 节点解析 LLM 输出的工具调用指令，生成 `CallSpec` 列�
 
 为了保证性能，Memory 节点应对长对话进行窗口截断或摘要压缩，避免提示过长导致生成成本上升。可以借鉴 Dify 的 Memory Window 机制，根据模型上下文窗口大小动态裁剪历史【449621660025648†L315-L320】。
 
-### 7.5 MCP 工具集成与 ToolBus 设计
+### 8.5 MCP 工具集成与 ToolBus 设计
 
 MCP (Model Context Protocol) 是一个开放标准，允许 LLM 应用与外部工具和服务集成。本框架通过 **ToolBus** 模块统一管理本地函数、MCP 服务和外部 API，为代理提供统一的工具调用接口。
 
-#### 7.5.1 ToolBus 架构设计
+#### 8.5.1 ToolBus 架构设计
 
 ```mermaid
 classDiagram
@@ -1180,7 +2271,7 @@ classDiagram
     ToolBus --> APIClient : 管理
 ```
 
-#### 7.5.2 ToolBus 实现示例
+#### 8.5.2 ToolBus 实现示例
 
 ```cpp
 #include <nlohmann/json.hpp>
@@ -1321,7 +2412,7 @@ public:
 };
 ```
 
-#### 7.5.3 在 workflow 中使用 ToolBus
+#### 8.5.3 在 workflow 中使用 ToolBus
 
 ToolBus 通过 Source 节点提供工具列表，并在循环体内的工具调用节点中使用：
 
@@ -1391,7 +2482,7 @@ auto [tool_call_node, _] = gb.create_for_each<std::vector<CallSpec>>(
     );
 ```
 
-#### 7.5.4 MCP 工具集成流程图
+#### 8.5.4 MCP 工具集成流程图
 
 ```mermaid
 sequenceDiagram
@@ -1426,7 +2517,7 @@ sequenceDiagram
 4. **易于扩展**：添加新工具只需注册到 ToolBus，无需修改工作流图。
 5. **LLM 集成**：`export_as_llm_tools()` 方法生成符合 OpenAI Function Calling 格式的工具描述，可直接传递给 LLM。
 
-### 7.6 终端输出与 UI 集成
+### 8.6 终端输出与 UI 集成
 
 Sink 节点可以根据不同客户端输出结果，支持命令行、ImGui 和 Web 前端。所有输出都通过 Sink 节点统一处理，实现了多端适配的灵活架构：
 
@@ -1463,7 +2554,7 @@ graph LR
     WEB_SINK --> WS
 ```
 
-#### 7.6.1 CLI 输出实现
+#### 8.6.1 CLI 输出实现
 
 命令行输出是最简单的场景，直接使用 `std::cout` 打印结果：
 
@@ -1500,7 +2591,7 @@ std::function<void(std::string_view)> cli_stream_callback =
     };
 ```
 
-#### 7.6.2 ImGui 输出实现
+#### 8.6.2 ImGui 输出实现
 
 ImGui 是即时模式 GUI 库，需要在主线程中更新界面。使用线程安全的消息队列在后台工作流线程和 GUI 线程间传递数据：
 
@@ -1571,7 +2662,7 @@ std::function<void(std::string_view)> gui_stream_callback =
     };
 ```
 
-#### 7.6.3 Web 输出实现（SSE/WebSocket）
+#### 8.6.3 Web 输出实现（SSE/WebSocket）
 
 Web 前端需要实时接收流式输出，可以使用 SSE（Server-Sent Events）或 WebSocket：
 
@@ -1664,11 +2755,11 @@ auto [ws_sink, tWsSink] = builder.create_any_sink(
 3. **流式输出**：LLM 节点的 `on_stream_token` 回调实时推送 token，CLI 直接打印，ImGui 和 Web 通过队列或网络连接推送。
 4. **多端适配**：同一个工作流可以同时连接多个 Sink，实现 CLI、ImGui 和 Web 的并行输出。
 
-## 八、关键算法与技术实现
+## 九、关键算法与技术实现
 
-### 8.1 多线程执行与工作窃取调度
+### 9.1 多线程执行与工作窃取调度
 
-#### 8.1.1 Taskflow 执行器配置
+#### 9.1.1 Taskflow 执行器配置
 
 Taskflow 在执行任务图时采用工作窃取调度器，每个线程维护一个任务队列并在空闲时从其他线程窃取任务，以提高负载均衡。在代理框架中，合理配置执行器线程数对性能至关重要：
 
@@ -1690,7 +2781,7 @@ auto future = builder.run_async(executor);  // 异步执行，返回 future
 future.wait();  // 等待完成
 ```
 
-#### 8.1.2 并行执行流程
+#### 9.1.2 并行执行流程
 
 代理框架中的并行执行主要体现在以下几个方面：
 
@@ -1746,7 +2837,7 @@ graph TB
 3. **工作窃取机制**：当某个线程完成自己的任务后，会自动从其他线程的队列中窃取任务，提高 CPU 利用率。
 4. **线程安全共享状态**：使用 `std::mutex` 或原子操作保护共享数据，避免数据竞争。
 
-#### 8.1.3 线程安全的共享状态管理
+#### 9.1.3 线程安全的共享状态管理
 
 在并行工具调用中，需要安全地收集结果。以下是几种线程安全的模式：
 
@@ -1813,7 +2904,7 @@ auto [tool_node, _] = builder.create_for_each<std::vector<CallSpec>>(
 3. **任务粒度**：将大任务拆分为多个小任务，提高并行度；但避免任务过小导致调度开销过大。
 4. **动态负载均衡**：Taskflow 的工作窃取机制自动平衡负载，无需手动分配任务。
 
-#### 8.1.4 异步任务与动态任务图
+#### 9.1.4 异步任务与动态任务图
 
 Taskflow 支持异步任务和动态任务图，在 3.6 版本中引入了 `dependent_async` 接口，允许在运行时创建新的任务并依赖已有任务【548440874866018†L29-L66】。在代理框架中，可以利用这些特性实现更灵活的任务调度：
 
@@ -1834,52 +2925,1141 @@ future.wait();
 
 在 `workflow` 中，`create_loop_decl` 会自动连接循环体和条件逻辑【631946224216190†L1280-L1334】。为了避免在循环内共享状态导致数据竞争，我们将可变数据放入线程安全的 SessionState 结构，或者在并行任务中尽量使用消息传递而非共享内存。共享变量需通过互斥锁或原子操作保护，但过度锁竞争可能降低性能，因此建议将结果写入线程本地容器，最后汇总。
 
-### 8.2 跨模态检索与融合算法
+### 9.2 跨模态检索与融合算法实现
 
-多模态 RAG 中的关键算法包括：
+多模态 RAG 中的关键算法需要具体实现，以下是详细的技术路线：
 
-1. **向量化及索引构建**：针对每个模态训练或使用预训练的编码器，将数据转换为固定维度向量。向量数据库可使用 IVF‑PQ、HNSW 等索引结构，以支持高维近似最近邻搜索。
-2. **查询向量构造与扩充**：除了直接编码用户输入，还可以通过查询扩展（QE）技术引入同义词、上下游描述等，提高召回率。对于图像查询，可以使用视觉补全模型生成类似图片描述。
-3. **交叉模态注意力**：将检索到的文本和视觉特征送入交叉注意力层，通过计算注意力权重实现对齐。常见做法是采用 Transformer 的交叉注意力块，让文本 token attend 到图像 patch 或图像区域 attend 到文本 token【253686691880274†L296-L299】。
-4. **融合层算法**：实现不同模态的加权融合。可以采用简单的加权平均，也可以使用神经网络在所有模态嵌入上进行进一步编码。BLIP‑2 等模型利用 Q‑Former 模块在融合过程中高效压缩视觉信息，以减轻 LLM 负担。
-5. **生成与后处理**：在融合上下文输入 LLM 后，生成答案可能包含多模态内容，如引用图片、链接或文本摘要。生成后可应用重排序、摘要压缩、情感调整等操作，使输出更符合用户需求。
+#### 9.2.1 向量化及索引构建实现
 
-### 8.3 计划解析与工具调用调度
+```cpp
+// 向量索引构建节点
+auto [index_builder, _] = builder.create_any_node(
+    "IndexBuilder",
+    {{"VectorStoreSink", "documents"}},
+    [&vector_db](const std::unordered_map<std::string, std::any>& inputs) {
+        auto documents = std::any_cast<std::vector<Document>>(inputs.at("documents"));
+        
+        // 1. 构建 Faiss IVF-PQ 索引（高效压缩）
+        faiss::IndexIVFPQ* index = new faiss::IndexIVFPQ(
+            quantizer,    // 量化器（K-means）
+            dimension,    // 向量维度
+            nlist,        // 聚类中心数
+            m,            // PQ 码本数
+            nbits         // PQ 编码位数
+        );
+        
+        // 2. 训练索引
+        std::vector<float> training_vectors;
+        for (const auto& doc : documents) {
+            training_vectors.insert(training_vectors.end(),
+                                   doc.embedding.begin(), doc.embedding.end());
+        }
+        index->train(training_vectors.size() / dimension, training_vectors.data());
+        
+        // 3. 添加向量
+        index->add(documents.size(), training_vectors.data());
+        
+        // 4. 保存索引
+        vector_db.save_index("multimodal_index.faiss", index);
+        
+        return std::unordered_map<std::string, std::any>{
+            {"index_path", std::any{std::string("multimodal_index.faiss")}},
+            {"doc_count", std::any{static_cast<int>(documents.size())}}
+        };
+    },
+    {"index_path", "doc_count"}
+);
+```
 
-LLM 输出的计划通常以自然语言或 JSON 嵌入形式表示，需要解析出要调用的工具名称和参数。Plan Parser 节点通过正则或 JSON 解析将 LLM 输出转换为 `CallSpec` 列表。还需考虑工具调用顺序：若 LLM 计划要求先后顺序，可按顺序执行；否则可以并行调用。在 ReAct 模式下，常见做法是先解析并行调用列表，然后执行所有调用，聚合结果后再交给 LLM 总结。
+#### 9.2.2 查询向量构造与扩充实现
 
-调度时，可以根据工具的耗时和资源消耗设置并发度上限。例如，在多线程环境中限制同时运行的重载工具数，或在 GPU 资源有限时排队执行。Taskflow 支持指定线程数量和运行模式，可以在执行器初始化时通过 `tf::Executor` 的线程数参数控制。
+```cpp
+// 查询扩展节点：引入同义词和相关描述
+auto [query_expander, _] = builder.create_any_node(
+    "QueryExpander",
+    {{"QueryEncoder", "query_vectors"}},
+    [&llm_client](const std::unordered_map<std::string, std::any>& inputs) {
+        auto query_vectors = std::any_cast<std::vector<std::pair<std::vector<float>, std::string>>>(
+            inputs.at("query_vectors"));
+        
+        std::vector<std::pair<std::vector<float>, std::string>> expanded_queries;
+        
+        for (const auto& [vec, modality] : query_vectors) {
+            // 1. 原始查询向量
+            expanded_queries.push_back({vec, modality});
+            
+            // 2. 查询扩展：使用 LLM 生成同义词和相关描述
+            if (modality == "text") {
+                std::string expanded_text = llm_client.expand_query(
+                    extract_text_from_vector(vec));
+                auto expanded_vec = text_encoder.encode(expanded_text);
+                expanded_queries.push_back({expanded_vec, modality});
+            }
+            
+            // 3. 图像查询：生成文本描述用于文本检索
+            if (modality == "image") {
+                std::string image_description = image_encoder.generate_caption(vec);
+                auto text_vec = text_encoder.encode(image_description);
+                expanded_queries.push_back({text_vec, "text"});  // 跨模态扩展
+            }
+        }
+        
+        return std::unordered_map<std::string, std::any>{
+            {"expanded_queries", std::any{expanded_queries}}
+        };
+    },
+    {"expanded_queries"}
+);
+```
 
-### 8.4 事件溯源与监控
+#### 9.2.3 交叉模态注意力实现
 
-框架需要记录每个节点的输入、输出、耗时以及错误信息。事件溯源模式通过存储不可变事件序列，实现审计和回放能力。可以在每个节点的回调中将事件写入日志（如本地文件或数据库），包括时间戳、节点名称、输入摘要、输出摘要和持续时间。代理在崩溃或重启后可通过重新加载事件日志恢复状态。
+```cpp
+// 交叉模态注意力节点：对齐文本和图像/音频
+auto [cross_attention, _] = builder.create_any_node(
+    "CrossModalAttention",
+    {{"VectorRetriever", "retrieved_docs"}},
+    [&attention_model](const std::unordered_map<std::string, std::any>& inputs) {
+        auto docs = std::any_cast<std::vector<RetrievalResult>>(
+            inputs.at("retrieved_docs"));
+        
+        // 实现 Transformer 交叉注意力机制
+        // 1. 构建文本 token 序列和图像 patch 序列
+        std::vector<float> text_tokens;  // [batch, seq_len, hidden_dim]
+        std::vector<float> image_patches;  // [batch, num_patches, hidden_dim]
+        
+        for (const auto& doc : docs) {
+            if (doc.modality == "text") {
+                // 文本 token 化
+                text_tokens.push_back(doc.embedding);
+            } else if (doc.modality == "image") {
+                // 图像 patch 化（CLIP 已处理）
+                image_patches.push_back(doc.embedding);
+            }
+        }
+        
+        // 2. 计算交叉注意力权重
+        // Q = text_tokens, K = image_patches, V = image_patches
+        auto attention_weights = attention_model.compute_cross_attention(
+            text_tokens, image_patches);
+        
+        // 3. 加权融合
+        std::vector<float> aligned_features = attention_model.weighted_sum(
+            attention_weights, image_patches);
+        
+        return std::unordered_map<std::string, std::any>{
+            {"aligned_features", std::any{aligned_features}},
+            {"attention_weights", std::any{attention_weights}}
+        };
+    },
+    {"aligned_features", "attention_weights"}
+);
+```
 
-为方便监控，工作流可启用 Taskflow 的 TFProf 分析器，通过环境变量 `TF_ENABLE_PROFILER` 输出执行时间线【201813784348343†L77-L92】。结合可视化工具，可以分析瓶颈，调整并行度或重构图结构。
+#### 9.2.4 融合层算法实现
 
-## 九、系统架构与技术路线
+```cpp
+// 多模态融合层节点
+auto [fusion_layer, _] = builder.create_any_node(
+    "FusionLayer",
+    {
+        {"CrossModalAttention", "aligned_features"},
+        {"VectorRetriever", "retrieved_docs"}
+    },
+    [&fusion_model](const std::unordered_map<std::string, std::any>& inputs) {
+        auto aligned_features = std::any_cast<std::vector<float>>(
+            inputs.at("aligned_features"));
+        auto docs = std::any_cast<std::vector<RetrievalResult>>(
+            inputs.at("retrieved_docs"));
+        
+        // 策略 1: 简单加权平均
+        std::vector<float> weighted_sum;
+        float total_weight = 0.0f;
+        
+        for (const auto& doc : docs) {
+            float weight = doc.score;  // 使用检索分数作为权重
+            for (size_t i = 0; i < doc.embedding.size(); ++i) {
+                if (weighted_sum.size() <= i) {
+                    weighted_sum.push_back(0.0f);
+                }
+                weighted_sum[i] += doc.embedding[i] * weight;
+            }
+            total_weight += weight;
+        }
+        
+        // 归一化
+        for (float& val : weighted_sum) {
+            val /= total_weight;
+        }
+        
+        // 策略 2: 神经网络融合（可选）
+        // std::vector<float> neural_fused = fusion_model.forward(aligned_features);
+        
+        // 生成文本摘要（供 LLM 使用）
+        std::string fused_context = generate_context_summary(docs, weighted_sum);
+        
+        return std::unordered_map<std::string, std::any>{
+            {"fused_context", std::any{fused_context}},
+            {"fused_embedding", std::any{weighted_sum}}
+        };
+    },
+    {"fused_context", "fused_embedding"}
+);
+```
 
-### 9.1 模块划分
+### 9.3 计划解析与工具调用调度实现
 
-整个系统可以划分为以下模块（与前文概念对应）：
+#### 9.3.1 PlanParser 节点详细实现
 
-1. **LLM 客户端模块**：负责与模型服务通信，支持流式和非流式生成。可适配多家模型，如 OpenAI、Anthropic、Gemini，或本地 vLLM 部署。需要实现函数调用协议、模型参数配置和故障重试机制。
-2. **ToolBus 模块**：提供统一工具注册和调用接口。内部维护本地工具表和 MCP 客户端列表，根据调用名称选择合适实现。支持以 JSON Schema 格式导出工具描述供 LLM 使用。
-3. **MCP 客户端模块**：实现与 Model Context Protocol (MCP) 服务的通信，可通过 stdio 或 HTTP 传输 JSON-RPC 2.0 消息。客户端负责列举工具、发送调用并返回结果，支持心跳检查和并发调用。
-4. **Memory 模块**：提供短期和长期记忆的存储和查询接口，通过事件日志驱动实现持久化。可以基于本地数据库或分布式存储。
-5. **VectorStore 模块**：封装向量数据库，实现多模态数据的存储、检索和更新。支持注册不同编码器和相似度函数。
-6. **GraphExecutor 模块**：基于 Taskflow `workflow` 构建工作流图，负责执行整个代理流程。包含多个图模板（例如 ReAct 循环、批量工具调用）和动态图生成器。
-7. **UI 适配模块**：为 CLI、ImGui 和 Web 前端提供适配器。负责将 Sink 节点输出转换为适当格式，如终端打印、桌面界面更新和 SSE 消息推送。
+LLM 输出的计划通常以 JSON 格式嵌入在响应中，需要精确解析：
 
-### 9.2 技术路线
+```cpp
+// PlanParser 节点：解析 LLM 工具调用指令
+auto [parser, _] = builder.create_any_node(
+    "PlanParser",
+    {{"LLM", "tool_calls"}},
+    [](const std::unordered_map<std::string, std::any>& inputs) {
+        // 1. 提取工具调用 JSON
+        auto tool_calls_json = std::any_cast<std::vector<json>>(inputs.at("tool_calls"));
+        
+        std::vector<CallSpec> specs;
+        std::vector<int> execution_order;  // 工具执行顺序（如果 LLM 指定）
+        
+        // 2. 解析每个工具调用
+        for (size_t i = 0; i < tool_calls_json.size(); ++i) {
+            const auto& tc = tool_calls_json[i];
+            
+            CallSpec spec;
+            spec.name = tc["function"]["name"].get<std::string>();
+            
+            // 解析参数（支持字符串和对象两种格式）
+            if (tc["function"]["arguments"].is_string()) {
+                spec.arguments = json::parse(
+                    tc["function"]["arguments"].get<std::string>());
+            } else {
+                spec.arguments = tc["function"]["arguments"];
+            }
+            
+            // 提取执行顺序（如果 LLM 指定了依赖关系）
+            if (tc.contains("order")) {
+                execution_order.push_back(tc["order"].get<int>());
+            } else {
+                execution_order.push_back(-1);  // -1 表示可以并行执行
+            }
+            
+            specs.push_back(spec);
+        }
+        
+        // 3. 根据执行顺序分组（顺序执行 vs 并行执行）
+        std::vector<std::vector<CallSpec>> execution_groups;
+        std::vector<CallSpec> current_group;
+        int current_order = -1;
+        
+        for (size_t i = 0; i < specs.size(); ++i) {
+            if (execution_order[i] == -1 || execution_order[i] != current_order) {
+                if (!current_group.empty()) {
+                    execution_groups.push_back(current_group);
+                    current_group.clear();
+                }
+                current_order = execution_order[i];
+            }
+            current_group.push_back(specs[i]);
+        }
+        if (!current_group.empty()) {
+            execution_groups.push_back(current_group);
+        }
+        
+        return std::unordered_map<std::string, std::any>{
+            {"calls", std::any{specs}},
+            {"execution_groups", std::any{execution_groups}},
+            {"parallel", std::any{current_order == -1}}
+        };
+    },
+    {"calls", "execution_groups", "parallel"}
+);
+```
 
-1. **编码与部署**：项目使用标准 C17 编写，依赖 Taskflow 和 workflow 库，外加 nlohmann/json 用于 JSON 操作。采用现代 C 特性（智能指针、异步任务、模板元编程）减少内存泄漏和开销。
-2. **多线程与性能优化**：利用 Taskflow 工作窃取调度并发执行工具调用和检索任务，合理配置线程数。对于 IO 密集型任务，可使用异步 IO 或线程池；对于计算密集型任务，可根据 CPU 核心数调整并行度。
-3. **流式输出**：使用 SSE 接口实现流式输出；后端维护会话 ID 和连接管理。为支持双向通信，如实时语音对话，可同时开放 WebSocket 接口。
-4. **多模态支持**：集成图像编码器、语音转写模型和向量数据库，通过 GraphExecutor 模块在工作流中自动调用。提供统一 API 管理不同模型的依赖、版本和 GPU 资源。
-5. **测试与验证**：设计单元测试覆盖 LLM 节点解析、工具调用调度、循环逻辑等关键路径；使用模拟工具或打桩以验证边界条件。
-6. **监控与报警**：集成 TFProf、Prometheus 或自定义监控，收集执行时间、内存使用、失败率等指标。为 SSE 连接、WebSocket 通信设置超时和错误处理机制，及时反馈故障。
+#### 9.3.2 工具调用调度实现
 
-## 十、未来展望与挑战
+根据工具的执行顺序和资源需求进行智能调度：
+
+```cpp
+// 工具调度器节点：根据工具特性和资源需求调度执行
+auto [scheduler, _] = builder.create_any_node(
+    "ToolScheduler",
+    {{"PlanParser", "execution_groups"}},
+    [&toolbus](const std::unordered_map<std::string, std::any>& inputs) {
+        auto groups = std::any_cast<std::vector<std::vector<CallSpec>>>(
+            inputs.at("execution_groups"));
+        
+        std::vector<ScheduledTask> scheduled_tasks;
+        
+        // 资源限制
+        const int max_concurrent_gpu = 2;  // 最多 2 个 GPU 工具并行
+        const int max_concurrent_heavy = 4;  // 最多 4 个重型工具并行
+        
+        int current_gpu = 0;
+        int current_heavy = 0;
+        
+        for (const auto& group : groups) {
+            for (const auto& spec : group) {
+                ScheduledTask task;
+                task.spec = spec;
+                
+                // 查询工具特性（GPU/CPU/IO）
+                auto tool_info = toolbus.get_tool_info(spec.name);
+                
+                if (tool_info.requires_gpu) {
+                    if (current_gpu < max_concurrent_gpu) {
+                        task.priority = 1;  // 高优先级
+                        current_gpu++;
+                    } else {
+                        task.priority = 3;  // 低优先级，等待 GPU 资源
+                    }
+                } else if (tool_info.is_heavy) {
+                    if (current_heavy < max_concurrent_heavy) {
+                        task.priority = 2;  // 中优先级
+                        current_heavy++;
+                    } else {
+                        task.priority = 3;  // 低优先级
+                    }
+                } else {
+                    task.priority = 1;  // 轻量级工具，高优先级
+                }
+                
+                scheduled_tasks.push_back(task);
+            }
+        }
+        
+        // 按优先级排序
+        std::sort(scheduled_tasks.begin(), scheduled_tasks.end(),
+            [](const ScheduledTask& a, const ScheduledTask& b) {
+                return a.priority < b.priority;
+            });
+        
+        return std::unordered_map<std::string, std::any>{
+            {"scheduled_tasks", std::any{scheduled_tasks}}
+        };
+    },
+    {"scheduled_tasks"}
+);
+```
+
+### 9.4 事件溯源与监控实现
+
+#### 9.4.1 事件溯源节点实现
+
+框架需要记录每个节点的输入、输出、耗时以及错误信息。事件溯源模式通过存储不可变事件序列，实现审计和回放能力：
+
+```cpp
+// 事件记录节点（包装器，用于记录所有节点的事件）
+class EventLogger {
+private:
+    std::ofstream event_log_;
+    std::mutex log_mutex_;
+    
+public:
+    void log_event(const std::string& node_name,
+                  const std::string& event_type,
+                  const json& data) {
+        std::lock_guard<std::mutex> lock(log_mutex_);
+        
+        json event = {
+            {"timestamp", std::time(nullptr)},
+            {"node", node_name},
+            {"type", event_type},
+            {"data", data}
+        };
+        
+        event_log_ << event.dump() << "\n";
+        event_log_.flush();
+    }
+};
+
+// 在节点创建时注入事件记录
+auto wrap_with_logging = [&event_logger](
+    const std::string& node_name,
+    std::function<std::unordered_map<std::string, std::any>(const auto&)> original_func
+) {
+    return [node_name, original_func, &event_logger](
+        const std::unordered_map<std::string, std::any>& inputs
+    ) {
+        auto start_time = std::chrono::steady_clock::now();
+        
+        try {
+            // 记录输入事件
+            json input_summary;
+            for (const auto& [key, val] : inputs) {
+                input_summary[key] = summarize_value(val);  // 摘要（避免日志过大）
+            }
+            event_logger.log_event(node_name, "input", input_summary);
+            
+            // 执行原始函数
+            auto outputs = original_func(inputs);
+            
+            // 记录输出事件
+            auto end_time = std::chrono::steady_clock::now();
+            auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(
+                end_time - start_time).count();
+            
+            json output_summary;
+            for (const auto& [key, val] : outputs) {
+                output_summary[key] = summarize_value(val);
+            }
+            
+            event_logger.log_event(node_name, "output", {
+                {"results", output_summary},
+                {"duration_ms", duration}
+            });
+            
+            return outputs;
+        } catch (const std::exception& e) {
+            // 记录错误事件
+            event_logger.log_event(node_name, "error", {
+                {"error", e.what()},
+                {"timestamp", std::time(nullptr)}
+            });
+            throw;
+        }
+    };
+};
+
+// 使用事件记录包装器
+auto [llm_node, _] = builder.create_any_node(
+    "LLM",
+    input_specs,
+    wrap_with_logging("LLM", original_llm_func),
+    output_keys
+);
+```
+
+#### 9.4.2 性能监控与 TFProf 集成
+
+```cpp
+// 性能监控节点（集成 TFProf）
+class PerformanceMonitor {
+private:
+    std::map<std::string, NodeStats> node_stats_;
+    std::mutex stats_mutex_;
+    
+public:
+    void record_execution(const std::string& node_name, 
+                         std::chrono::milliseconds duration) {
+        std::lock_guard<std::mutex> lock(stats_mutex_);
+        auto& stats = node_stats_[node_name];
+        stats.execution_count++;
+        stats.total_time += duration;
+        stats.avg_time = stats.total_time / stats.execution_count;
+        stats.max_time = std::max(stats.max_time, duration);
+        stats.min_time = std::min(stats.min_time, duration);
+    }
+    
+    void export_profiling_report(const std::string& path) {
+        // 导出为 JSON 报告
+        json report;
+        for (const auto& [name, stats] : node_stats_) {
+            report[name] = {
+                {"execution_count", stats.execution_count},
+                {"avg_time_ms", stats.avg_time.count()},
+                {"max_time_ms", stats.max_time.count()},
+                {"min_time_ms", stats.min_time.count()}
+            };
+        }
+        
+        std::ofstream out(path);
+        out << report.dump(2);
+    }
+};
+
+// 启用 Taskflow TFProf
+void enable_tfprof() {
+    setenv("TF_ENABLE_PROFILER", "1", 1);
+    setenv("TF_PROFILER_OUTPUT", "tfprof.json", 1);
+}
+
+// 在工作流执行后分析性能
+builder.run(executor);
+
+// 生成性能报告
+performance_monitor.export_profiling_report("performance_report.json");
+
+// 可视化性能瓶颈
+analyze_performance_bottlenecks("performance_report.json");
+```
+
+代理在崩溃或重启后可通过重新加载事件日志恢复状态。为方便监控，工作流可启用 Taskflow 的 TFProf 分析器，通过环境变量 `TF_ENABLE_PROFILER` 输出执行时间线【201813784348343†L77-L92】。结合可视化工具，可以分析瓶颈，调整并行度或重构图结构。
+
+## 十、系统架构与技术路线
+
+### 10.1 系统总体架构
+
+#### 10.1.1 分层架构设计
+
+本框架采用分层架构，从下到上分为基础设施层、核心引擎层、业务模块层和应用接口层：
+
+```mermaid
+graph TB
+    subgraph "应用接口层 (Application Layer)"
+        CLI[CLI 客户端]
+        GUI[ImGui 桌面应用]
+        WEB[Web 前端<br/>SSE/WebSocket]
+        API[REST API<br/>可选]
+    end
+    
+    subgraph "业务模块层 (Business Module Layer)"
+        LLM_CLIENT[LLM 客户端模块<br/>OpenAI/Anthropic/Gemini/vLLM]
+        TOOLBUS[ToolBus 模块<br/>工具统一管理]
+        MEMORY[Memory 模块<br/>短/长期记忆]
+        VECTOR[VectorStore 模块<br/>多模态向量检索]
+        ENCODER[Encoder 模块<br/>多模态编码]
+    end
+    
+    subgraph "核心引擎层 (Core Engine Layer)"
+        GRAPH[GraphExecutor 模块<br/>workflow 图构建与执行]
+        WORKFLOW[Workflow 库<br/>Taskflow workflow]
+        TASKFLOW[Taskflow 核心<br/>任务调度引擎]
+    end
+    
+    subgraph "基础设施层 (Infrastructure Layer)"
+        VDB[(向量数据库<br/>Faiss/Milvus)]
+        EVENT_LOG[(事件日志<br/>SQLite/文件)]
+        HTTP_SRV[HTTP 服务器<br/>httplib/asio]
+        MCP_SRV[MCP 服务<br/>stdio/HTTP]
+    end
+    
+    CLI --> GRAPH
+    GUI --> GRAPH
+    WEB --> HTTP_SRV
+    WEB --> GRAPH
+    
+    GRAPH --> LLM_CLIENT
+    GRAPH --> TOOLBUS
+    GRAPH --> MEMORY
+    GRAPH --> VECTOR
+    
+    TOOLBUS --> MCP_SRV
+    VECTOR --> ENCODER
+    VECTOR --> VDB
+    MEMORY --> EVENT_LOG
+    GRAPH --> WORKFLOW
+    WORKFLOW --> TASKFLOW
+```
+
+#### 10.1.2 模块依赖关系
+
+```mermaid
+graph LR
+    subgraph "核心依赖"
+        TASKFLOW[Taskflow Core]
+        WORKFLOW[Workflow Library]
+    end
+    
+    subgraph "业务模块"
+        GRAPH[GraphExecutor]
+        LLM[LLM Client]
+        TOOL[ToolBus]
+        MEM[Memory]
+        VEC[VectorStore]
+    end
+    
+    subgraph "外部依赖"
+        JSON[nlohmann/json]
+        HTTP[httplib/asio]
+        MCP[MCP Protocol]
+        FAISS[Faiss/Milvus]
+    end
+    
+    GRAPH --> WORKFLOW
+    WORKFLOW --> TASKFLOW
+    GRAPH --> LLM
+    GRAPH --> TOOL
+    GRAPH --> MEM
+    GRAPH --> VEC
+    LLM --> JSON
+    TOOL --> JSON
+    TOOL --> MCP
+    MEM --> JSON
+    VEC --> FAISS
+    GRAPH --> HTTP
+```
+
+### 10.2 核心模块详细设计
+
+#### 10.2.1 LLM 客户端模块
+
+**职责**：与各种 LLM 服务通信，支持流式和非流式生成。
+
+**核心接口**：
+
+```cpp
+class LLMClient {
+public:
+    // 异步调用 LLM，支持流式输出
+    std::future<LLMOutput> invoke(
+        const LLMInput& input,
+        std::function<void(std::string_view)> on_stream_token = nullptr
+    );
+    
+    // 注册模型适配器
+    void register_adapter(const std::string& provider, 
+                         std::shared_ptr<ModelAdapter> adapter);
+    
+    // 配置模型参数
+    void configure(const std::string& model_name, const ModelConfig& config);
+};
+
+// 模型适配器接口（支持 OpenAI、Anthropic、Gemini、vLLM 等）
+class ModelAdapter {
+public:
+    virtual std::future<LLMOutput> invoke(
+        const LLMInput& input,
+        std::function<void(std::string_view)> stream_callback
+    ) = 0;
+    
+    virtual std::vector<ToolMeta> get_available_tools() const = 0;
+};
+```
+
+**实现要点**：
+- **多模型适配**：通过适配器模式支持 OpenAI、Anthropic、Gemini、本地 vLLM 等
+- **流式输出**：使用回调函数实时推送 token，支持 SSE/WebSocket
+- **函数调用协议**：实现 OpenAI Function Calling 格式的工具调用
+- **故障重试**：指数退避重试机制，支持超时和错误处理
+- **配置管理**：温度、Top P、最大 token 数等参数可配置
+
+#### 10.2.2 ToolBus 模块
+
+**职责**：统一管理所有工具（本地函数、MCP 服务、外部 API），提供统一的调用接口。
+
+**核心接口**：
+
+```cpp
+class ToolBus {
+public:
+    // 注册本地工具
+    void register_local_tool(const std::string& name,
+                            std::function<json(const json&)> func,
+                            const ToolMeta& meta);
+    
+    // 注册 MCP 服务
+    void register_mcp_service(const std::string& name,
+                              std::shared_ptr<MCPClient> client);
+    
+    // 调用工具
+    std::future<json> call_tool(const std::string& name, const json& args);
+    
+    // 导出工具列表（供 LLM 使用）
+    std::vector<ToolMeta> export_as_llm_tools() const;
+    
+    // 查询工具信息
+    std::optional<ToolInfo> get_tool_info(const std::string& name) const;
+};
+```
+
+**实现要点**：
+- **统一接口**：所有工具通过 `ToolBus::call_tool` 调用，屏蔽底层实现差异
+- **自动路由**：根据工具名称自动选择本地函数、MCP 客户端或外部 API
+- **类型安全**：使用 JSON Schema 验证工具参数和返回值
+- **并发调用**：支持并行调用多个工具，自动处理依赖关系
+
+#### 10.2.3 MCP 客户端模块
+
+**职责**：实现与 Model Context Protocol (MCP) 服务的通信。
+
+**核心接口**：
+
+```cpp
+class MCPClient {
+public:
+    // 连接 MCP 服务（stdio 或 HTTP）
+    bool connect(const std::string& endpoint, MCPTransport transport);
+    
+    // 列举可用工具
+    std::future<std::vector<ToolMeta>> list_tools();
+    
+    // 调用工具
+    std::future<json> call_tool(const std::string& name, const json& args);
+    
+    // 心跳检查
+    bool ping();
+    
+private:
+    // JSON-RPC 2.0 消息处理
+    json send_request(const std::string& method, const json& params);
+};
+```
+
+**实现要点**：
+- **传输协议**：支持 stdio（标准输入输出）和 HTTP 两种传输方式
+- **JSON-RPC 2.0**：实现标准的 JSON-RPC 协议，支持请求/响应/通知消息
+- **并发调用**：支持多个工具调用的并发执行
+- **错误处理**：完善的错误码和异常处理机制
+
+#### 10.2.4 Memory 模块
+
+**职责**：提供短期和长期记忆的存储和查询接口。
+
+**核心接口**：
+
+```cpp
+class MemoryStore {
+public:
+    // 存储事件（事件溯源）
+    void store_event(const Event& event);
+    
+    // 查询对话历史
+    std::vector<Message> get_conversation_history(
+        const std::string& session_id,
+        int max_messages = 10
+    );
+    
+    // 查询短期记忆（当前会话）
+    std::vector<Event> get_short_term_memory(const std::string& session_id);
+    
+    // 存储长期记忆摘要
+    void store_long_term_memory(const std::string& session_id,
+                               const MemorySummary& summary);
+    
+    // 查询长期记忆
+    std::vector<MemorySummary> query_long_term_memory(
+        const std::string& query, int top_k = 5
+    );
+};
+```
+
+**实现要点**：
+- **事件溯源**：所有节点执行事件都记录到不可变日志中
+- **多级记忆**：区分即时记忆（per request）、短期记忆（per conversation）、长期记忆（knowledge base）
+- **内存窗口**：支持动态截断长对话历史，避免上下文过长
+- **持久化**：基于 SQLite 或文件系统实现持久化存储
+
+#### 10.2.5 VectorStore 模块
+
+**职责**：封装向量数据库，实现多模态数据的存储和检索。
+
+**核心接口**：
+
+```cpp
+class VectorStore {
+public:
+    // 插入文档（多模态）
+    void insert(const Document& doc, const std::vector<float>& embedding);
+    
+    // 向量检索
+    std::vector<RetrievalResult> search(
+        const std::vector<float>& query_vector,
+        int top_k = 5,
+        const std::string& modality = ""
+    );
+    
+    // 混合检索（语义 + 关键词）
+    std::vector<RetrievalResult> hybrid_search(
+        const std::string& query_text,
+        const std::vector<float>& query_vector,
+        int top_k = 5
+    );
+    
+    // 注册编码器
+    void register_encoder(const std::string& modality,
+                         std::shared_ptr<Encoder> encoder);
+};
+```
+
+**实现要点**：
+- **多模态支持**：支持文本、图像、音频、视频等多种模态的向量存储
+- **索引优化**：使用 Faiss IVF-PQ 或 Milvus 实现高效的近似最近邻搜索
+- **混合检索**：结合语义搜索（向量相似度）和关键词搜索（BM25）
+- **编码器管理**：支持注册不同的编码器（BERT、CLIP、Whisper 等）
+
+#### 10.2.6 GraphExecutor 模块
+
+**职责**：基于 Taskflow `workflow` 构建和执行工作流图。
+
+**核心接口**：
+
+```cpp
+class GraphExecutor {
+public:
+    // 构建标准 Agent 工作流
+    void build_agent_workflow(
+        const AgentConfig& config,
+        wf::GraphBuilder& builder
+    );
+    
+    // 构建自定义工作流
+    void build_custom_workflow(
+        const WorkflowConfig& config,
+        wf::GraphBuilder& builder
+    );
+    
+    // 执行工作流
+    std::future<WorkflowResult> execute(const std::string& workflow_name);
+    
+    // 注册工作流模板
+    void register_template(const std::string& name,
+                          std::function<void(wf::GraphBuilder&)> builder_fn);
+};
+```
+
+**实现要点**：
+- **图模板**：提供 ReAct 循环、批量工具调用等常用工作流模板
+- **动态图构建**：支持在运行时根据配置动态构建工作流图
+- **执行管理**：管理执行器线程池、任务调度和资源分配
+- **错误恢复**：支持工作流的暂停、恢复和回滚
+
+#### 10.2.7 UI 适配模块
+
+**职责**：为不同客户端提供统一的输出接口。
+
+**核心接口**：
+
+```cpp
+class UIManager {
+public:
+    // 注册 CLI 输出处理器
+    void register_cli_handler(std::function<void(std::string_view)> handler);
+    
+    // 注册 ImGui 消息队列
+    void register_gui_queue(std::shared_ptr<ThreadSafeQueue> queue);
+    
+    // 注册 Web 连接（SSE/WebSocket）
+    void register_web_connection(const std::string& session_id,
+                                 std::shared_ptr<WebConnection> conn);
+    
+    // 分发消息到所有注册的处理器
+    void dispatch_message(const std::string& type, const json& data);
+    
+    // 流式输出
+    void stream_token(const std::string& session_id, std::string_view token);
+};
+```
+
+**实现要点**：
+- **统一接口**：所有 UI 适配器实现统一的接口，便于扩展
+- **线程安全**：使用消息队列或锁机制确保线程安全
+- **会话管理**：管理多个会话的连接，支持并发用户
+- **协议适配**：支持 SSE、WebSocket 等不同协议
+
+### 10.3 项目目录结构与文件组织
+
+```
+agent_framework/
+├── CMakeLists.txt              # 主构建文件
+├── README.md                   # 项目说明
+├── LICENSE                     # 许可证
+│
+├── include/                    # 公共头文件
+│   └── agent/
+│       ├── llm_client.hpp      # LLM 客户端接口
+│       ├── toolbus.hpp         # ToolBus 接口
+│       ├── memory.hpp          # Memory 接口
+│       ├── vectorstore.hpp     # VectorStore 接口
+│       ├── graph_executor.hpp  # GraphExecutor 接口
+│       ├── ui_manager.hpp      # UI 管理器接口
+│       └── types.hpp           # 公共数据结构
+│
+├── src/                        # 实现文件
+│   ├── llm_client/
+│   │   ├── llm_client.cpp
+│   │   ├── openai_adapter.cpp
+│   │   ├── anthropic_adapter.cpp
+│   │   └── vllm_adapter.cpp
+│   ├── toolbus/
+│   │   ├── toolbus.cpp
+│   │   ├── local_tool.cpp
+│   │   └── mcp_client.cpp
+│   ├── memory/
+│   │   ├── memory_store.cpp
+│   │   └── event_logger.cpp
+│   ├── vectorstore/
+│   │   ├── vectorstore.cpp
+│   │   ├── faiss_adapter.cpp
+│   │   └── encoder_manager.cpp
+│   ├── graph_executor/
+│   │   ├── graph_executor.cpp
+│   │   ├── agent_templates.cpp
+│   │   └── workflow_builder.cpp
+│   └── ui/
+│       ├── ui_manager.cpp
+│       ├── cli_handler.cpp
+│       ├── gui_handler.cpp
+│       └── web_handler.cpp
+│
+├── examples/                   # 示例程序
+│   ├── simple_agent.cpp       # 简单 Agent 示例
+│   ├── multimodal_agent.cpp  # 多模态 Agent 示例
+│   ├── tool_integration.cpp   # 工具集成示例
+│   └── workflow_custom.cpp    # 自定义工作流示例
+│
+├── tests/                      # 单元测试
+│   ├── test_llm_client.cpp
+│   ├── test_toolbus.cpp
+│   ├── test_memory.cpp
+│   ├── test_vectorstore.cpp
+│   └── test_graph_executor.cpp
+│
+├── tools/                      # 工具脚本
+│   ├── build.sh
+│   ├── run_tests.sh
+│   └── profile.sh
+│
+├── docs/                       # 文档
+│   ├── api/                    # API 文档
+│   ├── guides/                 # 使用指南
+│   └── architecture/           # 架构文档
+│
+└── third_party/                # 第三方依赖（可选）
+    ├── nlohmann_json/
+    ├── httplib/
+    └── websocketpp/
+```
+
+### 10.4 技术路线与开发计划
+
+#### 10.4.1 开发阶段规划
+
+**第一阶段：核心框架搭建（4-6 周）**
+
+1. **Week 1-2：基础设施**
+   - 设置 CMake 构建系统
+   - 集成 Taskflow 和 workflow 库
+   - 创建基础目录结构和接口定义
+   - 实现基本的节点封装（Source、Node、Sink）
+
+2. **Week 3-4：LLM 与 ToolBus**
+   - 实现 LLM 客户端模块和适配器模式
+   - 实现 ToolBus 模块和本地工具注册
+   - 实现 MCP 客户端（stdio 和 HTTP 传输）
+   - 单元测试和集成测试
+
+3. **Week 5-6：GraphExecutor**
+   - 实现 GraphExecutor 模块
+   - 实现标准的 ReAct 循环模板
+   - 实现 Agent 循环子图构建
+   - 工作流可视化工具
+
+**第二阶段：多模态支持（3-4 周）**
+
+4. **Week 7-8：编码器集成**
+   - 集成文本编码器（Sentence Transformers）
+   - 集成图像编码器（CLIP）
+   - 集成音频编码器（Whisper）
+   - 编码器管理器实现
+
+5. **Week 9-10：向量检索与融合**
+   - 实现 VectorStore 模块
+   - 集成 Faiss 或 Milvus
+   - 实现多模态检索和融合节点
+   - 跨模态注意力机制
+
+**第三阶段：实时输出与 UI（2-3 周）**
+
+6. **Week 11-12：流式输出**
+   - 实现 SSE 服务器
+   - 实现 WebSocket 服务器
+   - 实现中断控制机制
+   - CLI 输出优化
+
+7. **Week 13：UI 适配**
+   - ImGui 集成
+   - Web 前端示例
+   - 会话管理和连接池
+
+**第四阶段：优化与完善（2-3 周）**
+
+8. **Week 14-15：性能优化**
+   - 多线程优化和负载均衡
+   - 内存管理优化
+   - 缓存机制实现
+   - 性能分析和瓶颈识别
+
+9. **Week 16：测试与文档**
+   - 完整的单元测试和集成测试
+   - 压力测试和性能基准测试
+   - API 文档和使用指南
+   - 示例程序和教程
+
+#### 10.4.2 技术栈选择
+
+**编程语言与标准**：
+- **C++17**：最低要求，推荐 C++20 以获得更好的性能
+- **编译选项**：`-O2 -march=native -pthread`（Release），`-g -O0`（Debug）
+
+**核心依赖**：
+- **Taskflow**：任务并行框架（Header-Only，Git Submodule）
+- **workflow**：数据流库（Taskflow 项目的 dev 分支）
+- **nlohmann/json**：JSON 解析和生成（Header-Only）
+- **OpenCV**：图像处理（可选，用于图像编码器）
+- **libcurl** 或 **httplib**：HTTP 客户端（用于 LLM API 和 Web 服务）
+
+**向量数据库**：
+- **Faiss**（Facebook AI Similarity Search）：高性能向量检索库
+- **Milvus**：分布式向量数据库（可选，用于大规模部署）
+
+**HTTP/WebSocket 服务器**：
+- **httplib**：轻量级 HTTP 服务器库（Header-Only）
+- **websocketpp**：WebSocket 库（Header-Only）
+- **asio**：异步 I/O 库（可选，用于高性能场景）
+
+**编码器模型**：
+- **Sentence Transformers**：文本嵌入（C++ 绑定或 Python 服务）
+- **CLIP**：视觉-语言模型（C++ 绑定或 Python 服务）
+- **Whisper**：语音识别（C++ 绑定或 Python 服务）
+
+#### 10.4.3 构建系统配置
+
+**CMakeLists.txt 关键配置**：
+
+```cmake
+cmake_minimum_required(VERSION 3.20)
+project(AgentFramework VERSION 1.0.0 LANGUAGES CXX)
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
+# 添加 Taskflow 子模块
+add_subdirectory(third_party/taskflow)
+
+# 启用 workflow 库
+set(TF_BUILD_WORKFLOW ON)
+add_subdirectory(third_party/taskflow/workflow)
+
+# 查找依赖
+find_package(OpenCV REQUIRED)
+find_package(CURL REQUIRED)
+
+# 包含目录
+include_directories(
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/nlohmann_json/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/httplib/include
+)
+
+# 编译选项
+if(CMAKE_BUILD_TYPE STREQUAL "Release")
+    add_compile_options(-O2 -march=native -DNDEBUG)
+else()
+    add_compile_options(-g -O0 -Wall -Wextra)
+endif()
+
+# 链接库
+add_executable(agent_framework main.cpp)
+target_link_libraries(agent_framework
+    PRIVATE
+    taskflow
+    workflow
+    ${OpenCV_LIBS}
+    CURL::libcurl
+)
+```
+
+#### 10.4.4 测试策略
+
+**单元测试**：
+- 使用 **Google Test** 或 **Catch2** 框架
+- 测试覆盖率目标：核心模块 > 80%
+- Mock 对象用于隔离外部依赖（LLM API、向量数据库等）
+
+**集成测试**：
+- 端到端工作流测试
+- 多模态输入输出测试
+- 并发工具调用测试
+- 错误恢复测试
+
+**性能测试**：
+- 使用 **TFProf** 进行性能分析
+- 基准测试：工具调用延迟、向量检索吞吐量、并发处理能力
+- 压力测试：长时间运行、高并发场景
+
+#### 10.4.5 部署架构
+
+**单机部署**：
+```
+┌─────────────────────────────────────────┐
+│           Agent Framework               │
+│  ┌──────────┐  ┌──────────────────┐   │
+│  │  CLI     │  │   Web Server     │   │
+│  │  Client  │  │  (SSE/WebSocket) │   │
+│  └────┬─────┘  └────────┬─────────┘   │
+│       │                 │              │
+│  ┌────▼─────────────────▼──────────┐  │
+│  │      GraphExecutor              │  │
+│  │  (Taskflow workflow)            │  │
+│  └────┬─────────────────────────────┘  │
+│       │                                 │
+│  ┌────▼─────┐  ┌──────┐  ┌──────────┐ │
+│  │  LLM     │  │Tool  │  │ Vector   │ │
+│  │  Client  │  │Bus   │  │ Store    │ │
+│  └──────────┘  └──────┘  └──────────┘ │
+└─────────────────────────────────────────┘
+```
+
+**分布式部署（未来扩展）**：
+- 使用消息队列（如 RabbitMQ、Kafka）连接多个节点
+- 分布式向量数据库（Milvus 集群）
+- 负载均衡器分发请求
+- 容器化部署（Docker/Kubernetes）
+
+#### 10.4.6 性能优化策略
+
+**多线程优化**：
+- **线程池配置**：CPU 核心数 = 线程数（CPU 密集型），2-4 倍核心数（I/O 密集型）
+- **工作窃取**：利用 Taskflow 的自动负载均衡
+- **避免锁竞争**：使用无锁数据结构、线程本地存储、消息传递
+
+**内存优化**：
+- **对象池**：复用 LLM 请求对象、工具调用对象
+- **智能指针**：使用 `std::shared_ptr` 和 `std::unique_ptr` 管理资源
+- **移动语义**：优先使用移动构造函数和移动赋值
+
+**I/O 优化**：
+- **异步 I/O**：LLM API 调用、向量数据库查询使用异步接口
+- **连接池**：复用 HTTP 连接、数据库连接
+- **批处理**：批量执行向量检索、工具调用
+
+**缓存策略**：
+- **LLM 响应缓存**：相同 prompt 的响应可以缓存
+- **向量索引缓存**：常用的查询向量可以缓存
+- **工具结果缓存**：幂等工具的结果可以缓存
+
+### 10.5 开发工具与环境
+
+**开发环境**：
+- **编译器**：GCC 8.4+、Clang 10+、MSVC 2019+
+- **构建工具**：CMake 3.20+
+- **IDE**：CLion、Visual Studio、VSCode + C++ 扩展
+- **调试器**：GDB、LLDB、Visual Studio Debugger
+
+**代码质量工具**：
+- **静态分析**：clang-tidy、cppcheck
+- **代码格式化**：clang-format（遵循 LLVM 风格）
+- **内存检查**：Valgrind、AddressSanitizer
+
+**文档工具**：
+- **API 文档**：Doxygen
+- **架构图**：Mermaid（Markdown 内嵌）
+- **使用指南**：Markdown
+
+### 10.6 集成与扩展
+
+**与现有系统集成**：
+- **Docker 容器化**：提供 Dockerfile，便于部署
+- **REST API**：可选的外部 API 接口，支持远程调用
+- **配置文件**：YAML/JSON 格式的配置文件，支持动态配置
+
+**扩展点**：
+- **自定义节点**：实现 `INode` 接口创建自定义节点
+- **自定义工具**：通过 ToolBus 注册自定义工具
+- **自定义编码器**：实现 `Encoder` 接口支持新的模态
+- **自定义工作流模板**：通过 GraphExecutor 注册自定义模板
+
+**插件机制**（未来扩展）：
+- 动态库加载（`dlopen`）
+- 插件注册表
+- 插件生命周期管理
+
+## 十一、未来展望与挑战
 
 虽然此框架提供了高性能的多模态代理解决方案，但仍有许多潜在扩展方向和挑战需要探索：
 
@@ -1889,7 +4069,7 @@ LLM 输出的计划通常以自然语言或 JSON 嵌入形式表示，需要解�
 4. **隐私与安全**：代理在处理多模态数据时需谨慎保护用户隐私，尤其是图像、音频和个人文档。需要在向量数据库和模型接口上实施访问控制和数据加密策略。
 5. **跨语言和跨领域适应**：随着全球化需求增长，代理需要支持多语言交流和不同领域的知识检索。这涉及多语言模型的集成和跨领域知识库的建设。
 
-## 十一、结论
+## 十二、结论
 
 本文基于 Taskflow `workflow` 库设计了一个高性能、多模态的智能代理框架。框架利用键值驱动的声明式图构造和丰富的控制流节点，结合 LLM 节点、工具调用节点和知识检索节点，构建出支持多轮计划与执行循环的代理工作流。通过引入多模态编码和检索机制，框架能够处理文本、图像、音频等各种输入，并融合为统一上下文供模型推理。采用 SSE 或 WebSocket 实现流式输出，为用户提供及时、连续的反馈。
 
