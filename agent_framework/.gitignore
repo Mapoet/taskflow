@@ -1,0 +1,61 @@
+# Build directories
+build/
+cmake-build-*/
+*.cmake
+!CMakeLists.txt
+
+# Compiled files
+*.o
+*.obj
+*.a
+*.lib
+*.so
+*.dll
+*.dylib
+*.exe
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+install_manifest.txt
+
+# Doxygen
+docs/html/
+docs/latex/
+
+# Test output
+test_results/
+*.gcov
+*.gcda
+*.gcno
+
+# Logs
+*.log
+*.out
+
+# Temporary files
+*.tmp
+*.bak
+*.cache
+
+# Python (if used for bindings)
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Third party build artifacts
+third_party/*/build/
+third_party/*/cmake-build-*/
+
