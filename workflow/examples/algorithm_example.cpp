@@ -50,10 +50,13 @@ int main() {
   
   auto [for_each_node, for_each_task] = builder.create_for_each<std::vector<int>>(
     "PrintElements",
-    {{"Input", "data"}},  // Input: container from Input node's "data" output
-    [](int value) {
-      std::cout << "  Processing element: " << value << "\n";
-    },
+    {{"Input", "data"}},  // Input: container from Input node's "data" output (first element is container)
+    std::function<void(int, std::unordered_map<std::string, std::any>&)>(
+      [](int value, std::unordered_map<std::string, std::any>& shared_params) {
+        std::cout << "  Processing element: " << value << "\n";
+        // shared_params can be used to modify shared state across iterations
+      }
+    ),
     {}  // No outputs for for_each
   );
   
@@ -62,18 +65,21 @@ int main() {
   // ==========================================================================
   std::cout << "\n2. Using create_transform to square each element:\n";
   
-  // First create a transform node (this will be implemented)
-  // For now, we'll use a regular node as a placeholder
-  auto [transform_node, transform_task] = builder.create_typed_node<std::vector<int>>(
+  auto [transform_node, transform_task] = builder.create_transform<std::vector<int>, std::vector<int>>(
     "SquareElements",
-    {{"Input", "data"}},
+    {{"Input", "data"}},  // Input container
+    std::function<int(int)>([](int val) -> int {
+      return val * val;
+    }),
+    {"squared"}  // Output key
+  );
+  
+  // Create a node to display the squared results
+  auto [display_node, display_task] = builder.create_typed_node<std::vector<int>>(
+    "DisplaySquared",
+    {{"SquareElements", "squared"}},
     [](const std::tuple<std::vector<int>>& in) {
-      const auto& input = std::get<0>(in);
-      std::vector<int> squared;
-      squared.reserve(input.size());
-      for (int val : input) {
-        squared.push_back(val * val);
-      }
+      const auto& squared = std::get<0>(in);
       std::cout << "  Squared vector: [";
       for (size_t i = 0; i < squared.size(); ++i) {
         std::cout << squared[i];

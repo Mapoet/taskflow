@@ -909,18 +909,28 @@ GraphBuilder::create_loop_decl(const std::string& name,
   return {node, body_task};
 }
 
-// Native function version of create_loop_decl (no GraphBuilder)
+// Native function version of create_loop_decl (no GraphBuilder, with input/output)
 std::pair<std::shared_ptr<LoopNode>, tf::Task>
 GraphBuilder::create_loop_decl(const std::string& name,
                                const std::vector<std::pair<std::string, std::string>>& input_specs,
-                               std::function<void()> body_func,
+                               std::function<std::unordered_map<std::string, std::any>(
+                                   const std::unordered_map<std::string, std::any>&)> body_func,
                                std::function<int(const std::unordered_map<std::string, std::any>&)> condition_func,
-                               std::function<void()> exit_func,
+                               std::function<std::unordered_map<std::string, std::any>(
+                                   const std::unordered_map<std::string, std::any>&)> exit_func,
                                const std::vector<std::string>& output_keys) {
   // Get any futures from source nodes
   std::unordered_map<std::string, std::shared_future<std::any>> input_futures;
   for (const auto& [source_node, source_key] : input_specs) {
     input_futures[source_key] = get_output(source_node, source_key);
+  }
+  
+  // Create output promises/futures for loop node
+  AnyOutputs outputs;
+  for (const auto& key : output_keys) {
+    auto promise = std::make_shared<std::promise<std::any>>();
+    outputs.promises[key] = promise;
+    outputs.futures[key] = promise->get_future().share();
   }
   
   // Create the loop node
@@ -929,26 +939,55 @@ GraphBuilder::create_loop_decl(const std::string& name,
                                          std::move(condition_func), 
                                          output_keys, 
                                          name);
+  node->out = outputs;
   
-  // Create body task using native function (no GraphBuilder)
-  tf::Task body_task = taskflow_.emplace([body_func]() {
+  // Create body task using native function with input/output (similar to create_any_node)
+  tf::Task body_task = taskflow_.emplace([this, body_func, fin = input_futures, name, output_keys, promises = outputs.promises]() mutable {
+    // Extract input values from futures
+    std::unordered_map<std::string, std::any> in_vals;
+    for (const auto& [key, fut] : fin) {
+      in_vals[key] = fut.get();
+    }
+    
+    // Execute body function and get outputs
     if (body_func) {
-      body_func();
+      std::unordered_map<std::string, std::any> outputs = body_func(in_vals);
+      
+      // Store outputs in promises
+      for (const auto& [key, value] : outputs) {
+        if (auto it = promises.find(key); it != promises.end()) {
+          it->second->set_value(value);
+        }
+      }
     }
   }).name(name + "_body");
   
   tasks_[name + "_body"] = body_task;
   
-  // Create exit task if provided
+  // Create exit task if provided (with input/output)
   std::optional<tf::Task> exit_task;
   if (exit_func) {
-    exit_task = taskflow_.emplace([exit_func]() {
-      exit_func();
+    exit_task = taskflow_.emplace([this, exit_func, fin = input_futures, name, promises = outputs.promises]() mutable {
+      // Extract input values from futures
+      std::unordered_map<std::string, std::any> in_vals;
+      for (const auto& [key, fut] : fin) {
+        in_vals[key] = fut.get();
+      }
+      
+      // Execute exit function and get outputs
+      std::unordered_map<std::string, std::any> outputs = exit_func(in_vals);
+      
+      // Store outputs in promises
+      for (const auto& [key, value] : outputs) {
+        if (auto it = promises.find(key); it != promises.end()) {
+          it->second->set_value(value);
+        }
+      }
     }).name(name + "_exit");
   }
   
   // Create condition task
-  tf::Task cond_task = taskflow_.emplace([fin = input_futures, fn = node->condition_func_, promises = node->out.promises]() mutable -> int {
+  tf::Task cond_task = taskflow_.emplace([fin = input_futures, fn = node->condition_func_, promises = outputs.promises]() mutable -> int {
     // Extract input values from futures
     std::unordered_map<std::string, std::any> in_vals;
     for (const auto& [key, fut] : fin) {
