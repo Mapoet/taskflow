@@ -175,8 +175,8 @@ int main() {
 
   int counter = 0;
 
-  // Declarative loop with string-keyed inputs
-  builder.create_loop_decl(
+  // Declarative loop with string-keyed inputs (using builder version)
+  auto [loop_node, loop_task] = builder.create_loop_decl(
     "Loop",
     {{"A", "value"}},  // input_specs: from A's "value" output
     [&counter](wf::GraphBuilder& gb, const std::unordered_map<std::string, std::any>& inputs) {

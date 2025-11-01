@@ -136,27 +136,44 @@ int main() {
     {{"multiplier", std::any{2}}}
   );
   
-  // Use create_for_each_index with index range as function parameters
-  auto [for_each_index_node, for_each_index_task] = builder.create_for_each_index<int>(
-    "PrintIndices",
+  // Use create_for_each_index with index range as function parameters and return value collection
+  auto [for_each_index_node, for_each_index_task] = builder.create_for_each_index<int, int>(
+    "ProcessIndices",
     {{"SharedParams", "multiplier"}},  // Shared parameters (optional)
     0,   // first: beginning index (inclusive)
     20,  // last: ending index (exclusive)
     2,   // step: step size
-    std::function<void(int, std::unordered_map<std::string, std::any>&)>(
-      [](int index, std::unordered_map<std::string, std::any>& shared_params) {
+    std::function<int(int, std::unordered_map<std::string, std::any>&)>(
+      [](int index, std::unordered_map<std::string, std::any>& shared_params) -> int {
         int multiplier = std::any_cast<int>(shared_params.at("multiplier"));
-        std::cout << "    Index: " << index << ", multiplied: " << (index * multiplier) << "\n";
+        int result = index * multiplier;
+        std::cout << "    Index: " << index << ", multiplied: " << result << "\n";
+        return result;  // Return value will be collected into vector
       }
     ),
-    {}  // No outputs
+    {"results"}  // Output key: stores std::vector<int> of collected results
+  );
+  
+  // Create a node to display collected results (no outputs, just display)
+  auto [display_results_node, display_results_task] = builder.create_any_sink(
+    "DisplayIndexResults",
+    {{"ProcessIndices", "results"}},
+    [](const std::unordered_map<std::string, std::any>& inputs) {
+      const std::vector<int>& results_vec = std::any_cast<const std::vector<int>&>(inputs.at("results"));
+      std::cout << "    Collected " << results_vec.size() << " results: ";
+      for (size_t i = 0; i < results_vec.size(); ++i) {
+        std::cout << results_vec[i];
+        if (i < results_vec.size() - 1) std::cout << ", ";
+      }
+      std::cout << "\n";
+    }
   );
   
   // ==========================================================================
   // Create sink to collect final results
   // ==========================================================================
   auto [sink, sink_task] = builder.create_any_sink("FinalSink",
-    {{"DisplaySum", "sum"}},  // Updated to use DisplaySum node
+    {{"DisplaySum", "sum"}},  // Collect from DisplaySum node
     [](const std::unordered_map<std::string, std::any>& values) {
       if (values.find("sum") != values.end()) {
         int final_sum = std::any_cast<int>(values.at("sum"));

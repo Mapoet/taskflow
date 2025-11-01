@@ -9,6 +9,8 @@
 #include <taskflow/algorithm/transform.hpp>
 #include <tuple>
 #include <type_traits>
+#include <mutex>
+#include <vector>
 
 namespace workflow {
 
@@ -861,14 +863,14 @@ GraphBuilder::create_for_each(const std::string& name,
 }
 
 // for_each_index implementation
-template <typename IndexType>
+template <typename IndexType, typename ReturnType>
 std::pair<std::shared_ptr<AnyNode>, tf::Task>
 GraphBuilder::create_for_each_index(const std::string& name,
                                     const std::vector<std::pair<std::string, std::string>>& input_specs,
                                     IndexType first,
                                     IndexType last,
                                     IndexType step,
-                                    std::function<void(IndexType, std::unordered_map<std::string, std::any>&)> callable,
+                                    std::function<ReturnType(IndexType, std::unordered_map<std::string, std::any>&)> callable,
                                     const std::vector<std::string>& output_keys) {
   // Get shared parameter futures (from input_specs)
   std::unordered_map<std::string, std::shared_future<std::any>> shared_futures;
@@ -876,9 +878,12 @@ GraphBuilder::create_for_each_index(const std::string& name,
     shared_futures[source_key] = get_output(source_node, source_key);
   }
   
+  // Ensure at least one output key exists (default: "result")
+  std::vector<std::string> effective_output_keys = output_keys.empty() ? std::vector<std::string>{"result"} : output_keys;
+  
   // Create output promises/futures
   AnyOutputs outputs;
-  for (const auto& key : output_keys) {
+  for (const auto& key : effective_output_keys) {
     auto promise = std::make_shared<std::promise<std::any>>();
     outputs.promises[key] = promise;
     outputs.futures[key] = promise->get_future().share();
@@ -887,8 +892,8 @@ GraphBuilder::create_for_each_index(const std::string& name,
   // Create the node
   auto node = std::make_shared<AnyNode>(
     std::unordered_map<std::string, std::shared_future<std::any>>{},  // No inputs from futures
-    output_keys,
-    [callable, outputs](const std::unordered_map<std::string, std::any>& inputs) mutable -> std::unordered_map<std::string, std::any> {
+    effective_output_keys,
+    [outputs](const std::unordered_map<std::string, std::any>& inputs) mutable -> std::unordered_map<std::string, std::any> {
       // This won't be used since we handle execution in the task below
       std::unordered_map<std::string, std::any> result;
       for (const auto& [key, promise] : outputs.promises) {
@@ -901,8 +906,8 @@ GraphBuilder::create_for_each_index(const std::string& name,
   );
   node->out = outputs;
   
-  // Create task - extract shared params once and pass to each index iteration
-  auto task = taskflow_.emplace([this, node, first, last, step, shared_futures, callable]() mutable {
+  // Create task - extract shared params once, collect return values, and store them
+  auto task = taskflow_.emplace([this, node, first, last, step, shared_futures, callable, result_key = effective_output_keys[0]]() mutable {
     if (executor_ == nullptr) {
       throw std::runtime_error("create_for_each_index requires executor to be set. Call run() or run_async() first.");
     }
@@ -913,19 +918,35 @@ GraphBuilder::create_for_each_index(const std::string& name,
       shared_params[key] = fut.get();
     }
     
+    // Collect return values from each index iteration
+    std::vector<ReturnType> results;
+    results.reserve((last - first + step - 1) / step);  // Reserve space for all results
+    
     // Create a temporary Taskflow and use for_each_index algorithm with shared params
     tf::Taskflow taskflow;
-    taskflow.for_each_index(first, last, step, [callable, &shared_params](IndexType index) {
-      // Pass index and shared_params (by reference, modifiable) to callable
-      callable(index, shared_params);
+    // Use a mutex to protect results vector during parallel collection
+    std::mutex results_mutex;
+    taskflow.for_each_index(first, last, step, [callable, &shared_params, &results, &results_mutex](IndexType index) {
+      // Call callable and collect return value
+      ReturnType ret_val = callable(index, shared_params);
+      // Thread-safe insertion into results vector
+      std::lock_guard<std::mutex> lock(results_mutex);
+      results.push_back(std::move(ret_val));
     });
     
     // Run the taskflow using executor
     executor_->run(taskflow).wait();
     
-    // Set outputs (if any)
+    // Set output: store collected results in the first output key
+    if (auto it = node->out.promises.find(result_key); it != node->out.promises.end()) {
+      it->second->set_value(std::any{std::move(results)});
+    }
+    
+    // Set other outputs to empty if any
     for (const auto& [key, promise] : node->out.promises) {
-      promise->set_value(std::any{});
+      if (key != result_key) {
+        promise->set_value(std::any{});
+      }
     }
   }).name(name);
   

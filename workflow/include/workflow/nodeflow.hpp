@@ -907,22 +907,24 @@ class GraphBuilder {
    * @param first Beginning index (inclusive)
    * @param last Ending index (exclusive)
    * @param step Step size (default: 1)
-   * @param callable Function to apply to each index: (index, shared_params) -> void
+   * @param callable Function to apply to each index: (index, shared_params) -> ReturnType
    *                 where shared_params is std::unordered_map<std::string, std::any>& (modifiable)
-   * @param output_keys Optional output keys
+   *                 Return values are collected into std::vector<ReturnType> and stored in output_keys[0]
+   * @param output_keys Output keys - first key (default: "result") stores the collected results vector
    * @return Pair of (node_ptr, task_handle)
    * @details The index range is passed as function parameters, not extracted from input_specs.
    *          Shared parameters (from input_specs) are extracted once and passed to each iteration, allowing modification.
+   *          Return values from callable are collected into std::vector<ReturnType> and stored in the first output key.
    */
-  template <typename IndexType>
+  template <typename IndexType, typename ReturnType = std::any>
   std::pair<std::shared_ptr<AnyNode>, tf::Task>
   create_for_each_index(const std::string& name,
                         const std::vector<std::pair<std::string, std::string>>& input_specs,
                         IndexType first,
                         IndexType last,
                         IndexType step,
-                        std::function<void(IndexType, std::unordered_map<std::string, std::any>&)> callable,
-                        const std::vector<std::string>& output_keys = {});
+                        std::function<ReturnType(IndexType, std::unordered_map<std::string, std::any>&)> callable,
+                        const std::vector<std::string>& output_keys = {"result"});
 
   /**
    * @brief Create a parallel reduce node
