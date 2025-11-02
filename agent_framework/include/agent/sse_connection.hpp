@@ -16,10 +16,8 @@
 #include <agent/types.hpp>
 #include <nlohmann/json.hpp>
 
-// 前向声明 httplib
-namespace httplib {
-    class Response;
-}
+// 注意：event_stream_ 使用 void* 存储，在实现文件中转换为具体类型
+// 这样可以避免在头文件中包含 httplib.hpp
 
 namespace agent_framework {
     using json = nlohmann::json;
@@ -75,10 +73,10 @@ public:
 private:
     std::string endpoint_;                              // SSE 端点 URL
     std::string task_id_;                               // 任务 ID
-    std::unique_ptr<httplib::Response> event_stream_;   // SSE 响应流
+    void* event_stream_;                                // SSE 响应流（httplib::Response*，在实现文件中转换为具体类型）
     bool active_ = false;                               // 连接状态
     std::thread event_thread_;                          // 事件处理线程
-    std::mutex connection_mutex_;                       // 连接互斥锁
+    mutable std::mutex connection_mutex_;               // 连接互斥锁（mutable 以支持 const 方法）
     
     std::function<void(const AgentTask&)> on_status_update_;        // 状态更新回调
     std::function<void(const AgentArtifact&)> on_artifact_update_; // Artifact 更新回调

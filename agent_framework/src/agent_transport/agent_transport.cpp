@@ -60,7 +60,7 @@ std::string HTTPAgentTransport::get_transport_type() const {
     return "http";
 }
 
-json HTTPAgentTransport::send_http_post(const json& payload) {
+json HTTPAgentTransport::send_http_post(const json& /* payload */) {
     // TODO: 实现 HTTP POST 请求
     // 1. 构建完整 URL: base_url_ + current_endpoint_
     // 2. 发送 POST 请求，Content-Type: application/json

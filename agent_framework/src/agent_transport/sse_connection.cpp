@@ -8,6 +8,8 @@
 #include <agent/sse_connection.hpp>
 #include <iostream>
 #include <sstream>
+#include <thread>
+#include <chrono>
 #include <nlohmann/json.hpp>
 
 // TODO: 实现 SSEConnection
@@ -16,7 +18,7 @@
 namespace agent_framework {
 
 SSEConnection::SSEConnection(const std::string& endpoint, const std::string& task_id)
-    : endpoint_(endpoint), task_id_(task_id), active_(false) {
+    : endpoint_(endpoint), task_id_(task_id), event_stream_(nullptr), active_(false) {
     // TODO: 初始化 SSE 连接
 }
 
@@ -47,7 +49,7 @@ void SSEConnection::subscribe(
     event_thread_ = std::thread(&SSEConnection::event_thread_func, this);
 }
 
-void SSEConnection::reconnect(const std::string& last_event_id) {
+void SSEConnection::reconnect(const std::string& /* last_event_id */) {
     std::lock_guard<std::mutex> lock(connection_mutex_);
     
     close();
@@ -68,7 +70,11 @@ void SSEConnection::close() {
     
     active_ = false;
     // TODO: 关闭 SSE 连接
-    event_stream_.reset();
+    // 在实现时，需要删除 httplib::Response* 对象
+    if (event_stream_) {
+        // delete static_cast<httplib::Response*>(event_stream_);  // TODO: 实现时取消注释
+        event_stream_ = nullptr;
+    }
 }
 
 bool SSEConnection::is_active() const {

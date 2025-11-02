@@ -19,7 +19,7 @@ namespace agent_framework {
 // 临时实现类
 class SimpleHTTPClient : public HTTPClient {
 public:
-    json post(const std::string& url, const json& body, const std::map<std::string, std::string>& headers = {}) override {
+    json post(const std::string& /* url */, const json& /* body */, const std::map<std::string, std::string>& /* headers */ = {}) override {
         // TODO: 使用 httplib 或 curl 实现 HTTP POST
         throw std::runtime_error("HTTPClient::post not implemented. Please use httplib or curl.");
     }
