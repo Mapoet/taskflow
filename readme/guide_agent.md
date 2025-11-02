@@ -86,6 +86,14 @@
     - [8.6.1 CLI 输出实现](#861-cli-输出实现)
     - [8.6.2 ImGui 输出实现](#862-imgui-输出实现)
     - [8.6.3 Web 输出实现（SSE/WebSocket）](#863-web-输出实现ssewebsocket)
+  - [8.7 A2A (Agent2Agent) 协议支持](#87-a2a-agent2agent-协议支持)
+    - [8.7.1 A2A 协议概述](#871-a2a-协议概述)
+    - [8.7.2 A2A 数据结构设计](#872-a2a-数据结构设计)
+    - [8.7.3 A2A 客户端实现](#873-a2a-客户端实现)
+    - [8.7.4 A2A 服务器实现](#874-a2a-服务器实现)
+    - [8.7.5 在 workflow 中集成 A2A](#875-在-workflow-中集成-a2a)
+    - [8.7.6 A2A 客户端作为 workflow 节点](#876-a2a-客户端作为-workflow-节点)
+    - [8.7.7 A2A 协议流程图](#877-a2a-协议流程图)
 
 - [九、关键算法与技术实现](#九关键算法与技术实现)
   - [9.1 多线程执行与工作窃取调度](#91-多线程执行与工作窃取调度)
@@ -117,6 +125,7 @@
     - [10.2.5 VectorStore 模块](#1025-vectorstore-模块)
     - [10.2.6 GraphExecutor 模块](#1026-graphexecutor-模块)
     - [10.2.7 UI 适配模块](#1027-ui-适配模块)
+    - [10.2.8 A2A 客户端/服务器模块](#1028-a2a-客户端服务器模块)
   - [10.3 项目目录结构与文件组织](#103-项目目录结构与文件组织)
   - [10.4 技术路线与开发计划](#104-技术路线与开发计划)
     - [10.4.1 开发阶段规划](#1041-开发阶段规划)
@@ -185,6 +194,8 @@
 3. **多模态 RAG（检索增强生成）**：传统 RAG 系统只能处理文本，难以应对图片、音频等多模态知识的检索与整合。多模态 RAG 通过向量数据库保存文本、图像、音频的嵌入，并在检索后利用融合层将不同模态的信息整合到统一上下文，以支持面向复杂场景的解答【253686691880274†L242-L306】。针对客服场景，当用户提供照片、语音描述和错误截图时，多模态 RAG 能够同时检索这些信息并生成精准回复【253686691880274†L242-L261】。
 
 4. **MCP（Model Context Protocol）工具集成**：MCP 是开放标准，允许 LLM 应用与外部工具和服务集成，实现统一的工具调用接口。支持本地函数、MCP 服务和外部 API 的统一管理。
+
+5. **A2A（Agent2Agent）协议支持**：A2A 是由 Google 及合作伙伴倡导的开放协议，旨在让来自不同供应商或基于不同框架构建的异构 AI Agent 能够进行安全的通信和任务协作。本框架通过 A2A 客户端和服务器组件，实现与其他 Agent 系统的互操作性。
 
 ### 1.3 基于 Taskflow workflow 的解决方案优势
 
@@ -263,6 +274,11 @@ mindmap
       ToolBus 统一接口
       本地/MCP/API 路由
       JSON Schema 验证
+    A2A 协议支持
+      Agent 发现与协作
+      任务生命周期管理
+      异步通信（SSE/Webhook）
+      多模态 Part 支持
     多端输出适配
       CLI 直接输出
       ImGui 消息队列
@@ -3430,6 +3446,499 @@ auto [ws_sink, tWsSink] = builder.create_any_sink(
 3. **流式输出**：LLM 节点的 `on_stream_token` 回调实时推送 token，CLI 直接打印，ImGui 和 Web 通过队列或网络连接推送。
 4. **多端适配**：同一个工作流可以同时连接多个 Sink，实现 CLI、ImGui 和 Web 的并行输出。
 
+### 8.7 A2A (Agent2Agent) 协议支持
+
+A2A（Agent2Agent）是由 Google 及合作伙伴倡导的开放协议，旨在让来自不同供应商或基于不同框架构建的异构 AI Agent 能够进行安全的通信和任务协作。本框架通过 A2A 客户端和服务器组件，实现与其他 Agent 系统的互操作性。
+
+#### 8.7.1 A2A 协议概述
+
+**A2A 核心概念**：
+
+1. **Agent Card（智能体名片）**：Agent 进行自我描述和被发现的基础，包含基本信息、API 端点、支持的能力、认证方案和技能列表。
+2. **Agent Task（任务）**：跟踪和管理一次协作交互的核心实体，包含 Task ID、Session ID、状态、交互历史、Artifacts 和元数据。
+3. **Agent Message（消息）**：Agent 之间传递信息的载体，包含来源角色和一系列 Part（注意：与 `agent_framework::Message` 不同，后者用于对话历史）。
+4. **Agent Part（部件）**：构成 Agent Message 或 Agent Artifact 内容的基本单元，支持 text、file、data 等多种类型。
+5. **Agent Artifact（工件）**：任务执行完成后产生的最终输出或成果物，由多个 Agent Part 组成。
+
+**A2A 交互模式**：
+
+- **Agent 发现**：通过 `.well-known` 路径或注册中心获取 Agent Card
+- **任务生命周期管理**：`tasks/send`（创建/更新任务）、`tasks/get`（查询状态）、`tasks/cancel`（取消任务）
+- **异步通信**：`tasks/sendSubscribe`（订阅 SSE 更新）、`tasks/resubscribe`（重连）、`tasks/pushNotification`（Webhook 推送）
+
+#### 8.7.2 A2A 数据结构设计
+
+```cpp
+namespace agent_framework {
+
+/**
+ * @brief Agent Card（智能体名片）结构（A2A 协议）
+ */
+struct AgentCard {
+    std::string name;                          // Agent 名称
+    std::string description;                   // 描述
+    std::string provider;                      // 提供商
+    std::string api_endpoint;                  // API 端点 URL
+    std::vector<std::string> capabilities;    // 支持的能力（如 "streaming", "push-notifications"）
+    json authentication_scheme;                // 认证方案要求
+    std::vector<AgentSkill> skills;             // 技能列表
+    
+    // 序列化/反序列化
+    json to_json() const;
+    static AgentCard from_json(const json& j);
+};
+
+/**
+ * @brief Agent Skill（技能）结构（A2A 协议）
+ */
+struct AgentSkill {
+    std::string name;                          // 技能名称
+    std::string description;                   // 技能描述
+    json input_schema;                         // 输入参数 JSON Schema
+    json output_schema;                       // 输出参数 JSON Schema
+    std::vector<std::string> required_capabilities;  // 所需能力
+};
+
+/**
+ * @brief Agent Task 状态枚举（A2A 协议）
+ */
+enum class AgentTaskStatus {
+    PENDING,              // 待处理
+    WORKING,              // 执行中
+    COMPLETED,            // 已完成
+    FAILED,               // 失败
+    INPUT_REQUIRED,       // 需要输入
+    CANCELLED             // 已取消
+};
+
+/**
+ * @brief Agent Task（任务）结构（A2A 协议）
+ */
+struct AgentTask {
+    std::string task_id;                      // 唯一任务 ID
+    std::optional<std::string> session_id;   // 会话 ID（可选）
+    AgentTaskStatus status;                      // 当前状态
+    std::vector<AgentMessage> messages;        // 交互历史
+    std::vector<AgentArtifact> artifacts;       // 生成的工件
+    json metadata;                           // 扩展元数据
+    std::chrono::system_clock::time_point created_at;
+    std::chrono::system_clock::time_point updated_at;
+    
+    json to_json() const;
+    static AgentTask from_json(const json& j);
+};
+
+/**
+ * @brief Agent Message（消息）结构（A2A 协议）
+ * 注意：与 agent_framework::Message 不同，后者用于对话历史
+ */
+struct AgentMessage {
+    enum class Role {
+        USER,    // 用户角色
+        AGENT    // Agent 角色
+    };
+    
+    Role role;                                // 来源角色
+    std::vector<AgentPart> parts;                // 消息部件列表
+    std::optional<std::string> message_id;    // 消息 ID（可选）
+    std::chrono::system_clock::time_point timestamp;
+    
+    json to_json() const;
+    static AgentMessage from_json(const json& j);
+};
+
+/**
+ * @brief Agent Part（部件）结构（A2A 协议）
+ */
+struct AgentPart {
+    enum class Type {
+        TEXT,    // 文本
+        FILE,    // 文件
+        DATA     // JSON 数据
+    };
+    
+    Type type;                                // 部件类型
+    std::optional<std::string> text;          // 文本内容（type == TEXT）
+    std::optional<AgentFileInfo> file;          // 文件信息（type == FILE）
+    std::optional<json> data;                 // JSON 数据（type == DATA）
+    
+    json to_json() const;
+    static AgentPart from_json(const json& j);
+};
+
+/**
+ * @brief Agent FileInfo（文件信息）结构（A2A 协议）
+ */
+struct AgentFileInfo {
+    std::string mime_type;                     // MIME 类型
+    std::optional<std::string> uri;           // 文件 URI（可选）
+    std::optional<std::vector<uint8_t>> bytes; // 文件字节（可选）
+    std::optional<std::string> name;          // 文件名（可选）
+};
+
+/**
+ * @brief Agent Artifact（工件）结构（A2A 协议）
+ */
+struct AgentArtifact {
+    std::string artifact_id;                  // 工件 ID
+    std::string task_id;                      // 关联任务 ID
+    std::vector<AgentPart> parts;                // 工件内容部件
+    json metadata;                            // 元数据
+    std::chrono::system_clock::time_point created_at;
+    bool is_immutable = true;                 // 是否不可变
+    
+    json to_json() const;
+    static AgentArtifact from_json(const json& j);
+};
+
+} // namespace agent_framework
+```
+
+#### 8.7.3 A2A 客户端实现
+
+A2A 客户端用于作为客户端与其他 Agent 系统交互：
+
+```cpp
+namespace agent_framework {
+
+/**
+ * @brief Agent 客户端（A2A 协议）
+ * 用于作为客户端与其他 Agent 通信
+ */
+class AgentClient {
+public:
+    explicit AgentClient(const std::string& server_url);
+    
+    // Agent 发现：获取远程 Agent 的 Agent Card
+    std::future<AgentCard> discover_agent(const std::string& agent_endpoint);
+    
+    // 任务生命周期管理
+    std::future<AgentTask> send_task(
+        const std::string& agent_endpoint,
+        const AgentMessage& initial_message,
+        const std::optional<std::string>& session_id = std::nullopt,
+        const json& metadata = {}
+    );
+    
+    std::future<AgentTask> get_task(const std::string& agent_endpoint, const std::string& task_id);
+    
+    std::future<bool> cancel_task(const std::string& agent_endpoint, const std::string& task_id);
+    
+    // 更新任务（发送额外输入）
+    std::future<AgentTask> update_task(
+        const std::string& agent_endpoint,
+        const std::string& task_id,
+        const AgentMessage& additional_message
+    );
+    
+    // 异步通信：订阅 SSE 更新
+    void subscribe_task_updates(
+        const std::string& agent_endpoint,
+        const std::string& task_id,
+        std::function<void(const AgentTask&)> on_status_update,
+        std::function<void(const AgentArtifact&)> on_artifact_update
+    );
+    
+    // 重新订阅（SSE 连接中断后）
+    void resubscribe_task_updates(
+        const std::string& agent_endpoint,
+        const std::string& task_id,
+        const std::string& last_event_id
+    );
+    
+    // Webhook 推送配置
+    void set_push_notification(
+        const std::string& agent_endpoint,
+        const std::string& task_id,
+        const std::string& webhook_url
+    );
+    
+    std::future<json> get_push_notification_config(
+        const std::string& agent_endpoint,
+        const std::string& task_id
+    );
+    
+    // 认证管理
+    void set_authentication(const json& auth_config);
+    void refresh_authentication();
+    
+private:
+    std::string server_url_;
+    json auth_config_;
+    std::mutex auth_mutex_;
+    
+    // HTTP 客户端（用于 JSON-RPC 2.0 请求）
+    std::unique_ptr<HTTPClient> http_client_;
+    
+    // SSE 连接管理
+    std::map<std::string, std::unique_ptr<SSEConnection>> sse_connections_;
+    std::mutex sse_mutex_;
+    
+    // 私有方法：发送 JSON-RPC 2.0 请求
+    json send_jsonrpc_request(const std::string& endpoint, const json& method, const json& params);
+    
+    // 私有方法：构建认证 Header
+    std::map<std::string, std::string> build_auth_headers() const;
+};
+
+} // namespace agent_framework
+```
+
+#### 8.7.4 A2A 服务器实现
+
+A2A 服务器用于对外提供 A2A 协议接口，使本框架的 Agent 能够被其他系统发现和调用：
+
+```cpp
+namespace agent_framework {
+
+/**
+ * @brief Agent 服务器（A2A 协议）
+ * 用于对外提供 A2A 协议接口
+ */
+class AgentServer {
+public:
+    explicit AgentServer(int port = 8080);
+    
+    // 启动服务器
+    void start();
+    void stop();
+    
+    // 注册本 Agent 的 Agent Card
+    void register_agent_card(const AgentCard& card);
+    
+    // 设置任务处理器（将 A2A Task 转换为 workflow 执行）
+    void set_task_handler(
+        std::function<std::future<AgentTask>(
+            const AgentTask& task,
+            std::shared_ptr<wf::GraphBuilder> builder
+        )> handler
+    );
+    
+    // 设置认证验证器
+    void set_authentication_validator(
+        std::function<bool(const std::map<std::string, std::string>& headers)> validator
+    );
+    
+    // SSE 事件推送
+    void push_task_status_update(const std::string& task_id, const AgentTask& task);
+    void push_artifact_update(const std::string& task_id, const AgentArtifact& artifact);
+    
+    // Webhook 通知推送
+    void notify_task_update_via_webhook(const std::string& task_id, const AgentTask& task);
+    
+private:
+    int port_;
+    std::unique_ptr<httplib::Server> http_server_;
+    AgentCard agent_card_;
+    std::map<std::string, AgentTask> active_tasks_;
+    std::map<std::string, std::vector<SSEConnection>> sse_subscribers_;
+    std::map<std::string, std::string> webhook_urls_;
+    std::mutex tasks_mutex_;
+    std::mutex sse_mutex_;
+    
+    // 任务处理器（将 A2A Task 转换为 workflow）
+    std::function<std::future<AgentTask>(const AgentTask&, std::shared_ptr<wf::GraphBuilder>)> task_handler_;
+    
+    // 认证验证器
+    std::function<bool(const std::map<std::string, std::string>&)> auth_validator_;
+    
+    // HTTP 端点处理
+    void setup_routes();
+    void handle_well_known_agent_card(httplib::Response& res);
+    void handle_tasks_send(const httplib::Request& req, httplib::Response& res);
+    void handle_tasks_get(const httplib::Request& req, httplib::Response& res);
+    void handle_tasks_cancel(const httplib::Request& req, httplib::Response& res);
+    void handle_tasks_send_subscribe(const httplib::Request& req, httplib::Response& res);
+    void handle_tasks_resubscribe(const httplib::Request& req, httplib::Response& res);
+    void handle_push_notification_set(const httplib::Request& req, httplib::Response& res);
+    void handle_push_notification_get(const httplib::Request& req, httplib::Response& res);
+};
+
+} // namespace agent_framework
+```
+
+#### 8.7.5 在 workflow 中集成 A2A
+
+将 A2A Task 转换为 workflow 执行的示例：
+
+```cpp
+// 创建 A2A 服务器并注册任务处理器
+AgentServer a2a_server(8080);
+
+// 注册 Agent Card
+AgentCard card;
+card.name = "TaskflowAgent";
+card.description = "基于 Taskflow workflow 的高性能智能代理";
+card.api_endpoint = "https://agent.example.com";
+card.capabilities = {"streaming", "push-notifications"};
+card.skills = {
+    AgentSkill{"text_analysis", "文本分析", ...},
+    AgentSkill{"multimodal_rag", "多模态检索增强生成", ...},
+    AgentSkill{"tool_execution", "工具执行", ...}
+};
+a2a_server.register_agent_card(card);
+
+// 设置任务处理器：将 A2A Task 转换为 workflow 执行
+a2a_server.set_task_handler([&executor, &llm_client, &toolbus, &knowledge_base](
+    const AgentTask& task,
+    std::shared_ptr<wf::GraphBuilder> builder
+) -> std::future<AgentTask> {
+    return std::async(std::launch::async, [&, task, builder]() {
+        // 1. 从 A2A Task 的 Message 中提取用户输入
+        std::string user_query;
+        for (const auto& msg : task.messages) {
+            if (msg.role == AgentMessage::Role::USER) {
+                for (const auto& part : msg.parts) {
+                    if (part.type == AgentPart::Type::TEXT && part.text.has_value()) {
+                        user_query += *part.text + "\n";
+                    }
+                }
+            }
+        }
+        
+        // 2. 构建 workflow（类似 8.3 节的完整工作流）
+        wf::GraphBuilder workflow_builder("AgentTask_" + task.task_id);
+        
+        // 创建源节点
+        auto [user_input, _] = workflow_builder.create_any_source(
+            "UserInput",
+            std::unordered_map<std::string, std::any>{
+                {"query", std::any{user_query}}
+            }
+        );
+        
+        // 创建 LLM 节点、工具调用等（省略详细代码，参考 8.3 节）
+        // ...
+        
+        // 3. 执行 workflow
+        auto future = workflow_builder.run_async(executor);
+        
+        // 4. 等待执行完成并构建 A2A Task 响应
+        future.wait();
+        
+        // 5. 从 workflow 输出构建 Artifact
+        AgentTask completed_task = task;
+        completed_task.status = AgentTaskStatus::COMPLETED;
+        
+        AgentArtifact artifact;
+        artifact.artifact_id = "artifact_" + task.task_id;
+        artifact.task_id = task.task_id;
+        
+        AgentPart result_part;
+        result_part.type = AgentPart::Type::TEXT;
+        result_part.text = "任务执行完成的结果...";  // 从 workflow 输出提取
+        artifact.parts.push_back(result_part);
+        
+        completed_task.artifacts.push_back(artifact);
+        
+        return completed_task;
+    });
+});
+
+// 启动服务器
+a2a_server.start();
+```
+
+#### 8.7.6 A2A 客户端作为 workflow 节点
+
+将 A2A 客户端调用封装为 workflow 节点：
+
+```cpp
+// 创建 A2A 客户端节点（用于调用远程 Agent）
+auto [a2a_client_node, _] = builder.create_any_node(
+    "AgentClientCall",
+    {{"UserInput", "query"}},
+    [&a2a_client](const std::unordered_map<std::string, std::any>& inputs) {
+        std::string query = std::any_cast<std::string>(inputs.at("query"));
+        
+        // 构建 A2A Message
+        AgentMessage msg;
+        msg.role = AgentMessage::Role::USER;
+        AgentPart text_part;
+        text_part.type = AgentPart::Type::TEXT;
+        text_part.text = query;
+        msg.parts.push_back(text_part);
+        
+        // 调用远程 Agent
+        std::string remote_agent_endpoint = "https://remote-agent.example.com";
+        auto task_future = a2a_client.send_task(remote_agent_endpoint, msg);
+        AgentTask task = task_future.get();
+        
+        // 等待任务完成（轮询或订阅 SSE）
+        while (task.status != AgentTaskStatus::COMPLETED && 
+               task.status != AgentTaskStatus::FAILED &&
+               task.status != AgentTaskStatus::CANCELLED) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            task = a2a_client.get_task(remote_agent_endpoint, task.task_id).get();
+        }
+        
+        // 提取 Artifact 结果
+        std::string result;
+        if (!task.artifacts.empty()) {
+            for (const auto& part : task.artifacts[0].parts) {
+                if (part.type == AgentPart::Type::TEXT && part.text.has_value()) {
+                    result += *part.text;
+                }
+            }
+        }
+        
+        return std::unordered_map<std::string, std::any>{
+            {"remote_result", std::any{result}},
+            {"task_id", std::any{task.task_id}}
+        };
+    },
+    {"remote_result", "task_id"}
+);
+```
+
+#### 8.7.7 A2A 协议流程图
+
+```mermaid
+sequenceDiagram
+    participant Client as A2A 客户端
+    participant Server as A2A 服务器
+    participant Workflow as Workflow 执行器
+    participant LLM as LLM 服务
+    participant Tools as ToolBus
+    
+    Client->>Server: GET /.well-known/agent-card
+    Server-->>Client: Agent Card (JSON)
+    
+    Client->>Server: POST tasks/send (Message)
+    Server->>Server: 创建 Task (status=PENDING)
+    Server->>Workflow: 转换 Task → workflow
+    Server->>Workflow: 执行 workflow
+    
+    loop 工作流执行
+        Workflow->>LLM: 调用 LLM
+        LLM-->>Workflow: 返回结果
+        Workflow->>Tools: 调用工具
+        Tools-->>Workflow: 返回结果
+    end
+    
+    Workflow-->>Server: 工作流完成（输出结果）
+    Server->>Server: 更新 Task (status=COMPLETED)
+    Server->>Server: 创建 Artifact
+    
+    alt SSE 订阅
+        Server->>Client: SSE: TaskStatusUpdateEvent
+        Server->>Client: SSE: TaskArtifactUpdateEvent
+    else Webhook 推送
+        Server->>Client: HTTP POST (Webhook URL)
+    end
+    
+    Client->>Server: GET tasks/get?task_id=xxx
+    Server-->>Client: Task (含 Artifact)
+```
+
+**关键设计要点**：
+
+1. **协议兼容性**：严格遵循 A2A 协议的 JSON-RPC 2.0 格式和数据结构
+2. **异步优先**：使用 SSE 和 Webhook 实现异步更新，避免轮询开销
+3. **模态无关**：通过 Part 结构支持文本、文件、数据等多种模态
+4. **安全可靠**：强制 HTTPS，支持多种认证方案
+5. **工作流集成**：A2A Task 无缝转换为 workflow 执行，结果自动包装为 Artifact
+
 ## 九、关键算法与技术实现
 
 ### 9.1 多线程执行与工作窃取调度
@@ -4415,6 +4924,69 @@ public:
 - **会话管理**：管理多个会话的连接，支持并发用户
 - **协议适配**：支持 SSE、WebSocket 等不同协议
 
+#### 10.2.8 A2A 客户端/服务器模块
+
+**职责**：实现 A2A（Agent2Agent）协议支持，使本框架的 Agent 能够与其他系统进行安全的通信和任务协作。
+
+**核心接口**：
+
+```cpp
+namespace agent_framework {
+
+// A2A 客户端（用于作为客户端与其他 Agent 通信）
+class AgentClient {
+public:
+    explicit AgentClient(const std::string& server_url);
+    
+    // Agent 发现
+    std::future<AgentCard> discover_agent(const std::string& agent_endpoint);
+    
+    // 任务生命周期管理
+    std::future<AgentTask> send_task(const std::string& agent_endpoint, const AgentMessage& initial_message, ...);
+    std::future<AgentTask> get_task(const std::string& agent_endpoint, const std::string& task_id);
+    std::future<bool> cancel_task(const std::string& agent_endpoint, const std::string& task_id);
+    
+    // 异步通信
+    void subscribe_task_updates(...);  // SSE 订阅
+    void resubscribe_task_updates(...);  // SSE 重连
+    void set_push_notification(...);  // Webhook 配置
+};
+
+// A2A 服务器（用于对外提供 A2A 协议接口）
+class AgentServer {
+public:
+    explicit AgentServer(int port = 8080);
+    
+    void start();
+    void stop();
+    void register_agent_card(const AgentCard& card);
+    
+    // 设置任务处理器（将 A2A Task 转换为 workflow 执行）
+    void set_task_handler(std::function<std::future<AgentTask>(const AgentTask&, std::shared_ptr<wf::GraphBuilder>)> handler);
+    
+    // SSE 事件推送
+    void push_task_status_update(const std::string& task_id, const AgentTask& task);
+    void push_artifact_update(const std::string& task_id, const AgentArtifact& artifact);
+};
+
+} // namespace agent_framework
+```
+
+**实现要点**：
+- **协议兼容性**：严格遵循 A2A 协议的 JSON-RPC 2.0 格式和数据结构
+- **异步优先**：使用 SSE 和 Webhook 实现异步更新，避免轮询开销
+- **模态无关**：通过 `AgentPart` 结构支持文本、文件、数据等多种模态
+- **安全可靠**：强制 HTTPS，支持多种认证方案
+- **工作流集成**：A2A Task 无缝转换为 workflow 执行，结果自动包装为 Artifact
+- **传输层抽象**：通过 `AgentTransport` 虚基类支持 HTTP、WebSocket 等不同传输方式
+
+**关键数据结构**：
+- `AgentCard`：智能体名片，包含技能列表、API 端点、认证方案
+- `AgentTask`：任务实体，包含状态、消息历史、Artifacts
+- `AgentMessage`：消息载体，包含角色和 Part 列表（注意：与 `agent_framework::Message` 不同，后者用于对话历史）
+- `AgentPart`：部件单元，支持 text、file、data 类型
+- `AgentArtifact`：最终输出工件，由多个 Part 组成
+
 ### 10.3 项目目录结构与文件组织
 
 ```
@@ -4806,16 +5378,58 @@ target_link_libraries(agent_framework
    - **竞争协作**：多个 Agent 竞争处理同一任务，选择最佳结果
    - **迭代协作**：Agent 之间多轮交互，逐步完善结果
 
-3. **协作机制设计**：
+3. **基于 A2A 协议的跨系统协作**：
+   通过 A2A 协议，本框架的 Agent 可以与其他系统的 Agent 进行协作：
+   
    ```cpp
-   // 示例：多 Agent 协作工作流
+   // 示例：使用 A2A 客户端调用远程 Agent
+   AgentClient a2a_client;
+   
+   // 发现远程规划 Agent
+   auto planner_card = a2a_client.discover_agent("https://planner-agent.example.com");
+   
+   // 发送规划任务
+   AgentMessage planning_msg;
+   planning_msg.role = AgentMessage::Role::USER;
+   AgentPart text_part;
+   text_part.type = AgentPart::Type::TEXT;
+   text_part.text = user_query;
+   planning_msg.parts.push_back(text_part);
+   auto planning_task = a2a_client.send_task(planner_card.api_endpoint, planning_msg).get();
+   
+   // 等待规划完成（通过 SSE 订阅或轮询）
+   while (planning_task.status != AgentTaskStatus::COMPLETED) {
+       planning_task = a2a_client.get_task(planner_card.api_endpoint, planning_task.task_id).get();
+   }
+   
+   // 从 Artifact 中提取规划结果，继续执行
+   // ...
+   ```
+
+4. **协作机制设计**：
+   ```cpp
+   // 示例：多 Agent 协作工作流（本地 + 远程）
    auto [coordinator_agent, _] = create_agent_node(builder, "Coordinator", ...);
+   
+   // 本地 Planner Agent
    auto [planner_agent, _] = create_agent_node(builder, "Planner", ...);
-   auto [executor_agent, _] = create_agent_node(builder, "Executor", ...);
+   
+   // 远程执行 Agent（通过 A2A）
+   auto [a2a_executor_node, _] = builder.create_any_node(
+       "AgentExecutor",
+       {{"Planner", "plan"}},
+       [&a2a_client](const auto& inputs) {
+           // 调用远程执行 Agent
+           // ...
+       },
+       {"execution_result"}
+   );
+   
+   // 本地 Reviewer Agent
    auto [reviewer_agent, _] = create_agent_node(builder, "Reviewer", ...);
    
    // Coordinator 协调其他 Agent 的协作
-   // Planner → Executor → Reviewer → (如果需要) Planner
+   // Planner → A2AExecutor (远程) → Reviewer → (如果需要) Planner
    ```
 
 ### 11.3 分布式任务调度

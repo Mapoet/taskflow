@@ -369,6 +369,133 @@ struct StreamMessage {
     std::time_t timestamp;         // 时间戳
 };
 
+// ============================================================================
+// A2A (Agent2Agent) 协议相关类型
+// ============================================================================
+
+/**
+ * @brief Agent Task 状态枚举（A2A 协议）
+ */
+enum class AgentTaskStatus {
+    PENDING,              // 待处理
+    WORKING,              // 执行中
+    COMPLETED,            // 已完成
+    FAILED,               // 失败
+    INPUT_REQUIRED,       // 需要输入
+    CANCELLED             // 已取消
+};
+
+/**
+ * @brief Agent Skill（技能）结构（A2A 协议）
+ */
+struct AgentSkill {
+    std::string name;                          // 技能名称
+    std::string description;                   // 技能描述
+    json input_schema;                         // 输入参数 JSON Schema
+    json output_schema;                        // 输出参数 JSON Schema
+    std::vector<std::string> required_capabilities;  // 所需能力
+};
+
+/**
+ * @brief Agent Card（智能体名片）结构（A2A 协议）
+ */
+struct AgentCard {
+    std::string name;                          // Agent 名称
+    std::string description;                   // 描述
+    std::string provider;                      // 提供商
+    std::string api_endpoint;                 // API 端点 URL
+    std::vector<std::string> capabilities;    // 支持的能力（如 "streaming", "push-notifications"）
+    json authentication_scheme;               // 认证方案要求
+    std::vector<AgentSkill> skills;           // 技能列表
+    
+    // 序列化/反序列化
+    json to_json() const;
+    static AgentCard from_json(const json& j);
+};
+
+/**
+ * @brief Agent FileInfo（文件信息）结构（A2A 协议）
+ */
+struct AgentFileInfo {
+    std::string mime_type;                     // MIME 类型
+    std::optional<std::string> uri;           // 文件 URI（可选）
+    std::optional<std::vector<uint8_t>> bytes; // 文件字节（可选）
+    std::optional<std::string> name;          // 文件名（可选）
+};
+
+/**
+ * @brief Agent Part（部件）结构（A2A 协议）
+ * 构成 Agent Message 或 Agent Artifact 内容的基本单元
+ */
+struct AgentPart {
+    enum class Type {
+        TEXT,    // 文本
+        FILE,    // 文件
+        DATA     // JSON 数据
+    };
+    
+    Type type;                                // 部件类型
+    std::optional<std::string> text;          // 文本内容（type == TEXT）
+    std::optional<AgentFileInfo> file;        // 文件信息（type == FILE）
+    std::optional<json> data;                 // JSON 数据（type == DATA）
+    
+    json to_json() const;
+    static AgentPart from_json(const json& j);
+};
+
+/**
+ * @brief Agent Message（消息）结构（A2A 协议）
+ * Agent 之间传递信息的载体（注意：与 agent_framework::Message 不同，后者用于对话历史）
+ */
+struct AgentMessage {
+    enum class Role {
+        USER,    // 用户角色
+        AGENT    // Agent 角色
+    };
+    
+    Role role;                                // 来源角色
+    std::vector<AgentPart> parts;            // 消息部件列表
+    std::optional<std::string> message_id;    // 消息 ID（可选）
+    std::chrono::system_clock::time_point timestamp;
+    
+    json to_json() const;
+    static AgentMessage from_json(const json& j);
+};
+
+/**
+ * @brief Agent Artifact（工件）结构（A2A 协议）
+ * 任务执行完成后产生的最终输出或成果物
+ */
+struct AgentArtifact {
+    std::string artifact_id;                  // 工件 ID
+    std::string task_id;                      // 关联任务 ID
+    std::vector<AgentPart> parts;             // 工件内容部件
+    json metadata;                            // 元数据
+    std::chrono::system_clock::time_point created_at;
+    bool is_immutable = true;                 // 是否不可变
+    
+    json to_json() const;
+    static AgentArtifact from_json(const json& j);
+};
+
+/**
+ * @brief Agent Task（任务）结构（A2A 协议）
+ * 跟踪和管理一次协作交互的核心实体
+ */
+struct AgentTask {
+    std::string task_id;                      // 唯一任务 ID
+    std::optional<std::string> session_id;   // 会话 ID（可选）
+    AgentTaskStatus status;                   // 当前状态
+    std::vector<AgentMessage> messages;      // 交互历史
+    std::vector<AgentArtifact> artifacts;    // 生成的工件
+    json metadata;                           // 扩展元数据
+    std::chrono::system_clock::time_point created_at;
+    std::chrono::system_clock::time_point updated_at;
+    
+    json to_json() const;
+    static AgentTask from_json(const json& j);
+};
+
 } // namespace agent_framework
 
 #endif // __AGENT_TYPES_H__
