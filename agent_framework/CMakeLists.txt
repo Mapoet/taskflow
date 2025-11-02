@@ -1,9 +1,19 @@
 cmake_minimum_required(VERSION 3.20)
 project(AgentFramework VERSION 1.0.0 LANGUAGES CXX)
 
-set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_CXX_EXTENSIONS OFF)
+# 检查父项目是否已设置 C++ 标准
+if(NOT DEFINED CMAKE_CXX_STANDARD)
+    set(CMAKE_CXX_STANDARD 20)
+    set(CMAKE_CXX_STANDARD_REQUIRED ON)
+    set(CMAKE_CXX_EXTENSIONS OFF)
+else()
+    # 如果父项目已设置，确保至少是 C++17
+    if(CMAKE_CXX_STANDARD LESS 17)
+        message(WARNING "C++ standard is ${CMAKE_CXX_STANDARD}, but at least C++17 is required. Setting to C++17.")
+        set(CMAKE_CXX_STANDARD 17)
+        set(CMAKE_CXX_STANDARD_REQUIRED ON)
+    endif()
+endif()
 
 # 编译选项
 if(CMAKE_BUILD_TYPE STREQUAL "Release")
@@ -120,35 +130,121 @@ endif()
 # 查找依赖（可选）
 find_package(OpenCV QUIET)
 find_package(CURL QUIET)
+find_package(Threads QUIET)
 
-# 源文件
-set(AGENT_SOURCES
-    src/llm_client/llm_client.cpp
-    src/llm_client/openai_adapter.cpp
-    src/llm_client/anthropic_adapter.cpp
-    src/llm_client/vllm_adapter.cpp
-    src/toolbus/toolbus.cpp
-    src/toolbus/local_tool.cpp
-    src/toolbus/mcp_client.cpp
-    src/memory/memory_store.cpp
-    src/memory/event_logger.cpp
-    src/vectorstore/vectorstore.cpp
-    src/vectorstore/faiss_adapter.cpp
-    src/vectorstore/encoder_manager.cpp
-    src/graph_executor/graph_executor.cpp
-    src/graph_executor/agent_templates.cpp
-    src/graph_executor/workflow_builder.cpp
-    src/ui/ui_manager.cpp
-    src/ui/cli_handler.cpp
-    src/ui/gui_handler.cpp
-    src/ui/web_handler.cpp
-    src/node/node_factory.cpp
-    src/node/llm_node.cpp
-    src/node/knowledge_base_node.cpp
-    src/node/tool_call_node.cpp
-    src/node/agent_loop_node.cpp
-    src/node/ui_sink_node.cpp
-)
+# 线程支持（用于 std::thread，SSEConnection 等）
+if(CMAKE_THREAD_LIBS_INIT OR Threads_FOUND)
+    set(CMAKE_USE_PTHREADS_INIT ON)
+endif()
+
+# 源文件（条件添加，仅当文件存在时）
+set(AGENT_SOURCES "")
+
+# LLM Client 模块
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/llm_client/llm_client.cpp)
+    list(APPEND AGENT_SOURCES src/llm_client/llm_client.cpp)
+endif()
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/llm_client/openai_adapter.cpp)
+    list(APPEND AGENT_SOURCES src/llm_client/openai_adapter.cpp)
+endif()
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/llm_client/anthropic_adapter.cpp)
+    list(APPEND AGENT_SOURCES src/llm_client/anthropic_adapter.cpp)
+endif()
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/llm_client/vllm_adapter.cpp)
+    list(APPEND AGENT_SOURCES src/llm_client/vllm_adapter.cpp)
+endif()
+
+# ToolBus 模块
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/toolbus/toolbus.cpp)
+    list(APPEND AGENT_SOURCES src/toolbus/toolbus.cpp)
+endif()
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/toolbus/local_tool.cpp)
+    list(APPEND AGENT_SOURCES src/toolbus/local_tool.cpp)
+endif()
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/toolbus/mcp_client.cpp)
+    list(APPEND AGENT_SOURCES src/toolbus/mcp_client.cpp)
+endif()
+
+# Memory 模块
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/memory/memory_store.cpp)
+    list(APPEND AGENT_SOURCES src/memory/memory_store.cpp)
+endif()
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/memory/event_logger.cpp)
+    list(APPEND AGENT_SOURCES src/memory/event_logger.cpp)
+endif()
+
+# VectorStore 模块
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/vectorstore/vectorstore.cpp)
+    list(APPEND AGENT_SOURCES src/vectorstore/vectorstore.cpp)
+endif()
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/vectorstore/faiss_adapter.cpp)
+    list(APPEND AGENT_SOURCES src/vectorstore/faiss_adapter.cpp)
+endif()
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/vectorstore/encoder_manager.cpp)
+    list(APPEND AGENT_SOURCES src/vectorstore/encoder_manager.cpp)
+endif()
+
+# GraphExecutor 模块
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/graph_executor/graph_executor.cpp)
+    list(APPEND AGENT_SOURCES src/graph_executor/graph_executor.cpp)
+endif()
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/graph_executor/agent_templates.cpp)
+    list(APPEND AGENT_SOURCES src/graph_executor/agent_templates.cpp)
+endif()
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/graph_executor/workflow_builder.cpp)
+    list(APPEND AGENT_SOURCES src/graph_executor/workflow_builder.cpp)
+endif()
+
+# UI 模块
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/ui/ui_manager.cpp)
+    list(APPEND AGENT_SOURCES src/ui/ui_manager.cpp)
+endif()
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/ui/cli_handler.cpp)
+    list(APPEND AGENT_SOURCES src/ui/cli_handler.cpp)
+endif()
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/ui/gui_handler.cpp)
+    list(APPEND AGENT_SOURCES src/ui/gui_handler.cpp)
+endif()
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/ui/web_handler.cpp)
+    list(APPEND AGENT_SOURCES src/ui/web_handler.cpp)
+endif()
+
+# Node 模块
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/node/node_factory.cpp)
+    list(APPEND AGENT_SOURCES src/node/node_factory.cpp)
+endif()
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/node/llm_node.cpp)
+    list(APPEND AGENT_SOURCES src/node/llm_node.cpp)
+endif()
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/node/knowledge_base_node.cpp)
+    list(APPEND AGENT_SOURCES src/node/knowledge_base_node.cpp)
+endif()
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/node/tool_call_node.cpp)
+    list(APPEND AGENT_SOURCES src/node/tool_call_node.cpp)
+endif()
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/node/agent_loop_node.cpp)
+    list(APPEND AGENT_SOURCES src/node/agent_loop_node.cpp)
+endif()
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/node/ui_sink_node.cpp)
+    list(APPEND AGENT_SOURCES src/node/ui_sink_node.cpp)
+endif()
+
+# A2A (Agent2Agent) 协议模块
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/agent_transport/agent_transport.cpp)
+    list(APPEND AGENT_SOURCES src/agent_transport/agent_transport.cpp)
+endif()
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/agent_transport/sse_connection.cpp)
+    list(APPEND AGENT_SOURCES src/agent_transport/sse_connection.cpp)
+endif()
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/agent_client/agent_client.cpp)
+    list(APPEND AGENT_SOURCES src/agent_client/agent_client.cpp)
+endif()
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/agent_server/agent_server.cpp)
+    list(APPEND AGENT_SOURCES src/agent_server/agent_server.cpp)
+endif()
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/agent_types_serialization.cpp)
+    list(APPEND AGENT_SOURCES src/agent_types_serialization.cpp)
+endif()
 
 # 头文件
 set(AGENT_HEADERS
@@ -162,6 +258,10 @@ set(AGENT_HEADERS
     include/agent/encoder.hpp
     include/agent/graph_executor.hpp
     include/agent/ui_manager.hpp
+    include/agent/agent_transport.hpp
+    include/agent/sse_connection.hpp
+    include/agent/agent_client.hpp
+    include/agent/agent_server.hpp
     include/node/node_factory.hpp
     include/node/llm_node.hpp
     include/node/knowledge_base_node.hpp
@@ -202,18 +302,60 @@ if(CURL_FOUND)
     target_compile_definitions(agent_framework PRIVATE HAVE_CURL)
 endif()
 
-# 示例程序
-add_executable(simple_agent examples/simple_agent.cpp)
-target_link_libraries(simple_agent PRIVATE agent_framework)
+# 线程库（用于 std::thread）
+if(CMAKE_USE_PTHREADS_INIT)
+    target_link_libraries(agent_framework PRIVATE Threads::Threads)
+endif()
 
-add_executable(multimodal_agent examples/multimodal_agent.cpp)
-target_link_libraries(multimodal_agent PRIVATE agent_framework)
+# MSVC 特殊处理：确保 C++20 支持
+if(MSVC AND CMAKE_CXX_STANDARD GREATER_EQUAL 20)
+    target_compile_options(agent_framework PRIVATE /std:c++20)
+endif()
 
-add_executable(tool_integration examples/tool_integration.cpp)
-target_link_libraries(tool_integration PRIVATE agent_framework)
+# 示例程序（条件添加，仅当文件存在时）
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/examples/simple_agent.cpp)
+    add_executable(simple_agent examples/simple_agent.cpp)
+    target_link_libraries(simple_agent PRIVATE agent_framework)
+    if(CMAKE_USE_PTHREADS_INIT)
+        target_link_libraries(simple_agent PRIVATE Threads::Threads)
+    endif()
+    if(MSVC AND CMAKE_CXX_STANDARD GREATER_EQUAL 20)
+        target_compile_options(simple_agent PRIVATE /std:c++20)
+    endif()
+endif()
 
-add_executable(workflow_custom examples/workflow_custom.cpp)
-target_link_libraries(workflow_custom PRIVATE agent_framework)
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/examples/multimodal_agent.cpp)
+    add_executable(multimodal_agent examples/multimodal_agent.cpp)
+    target_link_libraries(multimodal_agent PRIVATE agent_framework)
+    if(CMAKE_USE_PTHREADS_INIT)
+        target_link_libraries(multimodal_agent PRIVATE Threads::Threads)
+    endif()
+    if(MSVC AND CMAKE_CXX_STANDARD GREATER_EQUAL 20)
+        target_compile_options(multimodal_agent PRIVATE /std:c++20)
+    endif()
+endif()
+
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/examples/tool_integration.cpp)
+    add_executable(tool_integration examples/tool_integration.cpp)
+    target_link_libraries(tool_integration PRIVATE agent_framework)
+    if(CMAKE_USE_PTHREADS_INIT)
+        target_link_libraries(tool_integration PRIVATE Threads::Threads)
+    endif()
+    if(MSVC AND CMAKE_CXX_STANDARD GREATER_EQUAL 20)
+        target_compile_options(tool_integration PRIVATE /std:c++20)
+    endif()
+endif()
+
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/examples/workflow_custom.cpp)
+    add_executable(workflow_custom examples/workflow_custom.cpp)
+    target_link_libraries(workflow_custom PRIVATE agent_framework)
+    if(CMAKE_USE_PTHREADS_INIT)
+        target_link_libraries(workflow_custom PRIVATE Threads::Threads)
+    endif()
+    if(MSVC AND CMAKE_CXX_STANDARD GREATER_EQUAL 20)
+        target_compile_options(workflow_custom PRIVATE /std:c++20)
+    endif()
+endif()
 
 # 测试（需要 Google Test 或 Catch2）
 if(BUILD_TESTING)
