@@ -1686,6 +1686,7 @@ public:
 class HTTPAgentTransport : public AgentTransport {
 public:
     explicit HTTPAgentTransport(const std::string& base_url);
+    ~HTTPAgentTransport() override;
     
     bool connect(const std::string& endpoint) override;
     void disconnect() override;
@@ -1694,8 +1695,9 @@ public:
     std::string get_transport_type() const override;
     
 private:
-    std::string base_url_;
-    bool connected_ = false;
+    std::string base_url_;              // 基础 URL
+    std::string current_endpoint_;      // 当前端点
+    bool connected_ = false;            // 连接状态
     
     // 私有方法：发送 HTTP POST 请求
     json send_http_post(const json& payload);
@@ -1708,6 +1710,7 @@ private:
 class SSEConnection {
 public:
     explicit SSEConnection(const std::string& endpoint, const std::string& task_id);
+    ~SSEConnection();
     
     // 订阅 SSE 事件流
     void subscribe(
@@ -1725,15 +1728,21 @@ public:
     bool is_active() const;
     
 private:
-    std::string endpoint_;
-    std::string task_id_;
-    std::unique_ptr<httplib::Response> event_stream_;
-    bool active_ = false;
-    std::thread event_thread_;
-    std::mutex connection_mutex_;
+    std::string endpoint_;                              // SSE 端点 URL
+    std::string task_id_;                               // 任务 ID
+    void* event_stream_;                                // SSE 响应流（httplib::Response*，在实现文件中转换为具体类型）
+    bool active_ = false;                               // 连接状态
+    std::thread event_thread_;                          // 事件处理线程
+    mutable std::mutex connection_mutex_;               // 连接互斥锁（mutable 以支持 const 方法）
+    
+    std::function<void(const AgentTask&)> on_status_update_;        // 状态更新回调
+    std::function<void(const AgentArtifact&)> on_artifact_update_; // Artifact 更新回调
     
     // 私有方法：处理 SSE 事件
     void handle_event(const std::string& event_data);
+    
+    // 私有方法：事件处理线程主函数
+    void event_thread_func();
 };
 
 /**
@@ -1798,22 +1807,25 @@ public:
     void refresh_authentication();
     
 private:
-    std::string server_url_;
-    json auth_config_;
-    std::mutex auth_mutex_;
+    std::string server_url_;                                            // 服务器基础 URL
+    json auth_config_;                                                  // 认证配置
+    mutable std::mutex auth_mutex_;                                    // 认证互斥锁（mutable 以支持 const 方法）
     
     // HTTP 客户端（用于 JSON-RPC 2.0 请求）
     std::unique_ptr<HTTPClient> http_client_;
     
-    // SSE 连接管理
+    // SSE 连接管理（key: "agent_endpoint:task_id"）
     std::map<std::string, std::unique_ptr<SSEConnection>> sse_connections_;
-    std::mutex sse_mutex_;
+    mutable std::mutex sse_mutex_;                                     // SSE 互斥锁（mutable 以支持 const 方法）
     
     // 私有方法：发送 JSON-RPC 2.0 请求
     json send_jsonrpc_request(const std::string& endpoint, const json& method, const json& params);
     
     // 私有方法：构建认证 Header
     std::map<std::string, std::string> build_auth_headers() const;
+    
+    // 私有方法：生成 SSE 连接键
+    static std::string make_sse_key(const std::string& agent_endpoint, const std::string& task_id);
 };
 
 /**
@@ -1852,17 +1864,17 @@ public:
     void notify_task_update_via_webhook(const std::string& task_id, const AgentTask& task);
     
 private:
-    int port_;
-    std::unique_ptr<httplib::Server> http_server_;
-    AgentCard agent_card_;
-    std::map<std::string, AgentTask> active_tasks_;
-    std::map<std::string, std::vector<SSEConnection>> sse_subscribers_;
-    std::map<std::string, std::string> webhook_urls_;
-    std::mutex tasks_mutex_;
-    std::mutex sse_mutex_;
+    int port_;                                                              // 服务器端口
+    void* http_server_;                                                     // httplib::Server*，在实现文件中转换为具体类型（避免头文件依赖）
+    AgentCard agent_card_;                                                  // Agent Card
+    std::map<std::string, AgentTask> active_tasks_;                        // 活动任务（key: task_id）
+    std::map<std::string, std::vector<std::shared_ptr<SSEConnection>>> sse_subscribers_;  // SSE 订阅者（key: task_id）
+    std::map<std::string, std::string> webhook_urls_;                      // Webhook URL（key: task_id）
+    mutable std::mutex tasks_mutex_;                                       // 任务互斥锁（mutable 以支持 const 方法）
+    mutable std::mutex sse_mutex_;                                         // SSE 互斥锁（mutable 以支持 const 方法）
     
-    // 任务处理器（将 A2A Task 转换为 workflow）
-    std::function<std::future<AgentTask>(const AgentTask&, std::shared_ptr<wf::GraphBuilder>)> task_handler_;
+    // 任务处理器（将 Agent Task 转换为 workflow）
+    std::function<std::future<AgentTask>(const AgentTask&, std::shared_ptr<workflow::GraphBuilder>)> task_handler_;
     
     // 认证验证器
     std::function<bool(const std::map<std::string, std::string>&)> auth_validator_;
@@ -1877,6 +1889,12 @@ private:
     void handle_tasks_resubscribe(const httplib::Request& req, httplib::Response& res);
     void handle_push_notification_set(const httplib::Request& req, httplib::Response& res);
     void handle_push_notification_get(const httplib::Request& req, httplib::Response& res);
+    
+    // 私有方法：验证请求认证
+    bool validate_authentication(const httplib::Request& req);
+    
+    // 私有方法：生成唯一任务 ID
+    static std::string generate_task_id();
 };
 
 } // namespace agent_framework
@@ -2332,39 +2350,83 @@ classDiagram
     
     class HTTPAgentTransport {
         -base_url_ string
+        -current_endpoint_ string
+        -connected_ bool
         +connect() override
+        +disconnect() override
+        +send_request() override
         -send_http_post() json
     }
     
     class SSEConnection {
-        -event_stream_ unique_ptr
+        -endpoint_ string
+        -task_id_ string
+        -event_stream_ void*
+        -active_ bool
+        -event_thread_ thread
+        -connection_mutex_ mutable mutex
+        -on_status_update_ function
+        -on_artifact_update_ function
         +subscribe() void
         +reconnect() void
+        +close() void
+        +is_active() bool
         -handle_event() void
+        -event_thread_func() void
+    }
+    
+    class HTTPClient {
+        <<abstract>>
+        +post()* json
     }
     
     class AgentClient {
+        -server_url_ string
+        -auth_config_ json
+        -auth_mutex_ mutable mutex
         -http_client_ unique_ptr~HTTPClient~
         -sse_connections_ map~string,unique_ptr~SSEConnection~~
+        -sse_mutex_ mutable mutex
         +discover_agent() future~AgentCard~
         +send_task() future~AgentTask~
         +get_task() future~AgentTask~
+        +cancel_task() future~bool~
+        +update_task() future~AgentTask~
         +subscribe_task_updates() void
+        +resubscribe_task_updates() void
+        +set_push_notification() void
+        +set_authentication() void
         -send_jsonrpc_request() json
+        -build_auth_headers() map
+        -make_sse_key() static string
     }
     
     class AgentServer {
-        -http_server_ unique_ptr~httplib::Server~
+        -port_ int
+        -http_server_ void*
+        -agent_card_ AgentCard
         -active_tasks_ map~string,AgentTask~
-        -sse_subscribers_ map~string,vector~SSEConnection~~
+        -sse_subscribers_ map~string,vector~shared_ptr~SSEConnection~~~
+        -webhook_urls_ map~string,string~
+        -tasks_mutex_ mutable mutex
+        -sse_mutex_ mutable mutex
+        -task_handler_ function
+        -auth_validator_ function
+        +start() void
+        +stop() void
         +register_agent_card() void
         +set_task_handler() void
         +push_task_status_update() void
+        +push_artifact_update() void
+        +notify_task_update_via_webhook() void
+        -setup_routes() void
         -handle_tasks_send() void
+        -validate_authentication() bool
+        -generate_task_id() static string
     }
     
     AgentTransport <|-- HTTPAgentTransport
-    AgentClient o-- HTTPAgentTransport : uses
+    AgentClient o-- HTTPClient : uses
     AgentClient o-- SSEConnection : manages
     AgentServer o-- SSEConnection : manages
 ```
@@ -2413,8 +2475,9 @@ classDiagram
 - `MemoryStore::backend_mutex_`
 - `VectorStore::backend_mutex_`、`encoders_mutex_`
 - `UIManager::handlers_mutex_`
-- `AgentClient::auth_mutex_`、`sse_mutex_`
-- `AgentServer::tasks_mutex_`、`sse_mutex_`
+- `AgentClient::auth_mutex_`（`mutable`）、`sse_mutex_`（`mutable`）
+- `AgentServer::tasks_mutex_`（`mutable`）、`sse_mutex_`（`mutable`）
+- `SSEConnection::connection_mutex_`（`mutable`，用于支持 `is_active()` 等 const 方法）
 
 ---
 
@@ -2426,8 +2489,8 @@ graph TB
         GRAPH[GraphExecutor]
         LLM[LLMClient]
         TOOL[ToolBus]
-        AGENT_CLIENT[AgentClient]
-        AGENT_SERVER[AgentServer]
+        AGENT_CLIENT[AgentClient<br/>A2A客户端]
+        AGENT_SERVER[AgentServer<br/>A2A服务器]
         MEM[MemoryStore]
         VEC[VectorStore]
         UI[UIManager]
@@ -2438,6 +2501,7 @@ graph TB
         TOOL_INTERFACE[ToolInterface<br/>Local/MCP/API]
         MCP_TRANSPORT[MCPTransport<br/>Stdio/HTTP/WebSocket]
         AGENT_TRANSPORT[AgentTransport<br/>HTTP]
+        SSE_CONN[SSEConnection<br/>Server-Sent Events]
         MEM_BACKEND[MemoryBackend<br/>File/SQLite/InMemory]
         VEC_BACKEND[VectorStoreBackend<br/>Faiss/Milvus]
         ENCODER[Encoder<br/>Text/Image/Audio/Video]
@@ -2446,6 +2510,7 @@ graph TB
     GRAPH --> LLM
     GRAPH --> TOOL
     GRAPH --> AGENT_CLIENT
+    GRAPH --> AGENT_SERVER
     GRAPH --> MEM
     GRAPH --> VEC
     GRAPH --> UI
@@ -2454,13 +2519,16 @@ graph TB
     TOOL --> TOOL_INTERFACE
     TOOL --> MCP_TRANSPORT
     AGENT_CLIENT --> AGENT_TRANSPORT
+    AGENT_CLIENT --> SSE_CONN
     AGENT_SERVER --> AGENT_TRANSPORT
+    AGENT_SERVER --> SSE_CONN
     MEM --> MEM_BACKEND
     VEC --> VEC_BACKEND
     VEC --> ENCODER
     UI --> UI
     
     TOOL_INTERFACE --> MCP_TRANSPORT
+    AGENT_TRANSPORT -.->|JSON-RPC 2.0| AGENT_TRANSPORT
 ```
 
 ---
@@ -2473,7 +2541,8 @@ graph TB
 4. **新增编码器**：继承 `Encoder`，实现多模态编码
 5. **新增 UI 适配器**：继承 `UIHandler`，实现新的输出方式
 6. **新增工作流模板**：继承 `WorkflowTemplate`，定义新的工作流模式
-7. **新增 A2A 传输方式**：继承 `AgentTransport`，支持 WebSocket 等新的传输协议
+7. **新增 A2A 传输方式**：继承 `AgentTransport`，支持 WebSocket、gRPC 等新的传输协议
+8. **扩展 A2A 协议**：在 `AgentClient` 和 `AgentServer` 中添加新的端点处理逻辑
 
 所有扩展都遵循**开闭原则**（Open-Closed Principle）：
 - **对扩展开放**：通过继承虚基类扩展功能
