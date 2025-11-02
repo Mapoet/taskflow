@@ -2481,6 +2481,285 @@ classDiagram
 
 ---
 
+## Agent 工作流数据流图
+
+以下图表展示了 Agent 框架中数据的完整流动过程，从用户输入到最终输出的全链路数据流转：
+
+### Agent 工作流完整数据流
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant User as 用户
+    participant Source as Source Nodes\n输入源节点
+    participant LLM as LLM Node\nLLM推理节点
+    participant PR as PromptRenderer\n提示词渲染器
+    participant Parser as PlanParser\n计划解析器
+    participant Orch as Agent Loop\n代理循环
+    participant Tools as ToolBus\n工具总线
+    participant KB as KnowledgeBase\n知识库
+    participant Agg as Aggregator\n结果聚合器
+    participant Memory as MemoryStore\n记忆存储
+    participant Sink as Sink Nodes\n输出节点
+
+    User->>Source: 1. 提供输入\n(system_prompt, user_prompt,\nimage, audio, etc.)
+    Source->>LLM: 2. 组装输入数据\n(LLMInput结构)
+
+    LLM->>PR: 3. 调用提示词渲染器\n(渲染工具、历史、模板)
+    PR->>LLM: 4. 返回 RenderedPrompt\n(messages, tools_json)
+
+    LLM->>LLM: 5. 调用 LLM API\n(使用 RenderedPrompt)
+    LLM-->>Sink: 6. 流式输出 token\n(实时推送)
+    LLM->>Parser: 7. 输出工具调用指令\n(tool_calls, is_final)
+
+    alt is_final == false 需要继续执行
+        Parser->>Orch: 8. 解析为 CallSpec 列表
+        Orch->>Orch: 9. 动态构建循环体子图
+
+        par 并行执行工具调用
+            Orch->>Tools: 10a. 调用工具1
+            Tools->>Tools: 执行本地函数/MCP/API
+            Tools-->>Orch: 返回结果1
+        and 并行执行知识检索
+            Orch->>KB: 10b. 查询知识库
+            KB->>KB: 向量检索/混合检索
+            KB-->>Orch: 返回检索结果
+        end
+
+        Orch->>Agg: 11. 聚合工具结果和检索结果
+        Agg->>Memory: 12. 更新对话记忆
+        Agg-->>Orch: 13. 生成新的上下文
+        Orch->>LLM: 14. 将新上下文作为输入
+        Note over LLM,Sink: 重复步骤 5-14，直到 is_final == true
+    else is_final == true 完成
+        LLM->>Sink: 15. 输出最终答案
+        Sink->>Memory: 16. 保存最终结果
+        Sink->>User: 17. 显示最终结果
+    end
+```
+
+### 并行工具调用数据流
+
+```mermaid
+graph TB
+    subgraph "Agent Loop 循环体"
+        CALL_LIST["CallList Source\n工具调用列表\nCallSpec[]"]
+        
+        subgraph "并行工具调用 (create_for_each)"
+            TOOL1[ToolCall Node 1\n工具1]
+            TOOL2[ToolCall Node 2\n工具2]
+            TOOL3[ToolCall Node N\n工具N]
+        end
+        
+        SHARED_STATE[共享状态\nstd::shared_ptr\nresults + mutex]
+        AGG_NODE[Aggregator Node\n结果聚合]
+    end
+    
+    subgraph "ToolBus 工具总线"
+        TB[ToolBus\n统一接口]
+        LOCAL[LocalTool\n本地函数]
+        MCP[MCPTool\nMCP服务]
+        API[APITool\n外部API]
+    end
+    
+    CALL_LIST --> TOOL1
+    CALL_LIST --> TOOL2
+    CALL_LIST --> TOOL3
+    
+    TOOL1 -- 并行调用 --> TB
+    TOOL2 -- 并行调用 --> TB
+    TOOL3 -- 并行调用 --> TB
+    
+    TB --> LOCAL
+    TB --> MCP
+    TB --> API
+    
+    LOCAL -- result1 --> SHARED_STATE
+    MCP -- result2 --> SHARED_STATE
+    API -- resultN --> SHARED_STATE
+    
+    SHARED_STATE --> AGG_NODE
+    AGG_NODE -- merged_context --> LLM[LLM Node\n下一轮推理]
+    
+    style SHARED_STATE fill:#FFE5B4,stroke:#FFA500
+    style AGG_NODE fill:#E8F8F5,stroke:#1ABC9C
+```
+
+### 多模态数据处理流程
+
+```mermaid
+graph LR
+    subgraph "输入层"
+        TEXT_IN[Text Input<br/>文本输入]
+        IMG_IN[Image Input<br/>图像输入<br/>Base64]
+        AUD_IN[Audio Input<br/>音频输入<br/>Base64]
+    end
+    
+    subgraph "编码层 (Encoder Nodes)"
+        TEXT_ENC[TextEncoder<br/>BERT/Sentence<br/>Transformers]
+        IMG_ENC[ImageEncoder<br/>CLIP/BLIP-2]
+        AUD_ENC[AudioEncoder<br/>Whisper]
+    end
+    
+    subgraph "向量存储"
+        VEC_DB[(VectorStore<br/>Faiss/Milvus<br/>多模态向量)]
+    end
+    
+    subgraph "检索层"
+        QUERY_ENC[QueryEncoder<br/>查询编码器<br/>自动选择编码器]
+        RETRIEVER[VectorRetriever<br/>向量检索<br/>跨模态检索]
+    end
+    
+    subgraph "融合层"
+        FUSION[CrossModalFusion<br/>跨模态注意力融合<br/>Early/Intermediate/Late]
+    end
+    
+    subgraph "LLM层"
+        LLM_IN[LLMInput<br/>整合多模态数据]
+        LLM_NODE[LLM Node<br/>多模态推理]
+    end
+    
+    TEXT_IN --> TEXT_ENC
+    IMG_IN --> IMG_ENC
+    AUD_IN --> AUD_ENC
+    
+    TEXT_ENC -->|embedding| VEC_DB
+    IMG_ENC -->|embedding| VEC_DB
+    AUD_ENC -->|embedding| VEC_DB
+    
+    TEXT_IN --> QUERY_ENC
+    IMG_IN --> QUERY_ENC
+    AUD_IN --> QUERY_ENC
+    
+    QUERY_ENC --> RETRIEVER
+    VEC_DB -->|检索| RETRIEVER
+    
+    RETRIEVER --> FUSION
+    FUSION --> LLM_IN
+    LLM_IN --> LLM_NODE
+    
+    style VEC_DB fill:#FFE5B4,stroke:#FFA500
+    style FUSION fill:#E8F8F5,stroke:#1ABC9C
+    style LLM_NODE fill:#FDEDEC,stroke:#EC7063
+```
+
+---
+
+## A2A 任务请求与执行流程
+
+以下图表展示了 A2A (Agent2Agent) 协议中任务的请求、执行和更新的完整流程：
+
+### A2A 任务生命周期流程
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Client as AgentClient<br/>客户端Agent
+    participant Server as AgentServer<br/>服务端Agent
+    participant Workflow as Workflow<br/>工作流引擎
+    participant LLM as LLM Node
+    participant Tools as ToolBus
+    participant SSE as SSEConnection<br/>SSE连接
+
+    Note over Client,Server: 阶段1: 任务创建
+    Client->>Server: 1. send_task()<br/>POST /tasks/send<br/>AgentMessage
+    Server->>Server: 2. 验证认证<br/>validate_authentication()
+    Server->>Server: 3. 生成任务ID<br/>generate_task_id()
+    Server->>Server: 4. 创建AgentTask<br/>status=QUEUED
+    Server->>SSE: 5. 推送状态更新<br/>task_status_update
+    Server-->>Client: 6. 返回AgentTask<br/>(task_id, status)
+
+    Note over Client,Server: 阶段2: 订阅更新
+    Client->>Server: 7. subscribe_task_updates()<br/>GET /tasks/sendSubscribe<br/>?task_id=xxx
+    Server->>SSE: 8. 建立SSE连接<br/>Accept: text/event-stream
+    SSE-->>Client: 9. 推送初始状态<br/>event: task_status_update
+
+    Note over Server,Workflow: 阶段3: 任务执行
+    Server->>Workflow: 10. task_handler()<br/>转换AgentTask为workflow
+    Workflow->>Workflow: 11. 构建工作流图<br/>(使用GraphBuilder)
+    Workflow->>LLM: 12. 执行LLM推理
+    LLM->>Tools: 13. 调用工具
+    Tools-->>LLM: 14. 工具执行结果
+    LLM-->>Workflow: 15. 生成AgentMessage
+    Workflow-->>Server: 16. 返回AgentTask<br/>(status=RUNNING)
+
+    Note over Server,SSE: 阶段4: 实时更新
+    Server->>SSE: 17. push_task_status_update()<br/>更新任务状态
+    SSE-->>Client: 18. 推送SSE事件<br/>event: task_status_update<br/>data: {"task": {...}}
+    
+    Server->>SSE: 19. push_artifact_update()<br/>推送Artifact
+    SSE-->>Client: 20. 推送SSE事件<br/>event: artifact_update<br/>data: {"artifact": {...}}
+
+    Note over Client,Server: 阶段5: 任务完成
+    Workflow-->>Server: 21. 任务完成<br/>status=COMPLETED
+    Server->>SSE: 22. 推送最终状态
+    SSE-->>Client: 23. 最终状态更新
+    Server->>Server: 24. 清理任务资源
+
+    Note over Client,Server: 阶段6: 客户端查询
+    Client->>Server: 25. get_task()<br/>GET /tasks/get?task_id=xxx
+    Server-->>Client: 26. 返回完整AgentTask<br/>(包含所有messages和artifacts)
+```
+
+### A2A 协议通信架构
+
+```mermaid
+graph TB
+    subgraph "客户端 Agent (AgentClient)"
+        CLIENT[AgentClient]
+        HTTP_CLIENT[HTTPClient<br/>JSON-RPC 2.0]
+        SSE_CLIENT[SSEConnection<br/>订阅更新]
+        TRANSPORT_CLIENT[HTTPAgentTransport<br/>传输层]
+    end
+    
+    subgraph "网络通信"
+        HTTP_REQ[HTTP Request<br/>JSON-RPC 2.0<br/>POST /tasks/send]
+        SSE_STREAM[SSE Stream<br/>text/event-stream<br/>GET /tasks/sendSubscribe]
+        WEBHOOK[Webhook<br/>HTTP POST<br/>任务更新通知]
+    end
+    
+    subgraph "服务端 Agent (AgentServer)"
+        SERVER[AgentServer]
+        HTTP_SERVER[httplib::Server<br/>HTTP服务器]
+        SSE_SERVER[SSEConnection<br/>管理订阅者]
+        TASK_HANDLER[Task Handler<br/>转换AgentTask为Workflow]
+    end
+    
+    subgraph "工作流执行"
+        WORKFLOW[Workflow<br/>GraphBuilder]
+        LLM_NODE[LLM Node]
+        TOOL_NODE[Tool Node]
+    end
+    
+    CLIENT --> HTTP_CLIENT
+    CLIENT --> SSE_CLIENT
+    CLIENT --> TRANSPORT_CLIENT
+    
+    HTTP_CLIENT --> HTTP_REQ
+    SSE_CLIENT --> SSE_STREAM
+    TRANSPORT_CLIENT --> HTTP_REQ
+    
+    HTTP_REQ --> HTTP_SERVER
+    SSE_STREAM --> SSE_SERVER
+    
+    HTTP_SERVER --> SERVER
+    SSE_SERVER --> SERVER
+    
+    SERVER --> TASK_HANDLER
+    TASK_HANDLER --> WORKFLOW
+    WORKFLOW --> LLM_NODE
+    WORKFLOW --> TOOL_NODE
+    
+    SERVER --> SSE_SERVER
+    SERVER --> WEBHOOK
+    
+    style CLIENT fill:#E8F8F5,stroke:#1ABC9C
+    style SERVER fill:#FDEDEC,stroke:#EC7063
+    style WORKFLOW fill:#E3F2FD,stroke:#2196F3
+```
+
+---
+
 ## 模块间依赖关系
 
 ```mermaid
