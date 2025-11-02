@@ -119,7 +119,7 @@ public:
     
 private:
     int port_;                                                              // 服务器端口
-    std::unique_ptr<httplib::Server> http_server_;                          // HTTP 服务器
+    void* http_server_;                                                     // httplib::Server*，在实现文件中转换为具体类型（避免头文件依赖）
     AgentCard agent_card_;                                                  // Agent Card
     std::map<std::string, AgentTask> active_tasks_;                        // 活动任务（key: task_id）
     std::map<std::string, std::vector<std::shared_ptr<SSEConnection>>> sse_subscribers_;  // SSE 订阅者（key: task_id）

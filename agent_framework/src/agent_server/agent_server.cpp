@@ -15,35 +15,49 @@
 #include <iomanip>
 // #include <uuid/uuid.h>  // TODO: 或者使用其他 UUID 生成库（可选）
 
-// TODO: 引入 httplib 实现 HTTP 服务器
+// 在实现文件中包含 httplib 完整定义
+// 检查 httplib 位置并包含
+#if __has_include(<httplib/httplib.hpp>)
+    #include <httplib/httplib.hpp>
+#elif __has_include(<httplib.hpp>)
+    #include <httplib.hpp>
+#elif __has_include(<httplib.h>)
+    #include <httplib.h>
+#else
+    #error "httplib not found. Please ensure httplib is available in 3rd-party/httplib/"
+#endif
 
 namespace agent_framework {
 
 AgentServer::AgentServer(int port)
     : port_(port), http_server_(nullptr) {
     // TODO: 初始化 httplib::Server
-    // http_server_ = std::make_unique<httplib::Server>();
+    // 在实现时，取消下面的注释：
+    // http_server_ = new httplib::Server();
 }
 
 AgentServer::~AgentServer() {
     stop();
+    // 清理 http_server_
+    if (http_server_) {
+        // delete static_cast<httplib::Server*>(http_server_);  // TODO: 实现时取消注释
+        http_server_ = nullptr;
+    }
 }
 
 void AgentServer::start() {
+    // TODO: 实现 HTTP 服务器启动
     if (!http_server_) {
-        throw std::runtime_error("HTTP server not initialized");
+        // http_server_ = new httplib::Server();  // TODO: 实现时取消注释
+        // setup_routes();
     }
-    
-    setup_routes();
-    
-    // TODO: 启动 HTTP 服务器
-    // http_server_->listen("0.0.0.0", port_);
+    // static_cast<httplib::Server*>(http_server_)->listen("0.0.0.0", port_);
 }
 
 void AgentServer::stop() {
     // TODO: 停止 HTTP 服务器
     if (http_server_) {
-        // http_server_->stop();
+        // static_cast<httplib::Server*>(http_server_)->stop();  // TODO: 实现时取消注释
     }
     
     // 清理所有 SSE 连接
@@ -126,7 +140,9 @@ void AgentServer::setup_routes() {
     }
     
     // TODO: 设置 HTTP 路由
-    // http_server_->Get("/.well-known/agent-card", [this](const httplib::Request& req, httplib::Response& res) {
+    // 在实现时，取消下面的注释并使用 static_cast 转换：
+    // httplib::Server* server = static_cast<httplib::Server*>(http_server_);
+    // server->Get("/.well-known/agent-card", [this](const httplib::Request& req, httplib::Response& res) {
     //     handle_well_known_agent_card(res);
     // });
     //
@@ -343,7 +359,7 @@ void AgentServer::handle_push_notification_get(const httplib::Request& req, http
     }
 }
 
-bool AgentServer::validate_authentication(const httplib::Request& req) {
+bool AgentServer::validate_authentication(const httplib::Request& /* req */) {
     if (!auth_validator_) {
         return true;  // 如果没有设置验证器，默认通过
     }

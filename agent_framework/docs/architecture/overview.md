@@ -1651,6 +1651,237 @@ private:
 
 ---
 
+### 10. A2A (Agent2Agent) 模块继承体系
+
+```cpp
+namespace agent_framework {
+
+/**
+ * @brief Agent 传输层虚基类（A2A 协议）
+ * 定义统一的传输接口，支持 HTTP、WebSocket 等不同传输方式
+ */
+class AgentTransport {
+public:
+    virtual ~AgentTransport() = default;
+    
+    // 虚函数接口：连接服务
+    virtual bool connect(const std::string& endpoint) = 0;
+    
+    // 虚函数接口：断开连接
+    virtual void disconnect() = 0;
+    
+    // 虚函数接口：发送 JSON-RPC 2.0 请求
+    virtual json send_request(const std::string& method, const json& params) = 0;
+    
+    // 虚函数接口：检查连接状态
+    virtual bool is_connected() const = 0;
+    
+    // 虚函数接口：获取传输类型
+    virtual std::string get_transport_type() const = 0;  // 返回 "http", "websocket" 等
+};
+
+/**
+ * @brief HTTP Agent 传输实现（A2A 协议，用于 JSON-RPC 2.0）
+ */
+class HTTPAgentTransport : public AgentTransport {
+public:
+    explicit HTTPAgentTransport(const std::string& base_url);
+    
+    bool connect(const std::string& endpoint) override;
+    void disconnect() override;
+    json send_request(const std::string& method, const json& params) override;
+    bool is_connected() const override;
+    std::string get_transport_type() const override;
+    
+private:
+    std::string base_url_;
+    bool connected_ = false;
+    
+    // 私有方法：发送 HTTP POST 请求
+    json send_http_post(const json& payload);
+};
+
+/**
+ * @brief SSE 连接管理器
+ * 用于管理 Server-Sent Events 连接，实现异步任务更新推送
+ */
+class SSEConnection {
+public:
+    explicit SSEConnection(const std::string& endpoint, const std::string& task_id);
+    
+    // 订阅 SSE 事件流
+    void subscribe(
+        std::function<void(const AgentTask&)> on_status_update,
+        std::function<void(const AgentArtifact&)> on_artifact_update
+    );
+    
+    // 重新连接（连接中断后）
+    void reconnect(const std::string& last_event_id);
+    
+    // 关闭连接
+    void close();
+    
+    // 检查连接状态
+    bool is_active() const;
+    
+private:
+    std::string endpoint_;
+    std::string task_id_;
+    std::unique_ptr<httplib::Response> event_stream_;
+    bool active_ = false;
+    std::thread event_thread_;
+    std::mutex connection_mutex_;
+    
+    // 私有方法：处理 SSE 事件
+    void handle_event(const std::string& event_data);
+};
+
+/**
+ * @brief Agent 客户端（A2A 协议）
+ * 用于作为客户端与其他 Agent 系统通信
+ */
+class AgentClient {
+public:
+    explicit AgentClient(const std::string& server_url);
+    
+    // Agent 发现：获取远程 Agent 的 Agent Card
+    std::future<AgentCard> discover_agent(const std::string& agent_endpoint);
+    
+    // 任务生命周期管理
+    std::future<AgentTask> send_task(
+        const std::string& agent_endpoint,
+        const AgentMessage& initial_message,
+        const std::optional<std::string>& session_id = std::nullopt,
+        const json& metadata = {}
+    );
+    
+    std::future<AgentTask> get_task(const std::string& agent_endpoint, const std::string& task_id);
+    
+    std::future<bool> cancel_task(const std::string& agent_endpoint, const std::string& task_id);
+    
+    // 更新任务（发送额外输入）
+    std::future<AgentTask> update_task(
+        const std::string& agent_endpoint,
+        const std::string& task_id,
+        const AgentMessage& additional_message
+    );
+    
+    // 异步通信：订阅 SSE 更新
+    void subscribe_task_updates(
+        const std::string& agent_endpoint,
+        const std::string& task_id,
+        std::function<void(const AgentTask&)> on_status_update,
+        std::function<void(const AgentArtifact&)> on_artifact_update
+    );
+    
+    // 重新订阅（SSE 连接中断后）
+    void resubscribe_task_updates(
+        const std::string& agent_endpoint,
+        const std::string& task_id,
+        const std::string& last_event_id
+    );
+    
+    // Webhook 推送配置
+    void set_push_notification(
+        const std::string& agent_endpoint,
+        const std::string& task_id,
+        const std::string& webhook_url
+    );
+    
+    std::future<json> get_push_notification_config(
+        const std::string& agent_endpoint,
+        const std::string& task_id
+    );
+    
+    // 认证管理
+    void set_authentication(const json& auth_config);
+    void refresh_authentication();
+    
+private:
+    std::string server_url_;
+    json auth_config_;
+    std::mutex auth_mutex_;
+    
+    // HTTP 客户端（用于 JSON-RPC 2.0 请求）
+    std::unique_ptr<HTTPClient> http_client_;
+    
+    // SSE 连接管理
+    std::map<std::string, std::unique_ptr<SSEConnection>> sse_connections_;
+    std::mutex sse_mutex_;
+    
+    // 私有方法：发送 JSON-RPC 2.0 请求
+    json send_jsonrpc_request(const std::string& endpoint, const json& method, const json& params);
+    
+    // 私有方法：构建认证 Header
+    std::map<std::string, std::string> build_auth_headers() const;
+};
+
+/**
+ * @brief Agent 服务器（A2A 协议）
+ * 用于对外提供 A2A 协议接口，使本框架的 Agent 能够被其他系统发现和调用
+ */
+class AgentServer {
+public:
+    explicit AgentServer(int port = 8080);
+    
+    // 启动服务器
+    void start();
+    void stop();
+    
+    // 注册本 Agent 的 Agent Card
+    void register_agent_card(const AgentCard& card);
+    
+    // 设置任务处理器（将 A2A Task 转换为 workflow 执行）
+    void set_task_handler(
+        std::function<std::future<AgentTask>(
+            const AgentTask& task,
+            std::shared_ptr<wf::GraphBuilder> builder
+        )> handler
+    );
+    
+    // 设置认证验证器
+    void set_authentication_validator(
+        std::function<bool(const std::map<std::string, std::string>& headers)> validator
+    );
+    
+    // SSE 事件推送
+    void push_task_status_update(const std::string& task_id, const AgentTask& task);
+    void push_artifact_update(const std::string& task_id, const AgentArtifact& artifact);
+    
+    // Webhook 通知推送
+    void notify_task_update_via_webhook(const std::string& task_id, const AgentTask& task);
+    
+private:
+    int port_;
+    std::unique_ptr<httplib::Server> http_server_;
+    AgentCard agent_card_;
+    std::map<std::string, AgentTask> active_tasks_;
+    std::map<std::string, std::vector<SSEConnection>> sse_subscribers_;
+    std::map<std::string, std::string> webhook_urls_;
+    std::mutex tasks_mutex_;
+    std::mutex sse_mutex_;
+    
+    // 任务处理器（将 A2A Task 转换为 workflow）
+    std::function<std::future<AgentTask>(const AgentTask&, std::shared_ptr<wf::GraphBuilder>)> task_handler_;
+    
+    // 认证验证器
+    std::function<bool(const std::map<std::string, std::string>&)> auth_validator_;
+    
+    // HTTP 端点处理
+    void setup_routes();
+    void handle_well_known_agent_card(httplib::Response& res);
+    void handle_tasks_send(const httplib::Request& req, httplib::Response& res);
+    void handle_tasks_get(const httplib::Request& req, httplib::Response& res);
+    void handle_tasks_cancel(const httplib::Request& req, httplib::Response& res);
+    void handle_tasks_send_subscribe(const httplib::Request& req, httplib::Response& res);
+    void handle_tasks_resubscribe(const httplib::Request& req, httplib::Response& res);
+    void handle_push_notification_set(const httplib::Request& req, httplib::Response& res);
+    void handle_push_notification_get(const httplib::Request& req, httplib::Response& res);
+};
+
+} // namespace agent_framework
+```
+
 ## 类继承关系图
 
 ```mermaid
@@ -2136,237 +2367,6 @@ classDiagram
     AgentClient o-- HTTPAgentTransport : uses
     AgentClient o-- SSEConnection : manages
     AgentServer o-- SSEConnection : manages
-```
-
-### 10. A2A (Agent2Agent) 模块继承体系
-
-```cpp
-namespace agent_framework {
-
-/**
- * @brief Agent 传输层虚基类（A2A 协议）
- * 定义统一的传输接口，支持 HTTP、WebSocket 等不同传输方式
- */
-class AgentTransport {
-public:
-    virtual ~AgentTransport() = default;
-    
-    // 虚函数接口：连接服务
-    virtual bool connect(const std::string& endpoint) = 0;
-    
-    // 虚函数接口：断开连接
-    virtual void disconnect() = 0;
-    
-    // 虚函数接口：发送 JSON-RPC 2.0 请求
-    virtual json send_request(const std::string& method, const json& params) = 0;
-    
-    // 虚函数接口：检查连接状态
-    virtual bool is_connected() const = 0;
-    
-    // 虚函数接口：获取传输类型
-    virtual std::string get_transport_type() const = 0;  // 返回 "http", "websocket" 等
-};
-
-/**
- * @brief HTTP Agent 传输实现（A2A 协议，用于 JSON-RPC 2.0）
- */
-class HTTPAgentTransport : public AgentTransport {
-public:
-    explicit HTTPAgentTransport(const std::string& base_url);
-    
-    bool connect(const std::string& endpoint) override;
-    void disconnect() override;
-    json send_request(const std::string& method, const json& params) override;
-    bool is_connected() const override;
-    std::string get_transport_type() const override;
-    
-private:
-    std::string base_url_;
-    bool connected_ = false;
-    
-    // 私有方法：发送 HTTP POST 请求
-    json send_http_post(const json& payload);
-};
-
-/**
- * @brief SSE 连接管理器
- * 用于管理 Server-Sent Events 连接，实现异步任务更新推送
- */
-class SSEConnection {
-public:
-    explicit SSEConnection(const std::string& endpoint, const std::string& task_id);
-    
-    // 订阅 SSE 事件流
-    void subscribe(
-        std::function<void(const AgentTask&)> on_status_update,
-        std::function<void(const AgentArtifact&)> on_artifact_update
-    );
-    
-    // 重新连接（连接中断后）
-    void reconnect(const std::string& last_event_id);
-    
-    // 关闭连接
-    void close();
-    
-    // 检查连接状态
-    bool is_active() const;
-    
-private:
-    std::string endpoint_;
-    std::string task_id_;
-    std::unique_ptr<httplib::Response> event_stream_;
-    bool active_ = false;
-    std::thread event_thread_;
-    std::mutex connection_mutex_;
-    
-    // 私有方法：处理 SSE 事件
-    void handle_event(const std::string& event_data);
-};
-
-/**
- * @brief Agent 客户端（A2A 协议）
- * 用于作为客户端与其他 Agent 系统通信
- */
-class AgentClient {
-public:
-    explicit AgentClient(const std::string& server_url);
-    
-    // Agent 发现：获取远程 Agent 的 Agent Card
-    std::future<AgentCard> discover_agent(const std::string& agent_endpoint);
-    
-    // 任务生命周期管理
-    std::future<AgentTask> send_task(
-        const std::string& agent_endpoint,
-        const AgentMessage& initial_message,
-        const std::optional<std::string>& session_id = std::nullopt,
-        const json& metadata = {}
-    );
-    
-    std::future<AgentTask> get_task(const std::string& agent_endpoint, const std::string& task_id);
-    
-    std::future<bool> cancel_task(const std::string& agent_endpoint, const std::string& task_id);
-    
-    // 更新任务（发送额外输入）
-    std::future<AgentTask> update_task(
-        const std::string& agent_endpoint,
-        const std::string& task_id,
-        const AgentMessage& additional_message
-    );
-    
-    // 异步通信：订阅 SSE 更新
-    void subscribe_task_updates(
-        const std::string& agent_endpoint,
-        const std::string& task_id,
-        std::function<void(const AgentTask&)> on_status_update,
-        std::function<void(const AgentArtifact&)> on_artifact_update
-    );
-    
-    // 重新订阅（SSE 连接中断后）
-    void resubscribe_task_updates(
-        const std::string& agent_endpoint,
-        const std::string& task_id,
-        const std::string& last_event_id
-    );
-    
-    // Webhook 推送配置
-    void set_push_notification(
-        const std::string& agent_endpoint,
-        const std::string& task_id,
-        const std::string& webhook_url
-    );
-    
-    std::future<json> get_push_notification_config(
-        const std::string& agent_endpoint,
-        const std::string& task_id
-    );
-    
-    // 认证管理
-    void set_authentication(const json& auth_config);
-    void refresh_authentication();
-    
-private:
-    std::string server_url_;
-    json auth_config_;
-    std::mutex auth_mutex_;
-    
-    // HTTP 客户端（用于 JSON-RPC 2.0 请求）
-    std::unique_ptr<HTTPClient> http_client_;
-    
-    // SSE 连接管理
-    std::map<std::string, std::unique_ptr<SSEConnection>> sse_connections_;
-    std::mutex sse_mutex_;
-    
-    // 私有方法：发送 JSON-RPC 2.0 请求
-    json send_jsonrpc_request(const std::string& endpoint, const json& method, const json& params);
-    
-    // 私有方法：构建认证 Header
-    std::map<std::string, std::string> build_auth_headers() const;
-};
-
-/**
- * @brief Agent 服务器（A2A 协议）
- * 用于对外提供 A2A 协议接口，使本框架的 Agent 能够被其他系统发现和调用
- */
-class AgentServer {
-public:
-    explicit AgentServer(int port = 8080);
-    
-    // 启动服务器
-    void start();
-    void stop();
-    
-    // 注册本 Agent 的 Agent Card
-    void register_agent_card(const AgentCard& card);
-    
-    // 设置任务处理器（将 A2A Task 转换为 workflow 执行）
-    void set_task_handler(
-        std::function<std::future<AgentTask>(
-            const AgentTask& task,
-            std::shared_ptr<wf::GraphBuilder> builder
-        )> handler
-    );
-    
-    // 设置认证验证器
-    void set_authentication_validator(
-        std::function<bool(const std::map<std::string, std::string>& headers)> validator
-    );
-    
-    // SSE 事件推送
-    void push_task_status_update(const std::string& task_id, const AgentTask& task);
-    void push_artifact_update(const std::string& task_id, const AgentArtifact& artifact);
-    
-    // Webhook 通知推送
-    void notify_task_update_via_webhook(const std::string& task_id, const AgentTask& task);
-    
-private:
-    int port_;
-    std::unique_ptr<httplib::Server> http_server_;
-    AgentCard agent_card_;
-    std::map<std::string, AgentTask> active_tasks_;
-    std::map<std::string, std::vector<SSEConnection>> sse_subscribers_;
-    std::map<std::string, std::string> webhook_urls_;
-    std::mutex tasks_mutex_;
-    std::mutex sse_mutex_;
-    
-    // 任务处理器（将 A2A Task 转换为 workflow）
-    std::function<std::future<AgentTask>(const AgentTask&, std::shared_ptr<wf::GraphBuilder>)> task_handler_;
-    
-    // 认证验证器
-    std::function<bool(const std::map<std::string, std::string>&)> auth_validator_;
-    
-    // HTTP 端点处理
-    void setup_routes();
-    void handle_well_known_agent_card(httplib::Response& res);
-    void handle_tasks_send(const httplib::Request& req, httplib::Response& res);
-    void handle_tasks_get(const httplib::Request& req, httplib::Response& res);
-    void handle_tasks_cancel(const httplib::Request& req, httplib::Response& res);
-    void handle_tasks_send_subscribe(const httplib::Request& req, httplib::Response& res);
-    void handle_tasks_resubscribe(const httplib::Request& req, httplib::Response& res);
-    void handle_push_notification_set(const httplib::Request& req, httplib::Response& res);
-    void handle_push_notification_get(const httplib::Request& req, httplib::Response& res);
-};
-
-} // namespace agent_framework
 ```
 
 ---
