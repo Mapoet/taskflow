@@ -9,7 +9,6 @@
 #include <agent/types.hpp>
 #include <stdexcept>
 #include <sstream>
-#include <linux/uuid.h>  // TODO: 或者使用其他 UUID 生成库
 
 // TODO: 实现 HTTPClient 或使用 httplib
 
@@ -177,12 +176,15 @@ json AgentClient::send_jsonrpc_request(const std::string& endpoint, const json& 
     // 构建完整 URL
     std::string full_url = server_url_ + endpoint;
     
+    const std::uint64_t request_id =
+        jsonrpc_next_id_.fetch_add(1, std::memory_order_relaxed);
+
     // 构建 JSON-RPC 2.0 请求
     json request = {
         {"jsonrpc", "2.0"},
         {"method", method},
         {"params", params},
-        {"id", 1}  // TODO: 使用唯一 ID
+        {"id", request_id}
     };
     
     // 构建请求头

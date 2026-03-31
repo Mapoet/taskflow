@@ -8,6 +8,8 @@
 #ifndef __AGENT_CLIENT_H__
 #define __AGENT_CLIENT_H__
 
+#include <atomic>
+#include <cstdint>
 #include <string>
 #include <future>
 #include <map>
@@ -167,6 +169,9 @@ private:
     
     // HTTP 客户端（用于 JSON-RPC 2.0 请求）
     std::unique_ptr<HTTPClient> http_client_;
+
+    // JSON-RPC 2.0 请求 id（并发安全，每请求递增）
+    std::atomic<std::uint64_t> jsonrpc_next_id_{1};
     
     // SSE 连接管理（key: "agent_endpoint:task_id"）
     std::map<std::string, std::unique_ptr<SSEConnection>> sse_connections_;
