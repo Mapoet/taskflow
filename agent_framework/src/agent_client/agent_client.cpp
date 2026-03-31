@@ -9,7 +9,7 @@
 #include <agent/types.hpp>
 #include <stdexcept>
 #include <sstream>
-#include <uuid/uuid.h>  // TODO: 或者使用其他 UUID 生成库
+#include <linux/uuid.h>  // TODO: 或者使用其他 UUID 生成库
 
 // TODO: 实现 HTTPClient 或使用 httplib
 
