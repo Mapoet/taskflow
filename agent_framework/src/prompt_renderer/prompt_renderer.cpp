@@ -103,6 +103,7 @@ PromptRenderer::PromptRenderer()
     // Matching is prefix-wildcard (e.g. "gpt-*").
     register_tool_formatter("gpt-*", std::make_shared<OpenAIToolFormatter>());
     register_tool_formatter("openai-*", std::make_shared<OpenAIToolFormatter>());
+    register_tool_formatter("deepseek-*", std::make_shared<OpenAIToolFormatter>());
     register_tool_formatter("claude-*", std::make_shared<AnthropicToolFormatter>());
 }
 

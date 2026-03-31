@@ -80,6 +80,12 @@ void test_agent_loop_live() {
     if (std::getenv("AGENT_LLM_PROVIDER") == nullptr) {
         (void)::setenv("AGENT_LLM_PROVIDER", "openai", 0);
     }
+    if (std::getenv("AGENT_HTTP_TIMEOUT_SEC") == nullptr) {
+        (void)::setenv("AGENT_HTTP_TIMEOUT_SEC", "30", 0);
+    }
+    if (std::getenv("AGENT_LLM_MAX_RETRIES") == nullptr) {
+        (void)::setenv("AGENT_LLM_MAX_RETRIES", "1", 0);
+    }
     if (std::getenv("AGENT_LLM_MODEL") == nullptr) {
         const std::string m = env_or("DEEPSEEK_MODEL", "deepseek-chat");
         (void)::setenv("AGENT_LLM_MODEL", m.c_str(), 0);
