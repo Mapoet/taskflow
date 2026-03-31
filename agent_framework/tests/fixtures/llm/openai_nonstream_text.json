@@ -1,0 +1,11 @@
+{
+  "choices": [
+    {
+      "message": {
+        "role": "assistant",
+        "content": "Hello from fixture."
+      },
+      "finish_reason": "stop"
+    }
+  ]
+}

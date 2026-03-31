@@ -20,6 +20,8 @@
 
 namespace agent_framework {
 
+class LlmHttpTransport;
+
 // ============================================================================
 // 模型适配器接口
 // ============================================================================
@@ -102,8 +104,9 @@ protected:
  */
 class OpenAIAdapter : public ModelAdapter {
 public:
-    explicit OpenAIAdapter(const std::string& api_key, 
-                          const std::string& base_url = "https://api.openai.com/v1");
+    explicit OpenAIAdapter(const std::string& api_key,
+                          const std::string& base_url = "https://api.openai.com/v1",
+                          std::shared_ptr<LlmHttpTransport> transport = nullptr);
     
     std::future<LLMOutput> invoke(
         const LLMInput& input,
@@ -124,6 +127,7 @@ private:
     std::string api_key_;
     std::string base_url_;
     ModelConfig config_;
+    std::shared_ptr<LlmHttpTransport> http_transport_;
     
     /**
      * @brief 构建 OpenAI 格式的请求（使用 RenderedPrompt）
@@ -138,7 +142,9 @@ private:
  */
 class AnthropicAdapter : public ModelAdapter {
 public:
-    explicit AnthropicAdapter(const std::string& api_key);
+    explicit AnthropicAdapter(const std::string& api_key,
+                              const std::string& anthropic_base = "https://api.anthropic.com",
+                              std::shared_ptr<LlmHttpTransport> transport = nullptr);
     
     std::future<LLMOutput> invoke(
         const LLMInput& input,
@@ -157,8 +163,10 @@ public:
     
 private:
     std::string api_key_;
+    std::string anthropic_base_;
     ModelConfig config_;
-    
+    std::shared_ptr<LlmHttpTransport> http_transport_;
+
     /**
      * @brief 构建 Anthropic 格式的请求（使用 RenderedPrompt）
      * @param rendered 渲染后的提示词
@@ -244,6 +252,31 @@ private:
  */
 class LLMClient {
 public:
+    LLMClient() = default;
+    LLMClient(const LLMClient&) = delete;
+    LLMClient& operator=(const LLMClient&) = delete;
+    LLMClient(LLMClient&& o) noexcept
+        : prompt_renderer_(std::move(o.prompt_renderer_)),
+          adapters_(std::move(o.adapters_)),
+          default_provider_(std::move(o.default_provider_)) {}
+    LLMClient& operator=(LLMClient&& o) noexcept {
+        if (this != &o) {
+            prompt_renderer_ = std::move(o.prompt_renderer_);
+            adapters_ = std::move(o.adapters_);
+            default_provider_ = std::move(o.default_provider_);
+        }
+        return *this;
+    }
+
+    /**
+     * @brief 从环境变量注册默认适配器（需另行 set_prompt_renderer）
+     *
+     * 读取：AGENT_LLM_PROVIDER、AGENT_HTTP_TIMEOUT_SEC、AGENT_LLM_MAX_RETRIES、
+     * AGENT_OPENAI_BASE_URL、AGENT_ANTHROPIC_BASE_URL、AGENT_LLM_MODEL、
+     * OPENAI_API_KEY、ANTHROPIC_API_KEY
+     */
+    static LLMClient from_env();
+
     /**
      * @brief 设置提示词渲染器（用于将 LLMInput 转换为 RenderedPrompt）
      * @param renderer 提示词渲染器
@@ -316,8 +349,8 @@ private:
     std::shared_ptr<PromptRenderer> prompt_renderer_;  // 提示词渲染器
     std::map<std::string, std::shared_ptr<ModelAdapter>> adapters_;
     std::string default_provider_;
-    std::mutex adapters_mutex_;
-    std::mutex renderer_mutex_;
+    mutable std::mutex adapters_mutex_;
+    mutable std::mutex renderer_mutex_;
     
     /**
      * @brief 内部渲染提示词（如果未提供 RenderedPrompt）

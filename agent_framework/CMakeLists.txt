@@ -145,14 +145,23 @@ set(AGENT_SOURCES "")
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/llm_client/llm_client.cpp)
     list(APPEND AGENT_SOURCES src/llm_client/llm_client.cpp)
 endif()
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/llm_client/model_adapter.cpp)
+    list(APPEND AGENT_SOURCES src/llm_client/model_adapter.cpp)
+endif()
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/llm_client/openai_adapter.cpp)
     list(APPEND AGENT_SOURCES src/llm_client/openai_adapter.cpp)
 endif()
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/llm_client/anthropic_adapter.cpp)
     list(APPEND AGENT_SOURCES src/llm_client/anthropic_adapter.cpp)
 endif()
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/llm_client/gemini_adapter.cpp)
+    list(APPEND AGENT_SOURCES src/llm_client/gemini_adapter.cpp)
+endif()
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/llm_client/vllm_adapter.cpp)
     list(APPEND AGENT_SOURCES src/llm_client/vllm_adapter.cpp)
+endif()
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/prompt_renderer/prompt_renderer.cpp)
+    list(APPEND AGENT_SOURCES src/prompt_renderer/prompt_renderer.cpp)
 endif()
 
 # ToolBus 模块
@@ -370,10 +379,22 @@ if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/examples/workflow_custom.cpp)
     endif()
 endif()
 
-# 测试（需要 Google Test 或 Catch2）
+# 测试（WP1.1 LLM 轻量单测，无第三方框架）
 if(BUILD_TESTING)
     enable_testing()
-    # TODO: 添加测试
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_llm_client_wp1.cpp)
+        add_executable(test_llm_client_wp1 tests/test_llm_client_wp1.cpp)
+        target_link_libraries(test_llm_client_wp1 PRIVATE agent_framework)
+        if(CMAKE_USE_PTHREADS_INIT)
+            target_link_libraries(test_llm_client_wp1 PRIVATE Threads::Threads)
+        endif()
+        if(OpenSSL_FOUND)
+            target_link_libraries(test_llm_client_wp1 PRIVATE OpenSSL::SSL OpenSSL::Crypto)
+        endif()
+        add_test(NAME llm_client_wp1 COMMAND test_llm_client_wp1)
+        set_tests_properties(llm_client_wp1 PROPERTIES
+            ENVIRONMENT "AGENT_TEST_FIXTURES=${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/llm")
+    endif()
 endif()
 
 # 安装规则

@@ -1,0 +1,19 @@
+{
+  "id": "msg_fix",
+  "type": "message",
+  "role": "assistant",
+  "content": [
+    {
+      "type": "text",
+      "text": "Anthropic says hi."
+    },
+    {
+      "type": "tool_use",
+      "id": "toolu_01",
+      "name": "calc",
+      "input": {
+        "expr": "1+1"
+      }
+    }
+  ]
+}

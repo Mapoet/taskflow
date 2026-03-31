@@ -8,7 +8,9 @@
 #ifndef __AGENT_TYPES_H__
 #define __AGENT_TYPES_H__
 
+#include <algorithm>
 #include <nlohmann/json.hpp>
+#include <stdexcept>
 #include <string>
 #include <vector>
 #include <optional>
@@ -129,6 +131,8 @@ struct RenderedPrompt {
 struct CallSpec {
     std::string name;              // 工具名称
     json arguments;                // 调用参数（JSON 对象）
+    /** OpenAI `tool_calls[].id` / Anthropic `tool_use.id`，供多轮 tool_result 对齐 */
+    std::optional<std::string> tool_call_id;
 };
 
 /**
@@ -144,6 +148,30 @@ struct LLMOutput {
 };
 
 /**
+ * @brief LLM HTTP 层错误（供重试与排障）
+ */
+class llm_http_error : public std::runtime_error {
+public:
+    int status_code;                      ///< 0 表示连接/传输失败；否则 HTTP 状态码
+    std::string body_excerpt;            ///< 响应体摘录
+    std::string provider;                 ///< openai / anthropic 等
+    std::optional<int> retry_after_sec;  ///< 若服务端返回 Retry-After
+
+    llm_http_error(int status_code, std::string provider, std::string body_excerpt,
+                   std::optional<int> retry_after_sec = std::nullopt);
+};
+
+inline llm_http_error::llm_http_error(int status_code, std::string provider,
+                                      std::string body_excerpt,
+                                      std::optional<int> retry_after_sec)
+    : std::runtime_error("[" + provider + "] HTTP " + std::to_string(status_code) + ": " +
+                         body_excerpt.substr(0, std::min<std::size_t>(body_excerpt.size(), 256u))),
+      status_code(status_code),
+      body_excerpt(std::move(body_excerpt)),
+      provider(std::move(provider)),
+      retry_after_sec(retry_after_sec) {}
+
+/**
  * @brief 模型配置
  */
 struct ModelConfig {
@@ -152,6 +180,8 @@ struct ModelConfig {
     double top_p = 1.0;            // Top P 参数
     int max_tokens = 4096;         // 最大 token 数
     bool stream = true;            // 是否启用流式输出
+    int http_timeout_sec = 120;    // HTTP 连接/读超时（秒）
+    int max_retries = 3;           // 失败重试次数（不含首次）
     std::map<std::string, json> extra_params;  // 额外参数
 };
 
