@@ -8,6 +8,9 @@
  * - 模型：`DEEPSEEK_MODEL` 默认 `deepseek-chat`
  *
  * **Offline**：`AGENT_TEST_OFFLINE=1` 且 ctest 已设置 `AGENT_TEST_FIXTURES`，走假 transport + 夹具。
+ *
+ * **Live 输出**：默认把每次 API 的 `final_answer` / `tool_calls` / 流式累积打印到 **stdout**。
+ * 若需静默（如 CI），设 `AGENT_TEST_QUIET=1`。
  */
 
 #include <agent/httplib_http_client.hpp>
@@ -39,6 +42,46 @@ bool env_truthy(const char* key) {
         return false;
     }
     return v[0] == '1' || v[0] == 'y' || v[0] == 'Y' || v[0] == 't' || v[0] == 'T';
+}
+
+/** Live 下是否跳过打印模型输出（ctest 可设 AGENT_TEST_QUIET=1） */
+bool live_output_quiet() {
+    return env_truthy("AGENT_TEST_QUIET");
+}
+
+void live_print_case(const char* title) {
+    if (live_output_quiet()) {
+        return;
+    }
+    std::cout << "\n========== " << title << " ==========\n";
+}
+
+void live_print_output(const LLMOutput& o, const std::string* streamed = nullptr) {
+    if (live_output_quiet()) {
+        return;
+    }
+    std::cout << "is_final: " << (o.is_final ? "true" : "false") << '\n';
+    if (!o.reasoning.empty()) {
+        std::cout << "reasoning: " << o.reasoning << '\n';
+    }
+    if (streamed && !streamed->empty()) {
+        std::cout << "stream accumulated (" << streamed->size() << " chars): " << *streamed << '\n';
+    }
+    if (!o.final_answer.empty()) {
+        std::cout << "final_answer:\n" << o.final_answer << '\n';
+    }
+    if (!o.tool_calls.empty()) {
+        std::cout << "tool_calls (" << o.tool_calls.size() << "):\n";
+        for (std::size_t i = 0; i < o.tool_calls.size(); ++i) {
+            const CallSpec& tc = o.tool_calls[i];
+            std::cout << "  [" << i << "] name=\"" << tc.name << '"';
+            if (tc.tool_call_id.has_value() && !tc.tool_call_id->empty()) {
+                std::cout << " tool_call_id=\"" << *tc.tool_call_id << '"';
+            }
+            std::cout << "\n      arguments: " << tc.arguments.dump() << '\n';
+        }
+    }
+    std::cout.flush();
 }
 
 std::string fixtures_base_dir() {
@@ -340,6 +383,7 @@ const char* live_api_key() {
 }
 
 void run_live_openai_nonstream_text() {
+    live_print_case("OpenAI non-stream (chat)");
     const char* key = live_api_key();
     OpenAIAdapter ad(key, env_or("AGENT_OPENAI_BASE_URL", "https://api.deepseek.com/v1"));
     ModelConfig cfg = live_model_config(env_or("DEEPSEEK_MODEL", "deepseek-chat"));
@@ -348,6 +392,7 @@ void run_live_openai_nonstream_text() {
     rp.messages = {json{{"role", "user"},
                           {"content", "Reply with exactly one English word: the color of the sky on a clear day."}}};
     LLMOutput out = ad.invoke_with_rendered(rp, nullptr).get();
+    live_print_output(out, nullptr);
     if (out.final_answer.empty()) {
         throw std::runtime_error("live openai: empty final_answer");
     }
@@ -356,6 +401,7 @@ void run_live_openai_nonstream_text() {
 }
 
 void run_live_openai_tool_roundtrip() {
+    live_print_case("OpenAI tool round-trip (turn 1: model calls add)");
     const char* key = live_api_key();
     OpenAIAdapter ad(key, env_or("AGENT_OPENAI_BASE_URL", "https://api.deepseek.com/v1"));
     ModelConfig cfg = live_model_config(env_or("DEEPSEEK_MODEL", "deepseek-chat"));
@@ -367,6 +413,7 @@ void run_live_openai_tool_roundtrip() {
                            "You must use the add tool to compute 11 + 31. "
                            "Call add with a=11 and b=31 only. Do not state the sum before the tool runs."}}};
     LLMOutput first = ad.invoke_with_rendered(rp1, nullptr).get();
+    live_print_output(first, nullptr);
     if (first.tool_calls.empty()) {
         throw std::runtime_error("live openai tool: model did not return tool_calls (enable function calling?)");
     }
@@ -378,6 +425,9 @@ void run_live_openai_tool_roundtrip() {
         throw std::runtime_error("live openai tool: expected tool add, got " + tc.name);
     }
     const int sum = add_args_sum(tc);
+    if (!live_output_quiet()) {
+        std::cout << "injected tool_result content (string): " << sum << '\n';
+    }
     json assistant_msg = assistant_message_from_openai_tool_calls(first);
     json tool_msg = tool_message_openai(*tc.tool_call_id, std::to_string(sum));
 
@@ -385,7 +435,9 @@ void run_live_openai_tool_roundtrip() {
     rp2.tools_json = tool_add_openai_array();
     rp2.messages = {rp1.messages[0], assistant_msg, tool_msg};
 
+    live_print_case("OpenAI tool round-trip (turn 2: after tool_result)");
     LLMOutput second = ad.invoke_with_rendered(rp2, nullptr).get();
+    live_print_output(second, nullptr);
     if (!second.is_final || second.final_answer.empty()) {
         throw std::runtime_error("live openai tool round 2: expected final text answer");
     }
@@ -393,6 +445,7 @@ void run_live_openai_tool_roundtrip() {
 }
 
 void run_live_openai_stream() {
+    live_print_case("OpenAI stream (chat)");
     const char* key = live_api_key();
     OpenAIAdapter ad(key, env_or("AGENT_OPENAI_BASE_URL", "https://api.deepseek.com/v1"));
     ModelConfig cfg = live_model_config(env_or("DEEPSEEK_MODEL", "deepseek-chat"));
@@ -402,12 +455,14 @@ void run_live_openai_stream() {
     rp.messages = {json{{"role", "user"}, {"content", "Count from 1 to 3 separated by commas, no extra words."}}};
     std::string streamed;
     LLMOutput out = ad.invoke_with_rendered(rp, [&](std::string_view s) { streamed += s; }).get();
+    live_print_output(out, &streamed);
     if (streamed.empty() && out.final_answer.empty()) {
         throw std::runtime_error("live openai stream: no tokens");
     }
 }
 
 void run_live_openai_stream_tools() {
+    live_print_case("OpenAI stream + tools");
     const char* key = live_api_key();
     OpenAIAdapter ad(key, env_or("AGENT_OPENAI_BASE_URL", "https://api.deepseek.com/v1"));
     ModelConfig cfg = live_model_config(env_or("DEEPSEEK_MODEL", "deepseek-chat"));
@@ -419,6 +474,7 @@ void run_live_openai_stream_tools() {
                           {"content", "Use add with a=2 and b=3 only via the tool."}}};
     std::string streamed;
     LLMOutput out = ad.invoke_with_rendered(rp, [&](std::string_view s) { streamed += s; }).get();
+    live_print_output(out, &streamed);
     if (out.tool_calls.empty() && out.final_answer.empty()) {
         throw std::runtime_error("live openai stream+tools: no output");
     }
@@ -428,6 +484,7 @@ void run_live_openai_stream_tools() {
 }
 
 void run_live_anthropic_nonstream_text() {
+    live_print_case("Anthropic non-stream (Messages API)");
     const char* key = live_api_key();
     if (!key || !*key) {
         throw std::runtime_error("live anthropic needs DEEPSEEK_API_KEY");
@@ -439,12 +496,14 @@ void run_live_anthropic_nonstream_text() {
     rp.messages = {json{{"role", "user"},
                           {"content", "Reply with one word: capital of France."}}};
     LLMOutput out = ad.invoke_with_rendered(rp, nullptr).get();
+    live_print_output(out, nullptr);
     if (out.final_answer.empty() && out.tool_calls.empty()) {
         throw std::runtime_error("live anthropic: empty response");
     }
 }
 
 void run_live_anthropic_tool_roundtrip() {
+    live_print_case("Anthropic tool round-trip (turn 1)");
     const char* key = live_api_key();
     AnthropicAdapter ad(key, env_or("AGENT_ANTHROPIC_BASE_URL", "https://api.deepseek.com/anthropic"));
     ModelConfig cfg = live_model_config(env_or("DEEPSEEK_MODEL", "deepseek-chat"));
@@ -456,6 +515,7 @@ void run_live_anthropic_tool_roundtrip() {
                            "Use the add tool with a=7 and b=35 only. "
                            "Do not give the numeric answer before calling add."}}};
     LLMOutput first = ad.invoke_with_rendered(rp1, nullptr).get();
+    live_print_output(first, nullptr);
     if (first.tool_calls.empty()) {
         throw std::runtime_error("live anthropic tool: no tool_calls from model");
     }
@@ -467,6 +527,9 @@ void run_live_anthropic_tool_roundtrip() {
         throw std::runtime_error("live anthropic tool: expected add, got " + tc.name);
     }
     const int sum = add_args_sum(tc);
+    if (!live_output_quiet()) {
+        std::cout << "injected tool_result content (string): " << sum << '\n';
+    }
     json assistant_msg = assistant_message_from_openai_tool_calls(first);
     json tool_msg = tool_message_openai(*tc.tool_call_id, std::to_string(sum));
 
@@ -474,7 +537,9 @@ void run_live_anthropic_tool_roundtrip() {
     rp2.tools_json = tool_add_openai_array();
     rp2.messages = {rp1.messages[0], assistant_msg, tool_msg};
 
+    live_print_case("Anthropic tool round-trip (turn 2)");
     LLMOutput second = ad.invoke_with_rendered(rp2, nullptr).get();
+    live_print_output(second, nullptr);
     if (!second.is_final || second.final_answer.empty()) {
         throw std::runtime_error("live anthropic round 2: expected final answer");
     }
@@ -482,6 +547,7 @@ void run_live_anthropic_tool_roundtrip() {
 }
 
 void run_live_anthropic_stream() {
+    live_print_case("Anthropic stream (chat)");
     const char* key = live_api_key();
     AnthropicAdapter ad(key, env_or("AGENT_ANTHROPIC_BASE_URL", "https://api.deepseek.com/anthropic"));
     ModelConfig cfg = live_model_config(env_or("DEEPSEEK_MODEL", "deepseek-chat"));
@@ -491,12 +557,14 @@ void run_live_anthropic_stream() {
     rp.messages = {json{{"role", "user"}, {"content", "Say hi in 2 words."}}};
     std::string acc;
     LLMOutput out = ad.invoke_with_rendered(rp, [&](std::string_view s) { acc += s; }).get();
+    live_print_output(out, &acc);
     if (acc.empty() && out.final_answer.empty()) {
         throw std::runtime_error("live anthropic stream: empty");
     }
 }
 
 void run_live_anthropic_stream_tools() {
+    live_print_case("Anthropic stream + tools");
     const char* key = live_api_key();
     AnthropicAdapter ad(key, env_or("AGENT_ANTHROPIC_BASE_URL", "https://api.deepseek.com/anthropic"));
     ModelConfig cfg = live_model_config(env_or("DEEPSEEK_MODEL", "deepseek-chat"));
@@ -508,12 +576,14 @@ void run_live_anthropic_stream_tools() {
         {"role", "user"}, {"content", "Use add for a=1 b=1 via tool only."}}};
     std::string acc;
     LLMOutput out = ad.invoke_with_rendered(rp, [&](std::string_view s) { acc += s; }).get();
+    live_print_output(out, &acc);
     if (out.tool_calls.empty() && out.final_answer.empty() && acc.empty()) {
         throw std::runtime_error("live anthropic stream+tools: empty");
     }
 }
 
 void run_live_llm_client_invoke() {
+    live_print_case("LLMClient::invoke_with_rendered_prompt (OpenAI adapter)");
     const char* key = live_api_key();
     auto adapter = std::make_shared<OpenAIAdapter>(
         key, env_or("AGENT_OPENAI_BASE_URL", "https://api.deepseek.com/v1"));
@@ -524,6 +594,7 @@ void run_live_llm_client_invoke() {
     RenderedPrompt rp;
     rp.messages = {json{{"role", "user"}, {"content", "Reply OK if you read this."}}};
     LLMOutput out = client.invoke_with_rendered_prompt(rp, "openai", nullptr).get();
+    live_print_output(out, nullptr);
     if (out.final_answer.empty()) {
         throw std::runtime_error("live LLMClient: empty reply");
     }
@@ -547,8 +618,9 @@ int main() {
     try {
         if (live_api_key()) {
             std::cerr << "test_llm_client_wp1: live (DeepSeek/OpenAI + Anthropic endpoints)\n";
+            std::cerr << "(model output on stdout; set AGENT_TEST_QUIET=1 to suppress)\n";
             run_live_tests();
-            std::cerr << "test_llm_client_wp1: ok (live)\n";
+            std::cerr << "\ntest_llm_client_wp1: ok (live)\n";
             return 0;
         }
         if (env_truthy("AGENT_TEST_OFFLINE") && !fixtures_base_dir().empty()) {
