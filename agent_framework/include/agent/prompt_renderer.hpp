@@ -239,6 +239,8 @@ public:
  */
 class PromptRenderer {
 public:
+    /** 默认构造：使用最小模板与默认 formatter */
+    PromptRenderer();
     explicit PromptRenderer(std::shared_ptr<PromptTemplate> template_ptr);
     
     /**
@@ -275,6 +277,9 @@ public:
      * @param max_tokens 最大 token 数
      */
     void set_max_tokens(const std::string& model_name, int max_tokens);
+
+    /** 历史截断条数上限（仅针对 input.history，不含 system 与当前轮 user） */
+    void set_max_history_messages(int max_history_messages);
     
 private:
     std::shared_ptr<PromptTemplate> template_;
@@ -282,6 +287,7 @@ private:
     std::shared_ptr<HistoryFormatter> history_formatter_;
     std::map<std::string, int> max_tokens_map_;
     std::mutex formatters_mutex_;
+    int max_history_messages_ = 20;
     
     /**
      * @brief 获取工具格式化器（根据模型名称匹配）
