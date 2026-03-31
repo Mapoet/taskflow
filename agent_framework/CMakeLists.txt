@@ -171,8 +171,22 @@ endif()
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/toolbus/local_tool.cpp)
     list(APPEND AGENT_SOURCES src/toolbus/local_tool.cpp)
 endif()
-if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/toolbus/mcp_client.cpp)
-    list(APPEND AGENT_SOURCES src/toolbus/mcp_client.cpp)
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/toolbus/schema_validate.cpp)
+    list(APPEND AGENT_SOURCES src/toolbus/schema_validate.cpp)
+endif()
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/toolbus/mcptool.cpp)
+    list(APPEND AGENT_SOURCES src/toolbus/mcptool.cpp)
+endif()
+
+# MCP 客户端（WP1.3）
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/mcp_client/mcp_client.cpp)
+    list(APPEND AGENT_SOURCES src/mcp_client/mcp_client.cpp)
+endif()
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/mcp_client/stdio_transport.cpp)
+    list(APPEND AGENT_SOURCES src/mcp_client/stdio_transport.cpp)
+endif()
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/mcp_client/http_transport.cpp)
+    list(APPEND AGENT_SOURCES src/mcp_client/http_transport.cpp)
 endif()
 
 # Memory 模块
@@ -264,6 +278,8 @@ set(AGENT_HEADERS
     include/agent/types.hpp
     include/agent/llm_client.hpp
     include/agent/prompt_renderer.hpp
+    include/agent/schema_validate.hpp
+    include/agent/mcp_protocol.hpp
     include/agent/toolbus.hpp
     include/agent/mcp_client.hpp
     include/agent/memory.hpp
@@ -394,6 +410,43 @@ if(BUILD_TESTING)
         add_test(NAME llm_client_wp1 COMMAND test_llm_client_wp1)
         set_tests_properties(llm_client_wp1 PROPERTIES
             ENVIRONMENT "AGENT_TEST_FIXTURES=${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/llm")
+    endif()
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_toolbus_wp2.cpp)
+        add_executable(test_toolbus_wp2 tests/test_toolbus_wp2.cpp)
+        target_link_libraries(test_toolbus_wp2 PRIVATE agent_framework)
+        if(CMAKE_USE_PTHREADS_INIT)
+            target_link_libraries(test_toolbus_wp2 PRIVATE Threads::Threads)
+        endif()
+        add_test(NAME toolbus_wp2 COMMAND test_toolbus_wp2)
+        add_test(NAME toolbus_wp2_allowlist COMMAND test_toolbus_wp2 --allowlist)
+        # 避免继承外壳环境中的 AGENT_TOOL_ALLOWLIST，保证核心用例可注册任意工具名
+        set_tests_properties(toolbus_wp2 PROPERTIES ENVIRONMENT "AGENT_TOOL_ALLOWLIST=")
+        set_tests_properties(toolbus_wp2_allowlist PROPERTIES
+            ENVIRONMENT "AGENT_TOOL_ALLOWLIST=add")
+    endif()
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_mcp_wp3.cpp)
+        add_executable(test_mcp_wp3 tests/test_mcp_wp3.cpp)
+        target_link_libraries(test_mcp_wp3 PRIVATE agent_framework)
+        if(CMAKE_USE_PTHREADS_INIT)
+            target_link_libraries(test_mcp_wp3 PRIVATE Threads::Threads)
+        endif()
+        if(OpenSSL_FOUND)
+            target_link_libraries(test_mcp_wp3 PRIVATE OpenSSL::SSL OpenSSL::Crypto)
+        endif()
+        add_test(NAME mcp_wp3 COMMAND test_mcp_wp3)
+        set_tests_properties(mcp_wp3 PROPERTIES ENVIRONMENT "AGENT_TOOL_ALLOWLIST=")
+    endif()
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_cursor_mcp_import_wp3.cpp)
+        add_executable(test_cursor_mcp_import_wp3 tests/test_cursor_mcp_import_wp3.cpp)
+        target_link_libraries(test_cursor_mcp_import_wp3 PRIVATE agent_framework)
+        if(CMAKE_USE_PTHREADS_INIT)
+            target_link_libraries(test_cursor_mcp_import_wp3 PRIVATE Threads::Threads)
+        endif()
+        if(OpenSSL_FOUND)
+            target_link_libraries(test_cursor_mcp_import_wp3 PRIVATE OpenSSL::SSL OpenSSL::Crypto)
+        endif()
+        add_test(NAME cursor_mcp_import_wp3 COMMAND test_cursor_mcp_import_wp3)
+        set_tests_properties(cursor_mcp_import_wp3 PROPERTIES ENVIRONMENT "AGENT_TOOL_ALLOWLIST=")
     endif()
 endif()
 

@@ -1,0 +1,18 @@
+{
+  "mcpServers": {
+    "bad-http": {
+      "url": "http://127.0.0.1:1/mcp",
+      "headers": {
+        "Authorization": "Bearer TEST_TOKEN"
+      }
+    },
+    "bad-stdio": {
+      "command": "/bin/false",
+      "args": [],
+      "env": {
+        "CURSOR_MCP_TEST": "1"
+      }
+    }
+  }
+}
+

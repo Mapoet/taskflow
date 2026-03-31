@@ -13,15 +13,14 @@
 #include <vector>
 #include <map>
 #include <memory>
+#include <unordered_set>
 #include <functional>
 #include <future>
 #include <mutex>
 #include <optional>
+#include <utility>
 
-// 前向声明
-namespace agent_framework {
-    class MCPClient;
-}
+#include "mcp_client.hpp"
 
 namespace agent_framework {
 
@@ -103,6 +102,28 @@ private:
 };
 
 /**
+ * @brief 单个远端 MCP 工具在 ToolBus 中的代理（注册名 service__remote）
+ */
+class MCPProxyTool : public ToolInterface {
+public:
+    MCPProxyTool(std::shared_ptr<MCPClient> client, std::string registered_name, std::string remote_tool_name,
+                 ToolMeta meta);
+
+    std::future<json> call(const std::string& name, const json& arguments) override;
+    ToolMeta get_tool_meta(const std::string& name) const override;
+    std::vector<std::string> list_tools() const override;
+    bool validate_arguments(const std::string& name, const json& arguments) const override;
+    std::optional<ToolInfo> get_tool_info(const std::string& name) const override;
+
+private:
+    std::shared_ptr<MCPClient> client_;
+    std::string registered_name_;
+    std::string remote_tool_name_;
+    ToolMeta meta_;
+    ToolInfo info_;
+};
+
+/**
  * @brief MCP 工具实现（通过 MCPClient 调用）
  */
 class MCPTool : public ToolInterface {
@@ -122,7 +143,7 @@ public:
 private:
     std::shared_ptr<MCPClient> client_;
     std::vector<ToolMeta> cached_tools_;
-    std::mutex cache_mutex_;
+    mutable std::mutex cache_mutex_;
     
     /**
      * @brief 刷新工具列表缓存
@@ -233,10 +254,34 @@ public:
      * @return 工具名称列表
      */
     std::vector<std::string> list_all_tools() const;
+
+    struct CursorMcpImportFailure {
+        std::string service_name;
+        std::string reason;
+    };
+
+    struct CursorMcpImportResult {
+        std::vector<std::string> registered_services;
+        std::vector<CursorMcpImportFailure> failures;
+    };
+
+    /**
+     * @brief 从 Cursor MCP 配置（mcp.json）批量注册 MCP server
+     *
+     * - 自动识别 server 类型：含 url → HTTP；含 command → stdio
+     * - stdio 环境变量策略：继承当前进程环境并叠加 mcp.json 的 env（覆盖同名键）
+     *
+     * @param config_path 配置文件路径；空表示优先读 env AGENT_MCP_CONFIG_PATH，否则默认 ~/.cursor/mcp.json
+     * @param register_all true 表示注册 mcpServers 下所有 server；false 预留（仅一个 server）扩展
+     * @return 注册结果（best-effort：失败不会阻断其他 server）
+     */
+    CursorMcpImportResult register_mcp_from_cursor_config(const std::string& config_path = "",
+                                                         bool register_all = true);
     
 private:
     std::map<std::string, std::shared_ptr<ToolInterface>> tools_;
-    std::mutex tools_mutex_;
+    mutable std::mutex tools_mutex_;
+    std::unordered_set<std::string> mcp_services_;
     
     /**
      * @brief 根据工具名称查找工具接口
