@@ -21,7 +21,9 @@ NodeFactory::create_llm_node(
     const std::vector<std::pair<std::string, std::string>>& input_specs,
     std::function<void(std::string_view)> stream_callback
 ) {
-    return LLMNode::create(builder, name, llm_client, input_specs, stream_callback);
+    // Default factory path: use LLMClient internal renderer; for WP1.5, prefer passing renderer explicitly.
+    return LLMNode::create(builder, name, llm_client, std::make_shared<PromptRenderer>(),
+                           llm_client->get_model_name(), "", input_specs, stream_callback);
 }
 
 std::pair<std::shared_ptr<workflow::AnySource>, tf::Task>

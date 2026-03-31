@@ -7,8 +7,13 @@
 #include "node/llm_node.hpp"
 #include "node/tool_call_node.hpp"
 #include "node/knowledge_base_node.hpp"
+#include "agent/internal/agent_thread_state.hpp"
+#include "agent/internal/loop_io_keys.hpp"
 #include <any>
 #include <unordered_map>
+#include <chrono>
+#include <ctime>
+#include <sstream>
 
 namespace agent_framework {
 namespace node {
@@ -25,54 +30,94 @@ AgentLoopNode::create(
     const std::vector<std::pair<std::string, std::string>>& input_specs,
     const std::vector<std::string>& output_keys
 ) {
-    // 构建循环体函数
-    auto body_builder_fn = [agent_config, llm_client, toolbus, memory_store, vector_store](
-        workflow::GraphBuilder& body_builder,
-        const std::unordered_map<std::string, std::any>& inputs
-    ) {
-        build_loop_body(
-            body_builder,
-            agent_config,
-            llm_client,
-            toolbus,
-            memory_store,
-            vector_store,
-            inputs
-        );
+    // NOTE: workflow::create_loop_decl currently does NOT pass body outputs into condition_func.
+    // Therefore WP1.5 loop uses closure state:
+    // - body_func updates shared state
+    // - condition_func reads shared state (ignores its argument)
+    // - exit_func emits final outputs once (avoid promise re-set)
+
+    struct Shared {
+        std::shared_ptr<internal::AgentThreadState> state;
+        LLMOutput last_llm;
+        std::string final_answer;
+        bool is_final = false;
     };
-    
-    // 循环条件判断函数（注意：workflow 的 condition_func 只接收 inputs，不接收 iteration_count）
-    // 我们需要通过其他方式跟踪迭代次数，或者从 outputs 中推断
-    auto condition_func = [agent_config](
-        const std::unordered_map<std::string, std::any>& outputs
-    ) -> int {
-        // 简化实现：从 outputs 中检查 is_final，或使用固定的最大迭代次数
-        // 实际实现中可能需要使用共享状态来跟踪迭代次数
-        if (outputs.find("is_final") != outputs.end()) {
-            bool is_final = std::any_cast<bool>(outputs.at("is_final"));
-            if (is_final) {
-                return 1;  // 退出循环
-            }
+    auto shared = std::make_shared<Shared>();
+
+    auto body_func = [agent_config, llm_client, toolbus, shared](
+                         const std::unordered_map<std::string, std::any>& inps)
+        -> std::unordered_map<std::string, std::any> {
+        auto st = std::any_cast<std::shared_ptr<internal::AgentThreadState>>(
+            inps.at(std::string(internal::kAgentState)));
+        if (!shared->state) {
+            shared->state = st ? std::make_shared<internal::AgentThreadState>(*st)
+                               : std::make_shared<internal::AgentThreadState>();
         }
-        // TODO: 添加迭代次数跟踪
-        return 0;  // 继续循环
+
+        LLMInput llm_in;
+        llm_in.system_prompt =
+            std::any_cast<std::string>(inps.at(std::string(internal::kSystemPrompt)));
+        llm_in.user_prompt =
+            std::any_cast<std::string>(inps.at(std::string(internal::kUserQuery)));
+        llm_in.history = shared->state->history;
+        if (toolbus) {
+            llm_in.tools = toolbus->export_as_llm_tools();
+        }
+
+        // invoke (LLMClient will render using its configured PromptRenderer)
+        LLMOutput llm_out = llm_client->invoke(llm_in, "", nullptr).get();
+        shared->last_llm = llm_out;
+
+        // assistant message
+        Message a;
+        a.role = "assistant";
+        a.timestamp = std::time(nullptr);
+        a.content = !llm_out.final_answer.empty() ? llm_out.final_answer : llm_out.reasoning;
+        shared->state->history.push_back(std::move(a));
+
+        // tools (sequential)
+        std::vector<CallSpec> calls = llm_out.tool_calls;
+        if (static_cast<int>(calls.size()) > agent_config.max_tool_calls_per_iteration) {
+            calls.resize(static_cast<std::size_t>(agent_config.max_tool_calls_per_iteration));
+        }
+        for (const auto& c : calls) {
+            json result = toolbus->call_tool(c.name, c.arguments).get();
+            Message tm;
+            tm.role = "tool";
+            tm.tool_name = c.name;
+            tm.tool_result = result;
+            tm.timestamp = std::time(nullptr);
+            shared->state->history.push_back(std::move(tm));
+        }
+
+        shared->state->iteration += 1;
+        shared->is_final = llm_out.tool_calls.empty() && (llm_out.is_final || !llm_out.final_answer.empty());
+        shared->final_answer = llm_out.final_answer;
+
+        return {};
     };
-    
-    // 退出处理函数
-    auto exit_builder_fn = [](workflow::GraphBuilder& exit_builder,
-                              const std::unordered_map<std::string, std::any>& inputs) {
-        build_exit_handler(exit_builder, inputs);
+
+    auto condition_func = [agent_config, shared](const std::unordered_map<std::string, std::any>&) -> int {
+        const int it = shared->state ? shared->state->iteration : 0;
+        if (it >= agent_config.max_iterations) {
+            return 1;
+        }
+        if (shared->is_final) {
+            return 1;
+        }
+        return 0;
     };
-    
-    // 创建循环节点
-    return builder.create_loop_decl(
-        name,
-        input_specs,
-        body_builder_fn,
-        condition_func,
-        exit_builder_fn,
-        output_keys
-    );
+
+    auto exit_func = [shared](const std::unordered_map<std::string, std::any>&) -> std::unordered_map<std::string, std::any> {
+        return {
+            {std::string(internal::kFinalAnswer), std::any{shared->final_answer}},
+            {std::string(internal::kNextAgentState), std::any{shared->state}},
+            {std::string(internal::kLlmOutput), std::any{shared->last_llm}},
+            {std::string(internal::kIsFinal), std::any{shared->is_final}}
+        };
+    };
+
+    return builder.create_loop_decl(name, input_specs, body_func, condition_func, exit_func, output_keys);
 }
 
 void AgentLoopNode::build_loop_body(
@@ -84,68 +129,130 @@ void AgentLoopNode::build_loop_body(
     std::shared_ptr<VectorStore> vector_store,
     const std::unordered_map<std::string, std::any>& inputs
 ) {
-    // 1. 创建知识库查询节点（如果需要）
-    std::string query = std::any_cast<std::string>(inputs.at("query"));
-    
-    std::shared_ptr<workflow::AnySource> kb_source;
-    tf::Task kb_task;
-    
-    if (vector_store && agent_config.enable_knowledge_base) {
-        // 这里需要 encoder_manager，但为了简化，假设已提供
-        // 实际实现中应该从外部传入或使用全局管理器
-        // auto [kb_node, kb_task] = KnowledgeBaseSourceNode::create(...);
-    }
-    
-    // 2. 创建 LLM 节点
-    std::vector<std::pair<std::string, std::string>> llm_input_specs = {
-        {"SystemPrompt", "prompt"}
-    };
-    
-    if (inputs.find("query") != inputs.end()) {
-        llm_input_specs.push_back({"UserInput", "query"});
-    }
-    
+    // expose loop inputs as a source node
+    auto [loop_in, loop_task] = builder.create_any_source("LoopInput", inputs);
+    (void)loop_task;
+
+    // LLM node: render + invoke_with_rendered_prompt
+    const std::string model_name = agent_config.model_config.model_name;
+    const std::string provider = "";  // default provider
     auto [llm_node, llm_task] = LLMNode::create(
         builder,
         "LLM",
         llm_client,
-        llm_input_specs,
-        nullptr  // 流式回调
-    );
-    
-    // 3. 创建工具调用节点（如果 LLM 输出工具调用）
-    auto [tool_node, tool_task] = ToolCallNode::create_parallel(
-        builder,
-        "ToolCall",
-        toolbus,
-        {{"LLM", "tool_calls"}}
-    );
-    
-    // 4. 创建聚合节点（合并工具调用结果和 LLM 输出）
-    auto aggregate_functor = [](
-        const std::unordered_map<std::string, std::any>& inputs
-    ) -> std::unordered_map<std::string, std::any> {
-        // 聚合工具调用结果和 LLM 输出
-        bool is_final = std::any_cast<bool>(inputs.at("is_final"));
-        std::string final_answer = std::any_cast<std::string>(inputs.at("final_answer"));
-        
+        std::make_shared<PromptRenderer>(),
+        model_name,
+        provider,
+        {{"LoopInput", std::string(internal::kSystemPrompt)},
+         {"LoopInput", std::string(internal::kUserQuery)},
+         {"LoopInput", std::string(internal::kAgentState)}},
+        nullptr);
+    (void)llm_task;
+
+    // ToolAggregator: sequential tool execution
+    auto tool_agg = [toolbus, agent_config](
+                        const std::unordered_map<std::string, std::any>& inps)
+        -> std::unordered_map<std::string, std::any> {
+        const LLMOutput llm_out = std::any_cast<LLMOutput>(inps.at(std::string(internal::kLlmOutput)));
+        std::vector<Message> tool_msgs;
+        bool had_error = false;
+
+        std::vector<CallSpec> calls = llm_out.tool_calls;
+        if (static_cast<int>(calls.size()) > agent_config.max_tool_calls_per_iteration) {
+            calls.resize(static_cast<std::size_t>(agent_config.max_tool_calls_per_iteration));
+        }
+
+        for (const auto& c : calls) {
+            json result = toolbus->call_tool(c.name, c.arguments).get();
+            Message m;
+            m.role = "tool";
+            m.content = "";
+            m.tool_name = c.name;
+            m.tool_result = result;
+            m.timestamp = std::time(nullptr);
+            tool_msgs.push_back(std::move(m));
+
+            if (result.is_object() && result.contains("code") && result["code"].is_string()) {
+                had_error = true;
+            }
+        }
+
         return {
-            {"is_final", std::any{is_final}},
-            {"final_answer", std::any{final_answer}},
-            {"tool_results", inputs.at("results")}
+            {std::string(internal::kToolMessages), std::any{tool_msgs}},
+            {std::string(internal::kToolHadError), std::any{had_error}}
         };
     };
-    
+
+    auto [tool_node, tool_task] = builder.create_any_node(
+        "ToolAggregator",
+        {{"LLM", std::string(internal::kLlmOutput)}},
+        tool_agg,
+        {std::string(internal::kToolMessages), std::string(internal::kToolHadError)});
+    (void)tool_task;
+
+    // StateMerge: update history + iteration
+    auto state_merge = [](
+                          const std::unordered_map<std::string, std::any>& inps)
+        -> std::unordered_map<std::string, std::any> {
+        auto st = std::any_cast<std::shared_ptr<internal::AgentThreadState>>(
+            inps.at(std::string(internal::kAgentState)));
+        const LLMOutput llm_out = std::any_cast<LLMOutput>(inps.at(std::string(internal::kLlmOutput)));
+        const std::vector<Message> tool_msgs =
+            std::any_cast<std::vector<Message>>(inps.at(std::string(internal::kToolMessages)));
+
+        auto next = std::make_shared<internal::AgentThreadState>();
+        if (st) {
+            *next = *st;
+        }
+        // append assistant message
+        Message a;
+        a.role = "assistant";
+        a.timestamp = std::time(nullptr);
+        if (!llm_out.tool_calls.empty()) {
+            json j;
+            j["tool_calls"] = json::array();
+            for (const auto& c : llm_out.tool_calls) {
+                json one;
+                one["type"] = "function";
+                one["function"] = json{{"name", c.name}, {"arguments", c.arguments.dump()}};
+                if (c.tool_call_id) {
+                    one["id"] = *c.tool_call_id;
+                }
+                j["tool_calls"].push_back(std::move(one));
+            }
+            a.content = j.dump();
+        } else if (!llm_out.final_answer.empty()) {
+            a.content = llm_out.final_answer;
+        } else {
+            a.content = llm_out.reasoning;
+        }
+        next->history.push_back(std::move(a));
+        for (const auto& tm : tool_msgs) {
+            next->history.push_back(tm);
+        }
+        next->iteration += 1;
+
+        const bool is_final = llm_out.tool_calls.empty() && (llm_out.is_final || !llm_out.final_answer.empty());
+        const std::string final_answer = llm_out.final_answer;
+
+        return {
+            {std::string(internal::kNextAgentState), std::any{next}},
+            {std::string(internal::kIsFinal), std::any{is_final}},
+            {std::string(internal::kFinalAnswer), std::any{final_answer}},
+            {std::string(internal::kLlmOutput), std::any{llm_out}}
+        };
+    };
+
     builder.create_any_node(
-        "Aggregate",
-        {
-            {"LLM", "is_final"},
-            {"LLM", "final_answer"},
-            {"ToolCall", "results"}
-        },
-        aggregate_functor,
-        {"is_final", "final_answer", "tool_results"}
-    );
+        "StateMerge",
+        {{"LoopInput", std::string(internal::kAgentState)},
+         {"LLM", std::string(internal::kLlmOutput)},
+         {"ToolAggregator", std::string(internal::kToolMessages)}},
+        state_merge,
+        {std::string(internal::kNextAgentState),
+         std::string(internal::kIsFinal),
+         std::string(internal::kFinalAnswer),
+         std::string(internal::kLlmOutput)});
 }
 
 int AgentLoopNode::check_loop_condition(
@@ -175,9 +282,8 @@ void AgentLoopNode::build_exit_handler(
     workflow::GraphBuilder& builder,
     const std::unordered_map<std::string, std::any>& inputs
 ) {
-    // 退出处理：保存最终结果、清理资源等
-    // 可以在这里添加记忆存储、日志记录等逻辑
-    // TODO: 实现退出处理逻辑
+    (void)builder;
+    (void)inputs;
 }
 
 } // namespace node

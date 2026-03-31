@@ -4,6 +4,8 @@
  */
 
 #include "node/llm_node.hpp"
+#include "agent/internal/agent_thread_state.hpp"
+#include "agent/internal/loop_io_keys.hpp"
 #include <any>
 #include <unordered_map>
 
@@ -15,31 +17,32 @@ LLMNode::create(
     workflow::GraphBuilder& builder,
     const std::string& name,
     std::shared_ptr<LLMClient> llm_client,
+    std::shared_ptr<PromptRenderer> prompt_renderer,
+    const std::string& model_name,
+    const std::string& provider,
     const std::vector<std::pair<std::string, std::string>>& input_specs,
     std::function<void(std::string_view)> stream_callback
 ) {
     // 创建 LLM 节点的 functor
-    auto llm_functor = [llm_client, stream_callback](
+    auto llm_functor = [llm_client, prompt_renderer, model_name, provider, stream_callback](
         const std::unordered_map<std::string, std::any>& inputs
     ) -> std::unordered_map<std::string, std::any> {
         // 1. 提取 LLMInput
         LLMInput llm_input = extract_llm_input(inputs);
-        
-        // 2. 调用 LLM（异步，但这里同步等待结果）
-        std::future<LLMOutput> future = llm_client->invoke(
-            llm_input,
-            "",  // 使用默认 provider
-            stream_callback
-        );
+
+        // 2. 渲染提示词（两阶段渲染在 PromptRenderer 内）
+        if (!prompt_renderer) {
+            throw std::runtime_error("LLMNode: prompt_renderer is null");
+        }
+        RenderedPrompt rendered = prompt_renderer->render(llm_input, model_name);
+
+        // 3. 调用 LLM（使用已渲染提示词）
+        std::future<LLMOutput> future =
+            llm_client->invoke_with_rendered_prompt(rendered, provider, stream_callback);
         LLMOutput output = future.get();
-        
-        // 3. 返回输出
+
         return std::unordered_map<std::string, std::any>{
-            {"tool_calls", std::any{output.tool_calls}},
-            {"reasoning", std::any{output.reasoning}},
-            {"is_final", std::any{output.is_final}},
-            {"final_answer", std::any{output.final_answer}},
-            {"audio_out", std::any{output.audio_out.value_or("")}}
+            {std::string(internal::kLlmOutput), std::any{output}}
         };
     };
     
@@ -48,7 +51,7 @@ LLMNode::create(
         name,
         input_specs,
         llm_functor,
-        {"tool_calls", "reasoning", "is_final", "final_answer", "audio_out"}
+        {std::string(internal::kLlmOutput)}
     );
 }
 
@@ -81,6 +84,16 @@ LLMInput LLMNode::extract_llm_input(
     if (inputs.find("history") != inputs.end()) {
         llm_input.history = std::any_cast<std::vector<Message>>(inputs.at("history"));
     }
+    if (inputs.find(std::string(internal::kAgentState)) != inputs.end()) {
+        auto st = std::any_cast<std::shared_ptr<internal::AgentThreadState>>(
+            inputs.at(std::string(internal::kAgentState)));
+        if (st) {
+            llm_input.history = st->history;
+            if (!st->initial_user_prompt.empty()) {
+                llm_input.user_prompt = st->initial_user_prompt;
+            }
+        }
+    }
     
     // 提取图像数据
     if (inputs.find("image_data") != inputs.end()) {
@@ -90,6 +103,11 @@ LLMInput LLMNode::extract_llm_input(
     // 提取音频数据
     if (inputs.find("audio_data") != inputs.end()) {
         llm_input.audio_data = std::any_cast<std::string>(inputs.at("audio_data"));
+    }
+
+    if (inputs.find("extra_variables") != inputs.end()) {
+        llm_input.extra_variables =
+            std::any_cast<std::map<std::string, std::string>>(inputs.at("extra_variables"));
     }
     
     return llm_input;

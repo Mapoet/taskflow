@@ -45,6 +45,9 @@ public:
         workflow::GraphBuilder& builder,
         const std::string& name,
         std::shared_ptr<LLMClient> llm_client,
+        std::shared_ptr<PromptRenderer> prompt_renderer,
+        const std::string& model_name,
+        const std::string& provider,
         const std::vector<std::pair<std::string, std::string>>& input_specs,
         std::function<void(std::string_view)> stream_callback = nullptr
     );

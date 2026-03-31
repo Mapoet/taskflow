@@ -98,7 +98,13 @@ std::string build_missing_vars_system_notice(const std::vector<std::string>& mis
 
 PromptRenderer::PromptRenderer()
     : template_(std::make_shared<StringPromptTemplate>(
-          "{{system_prompt}}\n\n{{tools_text}}\n\n{{context}}\n\n{{user_prompt}}")) {}
+          "{{system_prompt}}\n\n{{tools_text}}\n\n{{context}}\n\n{{user_prompt}}")) {
+    // Default formatters to avoid noisy fallback logs for common models.
+    // Matching is prefix-wildcard (e.g. "gpt-*").
+    register_tool_formatter("gpt-*", std::make_shared<OpenAIToolFormatter>());
+    register_tool_formatter("openai-*", std::make_shared<OpenAIToolFormatter>());
+    register_tool_formatter("claude-*", std::make_shared<AnthropicToolFormatter>());
+}
 
 PromptRenderer::PromptRenderer(std::shared_ptr<PromptTemplate> template_ptr)
     : template_(std::move(template_ptr)) {
