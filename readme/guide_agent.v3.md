@@ -232,6 +232,20 @@ graph TB
 
 这一层次化结构使得每个模块可以独立开发和测试，并通过 `workflow` 的自动依赖推断机制连接。所有节点通过字符串键（key-based I/O）进行数据传递，依赖关系由 `input_specs` 自动建立。
 
+### 3.1.1 Skills、Harness 与 ToolBus / MCP 的边界
+
+**Skills**（技能）在本框架中指 **人可读、可版本化的操作说明与约束**：通常以单文件 **`SKILL.md`**（YAML Frontmatter + Markdown 正文）存放；**Harness** 指负责 **L1 元数据索引 → L2 按需注入完整指令 → L3 按需拉取脚本/参考文档或经 Tool 执行** 的运行时策略，目标是在不膨胀固定上下文的前提下扩展「可被发现」的能力面。详见仓库内 [`agent_framework/docs/guides/skills.md`](../agent_framework/docs/guides/skills.md)。
+
+与现有层次的关系可概括为：
+
+- **ToolBus / MCP**：**执行** 具名工具（HTTP、stdio、本地函数等），对 LLM 暴露的是 **函数签名级** `ToolMeta`；单次调用 **成本**主要在延迟与安全边界（配额、sandbox），而非指令篇幅。
+- **Skills**：为模型提供 **何时、如何用** 某类工具的 **程序性知识**（SOP、检查清单、失败恢复）；**不替代** Tool 注册表，而是通过 **渐进式披露** 把长文在「匹配到任务意图之后」再塞进上下文。
+- **工作流节点**：`create_loop_decl` 构成的 **Agent 循环** 与可选 **路由/条件节点**，适合在「每轮迭代」触发技能路由（例如根据意图或上一轮 observation 决定加载哪一个 `SKILL.md`）；**长会话 / 多轮编码** 可与进度文件、Memory 节点结合，使 L1 索引与任务状态持久对齐（概念上类似「初始化 Agent + 编码 Agent」分工，见 `skills.md`）。
+
+**与阶段 3（RAG）的衔接**：大量 `SKILL.md` 时，除关键词路由外，可对 **Frontmatter 中的 `description` / `trigger_keywords`（及必要时正文摘要）** 做向量索引，与 **KnowledgeBase** 共用 `VectorStore` 抽象，做到语义召回后再 L2 加载全文，避免「巨型 AGENTS 说明书」进窗。
+
+当前 C++ 代码库中 **Skill Registry / Loader 为规划项**，落地顺序与验收标准见 [`agent_framework/docs/guides/plan-detailed.md`](../agent_framework/docs/guides/plan-detailed.md) 中的 Skills 工作包。
+
 ### 3.2 数据流与控制流设计
 
 基于 Taskflow `workflow` 的数据流控制流程如下：

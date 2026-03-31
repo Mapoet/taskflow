@@ -5,7 +5,7 @@
 Agent Framework 采用分层架构设计：
 
 1. **应用接口层**：CLI、ImGui、Web 客户端
-2. **业务模块层**：LLM Client、ToolBus、A2A Client/Server、Memory、VectorStore、Encoder
+2. **业务模块层**：LLM Client、ToolBus、A2A Client/Server、Memory、VectorStore、Encoder；**Skills/Harness**（Skill Registry、按需 Loader、与 Prompt 拼装协作）按规划增量并入本层
 3. **核心引擎层**：GraphExecutor、Workflow 库、Taskflow 核心
 4. **基础设施层**：向量数据库、事件日志、HTTP 服务器、MCP 服务、A2A 协议
 
@@ -26,8 +26,24 @@ Agent Framework 采用分层架构设计：
 - 实时流式输出
 - MCP 工具集成
 - A2A（Agent2Agent）协议支持
+- **Skills & Harness（规划）**：`SKILL.md` 渐进式披露（L1 元数据 / L2 全文指令 / L3 资源与脚本），与 ToolBus 分工（**说明知识** vs **可调用工具**）
 
-详细架构设计请参考：`../../readme/guide_agent.md`
+详细架构设计请参考：`../../readme/guide_agent.md`；Skills 概念与 SkillHarness 模块拆解见 [`../guides/skills.md`](../guides/skills.md)。
+
+## Skills 与 Harness（概念映射）
+
+以下将 [`guides/skills.md`](../guides/skills.md) 中的 **SkillHarness** 逻辑构件，映射到本仓库 **计划中的** C++ 模块职责（尚未全部有独立源码目录时，由 GraphExecutor / Prompt / Tool 层协同演进）。
+
+| SkillHarness 概念 | 本框架中的落点（计划 / 现有） | 说明 |
+|-------------------|-------------------------------|------|
+| Skill Registry（L1 元数据索引） | 新模块或 `graph_executor` 子组件；扫描 `*SKILL.md` Frontmatter | 启动或刷新时 **只加载元数据**，控制初始 token |
+| Skill Router | LLM 意图、关键词检索或 **阶段 3 向量召回** | 与 Agent 循环、条件节点配合 |
+| Skill Loader（L2/L3） | 与 `PromptRenderer` / 上下文管理衔接；L3 经 **ToolBus** 执行脚本 | L3 尽量 **子进程/沙箱**，结果摘要回注 LLM |
+| Execution Engine / Executors | **现有** `ToolBus` + MCP / 本地工具 | 确定性步骤优先走工具而非长上下文 |
+| Observability Hub | Memory、日志、（可选）遥测与会话事件 | 支撑技能加载与工具失败的审计 |
+| Feedback Loop / Optimizer | CI、外部流程或后续专用节点 | 不阻塞最小闭环 |
+
+**与 A2A Agent Card 的关系**：Agent Card 描述的是 **对外可发现的 Agent 能力与端点**；**单个技能的细粒度能力表** 仍建议由 **L1 技能索引**（或 Card 的扩展字段，若规范允许）承载，二者不应混写为「把所有 SKILL 正文写进 Card」——避免重复与超长 discovery 响应。对齐策略随 **Google A2A** 规范版本在 `plan-detailed.md` 与 **spec tracker** 中更新。
 
 ## A2A HTTP 绑定（当前实现）
 
