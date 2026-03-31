@@ -155,6 +155,60 @@ void test_image_injected_as_content_parts() {
     assert(user.at("content").size() >= 2U);
 }
 
+void test_complete_render_user_template_vars() {
+    PromptRenderer r;
+    r.register_tool_formatter("gpt-*", std::make_shared<OpenAIToolFormatter>());
+    LLMInput in;
+    in.system_prompt = "Hi {{name}}";
+    in.user_prompt = "q";
+    in.extra_variables["name"] = "Mapoet";
+    RenderedPrompt out = r.render(in, "gpt-4o");
+    print_input_output("complete_render_user_template_vars", in, out);
+    const std::string sys = out.messages[0].at("content").get<std::string>();
+    assert(sys.find("Hi Mapoet") != std::string::npos);
+}
+
+void test_missing_vars_adds_extra_system_message() {
+    PromptRenderer r;
+    r.register_tool_formatter("gpt-*", std::make_shared<OpenAIToolFormatter>());
+    LLMInput in;
+    in.system_prompt = "sys";
+    in.user_prompt = "Ask {{topic}}";
+    RenderedPrompt out = r.render(in, "gpt-4o");
+    print_input_output("missing_vars_adds_extra_system_message", in, out);
+    // Expect: system (main) + system (missing-vars notice) + user
+    assert(out.messages.size() >= 3U);
+    assert(out.messages[0].at("role") == "system");
+    assert(out.messages[1].at("role") == "system");
+    const std::string notice = out.messages[1].at("content").get<std::string>();
+    assert(notice.find("Missing") != std::string::npos);
+    assert(notice.find("{{topic}}") != std::string::npos);
+}
+
+void test_two_phase_order_user_vars_before_context_injection() {
+    PromptRenderer r;
+    r.register_tool_formatter("gpt-*", std::make_shared<OpenAIToolFormatter>());
+    LLMInput in;
+    in.system_prompt = "SYS {{name}}";
+    in.user_prompt = "USER {{name}}";
+    in.context = "CTX";
+    in.extra_variables["name"] = "Alice";
+    RenderedPrompt out = r.render(in, "gpt-4o");
+    print_input_output("two_phase_order_user_vars_before_context_injection", in, out);
+    const std::string sys = out.messages[0].at("content").get<std::string>();
+    // user-var must be rendered, and context injected afterward into system block
+    assert(sys.find("SYS Alice") != std::string::npos);
+    assert(sys.find("Retrieved context") != std::string::npos);
+    assert(sys.find("CTX") != std::string::npos);
+    assert(sys.find("{{name}}") == std::string::npos);
+    const json& user = out.messages.back();
+    if (user.at("content").is_string()) {
+        const std::string u = user.at("content").get<std::string>();
+        assert(u.find("USER Alice") != std::string::npos);
+        assert(u.find("{{name}}") == std::string::npos);
+    }
+}
+
 } // namespace
 
 int main() {
@@ -163,6 +217,9 @@ int main() {
     test_tools_json_shape_openai_vs_anthropic();
     test_history_truncate_avoids_orphan_tool();
     test_image_injected_as_content_parts();
+    test_complete_render_user_template_vars();
+    test_missing_vars_adds_extra_system_message();
+    test_two_phase_order_user_vars_before_context_injection();
     return 0;
 }
 

@@ -2,7 +2,12 @@
  * @file prompt_template.cpp
  * @brief 提示词模板实现
  */
+#include <algorithm>
 #include <fstream>
+#include <regex>
+#include <set>
+#include <sstream>
+#include <string_view>
 #include "agent/prompt_renderer.hpp"
 
 namespace agent_framework {
@@ -16,6 +21,48 @@ void trim(std::string& s) {
     while (!s.empty() && std::isspace(static_cast<unsigned char>(s.back()))) {
         s.pop_back();
     }
+}
+
+std::vector<std::string> scan_template_vars(std::string_view text) {
+    static const std::regex k_var_pattern(R"(\{\{([^}]+)\}\})");
+    std::vector<std::string> out;
+    std::string s(text);
+    auto begin = std::sregex_iterator(s.begin(), s.end(), k_var_pattern);
+    auto end = std::sregex_iterator();
+    for (auto it = begin; it != end; ++it) {
+        std::string name = (*it)[1].str();
+        trim(name);
+        if (!name.empty()) {
+            out.push_back(std::move(name));
+        }
+    }
+    std::sort(out.begin(), out.end());
+    out.erase(std::unique(out.begin(), out.end()), out.end());
+    return out;
+}
+
+std::string render_user_template(std::string text,
+                                 const std::map<std::string, std::string>& user_vars,
+                                 std::vector<std::string>& missing_vars_out) {
+    missing_vars_out.clear();
+    const std::vector<std::string> vars = scan_template_vars(text);
+    missing_vars_out.reserve(vars.size());
+
+    for (const auto& k : vars) {
+        auto it = user_vars.find(k);
+        if (it == user_vars.end()) {
+            missing_vars_out.push_back(k);
+            continue;
+        }
+        const std::string ph = "{{" + k + "}}";
+        std::size_t pos = 0;
+        while ((pos = text.find(ph, pos)) != std::string::npos) {
+            text.replace(pos, ph.size(), it->second);
+            pos += it->second.size();
+        }
+        // also support "{{ k }}" with spaces inside braces by brute normalization is not done in v1
+    }
+    return text;
 }
 
 } // namespace

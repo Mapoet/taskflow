@@ -106,6 +106,7 @@ struct LLMInput {
     std::string system_prompt;     // 系统提示词（角色定义、行为规范）
     std::string user_prompt;       // 用户提示词（当前问题或指令）
     std::string context;           // 从知识库检索的内容摘要（多模态 RAG 结果）
+    std::map<std::string, std::string> extra_variables;  // 用户自定义模板变量（{{var}}）
     std::vector<ToolMeta> tools;   // 可用工具列表（ToolBus 导出）
     std::vector<Message> history;   // 对话历史（可选，用于多轮对话）
     std::optional<std::string> image_data;  // 图像 base64 编码（可选）

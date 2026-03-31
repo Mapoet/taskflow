@@ -8,8 +8,10 @@
 #include <cctype>
 #include <iostream>
 #include <memory>
+#include <regex>
 #include <sstream>
 #include <stdexcept>
+#include <string_view>
 
 namespace agent_framework {
 
@@ -29,6 +31,65 @@ bool wildcard_match(const std::string& pattern, const std::string& model) {
                model.compare(model.size() - suf.size(), suf.size(), suf) == 0;
     }
     return pattern == model;
+}
+
+std::vector<std::string> scan_template_vars(std::string_view text) {
+    static const std::regex k_var_pattern(R"(\{\{([^}]+)\}\})");
+    std::vector<std::string> out;
+    std::string s(text);
+    auto begin = std::sregex_iterator(s.begin(), s.end(), k_var_pattern);
+    auto end = std::sregex_iterator();
+    for (auto it = begin; it != end; ++it) {
+        std::string name = (*it)[1].str();
+        while (!name.empty() && std::isspace(static_cast<unsigned char>(name.front()))) {
+            name.erase(name.begin());
+        }
+        while (!name.empty() && std::isspace(static_cast<unsigned char>(name.back()))) {
+            name.pop_back();
+        }
+        if (!name.empty()) {
+            out.push_back(std::move(name));
+        }
+    }
+    std::sort(out.begin(), out.end());
+    out.erase(std::unique(out.begin(), out.end()), out.end());
+    return out;
+}
+
+std::string render_user_template(std::string text,
+                                 const std::map<std::string, std::string>& user_vars,
+                                 std::vector<std::string>& missing_vars_out) {
+    missing_vars_out.clear();
+    const std::vector<std::string> vars = scan_template_vars(text);
+    missing_vars_out.reserve(vars.size());
+    for (const auto& k : vars) {
+        auto it = user_vars.find(k);
+        if (it == user_vars.end()) {
+            missing_vars_out.push_back(k);
+            continue;
+        }
+        const std::string ph = "{{" + k + "}}";
+        std::size_t pos = 0;
+        while ((pos = text.find(ph, pos)) != std::string::npos) {
+            text.replace(pos, ph.size(), it->second);
+            pos += it->second.size();
+        }
+    }
+    return text;
+}
+
+std::string build_missing_vars_system_notice(const std::vector<std::string>& missing_vars) {
+    std::ostringstream o;
+    o << "Template variables are missing and were not fully rendered.\n";
+    o << "Missing:\n";
+    for (const auto& v : missing_vars) {
+        o << "- {{" << v << "}}\n";
+    }
+    o << "\nInstruction:\n";
+    o << "You MUST decide how to proceed. If these variables are required to answer accurately,\n";
+    o << "ask the user concise clarification questions to obtain them. Otherwise, proceed with\n";
+    o << "reasonable assumptions and clearly state what you assumed.\n";
+    return o.str();
 }
 
 } // namespace
@@ -146,13 +207,25 @@ RenderedPrompt PromptRenderer::render(const LLMInput& input, const std::string& 
     }
 
     std::map<std::string, std::string> vars;
-    std::string system_block = input.system_prompt;
+    std::vector<std::string> missing_sys;
+    std::vector<std::string> missing_user;
+    std::string user_system_prompt =
+        render_user_template(input.system_prompt, input.extra_variables, missing_sys);
+    std::string user_user_prompt =
+        render_user_template(input.user_prompt, input.extra_variables, missing_user);
+
+    std::vector<std::string> missing_all = missing_sys;
+    missing_all.insert(missing_all.end(), missing_user.begin(), missing_user.end());
+    std::sort(missing_all.begin(), missing_all.end());
+    missing_all.erase(std::unique(missing_all.begin(), missing_all.end()), missing_all.end());
+
+    std::string system_block = user_system_prompt;
     if (!input.context.empty()) {
         system_block += "\n\n## Retrieved context\n";
         system_block += input.context;
     }
     vars["system_prompt"] = system_block;
-    vars["user_prompt"] = input.user_prompt;
+    vars["user_prompt"] = user_user_prompt;
     vars["context"] = input.context;
     vars["tools_text"] = OpenAIToolFormatter().format_tools_as_text(input.tools);
 
@@ -166,11 +239,15 @@ RenderedPrompt PromptRenderer::render(const LLMInput& input, const std::string& 
     if (!system_block.empty()) {
         rendered.messages.push_back(json{{"role", "system"}, {"content", system_block}});
     }
+    if (!missing_all.empty()) {
+        rendered.messages.push_back(
+            json{{"role", "system"}, {"content", build_missing_vars_system_notice(missing_all)}});
+    }
     const std::vector<Message> history_trunc = hf->truncate(input.history, max_hist);
     for (const auto& jm : hf->format_as_messages(history_trunc)) {
         rendered.messages.push_back(jm);
     }
-    rendered.messages.push_back(json{{"role", "user"}, {"content", input.user_prompt}});
+    rendered.messages.push_back(json{{"role", "user"}, {"content", user_user_prompt}});
 
     std::shared_ptr<ToolFormatter> tf = get_tool_formatter(model_name);
     if (!tf) {
