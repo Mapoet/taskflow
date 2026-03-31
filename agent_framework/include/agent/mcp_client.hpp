@@ -58,6 +58,7 @@ private:
     std::map<std::string, std::string> extra_env_;
     bool connected_ = false;
     std::mutex io_mutex_;
+    std::string pending_read_;
 
     void write_framed_message(const json& msg);
     json read_framed_message();

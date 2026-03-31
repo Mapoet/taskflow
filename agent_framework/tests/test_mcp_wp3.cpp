@@ -17,6 +17,11 @@
 #include <vector>
 
 #include <agent/internal/http_sse.hpp>
+#include <agent/internal/stdio_framing.hpp>
+
+#if !defined(_WIN32)
+#include <unistd.h>
+#endif
 
 namespace {
 
@@ -248,6 +253,119 @@ void test_parse_sse_body_missing_data_throws() {
     }
 }
 
+void test_stdio_framing_noise_prefix_ok() {
+#if defined(_WIN32)
+    return;
+#else
+    int p[2]{-1, -1};
+    assert(::pipe(p) == 0);
+    const int rd = p[0];
+    const int wr = p[1];
+
+    const std::string body = "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}";
+    std::ostringstream frame;
+    frame << "Content-Length: " << body.size() << "\r\n\r\n" << body;
+    const std::string noise = "Context7 Documentation MCP Server v2.1.6 running on stdio\n";
+    const std::string payload = noise + frame.str();
+
+    (void)::write(wr, payload.data(), payload.size());
+    ::close(wr);
+
+    std::string pending;
+    const std::string out = agent_framework::internal::read_one_framed_body_text(
+        rd, pending, /*timeout_ms=*/2000, /*max_scan_bytes=*/256 * 1024);
+    json j = json::parse(out);
+    assert(j.at("id") == 1);
+    ::close(rd);
+#endif
+}
+
+void test_stdio_framing_noise_between_frames_ok() {
+#if defined(_WIN32)
+    return;
+#else
+    int p[2]{-1, -1};
+    assert(::pipe(p) == 0);
+    const int rd = p[0];
+    const int wr = p[1];
+
+    const std::string b1 = "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}";
+    const std::string b2 = "{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{}}";
+    std::ostringstream f1;
+    f1 << "Content-Length: " << b1.size() << "\r\n\r\n" << b1;
+    std::ostringstream f2;
+    f2 << "Content-Length: " << b2.size() << "\r\n\r\n" << b2;
+    const std::string noise = "banner line\n";
+    const std::string payload = f1.str() + noise + f2.str();
+
+    (void)::write(wr, payload.data(), payload.size());
+    ::close(wr);
+
+    std::string pending;
+    const std::string o1 = agent_framework::internal::read_one_framed_body_text(
+        rd, pending, 2000, 256 * 1024);
+    const std::string o2 = agent_framework::internal::read_one_framed_body_text(
+        rd, pending, 2000, 256 * 1024);
+    json j1 = json::parse(o1);
+    json j2 = json::parse(o2);
+    assert(j1.at("id") == 1);
+    assert(j2.at("id") == 2);
+    ::close(rd);
+#endif
+}
+
+void test_stdio_framing_only_noise_throws() {
+#if defined(_WIN32)
+    return;
+#else
+    int p[2]{-1, -1};
+    assert(::pipe(p) == 0);
+    const int rd = p[0];
+    const int wr = p[1];
+    const std::string payload(2048, 'x');
+    (void)::write(wr, payload.data(), payload.size());
+    ::close(wr);
+
+    std::string pending;
+    try {
+        (void)agent_framework::internal::read_one_framed_body_text(
+            rd, pending, 2000, /*max_scan_bytes=*/1024);
+        assert(false);
+    } catch (const std::runtime_error&) {
+    }
+    ::close(rd);
+#endif
+}
+
+void test_stdio_framing_fragmented_header_ok() {
+#if defined(_WIN32)
+    return;
+#else
+    int p[2]{-1, -1};
+    assert(::pipe(p) == 0);
+    const int rd = p[0];
+    const int wr = p[1];
+
+    const std::string body = "{\"jsonrpc\":\"2.0\",\"id\":7,\"result\":{}}";
+    std::ostringstream hdr;
+    hdr << "Content-Length: " << body.size() << "\r\n\r\n";
+    const std::string h = hdr.str();
+
+    (void)::write(wr, "Content-", 8);
+    (void)::write(wr, "Length: ", 8);
+    (void)::write(wr, h.substr(16).data(), h.size() - 16);
+    (void)::write(wr, body.data(), body.size());
+    ::close(wr);
+
+    std::string pending;
+    const std::string out = agent_framework::internal::read_one_framed_body_text(
+        rd, pending, 2000, 256 * 1024);
+    json j = json::parse(out);
+    assert(j.at("id") == 7);
+    ::close(rd);
+#endif
+}
+
 int run_live_http() {
     std::string post_url = first_non_empty({"AGENT_MCP_HTTP_URL", "AGENT_MCP_HTTP_POST_URL"});
     std::map<std::string, std::string> headers;
@@ -391,6 +509,10 @@ int main(int argc, char** argv) {
     test_parse_sse_body_multi_line_concat();
     test_parse_sse_body_done_stops();
     test_parse_sse_body_missing_data_throws();
+    test_stdio_framing_noise_prefix_ok();
+    test_stdio_framing_noise_between_frames_ok();
+    test_stdio_framing_only_noise_throws();
+    test_stdio_framing_fragmented_header_ok();
     std::cout << "test_mcp_wp3: all tests passed\n";
     return 0;
 }

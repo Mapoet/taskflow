@@ -4,6 +4,7 @@
  */
 
 #include "agent/mcp_client.hpp"
+#include "agent/internal/stdio_framing.hpp"
 
 #include <chrono>
 #include <cctype>
@@ -61,27 +62,10 @@ void writen(int fd, const char* buf, std::size_t len) {
     }
 }
 
-bool poll_readable(int fd, int timeout_ms) {
-    pollfd pfd{};
-    pfd.fd = fd;
-    pfd.events = POLLIN;
-    int r = ::poll(&pfd, 1, timeout_ms);
-    if (r < 0) {
-        if (errno == EINTR) {
-            return poll_readable(fd, timeout_ms);
-        }
-        throw std::runtime_error("StdioMCPTransport: poll failed: " + std::string(std::strerror(errno)));
-    }
-    if (r == 0) {
-        return false;
-    }
-    return (pfd.revents & (POLLIN | POLLHUP)) != 0;
-}
-
 void read_exact(int fd, char* buf, std::size_t len, int timeout_ms) {
     std::size_t off = 0;
     while (off < len) {
-        if (!poll_readable(fd, timeout_ms)) {
+        if (!internal::poll_readable(fd, timeout_ms)) {
             throw std::runtime_error("StdioMCPTransport: read timeout");
         }
         ssize_t n = ::read(fd, buf + off, len - off);
@@ -96,54 +80,6 @@ void read_exact(int fd, char* buf, std::size_t len, int timeout_ms) {
         }
         off += static_cast<std::size_t>(n);
     }
-}
-
-std::string read_http_style_headers(int fd, int timeout_ms) {
-    std::string acc;
-    acc.reserve(256);
-    char ch = 0;
-    while (acc.size() < 65536) {
-        read_exact(fd, &ch, 1, timeout_ms);
-        acc.push_back(ch);
-        if (acc.size() >= 4) {
-            std::size_t z = acc.size();
-            if (acc[z - 4] == '\r' && acc[z - 3] == '\n' && acc[z - 2] == '\r' && acc[z - 1] == '\n') {
-                return acc;
-            }
-        }
-    }
-    throw std::runtime_error("StdioMCPTransport: header too large");
-}
-
-std::size_t parse_content_length(const std::string& headers) {
-    constexpr const char* kpref = "content-length:";
-    std::istringstream in(headers);
-    std::string line;
-    while (std::getline(in, line)) {
-        if (!line.empty() && line.back() == '\r') {
-            line.pop_back();
-        }
-        if (line.empty()) {
-            continue;
-        }
-        std::string lower;
-        lower.reserve(line.size());
-        for (char c : line) {
-            lower.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
-        }
-        if (lower.rfind(kpref, 0) != 0) {
-            continue;
-        }
-        std::size_t pos = line.find(':');
-        if (pos == std::string::npos) {
-            continue;
-        }
-        std::stringstream ss(line.substr(pos + 1));
-        std::size_t v = 0;
-        ss >> v;
-        return v;
-    }
-    throw std::runtime_error("StdioMCPTransport: missing Content-Length");
 }
 
 } // namespace
@@ -197,6 +133,7 @@ bool StdioMCPTransport::connect(const std::string& /*endpoint*/) {
     if (connected_) {
         return true;
     }
+    pending_read_.clear();
     io_ = std::make_unique<StdioPipes>();
 
     int in_pipe[2];
@@ -264,6 +201,7 @@ void StdioMCPTransport::disconnect() {
     if (!connected_ && !io_) {
         return;
     }
+    pending_read_.clear();
     if (io_) {
         if (io_->to_child >= 0) {
             ::close(io_->to_child);
@@ -306,11 +244,10 @@ void StdioMCPTransport::write_framed_message(const json& msg) {
 
 json StdioMCPTransport::read_framed_message() {
     int tmo = mcp_timeout_ms();
-    std::string hdrs = read_http_style_headers(io_->from_child, tmo);
-    std::size_t n = parse_content_length(hdrs);
-    std::vector<char> body(n);
-    read_exact(io_->from_child, body.data(), n, tmo);
-    return json::parse(std::string(body.begin(), body.end()));
+    constexpr std::size_t k_max_scan_bytes = 256U * 1024U;
+    const std::string body_text =
+        internal::read_one_framed_body_text(io_->from_child, pending_read_, tmo, k_max_scan_bytes);
+    return json::parse(body_text);
 }
 
 json StdioMCPTransport::transceive(const json& jsonrpc_request) {
