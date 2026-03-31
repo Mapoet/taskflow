@@ -4,6 +4,7 @@
  */
 
 #include "agent/mcp_client.hpp"
+#include "agent/internal/http_sse.hpp"
 
 #include <cctype>
 #include <cstdlib>
@@ -136,6 +137,14 @@ json HttpMCPTransport::post_json(const json& body) {
     }
     if (res->body.empty()) {
         return json::object();
+    }
+    std::string content_type;
+    if (res->has_header("Content-Type")) {
+        content_type = res->get_header_value("Content-Type");
+    }
+    if (internal::icontains(content_type, "text/event-stream")) {
+        const std::string json_text = internal::parse_sse_body_to_json_text(res->body);
+        return json::parse(json_text);
     }
     return json::parse(res->body);
 }

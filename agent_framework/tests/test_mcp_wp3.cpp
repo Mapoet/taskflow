@@ -16,6 +16,8 @@
 #include <string>
 #include <vector>
 
+#include <agent/internal/http_sse.hpp>
+
 namespace {
 
 using json = nlohmann::json;
@@ -203,6 +205,49 @@ void test_toolbus_mcp_register_and_call() {
     assert(tools[0].name == "svc__echo");
 }
 
+void test_parse_sse_body_single_line() {
+    const std::string body =
+        "event: message\n"
+        "data: {\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}\n"
+        "\n";
+    const std::string json_text = agent_framework::internal::parse_sse_body_to_json_text(body);
+    json j = json::parse(json_text);
+    assert(j.at("jsonrpc") == "2.0");
+    assert(j.at("id") == 1);
+}
+
+void test_parse_sse_body_multi_line_concat() {
+    const std::string body =
+        "data: {\"jsonrpc\":\"2.0\",\n"
+        "data:  \"id\":1,\n"
+        "data:  \"result\":{}}\n"
+        "\n";
+    const std::string json_text = agent_framework::internal::parse_sse_body_to_json_text(body);
+    json j = json::parse(json_text);
+    assert(j.at("jsonrpc") == "2.0");
+    assert(j.at("id") == 1);
+    assert(j.contains("result"));
+}
+
+void test_parse_sse_body_done_stops() {
+    const std::string body =
+        "data: {\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}\n"
+        "data: [DONE]\n"
+        "data: {\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{}}\n";
+    const std::string json_text = agent_framework::internal::parse_sse_body_to_json_text(body);
+    json j = json::parse(json_text);
+    assert(j.at("id") == 1);
+}
+
+void test_parse_sse_body_missing_data_throws() {
+    const std::string body = "event: ping\n\n";
+    try {
+        (void)agent_framework::internal::parse_sse_body_to_json_text(body);
+        assert(false);
+    } catch (const std::runtime_error&) {
+    }
+}
+
 int run_live_http() {
     std::string post_url = first_non_empty({"AGENT_MCP_HTTP_URL", "AGENT_MCP_HTTP_POST_URL"});
     std::map<std::string, std::string> headers;
@@ -342,6 +387,10 @@ int main(int argc, char** argv) {
     }
     test_parse_jsonrpc();
     test_toolbus_mcp_register_and_call();
+    test_parse_sse_body_single_line();
+    test_parse_sse_body_multi_line_concat();
+    test_parse_sse_body_done_stops();
+    test_parse_sse_body_missing_data_throws();
     std::cout << "test_mcp_wp3: all tests passed\n";
     return 0;
 }
