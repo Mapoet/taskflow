@@ -29,6 +29,25 @@ Agent Framework 采用分层架构设计：
 
 详细架构设计请参考：`../../readme/guide_agent.md`
 
+## A2A HTTP 绑定（当前实现）
+
+本仓库内 **AgentClient** 与 **AgentServer** 的 HTTP 语义已对齐为 **REST + JSON**（非 JSON-RPC）：
+
+| 操作 | 方法 | 路径（相对 `agent_endpoint` 前缀） | 请求体 / 查询 | 成功响应要点 |
+|------|------|--------------------------------------|---------------|--------------|
+| 发现 Agent Card | GET | `/.well-known/agent-card`（或调用方传入的 path） | — | AgentCard JSON 根对象 |
+| 发送任务 | POST | `/tasks/send` | `message`, `metadata`, 可选 `session_id` | `{"task": ...}` |
+| 获取任务 | GET | `/tasks/get?task_id=` | query | `{"task": ...}` |
+| 取消任务 | POST | `/tasks/cancel` | `{"task_id": ...}` | `{"success": true}` |
+| 更新任务 | POST | `/tasks/update` | `task_id`, `message` | `{"task": ...}` |
+| SSE 订阅 | GET | `/tasks/sendSubscribe?task_id=` | query | `text/event-stream`（流式，客户端侧待完善） |
+| Webhook 设置 | POST | `/tasks/pushNotification/set` | `task_id`, `webhook_url` | `{"success": true}` |
+| Webhook 查询 | GET | `/tasks/pushNotification/get?task_id=` | query | `webhook_url` 等 |
+
+底层 HTTP 由 **HttplibClient**（cpp-httplib）执行。`https` 需在 CMake 中检测到 OpenSSL 并定义 `CPPHTTPLIB_OPENSSL_SUPPORT`。
+
+**HTTPAgentTransport** 仍为 **JSON-RPC 2.0** POST 到 `base_url + endpoint`，用于需要 RPC 形态的调用方，与上表 REST 绑定不同。
+
 ---
 
 ## 提示词渲染数据流设计

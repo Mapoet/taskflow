@@ -130,6 +130,7 @@ endif()
 # 查找依赖（可选）
 find_package(OpenCV QUIET)
 find_package(CURL QUIET)
+find_package(OpenSSL QUIET)
 find_package(Threads QUIET)
 
 # 线程支持（用于 std::thread，SSEConnection 等）
@@ -239,6 +240,9 @@ endif()
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/agent_client/agent_client.cpp)
     list(APPEND AGENT_SOURCES src/agent_client/agent_client.cpp)
 endif()
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/agent_client/httplib_http_client.cpp)
+    list(APPEND AGENT_SOURCES src/agent_client/httplib_http_client.cpp)
+endif()
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/agent_server/agent_server.cpp)
     list(APPEND AGENT_SOURCES src/agent_server/agent_server.cpp)
 endif()
@@ -261,6 +265,7 @@ set(AGENT_HEADERS
     include/agent/agent_transport.hpp
     include/agent/sse_connection.hpp
     include/agent/agent_client.hpp
+    include/agent/httplib_http_client.hpp
     include/agent/agent_server.hpp
     include/node/node_factory.hpp
     include/node/llm_node.hpp
@@ -300,6 +305,14 @@ endif()
 if(CURL_FOUND)
     target_link_libraries(agent_framework PRIVATE CURL::libcurl)
     target_compile_definitions(agent_framework PRIVATE HAVE_CURL)
+endif()
+
+if(OpenSSL_FOUND)
+    target_link_libraries(agent_framework PRIVATE OpenSSL::SSL OpenSSL::Crypto)
+    target_compile_definitions(agent_framework PRIVATE CPPHTTPLIB_OPENSSL_SUPPORT)
+    message(STATUS "Agent Framework: OpenSSL found, https enabled for cpp-httplib client")
+else()
+    message(STATUS "Agent Framework: OpenSSL not found; HttplibClient https disabled (http only)")
 endif()
 
 # 线程库（用于 std::thread）

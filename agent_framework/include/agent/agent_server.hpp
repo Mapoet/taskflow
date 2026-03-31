@@ -166,6 +166,11 @@ private:
     void handle_tasks_cancel(const httplib::Request& req, httplib::Response& res);
     
     /**
+     * @brief 处理 /tasks/update 请求（追加消息）
+     */
+    void handle_tasks_update(const httplib::Request& req, httplib::Response& res);
+    
+    /**
      * @brief 处理 /tasks/sendSubscribe 请求（订阅 SSE 更新）
      * @param req HTTP 请求
      * @param res HTTP 响应

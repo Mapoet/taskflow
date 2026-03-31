@@ -8,8 +8,6 @@
 #ifndef __AGENT_CLIENT_H__
 #define __AGENT_CLIENT_H__
 
-#include <atomic>
-#include <cstdint>
 #include <string>
 #include <future>
 #include <map>
@@ -18,7 +16,6 @@
 #include <functional>
 #include <optional>
 #include <agent/types.hpp>
-#include <agent/agent_transport.hpp>
 #include <agent/sse_connection.hpp>
 #include <nlohmann/json.hpp>
 
@@ -26,12 +23,16 @@ namespace agent_framework {
     
 using json = nlohmann::json;
 
-// 前向声明 HTTPClient（实际实现可以使用 httplib 或其他 HTTP 客户端）
-// TODO: 实际实现应该使用 httplib 或 curl
+/**
+ * @brief HTTP 抽象（JSON GET/POST），具体实现见 HttplibClient
+ */
 class HTTPClient {
 public:
     virtual ~HTTPClient() = default;
-    virtual json post(const std::string& url, const json& body, const std::map<std::string, std::string>& headers = {}) = 0;
+    virtual json post(const std::string& url, const json& body,
+                      const std::map<std::string, std::string>& headers = {}) = 0;
+    virtual json get(const std::string& url,
+                     const std::map<std::string, std::string>& headers = {}) = 0;
 };
 
 /**
@@ -161,30 +162,23 @@ public:
      * @brief 刷新认证（如刷新 OAuth token）
      */
     void refresh_authentication();
+
+    /**
+     * @brief 拼接两段 URL 路径（供 HTTPAgentTransport 等复用）
+     */
+    static std::string join_url(const std::string& base, const std::string& path);
     
 private:
     std::string server_url_;                                            // 服务器基础 URL
     json auth_config_;                                                  // 认证配置
     mutable std::mutex auth_mutex_;                                    // 认证互斥锁
     
-    // HTTP 客户端（用于 JSON-RPC 2.0 请求）
+    // HTTP 客户端（HttplibClient：REST 与 AgentServer 对齐）
     std::unique_ptr<HTTPClient> http_client_;
-
-    // JSON-RPC 2.0 请求 id（并发安全，每请求递增）
-    std::atomic<std::uint64_t> jsonrpc_next_id_{1};
     
     // SSE 连接管理（key: "agent_endpoint:task_id"）
     std::map<std::string, std::unique_ptr<SSEConnection>> sse_connections_;
     mutable std::mutex sse_mutex_;
-    
-    /**
-     * @brief 发送 JSON-RPC 2.0 请求
-     * @param endpoint 端点 URL
-     * @param method 方法名
-     * @param params 参数（JSON 对象）
-     * @return 响应（JSON 对象）
-     */
-    json send_jsonrpc_request(const std::string& endpoint, const json& method, const json& params);
     
     /**
      * @brief 构建认证 Header

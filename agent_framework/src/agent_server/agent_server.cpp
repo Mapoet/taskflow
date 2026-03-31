@@ -158,6 +158,10 @@ void AgentServer::setup_routes() {
     //     handle_tasks_cancel(req, res);
     // });
     //
+    // server->Post("/tasks/update", [this](const httplib::Request& req, httplib::Response& res) {
+    //     handle_tasks_update(req, res);
+    // });
+    //
     // http_server_->Get("/tasks/sendSubscribe", [this](const httplib::Request& req, httplib::Response& res) {
     //     handle_tasks_send_subscribe(req, res);
     // });
@@ -273,6 +277,35 @@ void AgentServer::handle_tasks_cancel(const httplib::Request& req, httplib::Resp
             res.status = 404;
             res.set_content(json{{"error", "Task not found"}}.dump(), "application/json");
         }
+    } catch (const std::exception& e) {
+        res.status = 400;
+        res.set_content(json{{"error", e.what()}}.dump(), "application/json");
+    }
+}
+
+void AgentServer::handle_tasks_update(const httplib::Request& req, httplib::Response& res) {
+    if (!validate_authentication(req)) {
+        res.status = 401;
+        res.set_content(json{{"error", "Unauthorized"}}.dump(), "application/json");
+        return;
+    }
+
+    try {
+        json request = json::parse(req.body);
+        std::string task_id = request["task_id"].get<std::string>();
+        AgentMessage additional = AgentMessage::from_json(request["message"]);
+
+        std::lock_guard<std::mutex> lock(tasks_mutex_);
+        auto it = active_tasks_.find(task_id);
+        if (it == active_tasks_.end()) {
+            res.status = 404;
+            res.set_content(json{{"error", "Task not found"}}.dump(), "application/json");
+            return;
+        }
+
+        it->second.messages.push_back(additional);
+        it->second.updated_at = std::chrono::system_clock::now();
+        res.set_content(json{{"task", it->second.to_json()}}.dump(), "application/json");
     } catch (const std::exception& e) {
         res.status = 400;
         res.set_content(json{{"error", e.what()}}.dump(), "application/json");

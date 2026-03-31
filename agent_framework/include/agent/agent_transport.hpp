@@ -8,8 +8,12 @@
 #ifndef __AGENT_TRANSPORT_H__
 #define __AGENT_TRANSPORT_H__
 
-#include <string>
+#include <atomic>
+#include <cstdint>
 #include <memory>
+#include <string>
+
+#include <agent/agent_client.hpp>
 #include <nlohmann/json.hpp>
 
 namespace agent_framework {
@@ -58,7 +62,7 @@ public:
 };
 
 /**
- * @brief HTTP Agent 传输实现（A2A 协议，用于 JSON-RPC 2.0）
+ * @brief HTTP Agent 传输实现（JSON-RPC 2.0 POST 至 base_url + endpoint）
  */
 class HTTPAgentTransport : public AgentTransport {
 public:
@@ -109,12 +113,9 @@ private:
     std::string base_url_;              // 基础 URL
     std::string current_endpoint_;      // 当前端点
     bool connected_ = false;            // 连接状态
-    
-    /**
-     * @brief 发送 HTTP POST 请求
-     * @param payload JSON 负载
-     * @return 响应 JSON
-     */
+    std::unique_ptr<HTTPClient> http_client_; // HttplibClient
+    std::atomic<std::uint64_t> jsonrpc_next_id_{1};
+
     json send_http_post(const json& payload);
 };
 

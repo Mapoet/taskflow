@@ -1,22 +1,16 @@
 /**
  * @file agent_transport.cpp
- * @brief Agent 传输层实现（A2A 协议）
- * @author Mapoet
- * @version 0.1
- * @date 2025-01-XX
+ * @brief Agent 传输层实现（HTTP + JSON-RPC 2.0，底层使用 HttplibClient）
  */
 #include <agent/agent_transport.hpp>
-#include <stdexcept>
-#include <iostream>
+#include <agent/httplib_http_client.hpp>
 
-// TODO: 实现 HTTPAgentTransport
-// 需要引入实际的 HTTP 客户端库（如 httplib）
+#include <stdexcept>
 
 namespace agent_framework {
 
 HTTPAgentTransport::HTTPAgentTransport(const std::string& base_url)
-    : base_url_(base_url), connected_(false) {
-    // TODO: 初始化 HTTP 客户端
+    : base_url_(base_url), connected_(false), http_client_(std::make_unique<HttplibClient>()) {
 }
 
 HTTPAgentTransport::~HTTPAgentTransport() {
@@ -24,31 +18,31 @@ HTTPAgentTransport::~HTTPAgentTransport() {
 }
 
 bool HTTPAgentTransport::connect(const std::string& endpoint) {
-    // TODO: 实现 HTTP 连接逻辑
     current_endpoint_ = endpoint;
     connected_ = true;
     return true;
 }
 
 void HTTPAgentTransport::disconnect() {
-    // TODO: 关闭 HTTP 连接
     connected_ = false;
     current_endpoint_.clear();
 }
 
 json HTTPAgentTransport::send_request(const std::string& method, const json& params) {
     if (!connected_) {
-        throw std::runtime_error("Not connected");
+        throw std::runtime_error("HTTPAgentTransport: not connected");
     }
-    
-    // TODO: 构建 JSON-RPC 2.0 请求
+
+    const std::uint64_t request_id =
+        jsonrpc_next_id_.fetch_add(1, std::memory_order_relaxed);
+
     json request = {
         {"jsonrpc", "2.0"},
         {"method", method},
         {"params", params},
-        {"id", 1}  // TODO: 使用唯一 ID
+        {"id", request_id}
     };
-    
+
     return send_http_post(request);
 }
 
@@ -60,15 +54,21 @@ std::string HTTPAgentTransport::get_transport_type() const {
     return "http";
 }
 
-json HTTPAgentTransport::send_http_post(const json& /* payload */) {
-    // TODO: 实现 HTTP POST 请求
-    // 1. 构建完整 URL: base_url_ + current_endpoint_
-    // 2. 发送 POST 请求，Content-Type: application/json
-    // 3. 解析响应 JSON
-    // 4. 返回 JSON 响应
-    
-    throw std::runtime_error("HTTPAgentTransport::send_http_post not implemented");
+json HTTPAgentTransport::send_http_post(const json& payload) {
+    const std::string url = AgentClient::join_url(base_url_, current_endpoint_);
+    std::map<std::string, std::string> headers;
+    headers["Content-Type"] = "application/json";
+    json response = http_client_->post(url, payload, headers);
+
+    if (response.contains("error")) {
+        const auto& err = response["error"];
+        if (err.is_object() && err.contains("message")) {
+            throw std::runtime_error("JSON-RPC error: " + err["message"].get<std::string>());
+        }
+        throw std::runtime_error("JSON-RPC error: unknown error object");
+    }
+
+    return response;
 }
 
 } // namespace agent_framework
-
