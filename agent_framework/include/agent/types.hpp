@@ -81,6 +81,7 @@ enum class FusionStrategy {
 struct Message {
     std::string role;              // 角色（"user", "assistant", "system", "tool"）
     std::string content;           // 消息内容
+    std::optional<std::string> tool_call_id;  // OpenAI tool_call_id（如果是 tool 消息）
     std::optional<std::string> tool_name;  // 工具名称（如果是 tool 消息）
     std::optional<json> tool_result;       // 工具执行结果
     std::time_t timestamp;         // 时间戳

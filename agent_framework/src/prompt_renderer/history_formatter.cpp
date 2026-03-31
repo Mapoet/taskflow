@@ -37,7 +37,12 @@ std::vector<json> OpenAIHistoryFormatter::format_as_messages(const std::vector<M
     for (const auto& m : history) {
         json j = json{{"role", m.role}, {"content", m.content}};
         if (m.role == "tool") {
-            j["name"] = m.tool_name.value_or("");
+            if (m.tool_call_id && !m.tool_call_id->empty()) {
+                j["tool_call_id"] = *m.tool_call_id;
+            } else {
+                // Backward-compat: some providers accept "name" for tool role.
+                j["name"] = m.tool_name.value_or("");
+            }
             if (m.tool_result) {
                 j["content"] = m.tool_result->dump();
             }

@@ -12,7 +12,9 @@
 #include <any>
 #include <unordered_map>
 #include <chrono>
+#include <cstdlib>
 #include <ctime>
+#include <iostream>
 #include <sstream>
 
 namespace agent_framework {
@@ -47,11 +49,20 @@ AgentLoopNode::create(
     auto body_func = [agent_config, llm_client, toolbus, shared](
                          const std::unordered_map<std::string, std::any>& inps)
         -> std::unordered_map<std::string, std::any> {
+        const char* dbg_env = std::getenv("AGENT_TEST_AGENT_LOOP_DEBUG");
+        const bool dbg = dbg_env && std::string(dbg_env) != "0";
+
         auto st = std::any_cast<std::shared_ptr<internal::AgentThreadState>>(
             inps.at(std::string(internal::kAgentState)));
         if (!shared->state) {
             shared->state = st ? std::make_shared<internal::AgentThreadState>(*st)
                                : std::make_shared<internal::AgentThreadState>();
+        }
+        const int it = shared->state ? shared->state->iteration : 0;
+        if (dbg) {
+            std::cout << "[AgentLoop] iter=" << it << " history_size="
+                      << (shared->state ? shared->state->history.size() : 0) << "\n";
+            std::cout.flush();
         }
 
         LLMInput llm_in;
@@ -65,7 +76,22 @@ AgentLoopNode::create(
         }
 
         // invoke (LLMClient will render using its configured PromptRenderer)
+        if (dbg) {
+            std::cout << "[AgentLoop] calling LLM...\n";
+            std::cout.flush();
+        }
+        const auto t0 = std::chrono::steady_clock::now();
         LLMOutput llm_out = llm_client->invoke(llm_in, "", nullptr).get();
+        const auto t1 = std::chrono::steady_clock::now();
+        if (dbg) {
+            const auto ms =
+                std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count();
+            std::cout << "[AgentLoop] LLM done in " << ms << "ms"
+                      << " tool_calls=" << llm_out.tool_calls.size()
+                      << " is_final=" << (llm_out.is_final ? "true" : "false")
+                      << " final_answer_len=" << llm_out.final_answer.size() << "\n";
+            std::cout.flush();
+        }
         shared->last_llm = llm_out;
 
         // assistant message
@@ -81,13 +107,23 @@ AgentLoopNode::create(
             calls.resize(static_cast<std::size_t>(agent_config.max_tool_calls_per_iteration));
         }
         for (const auto& c : calls) {
+            if (dbg) {
+                std::cout << "[AgentLoop] calling tool " << c.name << " args=" << c.arguments.dump()
+                          << "\n";
+                std::cout.flush();
+            }
             json result = toolbus->call_tool(c.name, c.arguments).get();
             Message tm;
             tm.role = "tool";
+            tm.tool_call_id = c.tool_call_id;
             tm.tool_name = c.name;
             tm.tool_result = result;
             tm.timestamp = std::time(nullptr);
             shared->state->history.push_back(std::move(tm));
+            if (dbg) {
+                std::cout << "[AgentLoop] tool " << c.name << " result=" << result.dump() << "\n";
+                std::cout.flush();
+            }
         }
 
         shared->state->iteration += 1;
