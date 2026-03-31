@@ -152,6 +152,7 @@ bool StdioMCPTransport::connect(const std::string& /*endpoint*/) {
     }
     ::posix_spawn_file_actions_adddup2(&fa, in_pipe[0], STDIN_FILENO);
     ::posix_spawn_file_actions_adddup2(&fa, out_pipe[1], STDOUT_FILENO);
+    ::posix_spawn_file_actions_adddup2(&fa, out_pipe[1], STDERR_FILENO);
     ::posix_spawn_file_actions_addclose(&fa, in_pipe[1]);
     ::posix_spawn_file_actions_addclose(&fa, out_pipe[0]);
 
