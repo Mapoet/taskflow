@@ -7,6 +7,10 @@
  *
  * `LLMClient::from_env` 前会调用与 `tests/test_agent_loop_wp5.cpp` 相同的 live 默认值
  * （如 DEEPSEEK_API_KEY → OPENAI_API_KEY、默认 base URL / model / 超时）；不覆盖已存在 env。
+ *
+ * Cursor MCP：默认尝试从 mcp.json 注册工具（与 wp5 一致：`--cursor-mcp-json` →
+ * `AGENT_TEST_CURSOR_MCP_JSON` → 空则 `ToolBus` 使用 `AGENT_MCP_CONFIG_PATH` 或 `~/.cursor/mcp.json`）。
+ * 使用 `--no-cursor-mcp` 或环境变量 `AGENT_TEST_SKIP_CURSOR_MCP` / `AGENT_CLI_SKIP_CURSOR_MCP` 可跳过。
  */
 
 #include "CLI11.hpp"
@@ -22,6 +26,7 @@
 #include <atomic>
 #include <cstdlib>
 #include <csignal>
+#include <cstddef>
 #include <iostream>
 #include <string>
 
@@ -71,6 +76,55 @@ void register_demo_tools(ToolBus& bus) {
 std::string env_or(const char* key, const char* default_val) {
     const char* v = std::getenv(key);
     return (v && *v) ? std::string(v) : std::string(default_val);
+}
+
+bool env_truthy(const char* key) {
+    const char* v = std::getenv(key);
+    if (!v || !*v) {
+        return false;
+    }
+    return v[0] == '1' || v[0] == 'y' || v[0] == 'Y' || v[0] == 't' || v[0] == 'T';
+}
+
+/**
+ * @brief 与 wp5 一致：`AGENT_TEST_CURSOR_MCP_JSON` 优先；否则空串交给 ToolBus（`AGENT_MCP_CONFIG_PATH` / ~/.cursor/mcp.json）
+ */
+std::string resolve_cursor_mcp_config_path(const std::string& cli_path) {
+    if (!cli_path.empty()) {
+        return cli_path;
+    }
+    const char* test_env = std::getenv("AGENT_TEST_CURSOR_MCP_JSON");
+    if (test_env && *test_env) {
+        return std::string(test_env);
+    }
+    return "";
+}
+
+void import_cursor_mcp_tools(ToolBus& bus, const std::string& config_path_arg, bool dbg,
+                            std::size_t* out_mcp_services) {
+    *out_mcp_services = 0;
+    const std::string path_for_display = config_path_arg.empty()
+                                              ? std::string("<ToolBus default: AGENT_MCP_CONFIG_PATH or ~/.cursor/mcp.json>")
+                                              : config_path_arg;
+    ToolBus::CursorMcpImportResult r = bus.register_mcp_from_cursor_config(config_path_arg, true);
+    *out_mcp_services = r.registered_services.size();
+    auto tools = bus.export_as_llm_tools();
+
+    if (dbg) {
+        std::clog << "cursor_mcp config_path=\"" << path_for_display << "\"\n";
+        std::clog << "  registered_services=" << r.registered_services.size()
+                  << " failures=" << r.failures.size() << "\n";
+        for (const auto& name : r.registered_services) {
+            std::clog << "    ok: " << name << '\n';
+        }
+        for (const auto& f : r.failures) {
+            std::clog << "    fail: " << f.service_name << " - " << f.reason << '\n';
+        }
+        std::clog << "toolbus export_as_llm_tools count=" << tools.size() << '\n';
+    } else if (!r.failures.empty() && *out_mcp_services == 0) {
+        std::clog << "[cli_agent_demo] cursor_mcp: no services registered (" << r.failures.size()
+                  << " failure(s); use -v or AGENT_TEST_AGENT_LOOP_DEBUG=1 for details)\n";
+    }
 }
 
 void set_env_if_absent(const char* key, const char* val) {
@@ -159,14 +213,20 @@ int main(int argc, char** argv) {
 
     std::string prompt_arg;
     std::string provider_arg;
+    std::string cursor_mcp_json_arg;
     int max_iterations = -1;
     bool verbose = false;
     bool mock = false;
+    bool no_cursor_mcp = false;
     app.add_flag("-v,--verbose", verbose, "Same as AGENT_LOG_LEVEL=debug for this process");
     app.add_option("-p,--prompt", prompt_arg, "Single-turn user message; then exit");
     app.add_option("--provider", provider_arg, "Override AGENT_LLM_PROVIDER for this run");
     app.add_option("--max-iterations", max_iterations,
                    "Override AgentConfig::max_iterations (default: keep env/config)");
+    app.add_option("--cursor-mcp-json", cursor_mcp_json_arg,
+                   "Path to Cursor mcp.json (else AGENT_TEST_CURSOR_MCP_JSON, else ToolBus default ~/.cursor/mcp.json)");
+    app.add_flag("--no-cursor-mcp", no_cursor_mcp,
+                 "Skip Cursor MCP import (or env AGENT_TEST_SKIP_CURSOR_MCP / AGENT_CLI_SKIP_CURSOR_MCP)");
     app.add_flag("--mock", mock, "Reserved for WP1.7 (offline mock); not implemented yet");
     app.set_help_flag("-h,--help", "Print this help and environment hints");
 
@@ -212,12 +272,27 @@ int main(int argc, char** argv) {
     auto renderer = std::make_shared<PromptRenderer>();
     llm->set_prompt_renderer(renderer);
 
+    const bool skip_cursor_mcp = no_cursor_mcp || env_truthy("AGENT_TEST_SKIP_CURSOR_MCP") ||
+                                 env_truthy("AGENT_CLI_SKIP_CURSOR_MCP");
+    const bool mcp_dbg = verbose || env_truthy("AGENT_TEST_AGENT_LOOP_DEBUG");
+
     auto bus = std::make_shared<ToolBus>();
     try {
         register_demo_tools(*bus);
     } catch (const std::exception& e) {
         std::cerr << "[error] register tools: " << e.what() << '\n';
         return 1;
+    }
+
+    std::size_t mcp_services = 0;
+    if (!skip_cursor_mcp) {
+        const std::string mcp_cfg = resolve_cursor_mcp_config_path(cursor_mcp_json_arg);
+        import_cursor_mcp_tools(*bus, mcp_cfg, mcp_dbg, &mcp_services);
+        if (!mcp_dbg && mcp_services > 0) {
+            std::clog << "[cli_agent_demo] cursor_mcp: " << mcp_services << " service(s) registered\n";
+        }
+    } else if (mcp_dbg) {
+        std::clog << "cursor_mcp: skipped (--no-cursor-mcp or skip env)\n";
     }
 
     AgentWorkflowDeps deps;
@@ -228,6 +303,7 @@ int main(int argc, char** argv) {
     cfg.name = "cli_agent_demo";
     cfg.system_prompt =
         "You are a helpful assistant. You may use the add tool for integer sums when relevant. "
+        "If MCP tools are available in the tool list, you may call them when they help answer the user. "
         "Answer concisely.";
     if (const char* m = std::getenv("AGENT_LLM_MODEL")) {
         cfg.model_config.model_name = m;

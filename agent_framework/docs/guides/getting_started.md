@@ -48,11 +48,16 @@ make -j$(nproc)
 
 # 覆盖 provider（会先设置 AGENT_LLM_PROVIDER 再初始化客户端）
 ./build/agent_framework/cli_agent_demo --provider openai -p "hello"
+
+# 显式指定 mcp.json（不设则按上一段默认路径解析）
+./build/agent_framework/cli_agent_demo --cursor-mcp-json ~/.cursor/mcp.json -p "hello"
 ```
 
 行为概要：流式 token 打印到 **stdout**；Loop 结束后 **Sink** 触发 `CLIHandler::handle_final_result`，默认打印简短 `[result]` 摘要（避免与流式全文重复）。工具行写入 **stderr**（`[tool] name=…`）。`--mock` 预留给 WP1.7，当前会报错退出。
 
-与 `simple_agent` 区别：`cli_agent_demo` 接真实 **WP1.5** 图（`build_cli_agent_graph_with_terminal_sink`）、**ToolBus** 演示工具 **add**、**SIGINT** 合作式退出。
+**Cursor MCP**（与 `test_agent_loop_wp5` 一致）：默认在注册 **add** 之后加载 Cursor `mcp.json`；路径为 `--cursor-mcp-json` → 环境变量 `AGENT_TEST_CURSOR_MCP_JSON` → 空则由 `ToolBus` 使用 `AGENT_MCP_CONFIG_PATH` 或 `~/.cursor/mcp.json`。跳过：`--no-cursor-mcp` 或 `AGENT_TEST_SKIP_CURSOR_MCP` / `AGENT_CLI_SKIP_CURSOR_MCP=1`。详细导入日志：`-v` 或 `AGENT_TEST_AGENT_LOOP_DEBUG=1`。
+
+与 `simple_agent` 区别：`cli_agent_demo` 接真实 **WP1.5** 图（`build_cli_agent_graph_with_terminal_sink`）、**ToolBus** 演示工具 **add**、可选 **Cursor MCP**、**SIGINT** 合作式退出。
 
 ## 运行示例
 
