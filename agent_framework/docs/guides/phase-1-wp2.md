@@ -60,6 +60,8 @@
 | `enum` | 可选实现；建议支持以覆盖 demo |
 | `additionalProperties` | 若为 `false`，拒绝未知键；若缺省，建议按 **`false` 默认**（与 OpenAI 常见 tool schema 一致） |
 | `$ref`、`allOf`、`oneOf` | **不支持**；遇到则校验失败并说明 `code` |
+| `$schema`、`$id`、`$comment` | **元数据**：在任意嵌套层级忽略，不参与校验；根对象上的值可通过 `extract_json_schema_root_meta` / `validate_tool_arguments(..., JsonSchemaRootMeta*)` 读出 |
+| 其它以 `$` 开头的键（如 `$ref`、`$vocabulary`） | **不支持**，`schema_unsupported` |
 | 嵌套 object | 支持一层或多层递归，与同一套 visitor |
 
 **实现方式**（二选一或组合）：

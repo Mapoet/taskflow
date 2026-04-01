@@ -24,6 +24,8 @@ bool schema_has_unsupported_keywords(const json& schema, std::string& bad_key) {
     static const std::unordered_set<std::string> k_compound = {
         "allOf", "anyOf", "oneOf", "not", "if", "then", "else",
         "dependentSchemas", "dependentRequired", "prefixItems", "contains"};
+    static const std::unordered_set<std::string> k_ignored_dollar_metadata = {"$schema", "$id",
+                                                                              "$comment"};
 
     if (!schema.is_object()) {
         return false;
@@ -31,6 +33,9 @@ bool schema_has_unsupported_keywords(const json& schema, std::string& bad_key) {
     for (auto it = schema.begin(); it != schema.end(); ++it) {
         const std::string& k = it.key();
         if (!k.empty() && k[0] == '$') {
+            if (k_ignored_dollar_metadata.count(k) != 0U) {
+                continue;
+            }
             bad_key = k;
             return true;
         }
@@ -271,7 +276,36 @@ bool validate_against_schema(const json& schema, const json& instance, const std
 
 } // namespace
 
-bool validate_tool_arguments(const json& schema, const json& arguments, json& error_obj) {
+void extract_json_schema_root_meta(const json& root_schema, JsonSchemaRootMeta& out) {
+    out.json_schema_uri.reset();
+    out.id_uri.reset();
+    out.comment.reset();
+    if (!root_schema.is_object()) {
+        return;
+    }
+    auto assign_opt_string = [](const json& v, std::optional<std::string>& slot) {
+        if (v.is_string()) {
+            slot = v.get<std::string>();
+        } else {
+            slot = v.dump();
+        }
+    };
+    if (auto it = root_schema.find("$schema"); it != root_schema.end()) {
+        assign_opt_string(*it, out.json_schema_uri);
+    }
+    if (auto it = root_schema.find("$id"); it != root_schema.end()) {
+        assign_opt_string(*it, out.id_uri);
+    }
+    if (auto it = root_schema.find("$comment"); it != root_schema.end()) {
+        assign_opt_string(*it, out.comment);
+    }
+}
+
+bool validate_tool_arguments(const json& schema, const json& arguments, json& error_obj,
+                             JsonSchemaRootMeta* root_meta_out) {
+    if (root_meta_out != nullptr) {
+        extract_json_schema_root_meta(schema, *root_meta_out);
+    }
     if (!schema.is_object()) {
         fill_error(error_obj, "validation_failed", "schema must be a JSON object", json::object());
         return false;

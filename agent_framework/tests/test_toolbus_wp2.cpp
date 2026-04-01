@@ -21,6 +21,8 @@ namespace {
 using json = nlohmann::json;
 using agent_framework::ToolBus;
 using agent_framework::ToolMeta;
+using agent_framework::JsonSchemaRootMeta;
+using agent_framework::extract_json_schema_root_meta;
 using agent_framework::validate_tool_arguments;
 
 ToolMeta make_add_meta() {
@@ -74,6 +76,71 @@ void test_schema_ref_rejected() {
     json err;
     assert(!validate_tool_arguments(schema, json::object(), err));
     assert(err["code"] == "schema_unsupported");
+}
+
+void test_schema_dollar_metadata_ignored_root() {
+    json schema = json::parse(R"({
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$id": "https://example.com/tool-params",
+        "$comment": "root note",
+        "type": "object",
+        "properties": {
+            "thought": { "type": "string" }
+        },
+        "required": ["thought"]
+    })");
+    json err;
+    JsonSchemaRootMeta meta;
+    assert(validate_tool_arguments(schema, json{{"thought", "ok"}}, err, &meta));
+    assert(meta.json_schema_uri.has_value());
+    assert(*meta.json_schema_uri == "https://json-schema.org/draft/2020-12/schema");
+    assert(meta.id_uri.has_value());
+    assert(*meta.id_uri == "https://example.com/tool-params");
+    assert(meta.comment.has_value());
+    assert(*meta.comment == "root note");
+}
+
+void test_schema_nested_property_dollar_comment() {
+    json schema = json::parse(R"({
+        "type": "object",
+        "properties": {
+            "n": {
+                "$comment": "nested",
+                "type": "integer"
+            }
+        },
+        "required": ["n"]
+    })");
+    json err;
+    assert(validate_tool_arguments(schema, json{{"n", 7}}, err));
+}
+
+void test_schema_unknown_dollar_keyword_rejected() {
+    json schema =
+        json::parse(R"({"type":"object","$vocabulary":"x","properties":{},"required":[]})");
+    json err;
+    assert(!validate_tool_arguments(schema, json::object(), err));
+    assert(err["code"] == "schema_unsupported");
+    assert(err["details"]["keyword"] == "$vocabulary");
+}
+
+void test_extract_json_schema_root_meta_non_string_values() {
+    json schema = json::parse(R"({
+        "$schema": {"not": "a string"},
+        "$id": 42,
+        "$comment": false,
+        "type": "object",
+        "properties": {},
+        "required": []
+    })");
+    JsonSchemaRootMeta meta;
+    extract_json_schema_root_meta(schema, meta);
+    assert(meta.json_schema_uri.has_value());
+    assert(meta.json_schema_uri->find("\"not\"") != std::string::npos);
+    assert(meta.id_uri.has_value());
+    assert(*meta.id_uri == "42");
+    assert(meta.comment.has_value());
+    assert(*meta.comment == "false");
 }
 
 void test_add_success() {
@@ -178,6 +245,10 @@ int run_core_tests() {
     test_schema_additional_props_implicit_false();
     test_schema_enum();
     test_schema_ref_rejected();
+    test_schema_dollar_metadata_ignored_root();
+    test_schema_nested_property_dollar_comment();
+    test_schema_unknown_dollar_keyword_rejected();
+    test_extract_json_schema_root_meta_non_string_values();
     test_add_success();
     test_unknown_tool();
     test_validation_failed_call();
