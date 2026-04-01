@@ -10,6 +10,7 @@
 
 #include "types.hpp"
 #include <workflow/nodeflow.hpp>
+#include <functional>
 #include <future>
 #include <map>
 #include <memory>
@@ -61,6 +62,46 @@ void build_cli_agent_graph(
     const AgentConfig& config,
     const AgentWorkflowDeps& deps,
     std::string_view user_query,
+    std::string_view loop_node_name = "AgentLoop");
+
+/**
+ * @brief 可选终端 Sink：Loop 退出后将结构化终稿交给单一回调（与 WP1.6 `handle_final_result` 字段对齐）
+ *
+ * `on_final_json` 必填；为空则 `build_cli_agent_graph_with_terminal_sink` 抛 `std::invalid_argument`。
+ * 回调收到的 JSON：`final_answer`（string）、`iteration`（number）、`history_size`（number）。
+ *
+ * **去重**：若 LLM 已配置 `stream_callback` 向用户增量打印全文，请勿在回调中再次全文打印终稿；约定仅一处负责用户可见终稿。
+ *
+ * `on_final_state`（可选）：与 `on_final_json` 同次 Sink 调度内调用，参数为 Loop 输出的 `next_agent_state`
+ *（可能与调用方传入的 `agent_state` 非同一 `shared_ptr`，因循环内会更新状态）。用于需要读 `history` 的消费方或测试。
+ */
+struct CliAgentTerminalSinkOptions {
+    std::string sink_node_name = "CliOutputSink";
+    std::function<void(const json&)> on_final_json;
+    std::function<void(const std::shared_ptr<internal::AgentThreadState>&)> on_final_state;
+};
+
+/**
+ * @brief 在 `build_cli_agent_graph` 基础上追加 `create_any_sink`，订阅 Loop 的 `final_answer` / `next_agent_state`
+ * @param loop_node_name 与构图时 Loop 节点名一致，默认 `AgentLoop`
+ */
+void build_cli_agent_graph_with_terminal_sink(
+    workflow::GraphBuilder& builder,
+    const AgentConfig& config,
+    const AgentWorkflowDeps& deps,
+    std::shared_ptr<internal::AgentThreadState> agent_state,
+    const CliAgentTerminalSinkOptions& sink,
+    std::string_view loop_node_name = "AgentLoop");
+
+/**
+ * @brief 便捷重载：内部创建 `AgentThreadState` 并设置 `initial_user_prompt`
+ */
+void build_cli_agent_graph_with_terminal_sink(
+    workflow::GraphBuilder& builder,
+    const AgentConfig& config,
+    const AgentWorkflowDeps& deps,
+    std::string_view user_query,
+    const CliAgentTerminalSinkOptions& sink,
     std::string_view loop_node_name = "AgentLoop");
 
 // ============================================================================
@@ -182,7 +223,16 @@ public:
                               workflow::GraphBuilder& builder,
                               const AgentWorkflowDeps& deps,
                               std::shared_ptr<internal::AgentThreadState> agent_state);
-    
+
+    /**
+     * @brief 同 `build_agent_workflow`，并追加终端 Sink（见 `CliAgentTerminalSinkOptions`）
+     */
+    void build_agent_workflow(const AgentConfig& config,
+                              workflow::GraphBuilder& builder,
+                              const AgentWorkflowDeps& deps,
+                              std::shared_ptr<internal::AgentThreadState> agent_state,
+                              const CliAgentTerminalSinkOptions& sink);
+
     /**
      * @brief 构建自定义工作流
      * @param config 工作流配置

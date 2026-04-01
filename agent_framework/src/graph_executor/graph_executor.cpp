@@ -17,6 +17,14 @@ void GraphExecutor::build_agent_workflow(const AgentConfig& config,
     build_cli_agent_graph(builder, config, deps, std::move(agent_state));
 }
 
+void GraphExecutor::build_agent_workflow(const AgentConfig& config,
+                                        workflow::GraphBuilder& builder,
+                                        const AgentWorkflowDeps& deps,
+                                        std::shared_ptr<internal::AgentThreadState> agent_state,
+                                        const CliAgentTerminalSinkOptions& sink) {
+    build_cli_agent_graph_with_terminal_sink(builder, config, deps, std::move(agent_state), sink);
+}
+
 void GraphExecutor::build_custom_workflow(const WorkflowConfig& /*config*/,
                                           workflow::GraphBuilder& /*builder*/) {
     // WP1.6+: 自定义节点编排

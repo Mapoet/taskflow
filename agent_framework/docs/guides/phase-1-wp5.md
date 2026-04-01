@@ -198,7 +198,8 @@ flowchart TD
 |-------|--------|
 | T5.1 | **`build_cli_agent_graph`**（[graph_executor.hpp](../include/agent/graph_executor.hpp)）：`AgentWorkflowDeps`（`llm` + `toolbus`）+ `AgentConfig` + `shared_ptr<AgentThreadState>` 或 `user_query` 重载；内置源节点名 **`SystemPrompt` / `UserInput` / `AgentState`**，输出键同 [loop_io_keys.hpp](../include/agent/internal/loop_io_keys.hpp)；默认 Loop 名 **`AgentLoop`**。`PromptRenderer` 由调用方在 `LLMClient` 上配置。 |
 | T5.2 | **`GraphExecutor::build_agent_workflow`** 委托 `build_cli_agent_graph`；**`ReActTemplate::build_react_loop`** 同委托；**`ReActTemplate::build(json)`** 抛错并提示使用上述入口（JSON 无法表达 `shared_ptr` 运行时依赖）。 |
-| T5.3 | 挂 **`Sink`**（WP1.6）：仍由调用方在图外加 `create_any_sink`，依赖 `AgentLoop` 的 `final_answer` / `next_agent_state` 等键。 |
+| T5.3 | 挂 **`Sink`**（WP1.6）：仍可由调用方在图外加 `create_any_sink`，依赖 `AgentLoop` 的 `final_answer` / `next_agent_state` 等键。 |
+| T5.4 | **终端 Sink 可选 API**：`CliAgentTerminalSinkOptions` + **`build_cli_agent_graph_with_terminal_sink`**（及 `GraphExecutor::build_agent_workflow(..., sink)`）一次构图即订阅上述键并向 `std::function<void(const json&)>` 交付终稿摘要；详见 [phase-1-wp6.md](./phase-1-wp6.md) §5.1。 |
 
 ### T6 — 测试
 

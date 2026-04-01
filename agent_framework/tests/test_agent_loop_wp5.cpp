@@ -9,6 +9,8 @@
  *   - 路径：`AGENT_TEST_CURSOR_MCP_JSON`；若未设置则传空路径，由 ToolBus 使用
  *     `AGENT_MCP_CONFIG_PATH` 或默认 `~/.cursor/mcp.json`。
  * - 用户问题为开放式中文：**从现在出发，北京→西安，何时能到**（高铁/火车等，需结合工具查信息）。
+ * - 构图使用 **`build_cli_agent_graph_with_terminal_sink`**（与 WP1.6 终稿 Sink 一致）；`on_final_json` 取终稿字符串，
+ *   `on_final_state` 读取最终 `AgentThreadState::history`（Loop 内会更迭状态指针，勿仅用初始 `agent_state`）。
  *
  * **环境变量**：
  * - `AGENT_TEST_AGENT_LOOP_DEBUG=1`：打印 MCP 注册结果、导出工具数、history 尾部。
@@ -23,7 +25,6 @@
 #include <agent/toolbus.hpp>
 #include <agent/types.hpp>
 #include <agent/internal/agent_thread_state.hpp>
-#include <agent/internal/loop_io_keys.hpp>
 
 #include <cassert>
 #include <cctype>
@@ -221,56 +222,52 @@ void test_agent_loop_live_travel_mcp() {
     AgentWorkflowDeps deps;
     deps.llm = llm;
     deps.toolbus = bus;
-    build_cli_agent_graph(b, cfg, deps, init_state);
 
     std::string final_answer;
-    auto [sink, sink_task] = b.create_any_sink(
-        "Sink",
-        {{"AgentLoop", std::string(internal::kFinalAnswer)},
-         {"AgentLoop", std::string(internal::kNextAgentState)}},
-        [&final_answer, dbg, relax, exported_tools, skip_mcp](
-            const std::unordered_map<std::string, std::any>& outs) {
-            final_answer = std::any_cast<std::string>(outs.at(std::string(internal::kFinalAnswer)));
-            auto st = std::any_cast<std::shared_ptr<internal::AgentThreadState>>(
-                outs.at(std::string(internal::kNextAgentState)));
-            assert(st);
-            assert(st->iteration >= 1);
+    CliAgentTerminalSinkOptions sink_opts;
+    sink_opts.sink_node_name = "Sink";
+    sink_opts.on_final_json = [&final_answer](const json& j) {
+        final_answer = j.at("final_answer").get<std::string>();
+    };
+    sink_opts.on_final_state = [&final_answer, dbg, relax, exported_tools, skip_mcp](
+        const std::shared_ptr<internal::AgentThreadState>& st) {
+        assert(st);
+        assert(st->iteration >= 1);
 
-            const int n_tools = count_history_tool_messages(st->history);
-            if (!relax && !skip_mcp && exported_tools > 0 && n_tools < 1) {
-                throw std::runtime_error(
-                    "期望至少调用 1 次 MCP 工具（history 中无 role=tool）。"
-                    "若模型未选工具，可设 AGENT_TEST_WP5_RELAX=1 重试。");
-            }
+        const int n_tools = count_history_tool_messages(st->history);
+        if (!relax && !skip_mcp && exported_tools > 0 && n_tools < 1) {
+            throw std::runtime_error(
+                "期望至少调用 1 次 MCP 工具（history 中无 role=tool）。"
+                "若模型未选工具，可设 AGENT_TEST_WP5_RELAX=1 重试。");
+        }
 
-            if (dbg) {
-                std::cout << "== loop exited ==\n";
-                std::cout << "final_answer=\"" << final_answer << "\"\n";
-                std::cout << "iteration=" << st->iteration << " history_size=" << st->history.size()
-                          << " tool_messages=" << n_tools << "\n";
-                const std::size_t n = st->history.size();
-                const std::size_t start = (n > 12) ? (n - 12) : 0;
-                for (std::size_t i = start; i < n; ++i) {
-                    const auto& m = st->history[i];
-                    std::cout << "  hist[" << i << "] role=" << m.role;
-                    if (m.tool_name) {
-                        std::cout << " tool=" << *m.tool_name;
-                    }
-                    if (m.tool_result) {
-                        const std::string j = m.tool_result->dump();
-                        const std::size_t cap = 500;
-                        if (j.size() > cap) {
-                            std::cout << " -> " << j.substr(0, cap) << "...";
-                        } else {
-                            std::cout << " -> " << j;
-                        }
-                    }
-                    std::cout << "\n";
+        if (dbg) {
+            std::cout << "== loop exited ==\n";
+            std::cout << "final_answer=\"" << final_answer << "\"\n";
+            std::cout << "iteration=" << st->iteration << " history_size=" << st->history.size()
+                      << " tool_messages=" << n_tools << "\n";
+            const std::size_t n = st->history.size();
+            const std::size_t start = (n > 12) ? (n - 12) : 0;
+            for (std::size_t i = start; i < n; ++i) {
+                const auto& m = st->history[i];
+                std::cout << "  hist[" << i << "] role=" << m.role;
+                if (m.tool_name) {
+                    std::cout << " tool=" << *m.tool_name;
                 }
+                if (m.tool_result) {
+                    const std::string tr = m.tool_result->dump();
+                    const std::size_t cap = 500;
+                    if (tr.size() > cap) {
+                        std::cout << " -> " << tr.substr(0, cap) << "...";
+                    } else {
+                        std::cout << " -> " << tr;
+                    }
+                }
+                std::cout << "\n";
             }
-        });
-    (void)sink;
-    (void)sink_task;
+        }
+    };
+    build_cli_agent_graph_with_terminal_sink(b, cfg, deps, init_state, sink_opts);
 
     auto f = b.run_async(ex);
     f.wait();

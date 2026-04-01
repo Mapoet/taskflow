@@ -100,6 +100,7 @@ auto stream_cb = [&cli](std::string_view tok) {
 
 - **`handle_final_result(json)`**：pretty-print 可选；至少打印 `final_answer` 字段或整段 JSON。
 - 若图 **Sink 节点** 已打印最终文本，避免 **重复输出** — 约定：**仅一处**负责用户可见终稿（推荐 **Sink → CLIHandler**，LLM stream 仅增量）。
+- **`build_cli_agent_graph_with_terminal_sink`**（[graph_executor.hpp](../include/agent/graph_executor.hpp)）产出的 JSON 含 `final_answer`、`iteration`、`history_size`，可直接传入 `handle_final_result` 或由 lambda 转发，与上述去重约定一致。
 
 ---
 
@@ -110,7 +111,7 @@ auto stream_cb = [&cli](std::string_view tok) {
 1. 解析 argv / env。
 2. 构造 **`LLMClient`、`ToolBus`、`PromptRenderer`**（或 `from_env()` 工厂）。
 3. **`toolbus` 注册 demo 工具**（示例/测试用）。
-4. **`build_cli_agent_graph`**：`GraphBuilder builder(...)`，注入 **`SystemPrompt` / `UserInput` 源** 与 **stream_callback**。
+4. **`build_cli_agent_graph`** 或（推荐在有单一终稿出口时）**`build_cli_agent_graph_with_terminal_sink`**：`GraphBuilder builder(...)`，注入 **`SystemPrompt` / `UserInput` 源** 与 **stream_callback**；后者在 Loop 后追加 Sink，将结构化 JSON 交给回调（可与 §4.3 的 `handle_final_result` / CLIHandler 对齐，并注意与 stream 去重）。
 5. **`tf::Executor executor`**；`executor.run(g)` 或项目所用 **workflow API**（以现有 `simple_agent.cpp` 为准演进）。
 
 ### 5.2 `UserInput` 源
