@@ -303,10 +303,18 @@ int main(int argc, char** argv) {
 
     AgentConfig cfg;
     cfg.name = "cli_agent_demo";
-    cfg.system_prompt =
-        "You are a helpful assistant. You may use the add tool for integer sums when relevant. "
-        "If MCP tools are available in the tool list, you may call them when they help answer the user. "
-        "Answer concisely.";
+    if (!skip_cursor_mcp && mcp_services > 0) {
+        cfg.system_prompt =
+            "你是一个能够调用外部工具的助手。\n"
+            "若有与问题直接相关的工具，优先调用工具获取可核对的信息；若无完全对口工具，可结合现有工具输出与常识推理补全结论。\n"
+            "不要编造无法核对的细节；若信息不足，请明确假设并给出合理区间。\n"
+            "回答使用简体中文，结构清晰。\n";
+    } else {
+        cfg.system_prompt =
+            "你是一个助手。当前未加载 MCP 工具；请基于常识与公开典型情况回答，并明确标注为估算。\n"
+            "不要编造无法核对的细节；信息不足时请说明假设并给出合理区间。\n"
+            "回答使用简体中文，结构清晰。\n";
+    }
     if (const char* m = std::getenv("AGENT_LLM_MODEL")) {
         cfg.model_config.model_name = m;
     }
