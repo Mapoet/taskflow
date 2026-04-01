@@ -395,6 +395,7 @@ endif(TF_BUILD_BENCHMARKS)
 if(TF_BUILD_AGENT_FRAMEWORK)
   message(STATUS "Building Agent Framework...")
   message(STATUS "Agent Framework requires workflow library, ensuring it is enabled...")
+  # 示例（含 cli_agent_demo）：默认随 TF_BUILD_EXAMPLES；可单独覆盖 -DAGENT_BUILD_EXAMPLES=ON|OFF
   
   # 确保 workflow 库已启用
   if(NOT TF_BUILD_WORKFLOW)

@@ -1,9 +1,9 @@
 # 阶段 1：可演示 CLI Agent — 详细实现规划
 
-本文档在 [plan-detailed.md](./plan-detailed.md) **§4** 的工作包与交付定义之上，给出**可排期、可验收**的实现拆解、依赖顺序、配置与测试矩阵。阶段 2（A2A）与阶段 3（RAG）仅在与阶段 1 的衔接处被引用，不纳入本文件范围。
+本文档在 [plan-detailed.md](./plan-detailed.md) **§4** 的工作包与交付定义之上，给出**可排期、可验收**的实现拆解、依赖顺序、配置与测试矩阵。阶段 2（A2A，及 **plan-detailed §5.4/§7** 中的 ImGui/TUI/Web 富界面）与阶段 3（RAG）仅在与阶段 1 的衔接处被引用，不纳入本文件范围。
 
-**文档版本**：0.1  
-**日期**：2026-03-31  
+**文档版本**：0.2  
+**日期**：2026-04-01  
 **上游依据**：`plan-detailed.md` v0.2（含 WP1.1–WP1.8）
 
 ---
@@ -26,7 +26,8 @@
 
 - Google A2A JSON-RPC 对外门面、Agent Card Well-Known 生产级路由（属阶段 2）。
 - 向量索引、KnowledgeBase 生产路径（属阶段 3；图中可有占位节点但 Demo 可不接）。
-- ImGui / Web 正式 UI（CLI-only；`ui_manager` 仅薄封装允许）。
+- **富界面（阶段 2 规划）**：
+  - **ImGui** 正式实现（`ImGuiHandler` 等）、**Web** 前端、**TUI**（如 **ncurses** 全屏终端、readline 式增强 REPL、语法高亮）。阶段 1 为 **CLI-only**（stdio + 可选简单 `getline` REPL）；`ui_manager.hpp` 中 **仅预留接口 / stub**，不引入 ImGui、ncurses 等大依赖。
 - Skills **完整** Harness：WP1.8 为 **可选**；未做 WP1.8 不影响 D1–D7。
 
 ### 1.3 当前代码基线（Gap 简表）
@@ -272,6 +273,7 @@ flowchart LR
 
 - **Agent 循环**与 `build_cli_agent_graph` 应可复用为「任务处理器」：输入为结构化 `UserMessage`，输出为流式观测接口（阶段 1 用 stdout，阶段 2 映射到 SSE）。
 - **LLMOutput / ToolCall** 类型避免绑定 CLI 专用结构，便于 A2A Parts 映射。
+- **UI（与 A2A 并列规划，不阻塞阶段 1）**：**ImGui**、**TUI（ncurses 等）**、**Web** 在阶段 2 实现具体 `UIHandler` 子类或适配层；阶段 1 保持 `CLIHandler` 可测、DoD 可验收。详见 [plan-detailed.md](./plan-detailed.md) §7 与 [phase-1-wp6.md](./phase-1-wp6.md) §1.3。
 
 ---
 
@@ -280,6 +282,7 @@ flowchart LR
 | 日期 | 版本 | 说明 |
 |------|------|------|
 | 2026-03-31 | 0.1 | 初稿：由 plan-detailed §4 展开 WP1.1–1.8、依赖、配置、测试与风险；对齐现有目录布局。 |
+| 2026-04-01 | 0.2 | §1.2 / §6：ImGui、Web、TUI（ncurses）列为阶段 2；阶段 1 CLI-only + UI 接口预留。 |
 
 ---
 

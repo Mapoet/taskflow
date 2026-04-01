@@ -230,7 +230,7 @@ public:
 private:
     std::vector<std::unique_ptr<UIHandler>> handlers_;
     std::map<std::string, std::unique_ptr<UIHandler>> session_handlers_;
-    std::mutex handlers_mutex_;
+    mutable std::mutex handlers_mutex_;
     
     /**
      * @brief 分发到所有处理器

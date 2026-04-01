@@ -2,9 +2,9 @@
 
 本文档将 [phase-1-plan.md](./phase-1-plan.md) **§3 WP1.6** 细化为可执行任务、进程生命周期、与 **WP1.5 图** 的衔接方式及日志/信号策略。与 [phase-1-wp5.md](./phase-1-wp5.md)（`build_cli_agent_graph`、`stream_callback` 注入）一致。
 
-**文档版本**：0.1  
-**日期**：2026-03-31  
-**上游依据**：`phase-1-plan.md` v0.1（任务 1.6.1–1.6.3）
+**文档版本**：0.2  
+**日期**：2026-04-01  
+**上游依据**：`phase-1-plan.md` v0.1（任务 1.6.1–1.6.3）；UI 阶段划分见 `plan-detailed.md`
 
 ---
 
@@ -24,10 +24,22 @@
 
 ### 1.2 非目标
 
-- TUI（readline、历史、语法高亮）。
-- ImGui / Web：`ImGuiHandler` / `WebHandler` 阶段 1 **可不实现**或保持 stub。
+- **TUI**（readline、历史、语法高亮、**ncurses 等全屏终端 UI**）：阶段 1 不做；见 **§1.3**。
+- **ImGui / Web**：`ImGuiHandler` / `WebHandler` 阶段 1 **不实现业务**，仅 **stub 或保留接口**，与 [phase-1-plan.md](./phase-1-plan.md)、[plan-detailed.md](./plan-detailed.md) 中「阶段 2 富界面」一致。
 - **子进程隔离** CLI（无需 `nsenter`）。
 - 与 **WP1.3 MCP** 强耦合的专用子命令（若需 `--mcp-stdio` 见 [phase-1-wp3.md](./phase-1-wp3.md)，本 WP 仅 **透传 argv 给配置层** 可选）。
+
+### 1.3 后续阶段（UI）：ImGui 与 TUI
+
+阶段 1 验收以 **stdio 流式 CLI**（`CLIHandler` + `cli_agent_demo`）为准。**不**在 WP1.6 引入 ImGui、osgEarth、ncurses 等大依赖。
+
+| 方向 | 阶段 | 说明 |
+|------|------|------|
+| **ImGui**（及可选 ImPlot / 第三方宿主） | **阶段 2** | 实现 `ImGuiHandler`（或等价适配层），与 `UIHandler` 事件模型对齐；流式 token / 终稿 / 错误与 §4 去重约定一致。 |
+| **TUI**（如 **ncurses**、分栏终端 UI） | **阶段 2** | 与「简单 REPL」区分；可作为独立可执行目标，复用 `LLMClient` / 图工厂，**不**替代阶段 1 的 `cli_agent_demo` DoD。 |
+| **Web** | **阶段 2**（与 [plan-detailed.md](./plan-detailed.md) §5、§7 一致） | `WebHandler`、HTTP/SSE 消费侧等。 |
+
+阶段 1 的 **预留**：`include/agent/ui_manager.hpp` 中 **`UIHandler` 虚接口**、`ImGuiHandler` / `WebHandler` 声明或 stub，保证阶段 2 接入时无需改动核心图与 `CLIHandler` 契约。
 
 ---
 
@@ -40,7 +52,7 @@
 | **`UIHandler`** | 接口保持；阶段 1 **仅必须**完整实现 **`CLIHandler`** |
 | **`CLIHandler`** | 实现 `handle_stream_token`（加锁写 `ostream`）、`handle_final_result`、`handle_error`；`format_output` 统一前缀/换行策略 |
 | **`UIManager`** | **最小实现**：单会话 CLI 可 **不用** `UIManager`（仅 `CLIHandler` + lambda）；若实现 `UIManager`：`register_cli_handler` + `stream_token(session, token)` 在阶段 1 可用 **固定 `session_id`**（如 `"default"`） |
-| **`ImGuiHandler` / `WebHandler`** | stub 或延迟到阶段 2 |
+| **`ImGuiHandler` / `WebHandler`** | **阶段 1**：stub 或仅保留接口；**阶段 2** 再实现（见 §1.3） |
 
 ### 2.2 产出文件（与 plan 一致）
 
@@ -221,3 +233,4 @@ flowchart LR
 | 日期 | 版本 | 说明 |
 |------|------|------|
 | 2026-03-31 | 0.1 | 初稿：CLIHandler、argv、REPL、信号、与图接线、DoD。 |
+| 2026-04-01 | 0.2 | §1.3：ImGui / TUI / Web 明确为阶段 2；阶段 1 仅预留 `UIHandler` 与 stub。 |

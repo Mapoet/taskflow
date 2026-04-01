@@ -2,6 +2,8 @@
 
 本文档基于产品优先级、技术约束与公开协议现状，对 `agent_framework` 的后续实现做**可执行级**规划。规划对象包含：可演示 CLI Agent、A2A 服务化、RAG 与向量检索、LLM 双供应商、工具（本地 + MCP）、与 **Google Agent2Agent（A2A）** 等公开规范的对齐策略，以及 UI 与向量库选型。
 
+**文档版本**：0.3（2026-04-01）— UI：ImGui / TUI / Web 归入阶段 2，见 §7、§5.4。
+
 **关联文档**：[架构总览](../architecture/overview.md)、[快速开始](./getting_started.md)、[Skills 与 Harness](./skills.md)、设计长文 `readme/guide_agent.v3.md`（仓库根目录 `readme/`）。
 
 ---
@@ -13,7 +15,7 @@
 | 顺序 | 阶段 | 目标陈述 |
 |------|------|----------|
 | 1 | **CLI Agent** | 在单进程内用 `workflow` + Taskflow 跑通「读入 → LLM（流式 + 工具调用）→ 输出到终端」的闭环，可重复演示、可测。 |
-| 2 | **A2A 服务化** | 同一套 Agent 逻辑可被**远程**通过标准 Agent 协议发现、投递任务、订阅流式更新；服务端可水平扩展话题留待后续。 |
+| 2 | **A2A 服务化**（及 **富 UI 子路线**，与 A2A 并行规划） | 同一套 Agent 逻辑可被**远程**通过标准 Agent 协议发现、投递任务、订阅流式更新；服务端可水平扩展话题留待后续。**桌面/终端富界面**（**ImGui**、可选 **TUI/ncurses**、**Web**）在阶段 2 落地具体 `UIHandler` 实现，阶段 1 仅预留接口（见 §7）。 |
 | 3 | **RAG + 向量库** | 在稳定 Agent 与可选 A2A 暴露之后，接入编码器、向量存储与检索节点，进入知识增强推理。 |
 
 ### 1.2 已确认的技术约束
@@ -22,7 +24,7 @@
 - **工具**：**本地 C++ 注册调用**与 **MCP**（**stdio** 与 **HTTP/SSE** 传输）均需纳入同一 **ToolBus** 抽象，统一成 LLM 可见的 `ToolMeta` + 统一执行路径。
 - **协议对齐**：以 **Google A2A** 及生态内公开的 **MCP** 规范为对齐目标；**随官方版本演进更新**（见第 3 节版本跟踪）。
 - **向量库**：**不强制使用 Faiss**；以 `VectorStore` 接口隔离实现，Faiss 作为可选后端之一（见第 7 节）。
-- **UI**：第一版交付 **HTTP**（含 SSE/流式消费侧）与 **CLI**；**ImGui / Web 前端**通过统一 Sink/适配层后续接入，不在第一阶段阻塞核心能力。
+- **UI**：第一版交付 **CLI**（stdio、流式打印）；**HTTP**（含 SSE）以阶段 2 **A2A/服务化**为主通道（见 §5）。**ImGui**、**Web 前端**、**TUI（如 ncurses）** 均在**阶段 2** 通过统一 `UIHandler` / Sink 适配层接入，**不在阶段 1** 引入大依赖；阶段 1 仅 **stub 或保留头文件接口**（与 [phase-1-wp6.md](./phase-1-wp6.md) §1.3 一致）。
 
 ### 1.3 工程假设
 
@@ -171,6 +173,18 @@ flowchart TB
 
 - 阶段 1 的 **Agent 循环**应能通过「任务处理器」回调被 A2A 层调用：即 **同一 GraphBuilder 模板**既可在 CLI 本地跑，也可在 Server 收到 `tasks/send` 后异步跑。
 
+### 5.4 富界面（可选工作包，与 A2A 同阶段规划）
+
+以下工作项**不**纳入阶段 1 DoD，可在阶段 2 与 WP2.x **并行或分批**排期：
+
+| 方向 | 内容 |
+|------|------|
+| **ImGui** | 实现 `ImGuiHandler`；主线程渲染与 LLM 回调线程的队列/加锁策略；与流式/终稿去重约定（同 WP1.6 §4.3）。 |
+| **TUI** | 可选 **ncurses**（或同类）终端 UI；独立可执行程序为佳，避免拖垮无头 CI。 |
+| **Web** | `WebHandler`、浏览器侧 SSE/WS 消费与 WP2 HTTP 通道衔接。 |
+
+依赖：阶段 1 已稳定的 **`UIHandler` 契约**与图工厂（`build_cli_agent_graph` 等）。
+
 ---
 
 ## 6. 阶段 3：RAG + 向量库
@@ -197,15 +211,17 @@ flowchart TB
 
 ---
 
-## 7. UI 路线：HTTP + CLI 优先，兼容 ImGui/Web
+## 7. UI 路线：阶段 1 仅 CLI；ImGui / TUI / Web 为阶段 2
 
-| 阶段 | CLI | HTTP | ImGui | Web |
-|------|-----|------|-------|-----|
-| 1 | 主入口：stdin/stdout、流式打印 | 可不启用 | 不交付 | 不交付 |
-| 2 | 保留（调试/运维） | **对外服务主通道**：REST/A2A、SSE 消费示例 | 占位接口 | 可提供最小静态页 + SSE 演示 |
-| 3 | 同上 | 可增加 RAG 管理 API（可选） | 规划 **同一 Sink 接口** | 同左 |
+| 阶段 | CLI（stdio） | HTTP | ImGui | TUI（如 ncurses） | Web |
+|------|--------------|------|-------|-------------------|-----|
+| **1** | **主入口**：stdin/stdout、流式打印、简单 REPL；`CLIHandler` 完整实现 | 可不启用；不以 Web 为 DoD | **不交付**：`ImGuiHandler` **stub / 仅接口** | **不交付**（readline/ncurses/全屏终端 UI 均属阶段 2） | **不交付**：`WebHandler` stub |
+| **2** | 保留（调试/运维） | **对外服务主通道**：REST/A2A、SSE 消费示例 | **实现** `ImGuiHandler`（或等价），可选第三方栈（ImPlot 等） | **可选**：独立目标（如 `tui_agent_demo`），复用图与 `UIHandler` 事件模型 | 最小静态页 + SSE 演示等 |
+| **3** | 同上 | 可增加 RAG 管理 API（可选） | 与 **同一 Sink / `UIHandler` 接口** 对齐扩展 | 同上 | 同左 |
 
-**兼容策略**：抽象 `UISink`（或沿用 `ui_sink_node` 方向），输出事件模型统一为「文本块 / 工具开始结束 / 错误 / 最终答案」，CLI 与 HTTP SSE 仅为不同 **adapter**。
+**兼容策略**：抽象 `UISink` / **`UIHandler`**（`handle_stream_token`、`handle_final_result`、`handle_error`），输出事件模型统一为「文本块 / 工具开始结束 / 错误 / 最终答案」；**CLI**、**HTTP SSE**、**ImGui**、**TUI** 仅为不同 **adapter**。阶段 1 验收不依赖 ImGui、ncurses、Web 运行时。
+
+**与 WP1.6 对齐**：详见 [phase-1-wp6.md](./phase-1-wp6.md) §1.2–§1.3。
 
 ---
 
@@ -247,6 +263,7 @@ flowchart TB
 |------|------|------|
 | 2026-03-31 | 0.1 | 初稿：按 CLI → A2A → RAG 顺序，整合 LLM/工具/MCP/A2A/Faiss/UI 约束与对齐策略。 |
 | 2026-03-31 | 0.2 | 增加 Skills/Harness：关联 `skills.md`、阶段 1 WP1.8、阶段 3 与向量路由衔接、信息清单与观测性条目。 |
+| 2026-04-01 | 0.3 | §1.1/§1.2/§7：ImGui、TUI（ncurses）、Web 明确为阶段 2；§5.4 富界面可选工作包；阶段 1 仅 CLI + UI 接口预留。 |
 
 ---
 

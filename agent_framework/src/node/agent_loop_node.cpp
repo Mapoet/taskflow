@@ -10,8 +10,10 @@
 #include "agent/internal/agent_thread_state.hpp"
 #include "agent/internal/loop_io_keys.hpp"
 #include <any>
+#include <functional>
 #include <unordered_map>
 #include <chrono>
+#include <cctype>
 #include <cstdlib>
 #include <ctime>
 #include <iostream>
@@ -19,6 +21,44 @@
 
 namespace agent_framework {
 namespace node {
+
+namespace {
+
+enum class LogLevel : int { Error = 0, Warn = 1, Info = 2, Debug = 3 };
+
+LogLevel log_level_from_env() {
+    const char* dbg = std::getenv("AGENT_TEST_AGENT_LOOP_DEBUG");
+    if (dbg && std::string(dbg) != "0") {
+        return LogLevel::Debug;
+    }
+    const char* e = std::getenv("AGENT_LOG_LEVEL");
+    if (!e || !*e) {
+        return LogLevel::Info;
+    }
+    std::string s(e);
+    for (char& c : s) {
+        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    }
+    if (s == "debug") {
+        return LogLevel::Debug;
+    }
+    if (s == "info") {
+        return LogLevel::Info;
+    }
+    if (s == "warn" || s == "warning") {
+        return LogLevel::Warn;
+    }
+    if (s == "error") {
+        return LogLevel::Error;
+    }
+    return LogLevel::Info;
+}
+
+bool log_at_least(LogLevel need) {
+    return static_cast<int>(log_level_from_env()) >= static_cast<int>(need);
+}
+
+} // namespace
 
 std::pair<std::shared_ptr<workflow::LoopNode>, tf::Task>
 AgentLoopNode::create(
@@ -30,7 +70,8 @@ AgentLoopNode::create(
     std::shared_ptr<MemoryStore> memory_store,
     std::shared_ptr<VectorStore> vector_store,
     const std::vector<std::pair<std::string, std::string>>& input_specs,
-    const std::vector<std::string>& output_keys
+    const std::vector<std::string>& output_keys,
+    std::function<void(std::string_view)> stream_callback
 ) {
     // NOTE: workflow::create_loop_decl currently does NOT pass body outputs into condition_func.
     // Therefore WP1.5 loop uses closure state:
@@ -46,7 +87,7 @@ AgentLoopNode::create(
     };
     auto shared = std::make_shared<Shared>();
 
-    auto body_func = [agent_config, llm_client, toolbus, shared](
+    auto body_func = [agent_config, llm_client, toolbus, shared, stream_callback](
                          const std::unordered_map<std::string, std::any>& inps)
         -> std::unordered_map<std::string, std::any> {
         const char* dbg_env = std::getenv("AGENT_TEST_AGENT_LOOP_DEBUG");
@@ -81,7 +122,7 @@ AgentLoopNode::create(
             std::cout.flush();
         }
         const auto t0 = std::chrono::steady_clock::now();
-        LLMOutput llm_out = llm_client->invoke(llm_in, "", nullptr).get();
+        LLMOutput llm_out = llm_client->invoke(llm_in, "", stream_callback).get();
         const auto t1 = std::chrono::steady_clock::now();
         if (dbg) {
             const auto ms =
@@ -129,6 +170,10 @@ AgentLoopNode::create(
                           << "\n";
                 std::cout.flush();
             }
+            if (log_at_least(LogLevel::Info)) {
+                std::clog << "[tool] name=" << c.name << " start\n";
+                std::clog.flush();
+            }
             json result = toolbus->call_tool(c.name, c.arguments).get();
             Message tm;
             tm.role = "tool";
@@ -137,6 +182,17 @@ AgentLoopNode::create(
             tm.tool_result = result;
             tm.timestamp = std::time(nullptr);
             shared->state->history.push_back(std::move(tm));
+            if (log_at_least(LogLevel::Info)) {
+                std::clog << "[tool] name=" << c.name << " done\n";
+                std::clog.flush();
+            }
+            if (result.is_object() && result.contains("code") && result["code"].is_string()) {
+                if (log_at_least(LogLevel::Warn)) {
+                    std::clog << "[tool] name=" << c.name << " warn code=" << result["code"].dump()
+                              << "\n";
+                    std::clog.flush();
+                }
+            }
             if (dbg) {
                 std::cout << "[AgentLoop] tool " << c.name << " result=" << result.dump() << "\n";
                 std::cout.flush();

@@ -39,6 +39,13 @@ struct AgentWorkflowDeps {
 };
 
 /**
+ * @brief 可选构图参数（WP1.6 流式等）
+ */
+struct CliAgentGraphOptions {
+    std::function<void(std::string_view)> stream_callback{};
+};
+
+/**
  * @brief 构建与 test_agent_loop_wp5 等价的 CLI ReAct 图：内置 SystemPrompt / UserInput / AgentState 源 + AgentLoop
  *
  * 节点契约（与 WP1.5 一致）：源名 `SystemPrompt`/`UserInput`/`AgentState`；输出键见 internal::loop_io_keys.hpp。
@@ -52,7 +59,8 @@ void build_cli_agent_graph(
     const AgentConfig& config,
     const AgentWorkflowDeps& deps,
     std::shared_ptr<internal::AgentThreadState> agent_state,
-    std::string_view loop_node_name = "AgentLoop");
+    std::string_view loop_node_name = "AgentLoop",
+    const CliAgentGraphOptions& graph_options = CliAgentGraphOptions());
 
 /**
  * @brief 便捷重载：内部创建 AgentThreadState 并设置 initial_user_prompt
@@ -62,7 +70,8 @@ void build_cli_agent_graph(
     const AgentConfig& config,
     const AgentWorkflowDeps& deps,
     std::string_view user_query,
-    std::string_view loop_node_name = "AgentLoop");
+    std::string_view loop_node_name = "AgentLoop",
+    const CliAgentGraphOptions& graph_options = CliAgentGraphOptions());
 
 /**
  * @brief 可选终端 Sink：Loop 退出后将结构化终稿交给单一回调（与 WP1.6 `handle_final_result` 字段对齐）
@@ -91,7 +100,8 @@ void build_cli_agent_graph_with_terminal_sink(
     const AgentWorkflowDeps& deps,
     std::shared_ptr<internal::AgentThreadState> agent_state,
     const CliAgentTerminalSinkOptions& sink,
-    std::string_view loop_node_name = "AgentLoop");
+    std::string_view loop_node_name = "AgentLoop",
+    const CliAgentGraphOptions& graph_options = CliAgentGraphOptions());
 
 /**
  * @brief 便捷重载：内部创建 `AgentThreadState` 并设置 `initial_user_prompt`
@@ -102,7 +112,8 @@ void build_cli_agent_graph_with_terminal_sink(
     const AgentWorkflowDeps& deps,
     std::string_view user_query,
     const CliAgentTerminalSinkOptions& sink,
-    std::string_view loop_node_name = "AgentLoop");
+    std::string_view loop_node_name = "AgentLoop",
+    const CliAgentGraphOptions& graph_options = CliAgentGraphOptions());
 
 // ============================================================================
 // 工作流模板接口
@@ -164,7 +175,8 @@ public:
         const AgentConfig& config,
         const AgentWorkflowDeps& deps,
         std::shared_ptr<internal::AgentThreadState> agent_state,
-        std::string_view loop_node_name = "AgentLoop");
+        std::string_view loop_node_name = "AgentLoop",
+        const CliAgentGraphOptions& graph_options = CliAgentGraphOptions());
 };
 
 /**

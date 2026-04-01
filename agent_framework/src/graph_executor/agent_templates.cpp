@@ -31,8 +31,10 @@ void ReActTemplate::build_react_loop(workflow::GraphBuilder& builder,
                                      const AgentConfig& config,
                                      const AgentWorkflowDeps& deps,
                                      std::shared_ptr<internal::AgentThreadState> agent_state,
-                                     std::string_view loop_node_name) {
-    build_cli_agent_graph(builder, config, deps, std::move(agent_state), loop_node_name);
+                                     std::string_view loop_node_name,
+                                     const CliAgentGraphOptions& graph_options) {
+    build_cli_agent_graph(builder, config, deps, std::move(agent_state), loop_node_name,
+                          graph_options);
 }
 
 void BatchToolCallTemplate::build(workflow::GraphBuilder& builder, const json& config) {

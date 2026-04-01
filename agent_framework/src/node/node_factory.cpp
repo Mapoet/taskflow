@@ -177,7 +177,8 @@ NodeFactory::create_agent_loop_node(
         memory_store,
         vector_store,
         input_specs,
-        output_keys
+        output_keys,
+        nullptr
     );
 }
 

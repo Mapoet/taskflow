@@ -14,8 +14,10 @@
 #include "../agent/toolbus.hpp"
 #include "../agent/memory.hpp"
 #include "../agent/vectorstore.hpp"
+#include <functional>
 #include <string>
 #include <memory>
+#include <string_view>
 
 namespace agent_framework {
 namespace node {
@@ -42,6 +44,7 @@ public:
      *   - "final_answer": 最终回答
      *   - "reasoning": 思考过程
      *   - "tool_calls": 工具调用列表
+     * @param stream_callback 可选；传给 `LLMClient::invoke` 的流式 token 回调（WP1.6）
      * @return (节点指针, 任务句柄)
      */
     static std::pair<std::shared_ptr<workflow::LoopNode>, tf::Task>
@@ -54,7 +57,8 @@ public:
         std::shared_ptr<MemoryStore> memory_store,
         std::shared_ptr<VectorStore> vector_store,
         const std::vector<std::pair<std::string, std::string>>& input_specs,
-        const std::vector<std::string>& output_keys
+        const std::vector<std::string>& output_keys,
+        std::function<void(std::string_view)> stream_callback = nullptr
     );
 
 private:

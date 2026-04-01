@@ -23,7 +23,8 @@ void build_cli_agent_graph_impl(workflow::GraphBuilder& builder,
                                 const AgentConfig& config,
                                 const AgentWorkflowDeps& deps,
                                 const std::shared_ptr<internal::AgentThreadState>& agent_state,
-                                std::string_view loop_node_name) {
+                                std::string_view loop_node_name,
+                                const CliAgentGraphOptions& graph_options) {
     if (!deps.llm) {
         throw std::invalid_argument("build_cli_agent_graph: deps.llm is null");
     }
@@ -65,7 +66,8 @@ void build_cli_agent_graph_impl(workflow::GraphBuilder& builder,
          {"UserInput", std::string(internal::kUserQuery)},
          {"AgentState", std::string(internal::kAgentState)}},
         {std::string(internal::kFinalAnswer), std::string(internal::kNextAgentState),
-         std::string(internal::kLlmOutput)});
+         std::string(internal::kLlmOutput)},
+        graph_options.stream_callback);
     (void)loop_node;
     (void)loop_task;
 }
@@ -114,18 +116,20 @@ void build_cli_agent_graph(workflow::GraphBuilder& builder,
                            const AgentConfig& config,
                            const AgentWorkflowDeps& deps,
                            std::shared_ptr<internal::AgentThreadState> agent_state,
-                           std::string_view loop_node_name) {
-    build_cli_agent_graph_impl(builder, config, deps, agent_state, loop_node_name);
+                           std::string_view loop_node_name,
+                           const CliAgentGraphOptions& graph_options) {
+    build_cli_agent_graph_impl(builder, config, deps, agent_state, loop_node_name, graph_options);
 }
 
 void build_cli_agent_graph(workflow::GraphBuilder& builder,
                            const AgentConfig& config,
                            const AgentWorkflowDeps& deps,
                            std::string_view user_query,
-                           std::string_view loop_node_name) {
+                           std::string_view loop_node_name,
+                           const CliAgentGraphOptions& graph_options) {
     auto st = std::make_shared<internal::AgentThreadState>();
     st->initial_user_prompt = std::string(user_query);
-    build_cli_agent_graph_impl(builder, config, deps, st, loop_node_name);
+    build_cli_agent_graph_impl(builder, config, deps, st, loop_node_name, graph_options);
 }
 
 void build_cli_agent_graph_with_terminal_sink(
@@ -134,8 +138,9 @@ void build_cli_agent_graph_with_terminal_sink(
     const AgentWorkflowDeps& deps,
     std::shared_ptr<internal::AgentThreadState> agent_state,
     const CliAgentTerminalSinkOptions& sink,
-    std::string_view loop_node_name) {
-    build_cli_agent_graph_impl(builder, config, deps, agent_state, loop_node_name);
+    std::string_view loop_node_name,
+    const CliAgentGraphOptions& graph_options) {
+    build_cli_agent_graph_impl(builder, config, deps, agent_state, loop_node_name, graph_options);
     append_cli_terminal_sink(builder, loop_node_name, sink);
 }
 
@@ -145,11 +150,12 @@ void build_cli_agent_graph_with_terminal_sink(
     const AgentWorkflowDeps& deps,
     std::string_view user_query,
     const CliAgentTerminalSinkOptions& sink,
-    std::string_view loop_node_name) {
+    std::string_view loop_node_name,
+    const CliAgentGraphOptions& graph_options) {
     auto st = std::make_shared<internal::AgentThreadState>();
     st->initial_user_prompt = std::string(user_query);
     build_cli_agent_graph_with_terminal_sink(builder, config, deps, std::move(st), sink,
-                                              loop_node_name);
+                                              loop_node_name, graph_options);
 }
 
 } // namespace agent_framework
