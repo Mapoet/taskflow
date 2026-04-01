@@ -17,13 +17,13 @@
  * - `AGENT_HTTP_TIMEOUT_SEC` / `AGENT_MCP_REQUEST_TIMEOUT_MS`：可按网络调大（MCP 多轮较慢）。
  */
 
+#include <agent/graph_executor.hpp>
 #include <agent/llm_client.hpp>
 #include <agent/prompt_renderer.hpp>
 #include <agent/toolbus.hpp>
 #include <agent/types.hpp>
 #include <agent/internal/agent_thread_state.hpp>
 #include <agent/internal/loop_io_keys.hpp>
-#include <node/agent_loop_node.hpp>
 
 #include <cassert>
 #include <cctype>
@@ -218,37 +218,10 @@ void test_agent_loop_live_travel_mcp() {
                   << " relax=" << (relax ? 1 : 0) << "\n";
     }
 
-    auto [sys_src, _st] = b.create_any_source(
-        "SystemPrompt",
-        std::unordered_map<std::string, std::any>{
-            {std::string(internal::kSystemPrompt), std::any{cfg.system_prompt}}});
-    (void)sys_src;
-    auto [user_src, _ut] = b.create_any_source(
-        "UserInput",
-        std::unordered_map<std::string, std::any>{
-            {std::string(internal::kUserQuery), std::any{init_state->initial_user_prompt}}});
-    (void)user_src;
-    auto [state_src, _at] = b.create_any_source(
-        "AgentState",
-        std::unordered_map<std::string, std::any>{
-            {std::string(internal::kAgentState), std::any{init_state}}});
-    (void)state_src;
-
-    auto [loop_node, loop_task] = node::AgentLoopNode::create(
-        b,
-        "AgentLoop",
-        cfg,
-        llm,
-        bus,
-        nullptr,
-        nullptr,
-        {{"SystemPrompt", std::string(internal::kSystemPrompt)},
-         {"UserInput", std::string(internal::kUserQuery)},
-         {"AgentState", std::string(internal::kAgentState)}},
-        {std::string(internal::kFinalAnswer), std::string(internal::kNextAgentState),
-         std::string(internal::kLlmOutput)});
-    (void)loop_task;
-    (void)loop_node;
+    AgentWorkflowDeps deps;
+    deps.llm = llm;
+    deps.toolbus = bus;
+    build_cli_agent_graph(b, cfg, deps, init_state);
 
     std::string final_answer;
     auto [sink, sink_task] = b.create_any_sink(

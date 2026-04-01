@@ -192,12 +192,13 @@ flowchart TD
 | T4.2 | `MemoryStore` / `VectorStore`：**若 nullptr**，跳过相关源节点；`AgentConfig::enable_*` false 时一致 |
 | T4.3 | `build_exit_handler`：对外输出 `final_answer`（最后一轮 `LLMOutput.final_answer` 或 history 尾部） |
 
-### T5 — `agent_templates.cpp` / `workflow_builder.cpp`
+### T5 — `agent_templates.cpp` / `cli_agent_graph.cpp` / `GraphExecutor`
 
 | 子 ID | 工作项 |
 |-------|--------|
-| T5.1 | `build_cli_agent_graph(builder, config, llm, toolbus, renderer, ...)` |
-| T5.2 | 注册 `SystemPrompt`、`UserInput` 源；挂 `AgentLoopNode`；挂 `Sink`（WP1.6） |
+| T5.1 | **`build_cli_agent_graph`**（[graph_executor.hpp](../include/agent/graph_executor.hpp)）：`AgentWorkflowDeps`（`llm` + `toolbus`）+ `AgentConfig` + `shared_ptr<AgentThreadState>` 或 `user_query` 重载；内置源节点名 **`SystemPrompt` / `UserInput` / `AgentState`**，输出键同 [loop_io_keys.hpp](../include/agent/internal/loop_io_keys.hpp)；默认 Loop 名 **`AgentLoop`**。`PromptRenderer` 由调用方在 `LLMClient` 上配置。 |
+| T5.2 | **`GraphExecutor::build_agent_workflow`** 委托 `build_cli_agent_graph`；**`ReActTemplate::build_react_loop`** 同委托；**`ReActTemplate::build(json)`** 抛错并提示使用上述入口（JSON 无法表达 `shared_ptr` 运行时依赖）。 |
+| T5.3 | 挂 **`Sink`**（WP1.6）：仍由调用方在图外加 `create_any_sink`，依赖 `AgentLoop` 的 `final_answer` / `next_agent_state` 等键。 |
 
 ### T6 — 测试
 
@@ -235,7 +236,7 @@ flowchart TD
 - [ ] 顺序工具执行；mock 路径 **2 轮 tool + 1 轮 final** 通过。
 - [ ] `AgentConfig::max_iterations` 生效；超限退出可观测。
 - [ ] `history` 可被 WP1.4 渲染消费（含 tool 消息，字段与 WP1.4 T-TYPES 一致）。
-- [ ] `build_cli_agent_graph`（或等价）可被 WP1.6 调用。
+- [x] `build_cli_agent_graph` / `GraphExecutor::build_agent_workflow` 已实现（WP1.6 可直接调用构图）。
 - [ ] 图 `dump` 可读，依赖全部由 `input_specs` 推断。
 
 ---

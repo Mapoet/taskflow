@@ -10,14 +10,58 @@
 
 #include "types.hpp"
 #include <workflow/nodeflow.hpp>
-#include <string>
-#include <vector>
+#include <future>
 #include <map>
 #include <memory>
-#include <future>
 #include <mutex>
+#include <string>
+#include <string_view>
+#include <vector>
 
 namespace agent_framework {
+
+class LLMClient;
+class ToolBus;
+
+namespace internal {
+struct AgentThreadState;
+}
+
+/**
+ * @brief WP1.5 ReAct Agent 图所需的运行时依赖（LLM + ToolBus）
+ *
+ * PromptRenderer 由调用方在 LLMClient 上 `set_prompt_renderer` 配置，不重复放入此结构。
+ */
+struct AgentWorkflowDeps {
+    std::shared_ptr<LLMClient> llm;
+    std::shared_ptr<ToolBus> toolbus;
+};
+
+/**
+ * @brief 构建与 test_agent_loop_wp5 等价的 CLI ReAct 图：内置 SystemPrompt / UserInput / AgentState 源 + AgentLoop
+ *
+ * 节点契约（与 WP1.5 一致）：源名 `SystemPrompt`/`UserInput`/`AgentState`；输出键见 internal::loop_io_keys.hpp。
+ * @param loop_node_name Loop 节点名，默认 `AgentLoop`
+ *
+ * 注意：传字面量 `nullptr` 会与 string_view 重载产生歧义，请使用
+ * `static_cast<std::shared_ptr<internal::AgentThreadState>>(nullptr)` 或具名变量。
+ */
+void build_cli_agent_graph(
+    workflow::GraphBuilder& builder,
+    const AgentConfig& config,
+    const AgentWorkflowDeps& deps,
+    std::shared_ptr<internal::AgentThreadState> agent_state,
+    std::string_view loop_node_name = "AgentLoop");
+
+/**
+ * @brief 便捷重载：内部创建 AgentThreadState 并设置 initial_user_prompt
+ */
+void build_cli_agent_graph(
+    workflow::GraphBuilder& builder,
+    const AgentConfig& config,
+    const AgentWorkflowDeps& deps,
+    std::string_view user_query,
+    std::string_view loop_node_name = "AgentLoop");
 
 // ============================================================================
 // 工作流模板接口
@@ -60,6 +104,9 @@ public:
 
 /**
  * @brief ReAct 循环模板
+ *
+ * WorkflowTemplate::build(json) 无法提供 LLM/ToolBus shared_ptr，将抛异常；请使用 build_react_loop 或
+ * build_cli_agent_graph / GraphExecutor::build_agent_workflow。
  */
 class ReActTemplate : public WorkflowTemplate {
 public:
@@ -67,14 +114,16 @@ public:
     std::string get_template_name() const override;
     std::string get_template_description() const override;
     bool validate_config(const json& config) const override;
-    
-private:
+
     /**
-     * @brief 构建 ReAct 循环体
-     * @param builder 图构建器
-     * @param config Agent 配置
+     * @brief 与 build_cli_agent_graph 等价，便于以模板类名义调用
      */
-    void build_react_loop(workflow::GraphBuilder& builder, const AgentConfig& config);
+    static void build_react_loop(
+        workflow::GraphBuilder& builder,
+        const AgentConfig& config,
+        const AgentWorkflowDeps& deps,
+        std::shared_ptr<internal::AgentThreadState> agent_state,
+        std::string_view loop_node_name = "AgentLoop");
 };
 
 /**
@@ -125,11 +174,14 @@ private:
 class GraphExecutor {
 public:
     /**
-     * @brief 构建标准 Agent 工作流
-     * @param config Agent 配置
-     * @param builder 图构建器
+     * @brief 构建标准 Agent（ReAct）工作流
+     * @param deps LLM 与 ToolBus；renderer 请在 llm 上预配置
+     * @param agent_state 非空；initial_user_prompt 为首轮用户内容
      */
-    void build_agent_workflow(const AgentConfig& config, workflow::GraphBuilder& builder);
+    void build_agent_workflow(const AgentConfig& config,
+                              workflow::GraphBuilder& builder,
+                              const AgentWorkflowDeps& deps,
+                              std::shared_ptr<internal::AgentThreadState> agent_state);
     
     /**
      * @brief 构建自定义工作流
@@ -169,15 +221,8 @@ public:
 private:
     std::map<std::string, std::shared_ptr<WorkflowTemplate>> templates_;
     std::map<std::string, workflow::GraphBuilder> workflows_;
-    std::mutex templates_mutex_;
-    std::mutex workflows_mutex_;
-    
-    /**
-     * @brief 构建默认 Agent 工作流（使用 ReAct 模板）
-     * @param config Agent 配置
-     * @param builder 图构建器
-     */
-    void build_default_agent_workflow(const AgentConfig& config, workflow::GraphBuilder& builder);
+    mutable std::mutex templates_mutex_;
+    mutable std::mutex workflows_mutex_;
 };
 
 } // namespace agent_framework
