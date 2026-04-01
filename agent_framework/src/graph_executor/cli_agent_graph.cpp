@@ -101,6 +101,29 @@ void append_cli_terminal_sink(workflow::GraphBuilder& builder,
             j["final_answer"] = final_answer;
             j["iteration"] = st_ptr ? st_ptr->iteration : 0;
             j["history_size"] = st_ptr ? static_cast<std::size_t>(st_ptr->history.size()) : 0;
+            // Optional guard fields (best-effort; keep backward compatibility)
+            // Convention: guard-triggered final_answer starts with "[guard]".
+            bool guard_triggered = final_answer.rfind("[guard]", 0) == 0;
+            j["guard_triggered"] = guard_triggered;
+            if (guard_triggered) {
+                // Parse reason=... token if present.
+                std::string reason;
+                const std::string k = "reason=";
+                const std::size_t pos = final_answer.find(k);
+                if (pos != std::string::npos) {
+                    const std::size_t start = pos + k.size();
+                    std::size_t end = final_answer.find_first_of(" \n\r\t", start);
+                    if (end == std::string::npos) {
+                        end = final_answer.size();
+                    }
+                    reason = final_answer.substr(start, end - start);
+                }
+                j["guard_reason"] = reason;
+                j["guard_details"] = final_answer;
+            } else {
+                j["guard_reason"] = "";
+                j["guard_details"] = "";
+            }
             cb(j);
             if (cb_state) {
                 cb_state(st_ptr);

@@ -18,6 +18,7 @@
 #include <ctime>
 #include <iostream>
 #include <sstream>
+#include <unordered_set>
 
 namespace agent_framework {
 namespace node {
@@ -25,6 +26,58 @@ namespace node {
 namespace {
 
 enum class LogLevel : int { Error = 0, Warn = 1, Info = 2, Debug = 3 };
+
+bool env_truthy(const char* key) {
+    const char* v = std::getenv(key);
+    if (!v || !*v) {
+        return false;
+    }
+    return v[0] == '1' || v[0] == 'y' || v[0] == 'Y' || v[0] == 't' || v[0] == 'T';
+}
+
+bool guard_repeat_tool_in_iteration_enabled() {
+    // default ON
+    if (std::getenv("AGENT_LOOP_GUARD_REPEAT_TOOL_IN_ITERATION") == nullptr) {
+        return true;
+    }
+    return env_truthy("AGENT_LOOP_GUARD_REPEAT_TOOL_IN_ITERATION");
+}
+
+bool guard_no_progress_enabled() {
+    // default OFF (conservative)
+    if (std::getenv("AGENT_LOOP_GUARD_NO_PROGRESS") == nullptr) {
+        return false;
+    }
+    return env_truthy("AGENT_LOOP_GUARD_NO_PROGRESS");
+}
+
+int guard_no_progress_k() {
+    const char* v = std::getenv("AGENT_LOOP_GUARD_NO_PROGRESS_K");
+    if (!v || !*v) {
+        return 3;
+    }
+    const int n = std::atoi(v);
+    return (n <= 0) ? 3 : n;
+}
+
+std::size_t guard_text_trunc() {
+    const char* v = std::getenv("AGENT_LOOP_GUARD_TEXT_TRUNC");
+    if (!v || !*v) {
+        return 200;
+    }
+    const int n = std::atoi(v);
+    if (n <= 0) {
+        return 200;
+    }
+    return static_cast<std::size_t>(n);
+}
+
+std::string trunc_copy(const std::string& s, std::size_t cap) {
+    if (s.size() <= cap) {
+        return s;
+    }
+    return s.substr(0, cap) + "...";
+}
 
 LogLevel log_level_from_env() {
     const char* dbg = std::getenv("AGENT_TEST_AGENT_LOOP_DEBUG");
@@ -164,12 +217,47 @@ AgentLoopNode::create(
         if (static_cast<int>(calls.size()) > agent_config.max_tool_calls_per_iteration) {
             calls.resize(static_cast<std::size_t>(agent_config.max_tool_calls_per_iteration));
         }
+        const bool guard_repeat_on = guard_repeat_tool_in_iteration_enabled();
+        const std::size_t guard_trunc = guard_text_trunc();
+        std::unordered_set<std::string> seen_calls;
+        if (guard_repeat_on) {
+            seen_calls.reserve(calls.size());
+        }
         for (const auto& c : calls) {
             if (dbg) {
                 std::cout << "[AgentLoop] calling tool " << c.name << " args=" << c.arguments.dump()
                           << "\n";
                 std::cout.flush();
             }
+
+            const std::string call_key = c.name + "\n" + c.arguments.dump();
+            if (guard_repeat_on) {
+                if (seen_calls.find(call_key) != seen_calls.end()) {
+                    const int iter = shared->state ? shared->state->iteration : 0;
+                    const std::string details = trunc_copy(call_key, guard_trunc);
+                    shared->is_final = true;
+                    shared->final_answer =
+                        "[guard] reason=repeat_tool_call_in_iteration iter=" +
+                        std::to_string(iter) +
+                        "\nDetected repeated tool call within the same iteration. "
+                        "Please avoid calling the same tool with identical arguments repeatedly. "
+                        "If inputs are missing, state the assumptions or request the missing fields.\n"
+                        "tool_call_key(truncated): " +
+                        details + "\n";
+                    shared->last_llm.is_final = true;
+                    shared->last_llm.final_answer = shared->final_answer;
+                    shared->last_llm.tool_calls.clear();
+
+                    if (log_at_least(LogLevel::Warn)) {
+                        std::clog << "[guard] reason=repeat_tool_call_in_iteration iter=" << iter
+                                  << " tool=" << c.name << "\n";
+                        std::clog.flush();
+                    }
+                    break;
+                }
+                seen_calls.insert(call_key);
+            }
+
             if (log_at_least(LogLevel::Info)) {
                 std::clog << "[tool] name=" << c.name << " start\n";
                 std::clog.flush();
@@ -200,8 +288,11 @@ AgentLoopNode::create(
         }
 
         shared->state->iteration += 1;
-        shared->is_final = llm_out.tool_calls.empty() && (llm_out.is_final || !llm_out.final_answer.empty());
-        shared->final_answer = llm_out.final_answer;
+        if (!shared->is_final) {
+            shared->is_final =
+                llm_out.tool_calls.empty() && (llm_out.is_final || !llm_out.final_answer.empty());
+            shared->final_answer = llm_out.final_answer;
+        }
 
         return {};
     };

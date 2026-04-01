@@ -114,6 +114,27 @@ auto stream_cb = [&cli](std::string_view tok) {
 - 若图 **Sink 节点** 已打印最终文本，避免 **重复输出** — 约定：**仅一处**负责用户可见终稿（推荐 **Sink → CLIHandler**，LLM stream 仅增量）。
 - **`build_cli_agent_graph_with_terminal_sink`**（[graph_executor.hpp](../include/agent/graph_executor.hpp)）产出的 JSON 含 `final_answer`、`iteration`、`history_size`，可直接传入 `handle_final_result` 或由 lambda 转发，与上述去重约定一致。
 
+### 4.4 反“陷入形式”工程兜底（Anti-loop Guard）
+
+在真实工具链（尤其 MCP 工具）下，LLM 可能出现「同一轮内反复选择同一工具与同一参数」或「输出无进展直到耗尽 `max_iterations`」的退化行为。阶段 1 增加**工程级兜底**，保证 CLI 不会在无意义循环中消耗大量轮次。
+
+- **Repeat-tool guard（默认开启）**：同一 iteration 内，相同 `(tool_name + arguments)` **只允许调用 1 次**；重复将触发 guard 并**优雅结束**本轮 AgentLoop。
+- **No-progress guard（默认关闭）**：保留开关与阈值，待线上案例充分验证后再默认开启（避免误伤轮询类工具）。
+
+#### 环境变量
+
+| 变量 | 默认 | 说明 |
+|------|------|------|
+| `AGENT_LOOP_GUARD_REPEAT_TOOL_IN_ITERATION` | `1` | `0/1`，关闭/开启 iteration 内重复工具兜底 |
+| `AGENT_LOOP_GUARD_TEXT_TRUNC` | `200` | guard 诊断信息中的参数/键截断长度 |
+| `AGENT_LOOP_GUARD_NO_PROGRESS` | `0` | `0/1`，关闭/开启无进展兜底（阶段 1 默认关闭） |
+| `AGENT_LOOP_GUARD_NO_PROGRESS_K` | `3` | 无进展连续次数阈值（阶段 1 预留） |
+
+#### 终稿 JSON 兼容扩展字段
+
+`build_cli_agent_graph_with_terminal_sink` 的 sink 回调 JSON 在原有字段基础上追加（不破坏既有消费者）：  
+`guard_triggered`（bool）、`guard_reason`（string）、`guard_details`（string）。
+
 ---
 
 ## 5. 与图连接（1.6.3）
