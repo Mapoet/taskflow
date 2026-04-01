@@ -1,6 +1,20 @@
 /**
  * @file test_agent_loop_wp5.cpp
- * @brief WP1.5 Agent loop integration test (mock LLM, real ToolBus)
+ * @brief WP1.5 Agent 循环综合集成测试：Live LLM + **Cursor MCP 工具** + 自然语言行程问题
+ *
+ * **运行**：默认跳过；`AGENT_TEST_LIVE=1` 时执行（需 API Key，约定同 `test_llm_client_wp1.cpp`）。
+ *
+ * **行为**：
+ * - 默认从 Cursor MCP 配置加载全部已配置 server 的工具（`register_mcp_from_cursor_config`）。
+ *   - 路径：`AGENT_TEST_CURSOR_MCP_JSON`；若未设置则传空路径，由 ToolBus 使用
+ *     `AGENT_MCP_CONFIG_PATH` 或默认 `~/.cursor/mcp.json`。
+ * - 用户问题为开放式中文：**从现在出发，北京→西安，何时能到**（高铁/火车等，需结合工具查信息）。
+ *
+ * **环境变量**：
+ * - `AGENT_TEST_AGENT_LOOP_DEBUG=1`：打印 MCP 注册结果、导出工具数、history 尾部。
+ * - `AGENT_TEST_SKIP_CURSOR_MCP=1`：不导入 MCP（仅测纯模型回复；断言会放宽）。
+ * - `AGENT_TEST_WP5_RELAX=1`：不要求 history 中出现 `tool` 消息（模型可能未调工具）。
+ * - `AGENT_HTTP_TIMEOUT_SEC` / `AGENT_MCP_REQUEST_TIMEOUT_MS`：可按网络调大（MCP 多轮较慢）。
  */
 
 #include <agent/llm_client.hpp>
@@ -12,6 +26,7 @@
 #include <node/agent_loop_node.hpp>
 
 #include <cassert>
+#include <cctype>
 #include <cstdlib>
 #include <iostream>
 #include <memory>
@@ -43,31 +58,7 @@ bool is_debug_enabled() {
     return v && std::string(v) != "0";
 }
 
-void dump_llm_output(const LLMOutput& o) {
-    std::cout << "  llm.is_final=" << (o.is_final ? "true" : "false")
-              << " final_answer_len=" << o.final_answer.size()
-              << " tool_calls=" << o.tool_calls.size() << "\n";
-    for (std::size_t i = 0; i < o.tool_calls.size(); ++i) {
-        const auto& c = o.tool_calls[i];
-        std::cout << "    [" << i << "] tool=" << c.name
-                  << " id=" << (c.tool_call_id ? *c.tool_call_id : std::string("(none)"))
-                  << " args=" << c.arguments.dump() << "\n";
-    }
-    if (!o.final_answer.empty()) {
-        std::cout << "  llm.final_answer=\"" << o.final_answer << "\"\n";
-    }
-}
-
-void test_agent_loop_live() {
-    const bool dbg = is_debug_enabled();
-    if (dbg) {
-        std::cout << "== WP1.5 agent loop debug ==\n";
-        std::cout << "env AGENT_TEST_AGENT_LOOP_DEBUG=1 enabled\n";
-    }
-
-    // Align with WP1.1 live test conventions:
-    // - Use DEEPSEEK_API_KEY as alias for OPENAI_API_KEY when present.
-    // - Default DeepSeek OpenAI-compatible base URL if not set.
+void apply_live_llm_env_defaults() {
     if (std::getenv("OPENAI_API_KEY") == nullptr) {
         const char* dk = std::getenv("DEEPSEEK_API_KEY");
         if (dk && *dk) {
@@ -81,7 +72,7 @@ void test_agent_loop_live() {
         (void)::setenv("AGENT_LLM_PROVIDER", "openai", 0);
     }
     if (std::getenv("AGENT_HTTP_TIMEOUT_SEC") == nullptr) {
-        (void)::setenv("AGENT_HTTP_TIMEOUT_SEC", "30", 0);
+        (void)::setenv("AGENT_HTTP_TIMEOUT_SEC", "120", 0);
     }
     if (std::getenv("AGENT_LLM_MAX_RETRIES") == nullptr) {
         (void)::setenv("AGENT_LLM_MAX_RETRIES", "1", 0);
@@ -90,83 +81,159 @@ void test_agent_loop_live() {
         const std::string m = env_or("DEEPSEEK_MODEL", "deepseek-chat");
         (void)::setenv("AGENT_LLM_MODEL", m.c_str(), 0);
     }
+    if (std::getenv("AGENT_MCP_REQUEST_TIMEOUT_MS") == nullptr) {
+        (void)::setenv("AGENT_MCP_REQUEST_TIMEOUT_MS", "20000", 0);
+    }
+}
 
-    // ToolBus with local add tool
+static std::string trim_copy(std::string s) {
+    while (!s.empty() && std::isspace(static_cast<unsigned char>(s.front()))) {
+        s.erase(s.begin());
+    }
+    while (!s.empty() && std::isspace(static_cast<unsigned char>(s.back()))) {
+        s.pop_back();
+    }
+    return s;
+}
+
+int count_history_tool_messages(const std::vector<Message>& history) {
+    int n = 0;
+    for (const auto& m : history) {
+        if (m.role == "tool") {
+            ++n;
+        }
+    }
+    return n;
+}
+
+bool final_mentions_route(const std::string& answer) {
+    return answer.find("北京") != std::string::npos || answer.find("西安") != std::string::npos ||
+           answer.find("Xi'an") != std::string::npos || answer.find("Xian") != std::string::npos;
+}
+
+std::shared_ptr<ToolBus> build_toolbus_cursor_mcp(bool skip_mcp, bool dbg, std::size_t* out_exported_tools) {
     auto bus = std::make_shared<ToolBus>();
-    ToolMeta add_meta;
-    add_meta.name = "add";
-    add_meta.description = "add";
-    add_meta.schema = json{
-        {"type", "object"},
-        {"properties", {{"a", {{"type", "integer"}}}, {"b", {{"type", "integer"}}}}},
-        {"required", {"a", "b"}}};
+    *out_exported_tools = 0;
 
-    bus->register_local_tool(
-        "add",
-        [](const json& args) -> json {
-            return json{{"result", args.at("a").get<int>() + args.at("b").get<int>()}};
-        },
-        add_meta);
-
-    // Best-effort import Cursor MCP tools
-    const std::string cursor_mcp =
-        env_or("AGENT_TEST_CURSOR_MCP_JSON", "/home/mapoet/.cursor/mcp.json");
-    try {
-        (void)::setenv("AGENT_MCP_REQUEST_TIMEOUT_MS", "5000", 1);
-        bus->register_mcp_from_cursor_config(cursor_mcp, true);
-    } catch (...) {
-        // ignore
+    if (skip_mcp) {
+        if (dbg) {
+            std::cout << "cursor_mcp: skipped (AGENT_TEST_SKIP_CURSOR_MCP=1)\n";
+        }
+        return bus;
     }
 
-    // LLMClient live
-    auto llm = std::make_shared<LLMClient>(LLMClient::from_env());
+    const std::string config_path = env_or("AGENT_TEST_CURSOR_MCP_JSON", "");
+    ToolBus::CursorMcpImportResult r =
+        bus->register_mcp_from_cursor_config(config_path, true);
 
-    // PromptRenderer
+    auto tools = bus->export_as_llm_tools();
+    *out_exported_tools = tools.size();
+
+    if (dbg) {
+        std::cout << "cursor_mcp config_path=\"" << (config_path.empty() ? "<default>" : config_path) << "\"\n";
+        std::cout << "  registered_services=" << r.registered_services.size()
+                  << " failures=" << r.failures.size() << "\n";
+        for (const auto& name : r.registered_services) {
+            std::cout << "    ok: " << name << "\n";
+        }
+        for (const auto& f : r.failures) {
+            std::cout << "    fail: " << f.service_name << " — " << f.reason << "\n";
+        }
+        std::cout << "toolbus export_as_llm_tools count=" << tools.size() << "\n";
+    }
+
+    return bus;
+}
+
+void test_agent_loop_live_travel_mcp() {
+    const bool dbg = is_debug_enabled();
+    const bool skip_mcp = env_truthy("AGENT_TEST_SKIP_CURSOR_MCP");
+    const bool relax = env_truthy("AGENT_TEST_WP5_RELAX");
+
+    if (dbg) {
+        std::cout << "== WP1.5 agent loop: Cursor MCP + 北京→西安 自然语言问题 ==\n";
+    }
+
+    apply_live_llm_env_defaults();
+
+    std::size_t exported_tools = 0;
+    auto bus = build_toolbus_cursor_mcp(skip_mcp, dbg, &exported_tools);
+
+    if (!skip_mcp && exported_tools == 0) {
+        throw std::runtime_error(
+            "Cursor MCP 导入后 export_as_llm_tools 为空。请检查 mcp.json 路径、各 server 是否可连、"
+            "或暂时设置 AGENT_TEST_SKIP_CURSOR_MCP=1 / AGENT_TEST_WP5_RELAX=1 做排查。"
+            " 可用 AGENT_TEST_AGENT_LOOP_DEBUG=1 查看失败原因。");
+    }
+
+    auto llm = std::make_shared<LLMClient>(LLMClient::from_env());
+    {
+        ModelConfig mc;
+        mc.model_name = env_or("AGENT_LLM_MODEL", "deepseek-chat");
+        mc.stream = false;
+        mc.http_timeout_sec = std::atoi(env_or("AGENT_HTTP_TIMEOUT_SEC", "120").c_str());
+        if (mc.http_timeout_sec <= 0) {
+            mc.http_timeout_sec = 120;
+        }
+        mc.max_retries = std::atoi(env_or("AGENT_LLM_MAX_RETRIES", "1").c_str());
+        if (mc.max_retries < 0) {
+            mc.max_retries = 1;
+        }
+        llm->configure("openai", mc);
+    }
+
     auto renderer = std::make_shared<PromptRenderer>();
     llm->set_prompt_renderer(renderer);
 
-    // Agent config
     AgentConfig cfg;
-    cfg.name = "t";
-    cfg.system_prompt =
-        "You are a tool-using agent.\n"
-        "You MUST call tool `add` exactly once to compute 1+2.\n"
-        "Then answer with the number only and do NOT call any more tools.\n";
+    cfg.name = "wp5_travel_mcp";
+    if (!skip_mcp && exported_tools > 0) {
+        cfg.system_prompt =
+            "你是具备外部工具能力的智能助手。用户会询问国内出行与时间估算等问题。\n"
+            "若有与问题直接相关的工具，必须优先调用它们获取可核对的信息；"
+            "若没有完全对口的工具，仍应尽可能调用当前已注册列表中已有的工具（检索、网页、地图、代码与计算等）"
+            "辅助推理与取证，再结合常识补全结论，不要空转不用工具。\n"
+            "不要编造具体车次号、精确到分钟的到达时刻或实时余票；工具若给出时间，请写明预计出发/到达的大致日期与时刻，并说明依据。"
+            "回答使用简体中文，结构清晰；信息不足时说明假设并给出合理区间。\n";
+    } else {
+        cfg.system_prompt =
+            "你是出行规划助手。当前未挂载 MCP 工具，请根据常识与公开典型情况回答，并明确标注为估算，"
+            "不要伪造精确时刻表。使用简体中文。\n";
+    }
     cfg.model_config.model_name = env_or("AGENT_LLM_MODEL", "deepseek-chat");
-    cfg.max_iterations = 5;
-    cfg.max_tool_calls_per_iteration = 5;
+    cfg.max_iterations = 12;
+    cfg.max_tool_calls_per_iteration = 8;
 
     tf::Executor ex;
-    workflow::GraphBuilder b("wp5_test");
+    workflow::GraphBuilder b("wp5_travel_mcp");
 
     auto init_state = std::make_shared<internal::AgentThreadState>();
-    init_state->initial_user_prompt = "Please compute 1+2 and answer with the number only.";
+    init_state->initial_user_prompt =
+        "从现在这一刻算起，如果我从北京出发前往西安，打算不吃不喝连续步行去，"
+        "请帮我估算或查询：我大概什么时候能到西安？请给出预计到达的大致日期和时间（说明你是依据工具结果还是常识推断）。";
+
     if (dbg) {
-        std::cout << "init_state.iteration=" << init_state->iteration
-                  << " history_size=" << init_state->history.size()
-                  << " initial_user_prompt=\"" << init_state->initial_user_prompt << "\"\n";
-        std::cout << "cfg.model=\"" << cfg.model_config.model_name << "\""
-                  << " max_iterations=" << cfg.max_iterations
-                  << " max_tool_calls_per_iteration=" << cfg.max_tool_calls_per_iteration << "\n";
+        std::cout << "model=" << cfg.model_config.model_name << " max_iterations=" << cfg.max_iterations
+                  << " exported_tools=" << exported_tools << " skip_mcp=" << (skip_mcp ? 1 : 0)
+                  << " relax=" << (relax ? 1 : 0) << "\n";
     }
 
     auto [sys_src, _st] = b.create_any_source(
         "SystemPrompt",
-        std::unordered_map<std::string, std::any>{{std::string(internal::kSystemPrompt),
-                                                   std::any{cfg.system_prompt}}});
+        std::unordered_map<std::string, std::any>{
+            {std::string(internal::kSystemPrompt), std::any{cfg.system_prompt}}});
     (void)sys_src;
     auto [user_src, _ut] = b.create_any_source(
         "UserInput",
-        std::unordered_map<std::string, std::any>{{std::string(internal::kUserQuery),
-                                                   std::any{init_state->initial_user_prompt}}});
+        std::unordered_map<std::string, std::any>{
+            {std::string(internal::kUserQuery), std::any{init_state->initial_user_prompt}}});
     (void)user_src;
     auto [state_src, _at] = b.create_any_source(
         "AgentState",
-        std::unordered_map<std::string, std::any>{{std::string(internal::kAgentState),
-                                                   std::any{init_state}}});
+        std::unordered_map<std::string, std::any>{
+            {std::string(internal::kAgentState), std::any{init_state}}});
     (void)state_src;
 
-    // Create loop node
     auto [loop_node, loop_task] = node::AgentLoopNode::create(
         b,
         "AgentLoop",
@@ -178,8 +245,7 @@ void test_agent_loop_live() {
         {{"SystemPrompt", std::string(internal::kSystemPrompt)},
          {"UserInput", std::string(internal::kUserQuery)},
          {"AgentState", std::string(internal::kAgentState)}},
-        {std::string(internal::kFinalAnswer),
-         std::string(internal::kNextAgentState),
+        {std::string(internal::kFinalAnswer), std::string(internal::kNextAgentState),
          std::string(internal::kLlmOutput)});
     (void)loop_task;
     (void)loop_node;
@@ -189,31 +255,42 @@ void test_agent_loop_live() {
         "Sink",
         {{"AgentLoop", std::string(internal::kFinalAnswer)},
          {"AgentLoop", std::string(internal::kNextAgentState)}},
-        [&final_answer, dbg](const std::unordered_map<std::string, std::any>& outs) {
+        [&final_answer, dbg, relax, exported_tools, skip_mcp](
+            const std::unordered_map<std::string, std::any>& outs) {
             final_answer = std::any_cast<std::string>(outs.at(std::string(internal::kFinalAnswer)));
             auto st = std::any_cast<std::shared_ptr<internal::AgentThreadState>>(
                 outs.at(std::string(internal::kNextAgentState)));
             assert(st);
-            assert(st->iteration >= 3);
+            assert(st->iteration >= 1);
+
+            const int n_tools = count_history_tool_messages(st->history);
+            if (!relax && !skip_mcp && exported_tools > 0 && n_tools < 1) {
+                throw std::runtime_error(
+                    "期望至少调用 1 次 MCP 工具（history 中无 role=tool）。"
+                    "若模型未选工具，可设 AGENT_TEST_WP5_RELAX=1 重试。");
+            }
+
             if (dbg) {
                 std::cout << "== loop exited ==\n";
                 std::cout << "final_answer=\"" << final_answer << "\"\n";
-                std::cout << "final_state.iteration=" << st->iteration
-                          << " history_size=" << st->history.size() << "\n";
-                // show tail of history (up to last 6)
+                std::cout << "iteration=" << st->iteration << " history_size=" << st->history.size()
+                          << " tool_messages=" << n_tools << "\n";
                 const std::size_t n = st->history.size();
-                const std::size_t start = (n > 6) ? (n - 6) : 0;
+                const std::size_t start = (n > 12) ? (n - 12) : 0;
                 for (std::size_t i = start; i < n; ++i) {
                     const auto& m = st->history[i];
                     std::cout << "  hist[" << i << "] role=" << m.role;
                     if (m.tool_name) {
-                        std::cout << " tool_name=" << *m.tool_name;
-                    }
-                    if (!m.content.empty()) {
-                        std::cout << " content_len=" << m.content.size();
+                        std::cout << " tool=" << *m.tool_name;
                     }
                     if (m.tool_result) {
-                        std::cout << " tool_result=" << m.tool_result->dump();
+                        const std::string j = m.tool_result->dump();
+                        const std::size_t cap = 500;
+                        if (j.size() > cap) {
+                            std::cout << " -> " << j.substr(0, cap) << "...";
+                        } else {
+                            std::cout << " -> " << j;
+                        }
                     }
                     std::cout << "\n";
                 }
@@ -224,25 +301,33 @@ void test_agent_loop_live() {
 
     auto f = b.run_async(ex);
     f.wait();
-    if (!dbg) {
-        std::cout << "final_answer:\n" << final_answer << "\n";
+
+    const std::string trimmed = trim_copy(final_answer);
+    if (trimmed.size() < 40) {
+        throw std::runtime_error("final_answer 过短（期望至少约 40 字的有内容回复），got len=" +
+                                 std::to_string(trimmed.size()));
     }
-    if (final_answer.find("3") == std::string::npos) {
-        throw std::runtime_error("expected final_answer to contain 3, got: " + final_answer);
+    if (!final_mentions_route(trimmed)) {
+        throw std::runtime_error(
+            "final_answer 应提及北京或西安（或 Xi'an）等与路线相关的字眼，便于确认答非所问未发生。");
+    }
+
+    if (!dbg) {
+        std::cout << "--- final_answer ---\n" << final_answer << "\n--- end ---\n";
     }
     if (dbg) {
-        std::cout << "PASS\n";
+        std::cout << "PASS travel_mcp\n";
     }
+    std::cout << "test_agent_loop_wp5: travel+MCP OK\n";
 }
 
 } // namespace
 
 int main() {
     if (!env_truthy("AGENT_TEST_LIVE")) {
-        std::cout << "test_agent_loop_wp5: skipped (set AGENT_TEST_LIVE=1 to run live)\n";
+        std::cout << "test_agent_loop_wp5: skipped (set AGENT_TEST_LIVE=1: Cursor MCP + 北京→西安 问题)\n";
         return 0;
     }
-    test_agent_loop_live();
+    test_agent_loop_live_travel_mcp();
     return 0;
 }
-

@@ -98,7 +98,24 @@ AgentLoopNode::create(
         Message a;
         a.role = "assistant";
         a.timestamp = std::time(nullptr);
-        a.content = !llm_out.final_answer.empty() ? llm_out.final_answer : llm_out.reasoning;
+        if (!llm_out.tool_calls.empty()) {
+            json j;
+            j["tool_calls"] = json::array();
+            for (const auto& c : llm_out.tool_calls) {
+                json one;
+                if (c.tool_call_id && !c.tool_call_id->empty()) {
+                    one["id"] = *c.tool_call_id;
+                }
+                one["type"] = "function";
+                one["function"] = json{{"name", c.name}, {"arguments", c.arguments.dump()}};
+                j["tool_calls"].push_back(std::move(one));
+            }
+            a.content = j.dump();
+        } else if (!llm_out.final_answer.empty()) {
+            a.content = llm_out.final_answer;
+        } else {
+            a.content = llm_out.reasoning;
+        }
         shared->state->history.push_back(std::move(a));
 
         // tools (sequential)

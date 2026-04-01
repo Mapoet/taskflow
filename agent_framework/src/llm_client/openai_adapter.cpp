@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <future>
+#include <iostream>
 #include <map>
 #include <sstream>
 #include <stdexcept>
@@ -173,9 +174,12 @@ std::future<LLMOutput> OpenAIAdapter::invoke(
 std::future<LLMOutput> OpenAIAdapter::invoke_with_rendered(
     const RenderedPrompt& rendered,
     std::function<void(std::string_view)> stream_callback) {
-    return std::async(std::launch::async, [this, rendered, cb = std::move(stream_callback)]() mutable {
+    const char* dbg_env = std::getenv("AGENT_TEST_AGENT_LOOP_DEBUG");
+    const bool dbg = dbg_env && std::string(dbg_env) != "0";
+    return std::async(std::launch::async,
+                      [this, rendered, cb = std::move(stream_callback), dbg]() mutable {
         return invoke_with_retries(
-            [this, &rendered, &cb]() {
+            [this, &rendered, &cb, dbg]() {
                 http_transport_->set_http_timeout_sec(config_.http_timeout_sec);
                 const std::string url = base_url_ + "/chat/completions";
                 json body = build_openai_request(rendered);
@@ -183,6 +187,13 @@ std::future<LLMOutput> OpenAIAdapter::invoke_with_rendered(
                                                            {"Content-Type", "application/json"}};
 
                 if (!config_.stream) {
+                    if (dbg) {
+                        std::cout << "[OpenAIAdapter] POST " << url
+                                  << " model=" << config_.model_name
+                                  << " stream=false timeout_sec=" << config_.http_timeout_sec
+                                  << " payload_chars=" << body.dump().size() << "\n";
+                        std::cout.flush();
+                    }
                     json resp = http_transport_->post_llm(url, body, hdrs, "openai");
                     return parse_openai_non_stream(resp);
                 }
@@ -191,6 +202,13 @@ std::future<LLMOutput> OpenAIAdapter::invoke_with_rendered(
                 std::string full_text;
                 std::map<int, StreamToolSlot> tool_acc;
 
+                if (dbg) {
+                    std::cout << "[OpenAIAdapter] SSE POST " << url
+                              << " model=" << config_.model_name
+                              << " stream=true timeout_sec=" << config_.http_timeout_sec
+                              << " payload_chars=" << body.dump().size() << "\n";
+                    std::cout.flush();
+                }
                 http_transport_->post_sse(
                     url, body, hdrs,
                     [&](const std::string&, const json& ev) {
