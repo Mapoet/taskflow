@@ -286,6 +286,8 @@ int main(int argc, char** argv) {
 
     std::size_t mcp_services = 0;
     if (!skip_cursor_mcp) {
+        std::clog << "[cli_agent_demo] loading Cursor MCP config (use --no-cursor-mcp to skip)...\n"
+                  << std::flush;
         const std::string mcp_cfg = resolve_cursor_mcp_config_path(cursor_mcp_json_arg);
         import_cursor_mcp_tools(*bus, mcp_cfg, mcp_dbg, &mcp_services);
         if (!mcp_dbg && mcp_services > 0) {
@@ -321,6 +323,10 @@ int main(int argc, char** argv) {
             return 130;
         }
         state->initial_user_prompt = line;
+        // LLM/MCP 可能阻塞较久且无首 token；提示走 clog，避免误以为 REPL 卡死
+        std::clog << "[cli_agent_demo] running agent loop (streaming to stdout; "
+                     "wait up to AGENT_HTTP_TIMEOUT_SEC)...\n"
+                  << std::flush;
         return run_graph_once(executor, cfg, deps, state, cli);
     };
 
@@ -329,9 +335,14 @@ int main(int argc, char** argv) {
     }
 
     if (ISATTY(STDIN_FILENO)) {
-        std::cout << "cli_agent_demo REPL (EOF or :quit to exit). Empty line skipped.\n";
+        std::clog << "[cli_agent_demo] REPL ready (LLM + ToolBus/MCP loaded).\n" << std::flush;
+        std::cout << "cli_agent_demo REPL (EOF or :quit to exit). Empty line skipped.\n" << std::flush;
         std::string line;
-        while (!g_shutdown_requested.load() && std::cout << "> " && std::getline(std::cin, line)) {
+        while (!g_shutdown_requested.load()) {
+            std::cout << "> " << std::flush;
+            if (!std::getline(std::cin, line)) {
+                break;
+            }
             if (g_shutdown_requested.load()) {
                 std::cout << "\n[interrupt]\n";
                 break;
@@ -346,6 +357,7 @@ int main(int argc, char** argv) {
             if (rc != 0) {
                 return rc;
             }
+            std::cout << std::flush;
         }
         if (g_shutdown_requested.load()) {
             std::cout << "\n[interrupt]\n";

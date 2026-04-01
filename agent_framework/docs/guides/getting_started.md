@@ -55,7 +55,7 @@ make -j$(nproc)
 
 行为概要：流式 token 打印到 **stdout**；Loop 结束后 **Sink** 触发 `CLIHandler::handle_final_result`，默认打印简短 `[result]` 摘要（避免与流式全文重复）。工具行写入 **stderr**（`[tool] name=…`）。`--mock` 预留给 WP1.7，当前会报错退出。
 
-**Cursor MCP**（与 `test_agent_loop_wp5` 一致）：默认在注册 **add** 之后加载 Cursor `mcp.json`；路径为 `--cursor-mcp-json` → 环境变量 `AGENT_TEST_CURSOR_MCP_JSON` → 空则由 `ToolBus` 使用 `AGENT_MCP_CONFIG_PATH` 或 `~/.cursor/mcp.json`。跳过：`--no-cursor-mcp` 或 `AGENT_TEST_SKIP_CURSOR_MCP` / `AGENT_CLI_SKIP_CURSOR_MCP=1`。详细导入日志：`-v` 或 `AGENT_TEST_AGENT_LOOP_DEBUG=1`。
+**Cursor MCP**（与 `test_agent_loop_wp5` 一致）：默认在注册 **add** 之后加载 Cursor `mcp.json`；路径为 `--cursor-mcp-json` → 环境变量 `AGENT_TEST_CURSOR_MCP_JSON` → 空则由 `ToolBus` 使用 `AGENT_MCP_CONFIG_PATH` 或 `~/.cursor/mcp.json`。跳过：`--no-cursor-mcp` 或 `AGENT_TEST_SKIP_CURSOR_MCP` / `AGENT_CLI_SKIP_CURSOR_MCP=1`。详细导入日志：`-v` 或 `AGENT_TEST_AGENT_LOOP_DEBUG=1`。程序会在 **stderr** 打印「加载 MCP / REPL ready / running agent loop」；若启动或提问后长时间无 **stdout** 输出，多为 LLM 首包或 HTTP 慢，可调大 `AGENT_HTTP_TIMEOUT_SEC`，或先用 `--no-cursor-mcp` 排除 MCP 初始化耗时。
 
 与 `simple_agent` 区别：`cli_agent_demo` 接真实 **WP1.5** 图（`build_cli_agent_graph_with_terminal_sink`）、**ToolBus** 演示工具 **add**、可选 **Cursor MCP**、**SIGINT** 合作式退出。
 
