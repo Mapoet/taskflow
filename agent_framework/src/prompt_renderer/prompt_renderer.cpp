@@ -227,6 +227,15 @@ RenderedPrompt PromptRenderer::render(const LLMInput& input, const std::string& 
     missing_all.erase(std::unique(missing_all.begin(), missing_all.end()), missing_all.end());
 
     std::string system_block = user_system_prompt;
+    if (input.skill_block && !input.skill_block->empty()) {
+        const std::string sid =
+            (input.active_skill_id && !input.active_skill_id->empty()) ? *input.active_skill_id
+                                                                       : std::string("unknown");
+        system_block += "\n\n## Active skill (id: ";
+        system_block += sid;
+        system_block += ")\n";
+        system_block += *input.skill_block;
+    }
     if (!input.context.empty()) {
         system_block += "\n\n## Retrieved context\n";
         system_block += input.context;

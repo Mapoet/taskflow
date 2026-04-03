@@ -215,7 +215,7 @@ flowchart LR
 |--------|------|
 | WP1.5 | 工厂签名、单轮/多轮状态、`stream_callback` 传入点 |
 | WP1.1 | 无取消时 SIGINT 仅停止「下一圈」 |
-| WP1.7 | `--mock`、退出码、CTest 启动 `cli_agent_demo` |
+| WP1.7 | `--mock`、退出码、CTest 启动 `cli_agent_demo`（[WP1.7 现为 BACKLOG](./phase-1-wp7.md)，计划在 WP1.8 后完整收口） |
 
 ---
 

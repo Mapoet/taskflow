@@ -2,8 +2,8 @@
 
 本文档在 [plan-detailed.md](./plan-detailed.md) **§4** 的工作包与交付定义之上，给出**可排期、可验收**的实现拆解、依赖顺序、配置与测试矩阵。阶段 2（A2A，及 **plan-detailed §5.4/§7** 中的 ImGui/TUI/Web 富界面）与阶段 3（RAG）仅在与阶段 1 的衔接处被引用，不纳入本文件范围。
 
-**文档版本**：0.2  
-**日期**：2026-04-01  
+**文档版本**：0.4  
+**日期**：2026-04-03  
 **上游依据**：`plan-detailed.md` v0.2（含 WP1.1–WP1.8）
 
 ---
@@ -14,7 +14,7 @@
 
 | 编号 | 交付项 | 验收要点 |
 |------|--------|----------|
-| D1 | **可执行 Demo** | 构建目标 `cli_agent_demo`（或等价名称），单命令启动；从 **stdin 或命令行参数**读取用户输入 |
+| D1 | **可执行 Demo** | 构建目标 `cli_agent_demo`；可选 **`cli_agent_skills_demo`**（默认从 `~/.cursor/skills` 与 `~/.cursor/skills-cursor` 合并加载 Skills，`AGENT_SKILLS_DIR` 可覆写为单根）。单命令启动；从 **stdin 或命令行参数**读取用户输入 |
 | D2 | **流式输出** | LLM 首 token 起向 **stdout** 增量输出（或明确约定为行缓冲打印）；与供应商流式协议对齐 |
 | D3 | **工具闭环** | 模型返回 **tool_calls** 时，经 **ToolBus** 执行，结果以 **tool 角色消息**回注，直至模型给出最终答复或达到 **max_turns** |
 | D4 | **双供应商** | 同一套 `LLMInput` / `LLMOutput` 路径下，可通过配置切换 **OpenAI 兼容** 与 **Anthropic Messages**（适配器内消化格式差异） |
@@ -70,9 +70,12 @@ flowchart LR
   LOOP --> TST
   PR --> SK
   SK --> LOOP
+  SK --> TST
 ```
 
 **实施建议**：并行度上，`ToolBus（本地）` 与 `PromptRenderer` 可并行起步；**LLMClient 依赖 RenderedPrompt 的稳定契约**；**MCP 在本地 ToolBus 可测后再接**；Agent 循环最后把三者收口。
+
+**WP1.7 排期（BACKLOG）**：[WP1.7](./phase-1-wp7.md) 的 **完整**自动化测试与 CI（含 **Skills** 相关用例）计划在 **WP1.8** 落地后再集中实施；图上 **`SK --> TST`** 表示「Skills 接入后再收 1.7 全套测试」。手测 `cli_agent_demo` 全链路可先独立验收。
 
 ---
 
@@ -207,11 +210,13 @@ flowchart LR
 | 1.6.2 | **Sink** | 流式 token 直接 `std::cout <<` + `flush`；工具开始/结束可 `std::clog` |
 | 1.6.3 | **与图连接** | 调 `agent_templates` 构建 + `executor.run` |
 
-**产出**：`src/ui/cli_handler.cpp`、`ui_manager.cpp`；`examples/cli_agent_demo.cpp`（新建或从 `simple_agent` 演进）
+**产出**：`src/ui/cli_handler.cpp`、`ui_manager.cpp`；`examples/cli_agent_demo.cpp`；`examples/cli_agent_skills_demo.cpp`（与 demo 同链路，**Cursor 默认双路径 Skills**，供手测与 WP1.7 Skills E2E 对齐）
 
 ---
 
 ### WP1.7 示例与测试
+
+**状态：BACKLOG**（详见 [phase-1-wp7.md](./phase-1-wp7.md)）：计划在 **WP1.8** 完成后再做 **完整** WP1.7（含 Skills 单测/集成与 `no_network` CI 默认路径）。
 
 **目标**：CTest 可重复；CI 可不联网（mock）。
 
@@ -232,10 +237,10 @@ flowchart LR
 
 | ID | 任务 | 说明 |
 |----|------|------|
-| 1.8.1 | **L1** | 扫描 `AGENT_SKILLS_DIR` 下 `*.skill.md`，仅解析 YAML Frontmatter → 内存索引 |
+| 1.8.1 | **L1** | 扫描 `AGENT_SKILLS_DIR` 或 **多根**（如 `SkillRegistry` 合并路径；`cli_agent_skills_demo` 默认 `~/.cursor/skills` + `~/.cursor/skills-cursor`）下 `*.skill.md`，仅解析 YAML Frontmatter → 内存索引 |
 | 1.8.2 | **路由** | 首版：**关键词/标签匹配**用户输入；命中则加载 L2 |
 | 1.8.3 | **L2** | 全文 Markdown 注入 **system 或单独 system 段**；可选 `AGENT_SKILL_CONTEXT_MAX_CHARS` |
-| 1.8.4 | **L3** | 仅允许通过 **ToolBus 注册**的 `run_skill_script`（参数：skill_id、相对路径），路径 **jail** 在技能目录下 |
+| 1.8.4 | **L3** | 仅允许通过 **ToolBus 注册**的 `run_skill_script`（参数：skill_id、相对路径），路径 **jail** 在 **`<scan_root>/<skill_id>/`**（若存在）或回退 `registry.root()/skill_id` |
 | 1.8.5 | **单测** | Frontmatter 解析、路径穿越拒绝、注入后 prompt 长度 |
 
 **依赖**：WP1.4、WP1.5、WP1.2。
@@ -253,8 +258,8 @@ flowchart LR
 | M3 | Anthropic 对等路径 | 1.1 |
 | M4 | MCP stdio + 文档 | 1.3 |
 | M5 | MCP HTTP（若 M4 稳定） | 1.3 |
-| M6 | CI mock 全套 + `cli_agent_demo` DoD | 1.7 |
-| M7（可选） | WP1.8 Skills MVP | 1.8 |
+| M6 | WP1.8 Skills MVP（接图 + ToolBus） | 1.8 |
+| M7 | **WP1.7 完整测试与 CI**（mock/夹具、`no_network`、**Skills 回归**） | 1.7（**依赖 M6**） |
 
 ---
 
@@ -283,6 +288,8 @@ flowchart LR
 |------|------|------|
 | 2026-03-31 | 0.1 | 初稿：由 plan-detailed §4 展开 WP1.1–1.8、依赖、配置、测试与风险；对齐现有目录布局。 |
 | 2026-04-01 | 0.2 | §1.2 / §6：ImGui、Web、TUI（ncurses）列为阶段 2；阶段 1 CLI-only + UI 接口预留。 |
+| 2026-04-03 | 0.3 | §2 依赖图：`SK --> TST`；§3 WP1.7 标 **BACKLOG**；§4 里程碑 M6/M7 调整为 **先 1.8 后完整 1.7**。 |
+| 2026-04-03 | 0.4 | D1 / WP1.6 / WP1.8：补充 **`cli_agent_skills_demo`** 与 Cursor 双目录 Skills；L3 jail 与多根扫描表述对齐实现。 |
 
 ---
 

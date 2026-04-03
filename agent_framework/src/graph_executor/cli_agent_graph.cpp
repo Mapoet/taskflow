@@ -8,6 +8,7 @@
 #include <agent/internal/agent_thread_state.hpp>
 #include <agent/internal/loop_io_keys.hpp>
 #include <agent/llm_client.hpp>
+#include <agent/skill_script_tool.hpp>
 #include <agent/toolbus.hpp>
 #include <node/agent_loop_node.hpp>
 
@@ -33,6 +34,10 @@ void build_cli_agent_graph_impl(workflow::GraphBuilder& builder,
     }
     if (!agent_state) {
         throw std::invalid_argument("build_cli_agent_graph: agent_state is null");
+    }
+
+    if (deps.skills) {
+        register_skill_script_tool(*deps.toolbus, deps.skills);
     }
 
     auto [sys_src, _st] = builder.create_any_source(
@@ -67,7 +72,8 @@ void build_cli_agent_graph_impl(workflow::GraphBuilder& builder,
          {"AgentState", std::string(internal::kAgentState)}},
         {std::string(internal::kFinalAnswer), std::string(internal::kNextAgentState),
          std::string(internal::kLlmOutput)},
-        graph_options.stream_callback);
+        graph_options.stream_callback,
+        deps.skills);
     (void)loop_node;
     (void)loop_task;
 }

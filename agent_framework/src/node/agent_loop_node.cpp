@@ -9,6 +9,7 @@
 #include "node/knowledge_base_node.hpp"
 #include "agent/internal/agent_thread_state.hpp"
 #include "agent/internal/loop_io_keys.hpp"
+#include "agent/skill_services.hpp"
 #include <any>
 #include <functional>
 #include <unordered_map>
@@ -124,7 +125,8 @@ AgentLoopNode::create(
     std::shared_ptr<VectorStore> vector_store,
     const std::vector<std::pair<std::string, std::string>>& input_specs,
     const std::vector<std::string>& output_keys,
-    std::function<void(std::string_view)> stream_callback
+    std::function<void(std::string_view)> stream_callback,
+    std::shared_ptr<SkillServices> skills
 ) {
     // NOTE: workflow::create_loop_decl currently does NOT pass body outputs into condition_func.
     // Therefore WP1.5 loop uses closure state:
@@ -140,7 +142,7 @@ AgentLoopNode::create(
     };
     auto shared = std::make_shared<Shared>();
 
-    auto body_func = [agent_config, llm_client, toolbus, shared, stream_callback](
+    auto body_func = [agent_config, llm_client, toolbus, shared, stream_callback, skills](
                          const std::unordered_map<std::string, std::any>& inps)
         -> std::unordered_map<std::string, std::any> {
         const char* dbg_env = std::getenv("AGENT_TEST_AGENT_LOOP_DEBUG");
@@ -159,12 +161,39 @@ AgentLoopNode::create(
             std::cout.flush();
         }
 
+        const std::string user_query =
+            std::any_cast<std::string>(inps.at(std::string(internal::kUserQuery)));
+
+        if (skills && skills->registry && skills->loader && it == 0) {
+            std::string user_for_match = user_query;
+            if (user_for_match.empty()) {
+                user_for_match = shared->state->initial_user_prompt;
+            }
+            if (const auto mid = skills->registry->match(user_for_match)) {
+                const auto loaded = skills->loader->load_instructions(
+                    *mid, skill_context_max_chars_from_env());
+                if (loaded && !loaded->empty()) {
+                    shared->state->skill_prompt_cache = *loaded;
+                    shared->state->active_skill_id = *mid;
+                } else {
+                    shared->state->skill_prompt_cache.reset();
+                    shared->state->active_skill_id.reset();
+                }
+            } else {
+                shared->state->skill_prompt_cache.reset();
+                shared->state->active_skill_id.reset();
+            }
+        }
+
         LLMInput llm_in;
         llm_in.system_prompt =
             std::any_cast<std::string>(inps.at(std::string(internal::kSystemPrompt)));
-        llm_in.user_prompt =
-            std::any_cast<std::string>(inps.at(std::string(internal::kUserQuery)));
+        llm_in.user_prompt = user_query;
         llm_in.history = shared->state->history;
+        if (shared->state->skill_prompt_cache && !shared->state->skill_prompt_cache->empty()) {
+            llm_in.skill_block = shared->state->skill_prompt_cache;
+            llm_in.active_skill_id = shared->state->active_skill_id;
+        }
         if (toolbus) {
             llm_in.tools = toolbus->export_as_llm_tools();
         }

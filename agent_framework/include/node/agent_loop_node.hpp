@@ -20,6 +20,9 @@
 #include <string_view>
 
 namespace agent_framework {
+
+struct SkillServices;
+
 namespace node {
 
 /**
@@ -45,6 +48,7 @@ public:
      *   - "reasoning": 思考过程
      *   - "tool_calls": 工具调用列表
      * @param stream_callback 可选；传给 `LLMClient::invoke` 的流式 token 回调（WP1.6）
+     * @param skills 可选 WP1.8；`nullptr` 关闭技能路由与 `skill_block` 注入
      * @return (节点指针, 任务句柄)
      */
     static std::pair<std::shared_ptr<workflow::LoopNode>, tf::Task>
@@ -58,7 +62,8 @@ public:
         std::shared_ptr<VectorStore> vector_store,
         const std::vector<std::pair<std::string, std::string>>& input_specs,
         const std::vector<std::string>& output_keys,
-        std::function<void(std::string_view)> stream_callback = nullptr
+        std::function<void(std::string_view)> stream_callback = nullptr,
+        std::shared_ptr<SkillServices> skills = nullptr
     );
 
 private:

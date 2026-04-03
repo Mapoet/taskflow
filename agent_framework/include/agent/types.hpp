@@ -105,6 +105,10 @@ struct ToolMeta {
  */
 struct LLMInput {
     std::string system_prompt;     // 系统提示词（角色定义、行为规范）
+    /** WP1.8：活动技能正文（不含 frontmatter）；由 PromptRenderer 加 `## Active skill (id: …)` 标题 */
+    std::optional<std::string> skill_block;
+    /** 与 skill_block 配套的 id，供系统区标题展示；缺省则 PromptRenderer 使用 `unknown` */
+    std::optional<std::string> active_skill_id;
     std::string user_prompt;       // 用户提示词（当前问题或指令）
     std::string context;           // 从知识库检索的内容摘要（多模态 RAG 结果）
     std::map<std::string, std::string> extra_variables;  // 用户自定义模板变量（{{var}}）

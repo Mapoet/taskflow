@@ -107,7 +107,7 @@ if(AGENT_BUILD_FAISS)
     endif()
 endif()
 
-# 示例可执行文件（含 WP1.6 cli_agent_demo）；Taskflow 根工程下默认与 TF_BUILD_EXAMPLES 一致
+# 示例可执行文件（含 WP1.6 cli_agent_demo、WP1.8 cli_agent_skills_demo）；Taskflow 根工程下默认与 TF_BUILD_EXAMPLES 一致
 if(DEFINED TF_BUILD_EXAMPLES AND NOT TF_BUILD_EXAMPLES)
     option(AGENT_BUILD_EXAMPLES
            "Build Agent Framework examples (cli_agent_demo, simple_agent, multimodal_agent, ...)" OFF)
@@ -180,6 +180,23 @@ if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/prompt_renderer/tool_formatter.cpp)
 endif()
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/prompt_renderer/history_formatter.cpp)
     list(APPEND AGENT_SOURCES src/prompt_renderer/history_formatter.cpp)
+endif()
+
+# WP1.8 Skills
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/skills/skill_frontmatter_parse.cpp)
+    list(APPEND AGENT_SOURCES src/skills/skill_frontmatter_parse.cpp)
+endif()
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/skills/skill_registry.cpp)
+    list(APPEND AGENT_SOURCES src/skills/skill_registry.cpp)
+endif()
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/skills/skill_loader.cpp)
+    list(APPEND AGENT_SOURCES src/skills/skill_loader.cpp)
+endif()
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/skills/skill_services.cpp)
+    list(APPEND AGENT_SOURCES src/skills/skill_services.cpp)
+endif()
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/skills/skill_script_tool.cpp)
+    list(APPEND AGENT_SOURCES src/skills/skill_script_tool.cpp)
 endif()
 
 # ToolBus 模块
@@ -320,6 +337,12 @@ set(AGENT_HEADERS
     include/node/agent_loop_node.hpp
     include/node/ui_sink_node.hpp
     include/node/nodes.hpp
+    include/agent/skill_types.hpp
+    include/agent/skill_registry.hpp
+    include/agent/skill_loader.hpp
+    include/agent/skill_services.hpp
+    include/agent/skill_script_tool.hpp
+    include/agent/internal/skill_frontmatter_parse.hpp
 )
 
 # 创建库
@@ -406,6 +429,25 @@ if(AGENT_BUILD_EXAMPLES)
         endif()
     endif()
 
+    # WP1.8：与 cli_agent_demo 相同链路，默认合并 ~/.cursor/skills 与 ~/.cursor/skills-cursor
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/examples/cli_agent_skills_demo.cpp)
+        if(NOT EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/../3rd-party/CLI11/CLI11.hpp)
+            message(WARNING "cli_agent_skills_demo: missing CLI11 (same as cli_agent_demo)")
+        else()
+            add_executable(cli_agent_skills_demo examples/cli_agent_skills_demo.cpp)
+            target_include_directories(cli_agent_skills_demo PRIVATE
+                ${CMAKE_CURRENT_SOURCE_DIR}/../3rd-party/CLI11)
+            target_link_libraries(cli_agent_skills_demo PRIVATE agent_framework)
+            if(CMAKE_USE_PTHREADS_INIT)
+                target_link_libraries(cli_agent_skills_demo PRIVATE Threads::Threads)
+            endif()
+            if(MSVC AND CMAKE_CXX_STANDARD GREATER_EQUAL 20)
+                target_compile_options(cli_agent_skills_demo PRIVATE /std:c++20)
+            endif()
+            list(APPEND _agent_framework_example_targets cli_agent_skills_demo)
+        endif()
+    endif()
+
     if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/examples/multimodal_agent.cpp)
         add_executable(multimodal_agent examples/multimodal_agent.cpp)
         target_link_libraries(multimodal_agent PRIVATE agent_framework)
@@ -448,7 +490,7 @@ if(AGENT_BUILD_EXAMPLES)
         message(STATUS "Agent Framework: examples -> ${_agent_ex_label} (target: agent_framework_examples)")
     endif()
 else()
-    message(STATUS "Agent Framework: examples disabled (AGENT_BUILD_EXAMPLES=OFF); cli_agent_demo not built")
+    message(STATUS "Agent Framework: examples disabled (AGENT_BUILD_EXAMPLES=OFF); cli demos not built")
 endif()
 
 # 测试（WP1.1 LLM 轻量单测，无第三方框架）
@@ -541,6 +583,34 @@ if(BUILD_TESTING)
         endif()
         add_test(NAME agent_loop_wp5 COMMAND test_agent_loop_wp5)
         set_tests_properties(agent_loop_wp5 PROPERTIES ENVIRONMENT "AGENT_TOOL_ALLOWLIST=")
+    endif()
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_skill_registry.cpp)
+        add_executable(test_skill_registry tests/test_skill_registry.cpp)
+        target_link_libraries(test_skill_registry PRIVATE agent_framework)
+        if(CMAKE_USE_PTHREADS_INIT)
+            target_link_libraries(test_skill_registry PRIVATE Threads::Threads)
+        endif()
+        add_test(NAME skill_registry_wp18 COMMAND test_skill_registry)
+        set_tests_properties(skill_registry_wp18 PROPERTIES ENVIRONMENT "AGENT_TOOL_ALLOWLIST=")
+    endif()
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_prompt_renderer_skill_block.cpp)
+        add_executable(test_prompt_renderer_skill_block tests/test_prompt_renderer_skill_block.cpp)
+        target_link_libraries(test_prompt_renderer_skill_block PRIVATE agent_framework)
+        if(CMAKE_USE_PTHREADS_INIT)
+            target_link_libraries(test_prompt_renderer_skill_block PRIVATE Threads::Threads)
+        endif()
+        add_test(NAME prompt_renderer_skill_block COMMAND test_prompt_renderer_skill_block)
+        set_tests_properties(prompt_renderer_skill_block PROPERTIES ENVIRONMENT "AGENT_TOOL_ALLOWLIST=")
+    endif()
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_skill_script_tool.cpp)
+        add_executable(test_skill_script_tool tests/test_skill_script_tool.cpp)
+        target_link_libraries(test_skill_script_tool PRIVATE agent_framework)
+        if(CMAKE_USE_PTHREADS_INIT)
+            target_link_libraries(test_skill_script_tool PRIVATE Threads::Threads)
+        endif()
+        add_test(NAME skill_script_tool_wp18 COMMAND test_skill_script_tool)
+        set_tests_properties(skill_script_tool_wp18 PROPERTIES
+            ENVIRONMENT "AGENT_TOOL_ALLOWLIST=;AGENT_SKILL_SCRIPT_ALLOWLIST=/bin/sh")
     endif()
 endif()
 

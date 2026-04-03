@@ -10,6 +10,7 @@
 
 #include "agent/types.hpp"
 
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -21,6 +22,9 @@ struct AgentThreadState {
     int iteration = 0;  // number of completed LLM calls
     std::string last_error;
     std::string initial_user_prompt;
+    /** WP1.8：首轮 LLM 前解析；后续迭代复用，避免 tool 轮重选技能 */
+    std::optional<std::string> skill_prompt_cache;
+    std::optional<std::string> active_skill_id;
 };
 
 } // namespace internal

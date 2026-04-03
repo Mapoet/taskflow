@@ -1,16 +1,14 @@
 /**
- * @file cli_agent_demo.cpp
- * @brief WP1.6 CLI demo: argv, REPL, stream + terminal sink, SIGINT (cooperative)
+ * @file cli_agent_skills_demo.cpp
+ * @brief CLI 示例：与 `cli_agent_demo` 等价全链路，默认从 **Cursor 技能目录**加载 Skills。
  *
- * Stream tokens go to stdout via CLIHandler; final JSON summary via Sink → handle_final_result
- * (see CLIHandler: avoids duplicating full final_answer when streaming). Use AGENT_LOG_LEVEL or -v.
+ * **技能路径**（合并扫描，仅已存在目录参与）：
+ * - `$HOME/.cursor/skills`
+ * - `$HOME/.cursor/skills-cursor`（Windows：`%USERPROFILE%` 下相同相对路径）
  *
- * `LLMClient::from_env` 前会调用与 `tests/test_agent_loop_wp5.cpp` 相同的 live 默认值
- * （如 DEEPSEEK_API_KEY → OPENAI_API_KEY、默认 base URL / model / 超时）；不覆盖已存在 env。
+ * 若设置 **`AGENT_SKILLS_DIR`**，则 **仅**使用该单目录（`SkillServices::from_env()`），便于覆写或 CI。
  *
- * Cursor MCP：默认尝试从 mcp.json 注册工具（与 wp5 一致：`--cursor-mcp-json` →
- * `AGENT_TEST_CURSOR_MCP_JSON` → 空则 `ToolBus` 使用 `AGENT_MCP_CONFIG_PATH` 或 `~/.cursor/mcp.json`）。
- * 使用 `--no-cursor-mcp` 或环境变量 `AGENT_TEST_SKIP_CURSOR_MCP` / `AGENT_CLI_SKIP_CURSOR_MCP` 可跳过。
+ * 流式、ToolBus、`run_skill_script`、MCP 等与 `cli_agent_demo` 一致。
  */
 
 #include "CLI11.hpp"
@@ -29,6 +27,7 @@
 #include <csignal>
 #include <cstddef>
 #include <iostream>
+#include <memory>
 #include <string>
 
 #ifdef _WIN32
@@ -87,9 +86,6 @@ bool env_truthy(const char* key) {
     return v[0] == '1' || v[0] == 'y' || v[0] == 'Y' || v[0] == 't' || v[0] == 'T';
 }
 
-/**
- * @brief 与 wp5 一致：`AGENT_TEST_CURSOR_MCP_JSON` 优先；否则空串交给 ToolBus（`AGENT_MCP_CONFIG_PATH` / ~/.cursor/mcp.json）
- */
 std::string resolve_cursor_mcp_config_path(const std::string& cli_path) {
     if (!cli_path.empty()) {
         return cli_path;
@@ -123,7 +119,8 @@ void import_cursor_mcp_tools(ToolBus& bus, const std::string& config_path_arg, b
         }
         std::clog << "toolbus export_as_llm_tools count=" << tools.size() << '\n';
     } else if (!r.failures.empty() && *out_mcp_services == 0) {
-        std::clog << "[cli_agent_demo] cursor_mcp: no services registered (" << r.failures.size()
+        std::clog << "[cli_agent_skills_demo] cursor_mcp: no services registered ("
+                  << r.failures.size()
                   << " failure(s); use -v or AGENT_TEST_AGENT_LOOP_DEBUG=1 for details)\n";
     }
 }
@@ -139,10 +136,6 @@ void set_env_if_absent(const char* key, const char* val) {
 #endif
 }
 
-/**
- * @brief 与 tests/test_agent_loop_wp5.cpp::apply_live_llm_env_defaults 一致：便于本地仅有
- *        DeepSeek 等键时直接跑 demo（不覆盖已设置的环境变量）。
- */
 void apply_live_llm_env_defaults() {
     if (std::getenv("OPENAI_API_KEY") == nullptr) {
         const char* dk = std::getenv("DEEPSEEK_API_KEY");
@@ -169,12 +162,37 @@ void apply_live_llm_env_defaults() {
     set_env_if_absent("AGENT_MCP_REQUEST_TIMEOUT_MS", "20000");
 }
 
+/** `AGENT_SKILLS_DIR` 优先；否则合并扫描 Cursor 默认双路径。 */
+std::shared_ptr<SkillServices> resolve_skills_services(bool dbg) {
+    const char* override_dir = std::getenv("AGENT_SKILLS_DIR");
+    std::shared_ptr<SkillServices> svc;
+    if (override_dir && *override_dir) {
+        svc = SkillServices::from_env();
+        if (dbg) {
+            std::clog << "[cli_agent_skills_demo] skills: AGENT_SKILLS_DIR=\"" << override_dir << "\"\n";
+        }
+    } else {
+        svc = SkillServices::from_cursor_default_skill_roots();
+        if (dbg && svc && svc->registry) {
+            std::clog << "[cli_agent_skills_demo] skills: Cursor roots (merge scan):\n";
+            for (const auto& r : svc->registry->roots()) {
+                std::clog << "  - " << r.string() << '\n';
+            }
+            std::clog << "  indexed_skills=" << svc->registry->entries().size() << '\n';
+        } else if (dbg && !svc) {
+            std::clog << "[cli_agent_skills_demo] skills: no AGENT_SKILLS_DIR and "
+                         "~/.cursor/skills / ~/.cursor/skills-cursor missing — skills disabled\n";
+        }
+    }
+    return svc;
+}
+
 int run_graph_once(tf::Executor& executor,
                    const AgentConfig& cfg,
                    const AgentWorkflowDeps& deps,
                    const std::shared_ptr<internal::AgentThreadState>& state,
                    CLIHandler& cli) {
-    workflow::GraphBuilder builder("cli_agent_demo");
+    workflow::GraphBuilder builder("cli_agent_skills_demo");
     CliAgentTerminalSinkOptions sink;
     sink.sink_node_name = "CliSink";
     sink.on_final_json = [&cli](const json& j) { cli.handle_final_result(j); };
@@ -207,9 +225,8 @@ int run_graph_once(tf::Executor& executor,
 } // namespace
 
 int main(int argc, char** argv) {
-    CLI::App app("cli_agent_demo — Agent Framework WP1.6 (stdio CLI)\n"
-                 "Streaming prints tokens to stdout; final line is a short [result] summary "
-                 "(full answer often already streamed). Set AGENT_LOG_LEVEL=debug or -v for more.");
+    CLI::App app("cli_agent_skills_demo — Cursor ~/.cursor/skills{,-cursor} + WP1.6 CLI\n"
+                 "Override with AGENT_SKILLS_DIR. Streaming to stdout; -v for skill/MCP details.");
     app.get_formatter()->column_width(32);
 
     std::string prompt_arg;
@@ -234,7 +251,7 @@ int main(int argc, char** argv) {
     CLI11_PARSE(app, argc, argv);
 
     if (mock) {
-        std::cerr << "[cli_agent_demo] --mock is reserved for WP1.7; use offline tests or unset "
+        std::cerr << "[cli_agent_skills_demo] --mock is reserved for WP1.7; use offline tests or unset "
                      "--mock.\n";
         return 2;
     }
@@ -266,7 +283,6 @@ int main(int argc, char** argv) {
     } catch (const std::exception& e) {
         std::cerr << "[error] LLM init: " << e.what() << "\n"
                   << "Set AGENT_LLM_PROVIDER, OPENAI_API_KEY / ANTHROPIC_API_KEY, or DEEPSEEK_API_KEY "
-                     "(demo mirrors test_agent_loop_wp5 DeepSeek defaults), etc. "
                      "(see docs/guides/getting_started.md)\n";
         return 1;
     }
@@ -287,12 +303,13 @@ int main(int argc, char** argv) {
 
     std::size_t mcp_services = 0;
     if (!skip_cursor_mcp) {
-        std::clog << "[cli_agent_demo] loading Cursor MCP config (use --no-cursor-mcp to skip)...\n"
+        std::clog << "[cli_agent_skills_demo] loading Cursor MCP config (--no-cursor-mcp to skip)...\n"
                   << std::flush;
         const std::string mcp_cfg = resolve_cursor_mcp_config_path(cursor_mcp_json_arg);
         import_cursor_mcp_tools(*bus, mcp_cfg, mcp_dbg, &mcp_services);
         if (!mcp_dbg && mcp_services > 0) {
-            std::clog << "[cli_agent_demo] cursor_mcp: " << mcp_services << " service(s) registered\n";
+            std::clog << "[cli_agent_skills_demo] cursor_mcp: " << mcp_services
+                      << " service(s) registered\n";
         }
     } else if (mcp_dbg) {
         std::clog << "cursor_mcp: skipped (--no-cursor-mcp or skip env)\n";
@@ -301,20 +318,22 @@ int main(int argc, char** argv) {
     AgentWorkflowDeps deps;
     deps.llm = llm;
     deps.toolbus = bus;
-    deps.skills = SkillServices::from_env();
+    deps.skills = resolve_skills_services(mcp_dbg);
 
     AgentConfig cfg;
-    cfg.name = "cli_agent_demo";
+    cfg.name = "cli_agent_skills_demo";
     if (!skip_cursor_mcp && mcp_services > 0) {
         cfg.system_prompt =
             "你是一个能够调用外部工具的助手。\n"
             "若有与问题直接相关的工具，优先调用工具获取可核对的信息；若无完全对口工具，可结合现有工具输出与常识推理补全结论。\n"
             "不要编造无法核对的细节；若信息不足，请明确假设并给出合理区间。\n"
+            "若系统提示中带有 Active skill，请优先遵循该技能说明；可使用 run_skill_script 在技能目录 jail 内执行脚本（需配置 AGENT_SKILL_SCRIPT_ALLOWLIST）。\n"
             "回答使用简体中文，结构清晰。\n";
     } else {
         cfg.system_prompt =
             "你是一个助手。当前未加载 MCP 工具；请基于常识与公开典型情况回答，并明确标注为估算。\n"
             "不要编造无法核对的细节；信息不足时请说明假设并给出合理区间。\n"
+            "若带有 Active skill 段，请优先遵循；脚本工具 run_skill_script 需 allowlist 与技能子目录。\n"
             "回答使用简体中文，结构清晰。\n";
     }
     if (const char* m = std::getenv("AGENT_LLM_MODEL")) {
@@ -336,8 +355,7 @@ int main(int argc, char** argv) {
         state->skill_prompt_cache.reset();
         state->active_skill_id.reset();
         state->initial_user_prompt = line;
-        // LLM/MCP 可能阻塞较久且无首 token；提示走 clog，避免误以为 REPL 卡死
-        std::clog << "[cli_agent_demo] running agent loop (streaming to stdout; "
+        std::clog << "[cli_agent_skills_demo] running agent loop (streaming to stdout; "
                      "wait up to AGENT_HTTP_TIMEOUT_SEC)...\n"
                   << std::flush;
         return run_graph_once(executor, cfg, deps, state, cli);
@@ -348,8 +366,9 @@ int main(int argc, char** argv) {
     }
 
     if (ISATTY(STDIN_FILENO)) {
-        std::clog << "[cli_agent_demo] REPL ready (LLM + ToolBus/MCP loaded).\n" << std::flush;
-        std::cout << "cli_agent_demo REPL (EOF or :quit to exit). Empty line skipped.\n" << std::flush;
+        std::clog << "[cli_agent_skills_demo] REPL ready (LLM + ToolBus/MCP + Cursor skills dirs).\n"
+                  << std::flush;
+        std::cout << "cli_agent_skills_demo REPL (EOF or :quit). Empty line skipped.\n" << std::flush;
         std::string line;
         while (!g_shutdown_requested.load()) {
             std::cout << "> " << std::flush;

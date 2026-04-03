@@ -1,3 +1,6 @@
+# Local runtime data (mirrored skills, local mcp.json — not committed)
+data/
+
 # Build directories
 build/
 cmake-build-*/

@@ -9,6 +9,7 @@
 #define __AGENT_GRAPH_EXECUTOR_H__
 
 #include "types.hpp"
+#include "skill_services.hpp"
 #include <workflow/nodeflow.hpp>
 #include <functional>
 #include <future>
@@ -32,10 +33,12 @@ struct AgentThreadState;
  * @brief WP1.5 ReAct Agent 图所需的运行时依赖（LLM + ToolBus）
  *
  * PromptRenderer 由调用方在 LLMClient 上 `set_prompt_renderer` 配置，不重复放入此结构。
+ * `skills == nullptr` 表示关闭 WP1.8 Skills。
  */
 struct AgentWorkflowDeps {
     std::shared_ptr<LLMClient> llm;
     std::shared_ptr<ToolBus> toolbus;
+    std::shared_ptr<SkillServices> skills;
 };
 
 /**

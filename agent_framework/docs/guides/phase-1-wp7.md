@@ -1,10 +1,14 @@
 # WP1.7：示例与测试 — 实现计划
 
-本文档将 [phase-1-plan.md](./phase-1-plan.md) **§3 WP1.7** 细化为 **CTest 布局、依赖选型、Mock LLM 策略、分模块单测与集成测、CI 约束及文档义务**。当前仓库 **`agent_framework/CMakeLists.txt`** 在 `BUILD_TESTING` 下仅 `enable_testing()`，**尚无** `tests/*.cpp`；本 WP 负责把测试基础设施落到可执行状态。
+> **状态：BACKLOG（排期延后）**  
+> **当前策略**：先完成 [WP1.8](./phase-1-wp8.md)（Skills 最小闭环并接入图与 ToolBus），再实施本 WP 的 **完整** 测试矩阵——包括 **无网/CI 默认路径**、`ctest` 标签、Mock LLM/HTTP 假服务，以及 **Skills 相关**单测与集成测（L1 索引、路由、L2 注入、`run_skill_script` jail、**多根目录合并扫描**等，与 wp8 §G6 互为补充）。  
+> **说明**：`cli_agent_demo` 与 **`cli_agent_skills_demo`**（默认合并 `~/.cursor/skills` + `~/.cursor/skills-cursor`，见示例源码）可作 **手测全链路 / 真实 Cursor 技能布局**验收；WP1.7 backlog **仍须**交付可重复 CI，**不能**仅以手测代替自动化验收。
 
-**文档版本**：0.1  
-**日期**：2026-03-31  
-**上游依据**：`phase-1-plan.md` v0.1（任务 1.7.1–1.7.4）
+本文档将 [phase-1-plan.md](./phase-1-plan.md) **§3 WP1.7** 细化为 **CTest 布局、依赖选型、Mock LLM 策略、分模块单测与集成测、CI 约束及文档义务**。仓库在 `BUILD_TESTING` 下已有多份 `tests/test_*.cpp` 与夹具；本 WP 的 backlog 条目 focus 在：**默认无网不 SKIP**、`no_network` 标签化 CI、`--mock` 与 **Skills 落地后**的回归覆盖面。
+
+**文档版本**：0.3  
+**日期**：2026-04-03  
+**上游依据**：`phase-1-plan.md` v0.3（任务 1.7.1–1.7.4）；排期与 WP1.8 联动见同文件 §4 里程碑 M6/M7
 
 ---
 
@@ -17,7 +21,7 @@
 | G1 | **`ctest --output-on-failure`** 在本地与 CI 中 **零网络**（或可选联网 job）可重复通过 |
 | G2 | **单测**：覆盖 [phase-1-wp4.md](./phase-1-wp4.md) PromptRenderer、[phase-1-wp2.md](./phase-1-wp2.md) ToolBus/schema、[phase-1-wp1.md](./phase-1-wp1.md) OpenAI/Anthropic 解析与拼接、（可选）[phase-1-wp3.md](./phase-1-wp3.md) MCP JSON-RPC |
 | G3 | **Mock LLM**：**进程内 fake `ModelAdapter`** 和/或 **本地 `httplib::Server` 假 API** 二选一或组合 |
-| G4 | **集成测**：[phase-1-wp5.md](./phase-1-wp5.md) 循环状态机（2×tool + 1×final）与/或 [phase-1-wp6.md](./phase-1-wp6.md) `cli_agent_demo --mock` |
+| G4 | **集成测**：[phase-1-wp5.md](./phase-1-wp5.md) 循环状态机（2×tool + 1×final）与/或 [phase-1-wp6.md](./phase-1-wp6.md) `cli_agent_demo --mock`；Skills 场景需覆盖 **`cli_agent_skills_demo` 或等价图路径**（含 Cursor 双目录合并、L2 注入、`run_skill_script` + allowlist） |
 | G5 | **文档**：[getting_started.md](./getting_started.md) 中 **`cli_agent_demo`、构建测试、`AGENT_*` 必填 env** |
 | G6 | **`tools/run_tests.sh`** 继续可用：触发 `ctest`（可设 `BUILD_TESTING=ON`） |
 
@@ -125,6 +129,7 @@ agent_framework/
 |------|------|
 | **Loop smoke** | 单进程：`build_cli_agent_graph` + `FakeModelAdapter` + mock tool，无 CLI |
 | **CLI mock** | `cli_agent_demo --mock -p "hi"`：`--mock` 注册 fake LLM + 固定 tool；**退出码 0**，stdout 含关键字（可用 `cmake -E compare_files` 或 golden file） |
+| **Skills 手测 / E2E（WP1.8 之后纳入自动化）** | 构建 **`cli_agent_skills_demo`**；在 `~/.cursor/skills` 与/或 `~/.cursor/skills-cursor` 放置合法 `*.skill.md`（及 `<skill_id>/` 下脚本若测 `run_skill_script`）；配置 `AGENT_SKILL_SCRIPT_ALLOWLIST`（如 `/bin/sh`）；断言路由命中、系统提示含 Active skill、工具调用与 jail 行为。覆写目录时用 **`AGENT_SKILLS_DIR`**（单根，与合并扫描互斥）。 |
 
 **稳定性**：禁止依赖当前时间；`Message::timestamp` 在比较前置 0。
 
@@ -218,11 +223,14 @@ flowchart LR
 
 ## 12. 完成定义（WP1.7 DoD）
 
+以下项在 **WP1.8 完成并接上图** 后再统一验收（含 Skills 场景）； backlog 期间可作为检查清单，不要求全部勾满即可交付 WP1.8。
+
 - [ ] `BUILD_TESTING`/`AGENT_BUILD_TESTS` 打开后 **`ctest` 有 ≥1 用例且通过**。
-- [ ] **无网**默认路径可跑（或 CI job 明确只跑 `no_network`）。
-- [ ] **wp1–wp2–wp4** 至少各 **1 个**有意义的单测文件。
-- [ ] **Agent 循环 smoke**（FakeModelAdapter + mock tool）通过。
-- [ ] **`getting_started.md`** 含测试与 env 说明。
+- [ ] **无网**默认路径可跑（或 CI job 明确只跑 `no_network`）；**不得**依赖「无密钥则 SKIP 仍返回 0」冒充通过。
+- [ ] **wp1–wp2–wp4** 至少各 **1 个**有意义的单测文件（或与现状对齐后文档化）。
+- [ ] **Agent 循环 smoke**（Fake / Queued `ModelAdapter` + mock tool）通过，含 **2×tool + 1×final** 或等价断言。
+- [ ] **Skills（WP1.8）**：Frontmatter、路由、L2 注入边界、`run_skill_script` 越狱拒绝、**`SkillRegistry` 多根合并**等至少有 **可归入 `no_network`** 的用例；与 **`cli_agent_skills_demo`**（Cursor `~/.cursor/skills` + `~/.cursor/skills-cursor`）手测/录屏需求对齐，便于后续改成 golden 或 subprocess 测。
+- [ ] **`getting_started.md`** 含测试与 env 说明（CI / live 分离）。
 - [ ] （可选）**`cli_agent_demo --mock`** 被 `add_test` 引用。
 
 ---
@@ -244,3 +252,5 @@ flowchart LR
 | 日期 | 版本 | 说明 |
 |------|------|------|
 | 2026-03-31 | 0.1 | 初稿：CMake、Catch2/GTest、fixture、FakeAdapter、httplib mock、ctest 标签、DoD。 |
+| 2026-04-03 | 0.2 | **BACKLOG**：排期在 WP1.8 之后；DoD 增补 Skills 相关验收；修正「尚无 tests」基线表述。 |
+| 2026-04-03 | 0.3 | 增补 **`cli_agent_skills_demo`**、Cursor 双路径 Skills 的 **手测/E2E** 与 WP1.7 自动化收口目标（多根扫描 + `run_skill_script`）。 |
