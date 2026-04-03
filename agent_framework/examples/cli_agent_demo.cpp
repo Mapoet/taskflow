@@ -2,6 +2,9 @@
  * @file cli_agent_demo.cpp
  * @brief WP1.6 CLI demo: argv, REPL, stream + terminal sink, SIGINT (cooperative)
  *
+ * 交互 REPL（TTY）：**Enter** 插入换行；**Ctrl+Enter**（终端发送 CSI 13;5u 等时）或 **Ctrl+O** 提交并执行。
+ * 非 TTY / Windows：仍为单行 getline。
+ *
  * Stream tokens go to stdout via CLIHandler; final JSON summary via Sink → handle_final_result
  * (see CLIHandler: avoids duplicating full final_answer when streaming). Use AGENT_LOG_LEVEL or -v.
  *
@@ -14,6 +17,7 @@
  */
 
 #include "CLI11.hpp"
+#include "cli_multiline_tty.hpp"
 
 #include <agent/graph_executor.hpp>
 #include <agent/internal/agent_thread_state.hpp>
@@ -360,12 +364,20 @@ int main(int argc, char** argv) {
 
     if (ISATTY(STDIN_FILENO)) {
         std::clog << "[cli_agent_demo] REPL ready (LLM + ToolBus/MCP loaded).\n" << std::flush;
-        std::cout << "cli_agent_demo REPL (EOF or :quit to exit). Empty line skipped.\n" << std::flush;
+        std::cout << "cli_agent_demo REPL — Enter=newline, Ctrl+Enter or Ctrl+O=submit, :quit / :q, EOF.\n"
+                  << std::flush;
         std::string line;
         while (!g_shutdown_requested.load()) {
             std::cout << "> " << std::flush;
-            if (!std::getline(std::cin, line)) {
-                break;
+            bool got = cli_multiline_tty::read_multiline_repl_input(line, &g_shutdown_requested);
+            if (!got) {
+                if (g_shutdown_requested.load()) {
+                    std::cout << "\n[interrupt]\n";
+                    break;
+                }
+                if (!std::getline(std::cin, line)) {
+                    break;
+                }
             }
             if (g_shutdown_requested.load()) {
                 std::cout << "\n[interrupt]\n";

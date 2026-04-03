@@ -9,9 +9,12 @@
  * 若设置 **`AGENT_SKILLS_DIR`**，则 **仅**使用该单目录（`SkillServices::from_env()`），便于覆写或 CI。
  *
  * 流式、ToolBus、`run_skill_script`、MCP 等与 `cli_agent_demo` 一致。
+ *
+ * TTY REPL：**Enter** 换行；**Ctrl+Enter** 或 **Ctrl+O** 提交（与 `cli_agent_demo` 相同；非 TTY 为单行）。
  */
 
 #include "CLI11.hpp"
+#include "cli_multiline_tty.hpp"
 
 #include <agent/graph_executor.hpp>
 #include <agent/internal/agent_thread_state.hpp>
@@ -379,12 +382,20 @@ int main(int argc, char** argv) {
     if (ISATTY(STDIN_FILENO)) {
         std::clog << "[cli_agent_skills_demo] REPL ready (LLM + ToolBus/MCP + Cursor skills dirs).\n"
                   << std::flush;
-        std::cout << "cli_agent_skills_demo REPL (EOF or :quit). Empty line skipped.\n" << std::flush;
+        std::cout << "cli_agent_skills_demo REPL — Enter=newline, Ctrl+Enter or Ctrl+O=submit, :quit / :q, EOF.\n"
+                  << std::flush;
         std::string line;
         while (!g_shutdown_requested.load()) {
             std::cout << "> " << std::flush;
-            if (!std::getline(std::cin, line)) {
-                break;
+            bool got = cli_multiline_tty::read_multiline_repl_input(line, &g_shutdown_requested);
+            if (!got) {
+                if (g_shutdown_requested.load()) {
+                    std::cout << "\n[interrupt]\n";
+                    break;
+                }
+                if (!std::getline(std::cin, line)) {
+                    break;
+                }
             }
             if (g_shutdown_requested.load()) {
                 std::cout << "\n[interrupt]\n";
