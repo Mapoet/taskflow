@@ -2,7 +2,8 @@
  * @file cli_multiline_tty.hpp
  * @brief REPL 多行输入：Enter 换行；Ctrl+Enter（CSI 13;5u 等）或 Ctrl+O 提交
  *
- * POSIX/WSL：termios 非规范模式。Windows 下 read_multiline_repl_input 返回 false，调用方退回 std::getline。
+ * POSIX/WSL：termios 非规范模式，按字节读入并回显以支持 UTF-8（含中文）；退格按完整码点删除。
+ * Windows 下 read_multiline_repl_input 返回 false，调用方退回 std::getline。
  */
 #ifndef AGENT_EXAMPLES_CLI_MULTILINE_TTY_HPP
 #define AGENT_EXAMPLES_CLI_MULTILINE_TTY_HPP
@@ -23,6 +24,29 @@
 namespace cli_multiline_tty {
 
 #ifndef _WIN32
+
+/** UTF-8 continuation byte: 10xxxxxx */
+inline bool utf8_is_continuation(unsigned char b) {
+    return (b & 0xC0U) == 0x80U;
+}
+
+/** 从 out 末尾删一个 UTF-8 码点（至少 1 字节）；返回删除的字节数（用于回显擦除）。 */
+inline std::size_t utf8_pop_last_char(std::string& out) {
+    if (out.empty()) {
+        return 0;
+    }
+    const std::size_t end = out.size();
+    std::size_t i = end;
+    while (i > 0) {
+        --i;
+        if (!utf8_is_continuation(static_cast<unsigned char>(out[i]))) {
+            break;
+        }
+    }
+    const std::size_t n = end - i;
+    out.erase(i, n);
+    return n;
+}
 
 inline bool isatty_stdin() {
     return isatty(STDIN_FILENO) != 0;
@@ -128,12 +152,14 @@ inline bool read_multiline_from_tty(std::string& out, const std::atomic<bool>* i
             continue;
         }
 
-        // Backspace / Ctrl+H
+        // Backspace / Ctrl+H（按整段 UTF-8 码点删除，避免中文只剩半个码点）
         if (c == 0x7f || c == 0x08) {
             if (!out.empty()) {
-                out.pop_back();
+                const std::size_t erased = utf8_pop_last_char(out);
                 const char bs[] = "\b \b";
-                (void)write(STDOUT_FILENO, bs, 3);
+                for (std::size_t i = 0; i < erased; ++i) {
+                    (void)write(STDOUT_FILENO, bs, 3);
+                }
             }
             continue;
         }
@@ -162,8 +188,8 @@ inline bool read_multiline_from_tty(std::string& out, const std::atomic<bool>* i
             continue;
         }
 
-        // 可打印与控制字符：写入缓冲并回显
-        if (c >= 0x20 && c < 0x7f) {
+        // UTF-8：单字节 ASCII 可打印 + 多字节延续位（0x80+）；过滤掉 C0 控制区除已处理项
+        if (c >= 0x20) {
             out.push_back(static_cast<char>(c));
             (void)write(STDOUT_FILENO, &c, 1);
         } else if (c == '\t') {

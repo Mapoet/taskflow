@@ -9,7 +9,9 @@
 #include "agent/schema_validate.hpp"
 
 #include <cctype>
+#include <cstring>
 #include <cstdlib>
+#include <filesystem>
 #include <fstream>
 #include <future>
 #include <iostream>
@@ -106,6 +108,29 @@ json read_json_file_or_throw(const std::string& path) {
     std::stringstream ss;
     ss << in.rdbuf();
     return json::parse(ss.str());
+}
+
+std::string mcp_config_parent_abs(const std::string& config_path) {
+    namespace fs = std::filesystem;
+    fs::path p(config_path);
+    fs::path dir = p.has_parent_path() ? p.parent_path() : fs::path(".");
+    std::error_code ec;
+    fs::path canon = fs::weakly_canonical(fs::absolute(dir), ec);
+    if (ec) {
+        canon = fs::absolute(dir);
+    }
+    return canon.string();
+}
+
+void expand_mcp_stdio_args(std::vector<std::string>& args, const std::string& config_parent_abs) {
+    constexpr const char* k_token = "${CONFIG_DIR}";
+    for (std::string& a : args) {
+        std::size_t pos = 0;
+        while ((pos = a.find(k_token, pos)) != std::string::npos) {
+            a.replace(pos, std::strlen(k_token), config_parent_abs);
+            pos += config_parent_abs.size();
+        }
+    }
 }
 
 std::vector<std::string> parse_string_array(const json& arr) {
@@ -277,6 +302,8 @@ ToolBus::CursorMcpImportResult ToolBus::register_mcp_from_cursor_config(const st
         return result;
     }
 
+    const std::string config_parent_abs = mcp_config_parent_abs(path);
+
     const json& servers = doc["mcpServers"];
     for (auto it = servers.begin(); it != servers.end(); ++it) {
         const std::string service_name = it.key();
@@ -303,6 +330,7 @@ ToolBus::CursorMcpImportResult ToolBus::register_mcp_from_cursor_config(const st
                 std::vector<std::string> args;
                 if (s.contains("args")) {
                     args = parse_string_array(s["args"]);
+                    expand_mcp_stdio_args(args, config_parent_abs);
                 }
                 std::map<std::string, std::string> env;
                 if (s.contains("env")) {

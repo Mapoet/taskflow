@@ -162,7 +162,8 @@ void apply_live_llm_env_defaults() {
         (void)::setenv("AGENT_LLM_MODEL", m.c_str(), 0);
 #endif
     }
-    set_env_if_absent("AGENT_MCP_REQUEST_TIMEOUT_MS", "20000");
+    // npx 冷启动较慢；过短会导致 stdio MCP 握手阶段 read timeout
+    set_env_if_absent("AGENT_MCP_REQUEST_TIMEOUT_MS", "120000");
 }
 
 /** `AGENT_SKILLS_DIR` 优先；否则合并扫描 Cursor 默认双路径。 */
@@ -307,7 +308,7 @@ int main(int argc, char** argv) {
     std::size_t mcp_services = 0;
     if (!skip_cursor_mcp) {
         std::clog << "[cli_agent_skills_demo] loading Cursor MCP config (--no-cursor-mcp to skip)...\n"
-                     "  (stdio/HTTP 每个服务可能阻塞至多 AGENT_MCP_REQUEST_TIMEOUT_MS，默认 60000 ms)\n"
+                     "  (stdio/HTTP 单服务最长等待 AGENT_MCP_REQUEST_TIMEOUT_MS；未设置时本 demo 为 120000 ms)\n"
                   << std::flush;
         const std::string mcp_cfg = resolve_cursor_mcp_config_path(cursor_mcp_json_arg);
         import_cursor_mcp_tools(*bus, mcp_cfg, mcp_dbg, &mcp_services);
