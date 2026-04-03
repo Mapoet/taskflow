@@ -137,6 +137,8 @@ flowchart LR
 
 **产出**：`src/toolbus/toolbus.cpp`、`local_tool.cpp`
 
+**可选：内建 `web_*`（WP1.2 扩展）**：在 **`AGENT_WEB_ENABLE`**、OpenSSL + **`CPPHTTPLIB_OPENSSL_SUPPORT`** 等条件满足时，`build_cli_agent_graph` 可额外注册 **`web_search` / `web_fetch` / `web_rss_feed` / `web_fetch_archive`**（SSRF、配额、`AGENT_TOOL_ALLOWLIST` 与离线单测约定见 **[内建 web_* 工具](./builtin-web-tools.md)**）。
+
 ---
 
 ### WP1.3 MCP

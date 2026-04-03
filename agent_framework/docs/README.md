@@ -12,6 +12,8 @@
 
 - **分阶段实施规划（深度）**：[guides/plan-detailed.md](guides/plan-detailed.md)
 - **Skills 与 Harness（渐进式披露、SkillHarness 概念）**：[guides/skills.md](guides/skills.md)
+- **内建网络工具（搜索 / 抓取 / 归档 / RSS）**：[guides/builtin-web-tools.md](guides/builtin-web-tools.md)
+- **内建本地 fs 工具**：[guides/builtin-fs-tools.md](guides/builtin-fs-tools.md)
 - 设计文档：`../readme/guide_agent.md`（在父目录的 readme 文件夹中；长文见根目录 `readme/guide_agent.v3.md`）
 - Taskflow workflow 文档：`../../workflow/README.md`
 

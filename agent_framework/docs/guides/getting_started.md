@@ -65,6 +65,8 @@ make -j$(nproc)
 
 **内建文件系统工具（`fs_*`）**：若设置环境变量 **`AGENT_FS_ROOT`** 为已存在目录，构图时会额外注册 **`fs_read` / `fs_write` / `fs_list_dir` / `fs_mkdir` / `fs_delete` / `fs_search` / `fs_grep` / `fs_replace`**（路径监禁、配额与确认写删见 **[内建 fs_* 工具](./builtin-fs-tools.md)**）。若仍使用 Cursor 的 **filesystem MCP**，建议二选一或明确两套根目录策略，以免模型混用。
 
+**内建网络工具（`web_*`）**：若 **`AGENT_WEB_ENABLE=1`**（及 `1`/`true`/`yes`/`on`）且构建已链接 **OpenSSL**（`CPPHTTPLIB_OPENSSL_SUPPORT`），则注册 **`web_search` / `web_fetch` / `web_rss_feed` / `web_fetch_archive`**。常用变量：**`AGENT_WEB_ALLOW_HTTP=1`** 才允许 `http://`；**`AGENT_WEB_MAX_REDIRECTS`**、**`AGENT_WEB_MAX_RESPONSE_BYTES`**、**`AGENT_WEB_ALLOW_HOSTS`**（非空则严格主机白名单）；**`AGENT_WEB_SEARCH_MIN_INTERVAL_MS`**；归档解压需 **`AGENT_FS_ROOT`** 与可选 **`AGENT_WEB_EXTRACT_SUBDIR`**。详见 **[内建 web_* 工具](./builtin-web-tools.md)**。工具名仍受 **`AGENT_TOOL_ALLOWLIST`** 约束（与 `fs_*` 相同）。
+
 与 `simple_agent` 区别：`cli_agent_demo` 接真实 **WP1.5** 图（`build_cli_agent_graph_with_terminal_sink`）、**ToolBus** 演示工具 **add**、可选 **Cursor MCP**、**SIGINT** 合作式退出。
 
 ## WP1.8：Skills（可选）
