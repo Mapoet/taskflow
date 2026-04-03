@@ -63,6 +63,8 @@ make -j$(nproc)
 
 **具体如何编辑 `mcp.json`（在 `~/.cursor/mcp.json` 上追加、工具命名、`url`/`command` 规则、与 allowlist 关系）**：见 **[Cursor 格式 mcp.json 配置指南](./cursor_mcp_json.md)**。
 
+**内建文件系统工具（`fs_*`）**：若设置环境变量 **`AGENT_FS_ROOT`** 为已存在目录，构图时会额外注册 **`fs_read` / `fs_write` / `fs_list_dir` / `fs_mkdir` / `fs_delete` / `fs_search` / `fs_grep` / `fs_replace`**（路径监禁、配额与确认写删见 **[内建 fs_* 工具](./builtin-fs-tools.md)**）。若仍使用 Cursor 的 **filesystem MCP**，建议二选一或明确两套根目录策略，以免模型混用。
+
 与 `simple_agent` 区别：`cli_agent_demo` 接真实 **WP1.5** 图（`build_cli_agent_graph_with_terminal_sink`）、**ToolBus** 演示工具 **add**、可选 **Cursor MCP**、**SIGINT** 合作式退出。
 
 ## WP1.8：Skills（可选）
