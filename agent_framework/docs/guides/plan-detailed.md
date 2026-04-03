@@ -135,7 +135,7 @@ flowchart TB
 | **WP1.5 Agent 循环** | `create_loop_decl` 或封装节点：LLM → 条件（是否有工具）→ Tool 并行/串行 → 回到 LLM。 | `agent_loop_node.cpp` + `agent_templates.cpp` 最小模板 |
 | **WP1.6 CLI** | 读写终端、信号处理、日志级别；可选 **单行多轮 REPL**。 | `cli_handler.cpp`、`ui_manager.cpp` 薄封装 |
 | **WP1.7 示例与测试** | `examples/cli_agent_demo.cpp`；mock LLM / mock tool 单测。 | CTest 用例 |
-| **WP1.8 Skills 最小闭环（可选，与 WP1.4/1.5 串行）** | **L1**：启动时扫描配置目录下 `*SKILL.md`，只解析 **YAML Frontmatter**（`id`, `name`, `description`, `trigger_keywords`, `tags`），注入系统或独立消息块作为「技能目录」；**L2**：路由命中后读取**同一文件**正文，经 `PromptRenderer` 拼入 `LLMInput`（可设 token 预算）；**L3**：正文中引用的脚本/参考路径由 **ToolBus** 注册为 `run_skill_script` 类工具或专用 MCP，**禁止**无边界 `system()`。 | `skill_registry.*`、`skill_loader.*` 或并入 `graph_executor`；单测：Frontmatter 解析、注入前后上下文长度 |
+| **WP1.8 Skills 最小闭环（可选，与 WP1.4/1.5 串行）** | **L1**：启动时扫描配置目录下 **`<skill-folder>/SKILL.md`**（各根的一级子目录），只解析 **YAML Frontmatter**（`id`, `name`, `description`, `trigger_keywords`, `tags`），注入系统或独立消息块作为「技能目录」；**L2**：路由命中后读取**该 `SKILL.md`** 正文，经 `PromptRenderer` 拼入 `LLMInput`（可设 token 预算）；**L3**：正文中引用的脚本/参考路径由 **ToolBus** 注册为 `run_skill_script` 类工具或专用 MCP，**禁止**无边界 `system()`。 | `skill_registry.*`、`skill_loader.*` 或并入 `graph_executor`；单测：Frontmatter 解析、注入前后上下文长度 |
 
 ### 4.3 流式 + 工具调用的接口要点（避免返工）
 

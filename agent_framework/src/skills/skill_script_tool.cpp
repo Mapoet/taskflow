@@ -115,7 +115,8 @@ void register_skill_script_tool(ToolBus& bus, const std::shared_ptr<SkillService
     ToolMeta meta;
     meta.name = k_name;
     meta.description =
-        "Run a script under the skill directory jail (AGENT_SKILLS_DIR/skill_id/). "
+        "Run a script inside the indexed skill package directory (jail). "
+        "Parameter skill_id is the canonical skill key (Cursor frontmatter name, legacy id, or folder name). "
         "Requires AGENT_SKILL_SCRIPT_ALLOWLIST.";
     meta.schema = json::parse(R"({
         "type": "object",

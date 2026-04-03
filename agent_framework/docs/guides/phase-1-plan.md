@@ -233,14 +233,14 @@ flowchart LR
 
 ### WP1.8 Skills 最小闭环（可选）
 
-**目标**：对齐 [skills.md](./skills.md) 的 **渐进式披露** 子集；技能文件建议 **`.skill.md`（Frontmatter + Markdown）**（与 `plan-detailed` 中 `*SKILL.md` 表述并存时，以 **`.skill.md` 为仓库规范**）。
+**目标**：对齐 [skills.md](./skills.md) 的 **渐进式披露** 子集；技能目录规范为 **`<skills_root>/<skill-folder>/SKILL.md`**（Frontmatter + Markdown 正文）。
 
 | ID | 任务 | 说明 |
 |----|------|------|
-| 1.8.1 | **L1** | 扫描 `AGENT_SKILLS_DIR` 或 **多根**（如 `SkillRegistry` 合并路径；`cli_agent_skills_demo` 默认 `~/.cursor/skills` + `~/.cursor/skills-cursor`）下 `*.skill.md`，仅解析 YAML Frontmatter → 内存索引 |
+| 1.8.1 | **L1** | 扫描 `AGENT_SKILLS_DIR` 或 **多根**（如 `SkillRegistry` 合并路径；`cli_agent_skills_demo` 默认 `~/.cursor/skills` + `~/.cursor/skills-cursor`）下 **一层子目录**中的 `SKILL.md`，仅解析 YAML Frontmatter → 内存索引 |
 | 1.8.2 | **路由** | 首版：**关键词/标签匹配**用户输入；命中则加载 L2 |
 | 1.8.3 | **L2** | 全文 Markdown 注入 **system 或单独 system 段**；可选 `AGENT_SKILL_CONTEXT_MAX_CHARS` |
-| 1.8.4 | **L3** | 仅允许通过 **ToolBus 注册**的 `run_skill_script`（参数：skill_id、相对路径），路径 **jail** 在 **`<scan_root>/<skill_id>/`**（若存在）或回退 `registry.root()/skill_id` |
+| 1.8.4 | **L3** | 仅允许通过 **ToolBus 注册**的 `run_skill_script`（参数：skill_id、相对路径）；**jail** 为索引中 **`SkillIndexEntry::script_jail`**（技能包目录）。参数 **skill_id** 为 **canonical key**（Frontmatter **`name`** 优先，否则 legacy **`id`**，否则 **目录名**）。 |
 | 1.8.5 | **单测** | Frontmatter 解析、路径穿越拒绝、注入后 prompt 长度 |
 
 **依赖**：WP1.4、WP1.5、WP1.2。

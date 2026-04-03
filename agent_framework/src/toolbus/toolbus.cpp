@@ -12,6 +12,7 @@
 #include <cstdlib>
 #include <fstream>
 #include <future>
+#include <iostream>
 #include <mutex>
 #include <sstream>
 #include <stdexcept>
@@ -286,6 +287,8 @@ ToolBus::CursorMcpImportResult ToolBus::register_mcp_from_cursor_config(const st
             continue;
         }
 
+        std::clog << "[ToolBus] MCP: connecting \"" << service_name << "\"...\n" << std::flush;
+
         try {
             std::shared_ptr<MCPClient> client;
             if (s.contains("url") && s["url"].is_string()) {
@@ -312,7 +315,10 @@ ToolBus::CursorMcpImportResult ToolBus::register_mcp_from_cursor_config(const st
 
             register_mcp_service(service_name, client);
             result.registered_services.push_back(service_name);
+            std::clog << "[ToolBus] MCP: \"" << service_name << "\" registered\n" << std::flush;
         } catch (const std::exception& e) {
+            std::clog << "[ToolBus] MCP: \"" << service_name << "\" failed: " << e.what() << '\n'
+                      << std::flush;
             result.failures.push_back(CursorMcpImportFailure{service_name, e.what()});
         }
     }

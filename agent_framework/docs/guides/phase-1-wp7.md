@@ -129,7 +129,7 @@ agent_framework/
 |------|------|
 | **Loop smoke** | 单进程：`build_cli_agent_graph` + `FakeModelAdapter` + mock tool，无 CLI |
 | **CLI mock** | `cli_agent_demo --mock -p "hi"`：`--mock` 注册 fake LLM + 固定 tool；**退出码 0**，stdout 含关键字（可用 `cmake -E compare_files` 或 golden file） |
-| **Skills 手测 / E2E（WP1.8 之后纳入自动化）** | 构建 **`cli_agent_skills_demo`**；在 `~/.cursor/skills` 与/或 `~/.cursor/skills-cursor` 放置合法 `*.skill.md`（及 `<skill_id>/` 下脚本若测 `run_skill_script`）；配置 `AGENT_SKILL_SCRIPT_ALLOWLIST`（如 `/bin/sh`）；断言路由命中、系统提示含 Active skill、工具调用与 jail 行为。覆写目录时用 **`AGENT_SKILLS_DIR`**（单根，与合并扫描互斥）。 |
+| **Skills 手测 / E2E（WP1.8 之后纳入自动化）** | 构建 **`cli_agent_skills_demo`**；在 `~/.cursor/skills` 与/或 `~/.cursor/skills-cursor` 下按 **`<skill-folder>/SKILL.md`** 放置技能（同目录下放脚本若测 `run_skill_script`）；配置 `AGENT_SKILL_SCRIPT_ALLOWLIST`（如 `/bin/sh`）；断言路由命中、系统提示含 Active skill、工具调用与 jail 行为。覆写目录时用 **`AGENT_SKILLS_DIR`**（单根，与合并扫描互斥）。 |
 
 **稳定性**：禁止依赖当前时间；`Message::timestamp` 在比较前置 0。
 

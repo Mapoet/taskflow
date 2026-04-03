@@ -20,6 +20,7 @@ CC 仅分析**本地可读的客户端**编排、权限、上下文与工具管�
 
 ## 阅读顺序
 
+0. **阶段 2/3 深化（架构目录）**：[../architecture/plan-detailed.v2.md](../architecture/plan-detailed.v2.md) — Verifier、记忆落盘、Faiss、动态 MCP 等拍板与工作包；总纲仍见 [plan-detailed.md](../guides/plan-detailed.md)。
 1. **[comparison_three_agents.md](./comparison_three_agents.md)** — 总览、对比矩阵、结论与对 AF 的启示。
 2. 按需深入分册：
   - [deep_dive_execution.md](./deep_dive_execution.md) — 技术流与并行

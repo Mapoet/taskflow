@@ -1,6 +1,8 @@
 /**
  * @file test_skill_registry.cpp
  * @brief WP1.8 SkillRegistry / SkillLoader 单测（无网络）
+ *
+ * 布局：`<root>/<skill-folder>/SKILL.md`
  */
 
 #include <agent/skill_loader.hpp>
@@ -33,23 +35,66 @@ int main() {
     fs::remove_all(base, ec);
     assert(fs::create_directories(base));
 
-    // --- missing id → skip ---
-    write_file(
-        base / "bad.skill.md",
-        std::string("---\nname: no_id\n---\nbody\n"));
+    // --- no YAML frontmatter → skip ---
+    fs::create_directories(base / "raw");
+    write_file(base / "raw" / "SKILL.md", std::string("just markdown with no frontmatter\n"));
     {
         SkillRegistry reg(base);
         reg.scan_or_reload();
         assert(reg.entries().empty());
     }
-    fs::remove(base / "bad.skill.md");
+    fs::remove_all(base / "raw", ec);
 
-    // --- duplicate id: second file skipped ---
+    // --- canonical from directory when name/id absent ---
+    fs::create_directories(base / "foldonly");
+    write_file(
+        base / "foldonly" / "SKILL.md",
+        std::string("---\ndescription: folddesc\n---\nbody\n"));
+    {
+        SkillRegistry reg(base);
+        reg.scan_or_reload();
+        assert(reg.entries().size() == 1U);
+        assert(reg.get("foldonly").has_value());
+        assert(reg.get("foldonly")->description == "folddesc");
+    }
+    fs::remove_all(base / "foldonly", ec);
+
+    // --- Cursor-style description block + name ---
+    fs::create_directories(base / "cur");
+    write_file(base / "cur" / "SKILL.md",
+               std::string("---\nname: cur\n"
+                           "description: >-\n"
+                           "  hello merge-ready tail\n"
+                           "---\n# H\n"));
+    {
+        SkillRegistry reg(base);
+        reg.scan_or_reload();
+        const auto e = reg.get("cur");
+        assert(e.has_value());
+        assert(e->description.find("merge-ready") != std::string::npos);
+    }
+    fs::remove_all(base / "cur", ec);
+
+    // --- match by canonical / name substring (no trigger_keywords) ---
+    fs::create_directories(base / "byname");
+    write_file(
+        base / "byname" / "SKILL.md",
+        std::string("---\nname: unique_skill_alpha\n---\n"));
+    {
+        SkillRegistry reg(base);
+        reg.scan_or_reload();
+        const auto m = reg.match("please use unique_skill_alpha thanks");
+        assert(m.has_value());
+        assert(*m == "unique_skill_alpha");
+    }
+    fs::remove_all(base / "byname", ec);
+
+    // --- duplicate canonical: second package skipped ---
     fs::create_directories(base / "a");
     fs::create_directories(base / "b");
-    write_file(base / "a" / "first.skill.md",
+    write_file(base / "a" / "SKILL.md",
                std::string("---\nid: dup\n---\nalpha\n"));
-    write_file(base / "b" / "second.skill.md",
+    write_file(base / "b" / "SKILL.md",
                std::string("---\nid: dup\n---\nbeta\n"));
     {
         SkillRegistry reg(base);
@@ -61,7 +106,8 @@ int main() {
     fs::remove_all(base / "b", ec);
 
     // --- match + loader + in-body --- ---
-    write_file(base / "route.skill.md",
+    fs::create_directories(base / "route");
+    write_file(base / "route" / "SKILL.md",
                std::string("---\nid: route\n"
                            "trigger_keywords:\n"
                            "  - unique_kw_xyz\n"
@@ -84,14 +130,14 @@ int main() {
         assert(tiny.has_value());
         assert(tiny->size() <= 4U);
     }
-    fs::remove(base / "route.skill.md");
+    fs::remove_all(base / "route", ec);
 
     // --- merge two scan roots ---
-    fs::create_directories(base / "r1");
-    fs::create_directories(base / "r2");
-    write_file(base / "r1" / "one.skill.md",
+    fs::create_directories(base / "r1" / "one");
+    fs::create_directories(base / "r2" / "two");
+    write_file(base / "r1" / "one" / "SKILL.md",
                std::string("---\nid: one\n---\n"));
-    write_file(base / "r2" / "two.skill.md",
+    write_file(base / "r2" / "two" / "SKILL.md",
                std::string("---\nid: two\n---\n"));
     {
         SkillRegistry reg({base / "r1", base / "r2"});
@@ -104,7 +150,8 @@ int main() {
     fs::remove_all(base / "r2", ec);
 
     // --- router off ---
-    write_file(base / "off.skill.md",
+    fs::create_directories(base / "off");
+    write_file(base / "off" / "SKILL.md",
                std::string("---\nid: off\n"
                            "trigger_keywords:\n"
                            "  - marker_only\n"
@@ -124,7 +171,7 @@ int main() {
         (void)::unsetenv("AGENT_SKILL_ROUTER");
 #endif
     }
-    fs::remove(base / "off.skill.md");
+    fs::remove_all(base / "off", ec);
 
     fs::remove_all(base, ec);
     std::clog << "test_skill_registry: ok\n";

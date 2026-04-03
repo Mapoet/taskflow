@@ -288,6 +288,7 @@ int main(int argc, char** argv) {
     std::size_t mcp_services = 0;
     if (!skip_cursor_mcp) {
         std::clog << "[cli_agent_demo] loading Cursor MCP config (use --no-cursor-mcp to skip)...\n"
+                     "  (each server may block up to AGENT_MCP_REQUEST_TIMEOUT_MS, default 60000 ms)\n"
                   << std::flush;
         const std::string mcp_cfg = resolve_cursor_mcp_config_path(cursor_mcp_json_arg);
         import_cursor_mcp_tools(*bus, mcp_cfg, mcp_dbg, &mcp_services);
@@ -316,6 +317,16 @@ int main(int argc, char** argv) {
             "你是一个助手。当前未加载 MCP 工具；请基于常识与公开典型情况回答，并明确标注为估算。\n"
             "不要编造无法核对的细节；信息不足时请说明假设并给出合理区间。\n"
             "回答使用简体中文，结构清晰。\n";
+    }
+    if (env_truthy("AGENT_SKILL_INJECT_CATALOG") && deps.skills && deps.skills->registry) {
+        std::size_t cap = 2048;
+        if (const char* c = std::getenv("AGENT_SKILL_CATALOG_MAX_CHARS")) {
+            const int v = std::atoi(c);
+            if (v > 0) {
+                cap = static_cast<std::size_t>(v);
+            }
+        }
+        cfg.system_prompt += format_skill_catalog_l1(*deps.skills->registry, cap);
     }
     if (const char* m = std::getenv("AGENT_LLM_MODEL")) {
         cfg.model_config.model_name = m;

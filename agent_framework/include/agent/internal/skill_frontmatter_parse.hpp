@@ -14,8 +14,9 @@ namespace agent_framework {
 namespace internal {
 
 /**
- * @brief 解析首个 `---` … `---` 块为 SkillIndexEntry 字段；失败返回 nullopt。
- * @param yaml_block 不含外层分隔行，仅中间 YAML 文本
+ * @brief 解析首个 `---` … `---` 块为 SkillIndexEntry 字段（Cursor：`name`、`description:>-`、
+ *        `disable-model-invocation`；legacy `id` 写入 `yaml_id`）。
+ * @return YAML 体在 trim 后为空则 nullopt；否则返回部分填充的条目（canonical 由 SkillRegistry 合并）。
  */
 std::optional<SkillIndexEntry> parse_skill_frontmatter_yaml(const std::string& yaml_block,
                                                             std::string* error_out);

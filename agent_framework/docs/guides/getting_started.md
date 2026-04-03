@@ -79,8 +79,12 @@ make -j$(nproc)
 | `AGENT_SKILL_ROUTER` | 设为 `off` / `0` / `false` 关闭路由 |
 | `AGENT_SKILL_SCRIPT_ALLOWLIST` | 逗号分隔解释器路径（如 `/bin/sh,/usr/bin/python3`）；**空则拒绝一切脚本执行** |
 | `AGENT_SKILL_SCRIPT_TIMEOUT_SEC` | 子进程超时秒数，默认 `30`（POSIX） |
+| `AGENT_SKILL_INJECT_CATALOG` | 非空/`1`/`true` 时在 system 末尾追加已索引技能短表，便于模型使用正确 canonical（配合 `run_skill_script`） |
+| `AGENT_SKILL_CATALOG_MAX_CHARS` | 目录摘要最大字符，默认 `2048` |
 
-仓库示例：`agent_framework/skills/demo.skill.md` 与 `agent_framework/skills/demo/hello.sh`；可将 `AGENT_SKILLS_DIR` 指到 `agent_framework/skills` 试跑。
+仓库示例：`agent_framework/skills/demo/SKILL.md` 与 `agent_framework/skills/demo/hello.sh`；可将 `AGENT_SKILLS_DIR` 指到 `agent_framework/skills` 试跑（每技能为 **`<root>/<folder>/SKILL.md`**）。
+
+**Frontmatter 与 Cursor 对齐**：优先 **`name:`** 作为 canonical（与目录名一致为佳）；可保留 **`id:`**（legacy）；**无二者** 时用 **目录名**。多行描述使用 **`description: >-`** 等块标量。**`disable-model-invocation: true`** 的技能不参与自动路由，仍可被工具显式引用。
 
 ## 运行示例
 

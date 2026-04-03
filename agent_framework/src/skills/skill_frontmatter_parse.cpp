@@ -1,13 +1,13 @@
 /**
  * @file skill_frontmatter_parse.cpp
- * @brief WP1.8 受限 frontmatter 解析
+ * @brief WP1.8 受限 frontmatter 解析（Cursor：name、description:>-、disable-model-invocation）
  */
 
 #include <agent/internal/skill_frontmatter_parse.hpp>
 
-#include <algorithm>
 #include <cctype>
 #include <sstream>
+#include <vector>
 
 namespace agent_framework {
 namespace internal {
@@ -35,6 +35,118 @@ std::string trim_copy(std::string_view sv) {
     return std::string(sv.substr(a, b - a));
 }
 
+std::string lower_copy(std::string_view sv) {
+    std::string o;
+    o.reserve(sv.size());
+    for (unsigned char c : sv) {
+        o.push_back(static_cast<char>(std::tolower(c)));
+    }
+    return o;
+}
+
+std::string normalize_yaml_key(std::string_view key) {
+    std::string o;
+    for (char c : key) {
+        o += (c == '-') ? '_' : c;
+    }
+    return o;
+}
+
+bool parse_bool_scalar(std::string_view rest) {
+    const std::string t = lower_copy(trim_copy(rest));
+    return t == "true" || t == "yes" || t == "1";
+}
+
+bool looks_like_new_top_level_key(std::string_view trimmed) {
+    if (trimmed.empty() || trimmed[0] == '-') {
+        return false;
+    }
+    const std::size_t c = trimmed.find(':');
+    if (c == std::string::npos) {
+        return false;
+    }
+    std::string key = trim_copy(trimmed.substr(0, c));
+    if (key.empty()) {
+        return false;
+    }
+    return true;
+}
+
+/** Strip leading spaces/tabs (YAML folded / literal continuation indent). */
+std::string strip_indent(std::string_view line) {
+    std::size_t k = 0;
+    while (k < line.size() && (line[k] == ' ' || line[k] == '\t')) {
+        ++k;
+    }
+    return std::string(line.substr(k));
+}
+
+/** Collect folded (>) / literal (|) lines after `key: >-` line; returns index of first line *after* block. */
+std::size_t consume_block_scalar(const std::vector<std::string>& lines,
+                                  std::size_t j,
+                                  bool literal_fold,
+                                  std::string* out_accum) {
+    std::vector<std::string> parts;
+    while (j < lines.size()) {
+        const std::string& L = lines[j];
+        if (!L.empty() && L[0] != ' ' && L[0] != '\t') {
+            const std::string t = trim_copy(L);
+            if (looks_like_new_top_level_key(t)) {
+                break;
+            }
+        }
+        if (L.empty()) {
+            if (literal_fold) {
+                parts.emplace_back("");
+                ++j;
+                continue;
+            }
+            break;
+        }
+        if (L[0] == ' ' || L[0] == '\t') {
+            parts.push_back(strip_indent(L));
+            ++j;
+            continue;
+        }
+        break;
+    }
+    if (literal_fold) {
+        // `|` literal: preserve newlines
+        std::string out;
+        for (std::size_t p = 0; p < parts.size(); ++p) {
+            if (p > 0) {
+                out += '\n';
+            }
+            out += parts[p];
+        }
+        *out_accum = std::move(out);
+    } else {
+        std::string out;
+        for (const auto& part : parts) {
+            if (!out.empty()) {
+                out += ' ';
+            }
+            out += trim_copy(part);
+        }
+        trim_inplace(out);
+        *out_accum = std::move(out);
+    }
+    return j;
+}
+
+std::vector<std::string> split_lines(const std::string& s) {
+    std::vector<std::string> out;
+    std::istringstream iss(s);
+    std::string ln;
+    while (std::getline(iss, ln)) {
+        if (!ln.empty() && ln.back() == '\r') {
+            ln.pop_back();
+        }
+        out.push_back(std::move(ln));
+    }
+    return out;
+}
+
 bool is_list_item(std::string_view line, std::string& out_item) {
     std::string t = trim_copy(line);
     if (t.size() < 2 || t[0] != '-') {
@@ -45,6 +157,11 @@ bool is_list_item(std::string_view line, std::string& out_item) {
     }
     out_item = trim_copy(std::string_view(t).substr(2));
     return true;
+}
+
+bool is_block_indicator(std::string_view rest) {
+    const std::string t = trim_copy(rest);
+    return t == ">-" || t == ">" || t == "|";
 }
 
 } // namespace
@@ -76,8 +193,7 @@ SplitFrontmatterResult split_skill_file_content(std::string_view file_content) {
     const std::size_t nl3b = content.find("\n---\r\n", yaml_start);
     std::size_t close_nl = std::string::npos;
     std::size_t body_off = 0;
-    if (nl3a != std::string::npos &&
-        (nl3b == std::string::npos || nl3a <= nl3b)) {
+    if (nl3a != std::string::npos && (nl3b == std::string::npos || nl3a <= nl3b)) {
         close_nl = nl3a;
         body_off = nl3a + 5;
     } else if (nl3b != std::string::npos) {
@@ -102,25 +218,25 @@ SplitFrontmatterResult split_skill_file_content(std::string_view file_content) {
 
 std::optional<SkillIndexEntry> parse_skill_frontmatter_yaml(const std::string& yaml_block,
                                                             std::string* error_out) {
+    (void)error_out;
+    const std::string trimmed_block = trim_copy(yaml_block);
+    if (trimmed_block.empty()) {
+        return std::nullopt;
+    }
+
     SkillIndexEntry e;
-    std::istringstream in(yaml_block);
-    std::string line;
+    const std::vector<std::string> lines = split_lines(yaml_block);
+
     enum class Mode { None, Keywords, Tags };
     Mode mode = Mode::None;
 
-    auto fail = [&](const char* msg) -> std::optional<SkillIndexEntry> {
-        if (error_out) {
-            *error_out = msg;
-        }
-        return std::nullopt;
-    };
-
-    while (std::getline(in, line)) {
-        if (!line.empty() && line.back() == '\r') {
-            line.pop_back();
-        }
+    std::size_t i = 0;
+    while (i < lines.size()) {
+        std::string line = lines[i];
         std::string trimmed = trim_copy(line);
+
         if (trimmed.empty()) {
+            ++i;
             continue;
         }
 
@@ -132,6 +248,7 @@ std::optional<SkillIndexEntry> parse_skill_frontmatter_yaml(const std::string& y
                 } else {
                     e.tags.push_back(std::move(item));
                 }
+                ++i;
                 continue;
             }
             mode = Mode::None;
@@ -139,29 +256,68 @@ std::optional<SkillIndexEntry> parse_skill_frontmatter_yaml(const std::string& y
 
         const std::size_t col = trimmed.find(':');
         if (col == std::string::npos) {
+            ++i;
             continue;
         }
         std::string key = trim_copy(std::string_view(trimmed).substr(0, col));
         std::string rest = trim_copy(std::string_view(trimmed).substr(col + 1));
+        const std::string key_norm = normalize_yaml_key(key);
+
+        if (key_norm == "disable_model_invocation") {
+            e.disable_model_invocation = parse_bool_scalar(rest);
+            ++i;
+            continue;
+        }
 
         if (key == "id") {
-            if (rest.empty()) {
-                return fail("id empty");
+            e.yaml_id = rest;
+            ++i;
+            continue;
+        }
+
+        if (key == "name") {
+            if (is_block_indicator(rest)) {
+                const bool lit = (trim_copy(rest) == "|");
+                std::string block_text;
+                const std::size_t j = consume_block_scalar(lines, i + 1, lit, &block_text);
+                e.name = std::move(block_text);
+                i = j;
+            } else {
+                e.name = rest;
+                ++i;
             }
-            e.id = std::move(rest);
-        } else if (key == "name") {
-            e.name = std::move(rest);
-        } else if (key == "description") {
-            e.description = std::move(rest);
-        } else if (key == "trigger_keywords") {
+            continue;
+        }
+
+        if (key == "description") {
+            if (is_block_indicator(rest)) {
+                const bool lit = (trim_copy(rest) == "|");
+                std::string block_text;
+                const std::size_t j = consume_block_scalar(lines, i + 1, lit, &block_text);
+                e.description = std::move(block_text);
+                i = j;
+            } else {
+                e.description = rest;
+                ++i;
+            }
+            continue;
+        }
+
+        if (key == "trigger_keywords") {
             if (rest.empty()) {
                 mode = Mode::Keywords;
             }
-        } else if (key == "tags") {
+            ++i;
+            continue;
+        }
+        if (key == "tags") {
             if (rest.empty()) {
                 mode = Mode::Tags;
             }
-        } else if (key == "resources") {
+            ++i;
+            continue;
+        }
+        if (key == "resources") {
             if (!rest.empty()) {
                 try {
                     e.resources = nlohmann::json::parse(rest);
@@ -169,12 +325,13 @@ std::optional<SkillIndexEntry> parse_skill_frontmatter_yaml(const std::string& y
                     e.resources = nlohmann::json{{"raw", rest}};
                 }
             }
+            ++i;
+            continue;
         }
+
+        ++i;
     }
 
-    if (e.id.empty()) {
-        return fail("missing id");
-    }
     return e;
 }
 

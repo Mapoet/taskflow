@@ -2,7 +2,8 @@
  * @file skill_registry.hpp
  * @brief WP1.8 L1：技能目录扫描与关键词路由
  *
- * **重复 id**：后扫描到的文件 **不覆盖**已有条目，写入 stderr 警告后跳过。
+ * **布局**：每个技能为 **`<root>/<skill-folder>/SKILL.md`**（`skill-folder` 为一级子目录名）。
+ * **重复 id**：后扫描到的包 **不覆盖**已有条目，写入 stderr 警告后跳过。
  */
 #ifndef __AGENT_SKILL_REGISTRY_H__
 #define __AGENT_SKILL_REGISTRY_H__
@@ -27,7 +28,7 @@ public:
      */
     explicit SkillRegistry(std::vector<std::filesystem::path> root_directories);
 
-    /** 递归扫描 `*.skill.md`；可重复调用以 reload */
+    /** 扫描各根下一层子目录中的 **`SKILL.md`**；可重复调用以 reload */
     void scan_or_reload();
 
     const std::vector<SkillIndexEntry>& entries() const {

@@ -7,6 +7,8 @@
 #include <cstdlib>
 #include <filesystem>
 #include <limits>
+#include <sstream>
+#include <string>
 #include <vector>
 
 namespace agent_framework {
@@ -89,6 +91,37 @@ std::size_t skill_context_max_chars_from_env() {
         return std::numeric_limits<std::size_t>::max() / 4;
     }
     return static_cast<std::size_t>(v);
+}
+
+std::string format_skill_catalog_l1(const SkillRegistry& registry, std::size_t max_chars) {
+    const auto& ent = registry.entries();
+    if (ent.empty() || max_chars == 0) {
+        return {};
+    }
+    std::ostringstream oss;
+    oss << "\n\n## Indexed skills (canonical id for run_skill_script)\n";
+    constexpr std::size_t k_desc_cap = 200;
+    for (const auto& e : ent) {
+        std::string line = "- ";
+        line += e.id;
+        line += ": ";
+        std::string d = e.description;
+        for (char& c : d) {
+            if (c == '\n' || c == '\r') {
+                c = ' ';
+            }
+        }
+        if (d.size() > k_desc_cap) {
+            d.resize(k_desc_cap);
+        }
+        line += d;
+        line += '\n';
+        if (oss.tellp() + static_cast<std::streamoff>(line.size()) > static_cast<std::streamoff>(max_chars)) {
+            break;
+        }
+        oss << line;
+    }
+    return oss.str();
 }
 
 } // namespace agent_framework

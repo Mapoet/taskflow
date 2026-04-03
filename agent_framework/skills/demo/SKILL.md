@@ -1,7 +1,6 @@
 ---
-id: demo
-name: WP1.8 Demo Skill
-description: Minimal sample skill for AGENT_SKILLS_DIR smoke tests
+name: demo
+description: Minimal sample skill for AGENT_SKILLS_DIR smoke tests (WP1.8 demo)
 trigger_keywords:
   - demo skill
   - wp1.8

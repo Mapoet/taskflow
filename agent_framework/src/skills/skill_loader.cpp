@@ -28,7 +28,15 @@ std::uintmax_t file_time_stamp(const std::filesystem::path& p) {
 SkillLoader::SkillLoader(const SkillRegistry& registry) : registry_(registry) {}
 
 std::filesystem::path SkillLoader::skill_directory(const std::string& skill_id) const {
-    return std::filesystem::weakly_canonical(registry_.root() / skill_id);
+    const auto ent = registry_.get(skill_id);
+    if (!ent.has_value()) {
+        return {};
+    }
+    std::error_code ec;
+    if (ent->script_jail.has_value()) {
+        return std::filesystem::weakly_canonical(*ent->script_jail, ec);
+    }
+    return std::filesystem::weakly_canonical(ent->file_path.parent_path(), ec);
 }
 
 std::optional<std::string> SkillLoader::load_instructions(const std::string& skill_id,

@@ -17,6 +17,39 @@ namespace agent_framework {
 
 namespace {
 
+constexpr int kCanonical_full_match_bonus = 2;
+constexpr int kCanonical_part_bonus_cap = 3;
+
+void score_canonical_in_user_text(const std::string& hay_lower, const std::string& canon_lower,
+                                  int& score) {
+    if (canon_lower.empty()) {
+        return;
+    }
+    if (hay_lower.find(canon_lower) != std::string::npos) {
+        score += kCanonical_full_match_bonus;
+    }
+    int part_bonus = 0;
+    std::size_t start = 0;
+    while (start <= canon_lower.size()) {
+        const std::size_t dash = canon_lower.find('-', start);
+        const std::string part = (dash == std::string::npos)
+                                       ? canon_lower.substr(start)
+                                       : canon_lower.substr(start, dash - start);
+        if (part.size() >= 3U && hay_lower.find(part) != std::string::npos) {
+            ++part_bonus;
+            if (part_bonus >= kCanonical_part_bonus_cap) {
+                break;
+            }
+        }
+        if (dash == std::string::npos) {
+            break;
+        }
+        start = dash + 1U;
+    }
+    score += part_bonus;
+}
+
+
 bool env_skill_router_off() {
     const char* v = std::getenv("AGENT_SKILL_ROUTER");
     if (!v || !*v) {
@@ -70,21 +103,26 @@ void SkillRegistry::scan_one_root(const std::filesystem::path& scan_root,
         return;
     }
 
+    std::error_code d_ec;
     for (const std::filesystem::directory_entry& de :
-         std::filesystem::recursive_directory_iterator(scan_root)) {
-        if (!de.is_regular_file()) {
-            continue;
+         std::filesystem::directory_iterator(scan_root, d_ec)) {
+        if (d_ec) {
+            std::clog << "[SkillRegistry] directory_iterator " << scan_root << ": " << d_ec.message()
+                      << '\n';
+            break;
         }
-        const auto& p = de.path();
-        if (p.extension() != ".md") {
-            continue;
-        }
-        const std::string stem = p.stem().string();
-        if (stem.size() < 7 || stem.compare(stem.size() - 6, 6, ".skill") != 0) {
+        if (!de.is_directory()) {
             continue;
         }
 
-        std::ifstream f(p);
+        const std::filesystem::path skill_dir = de.path();
+        const std::filesystem::path skill_md = skill_dir / "SKILL.md";
+        std::error_code f_ec;
+        if (!std::filesystem::is_regular_file(skill_md, f_ec)) {
+            continue;
+        }
+
+        std::ifstream f(skill_md);
         if (!f) {
             continue;
         }
@@ -94,29 +132,53 @@ void SkillRegistry::scan_one_root(const std::filesystem::path& scan_root,
 
         const internal::SplitFrontmatterResult sp = internal::split_skill_file_content(content);
         if (!sp.ok) {
-            std::clog << "[SkillRegistry] skip (no frontmatter): " << p << '\n';
+            std::clog << "[SkillRegistry] skip (no frontmatter): " << skill_md << '\n';
             continue;
         }
 
-        std::string err;
-        auto parsed = internal::parse_skill_frontmatter_yaml(sp.yaml_inner, &err);
+        auto parsed = internal::parse_skill_frontmatter_yaml(sp.yaml_inner, nullptr);
         if (!parsed.has_value()) {
-            std::clog << "[SkillRegistry] skip " << p << ": " << err << '\n';
+            std::clog << "[SkillRegistry] skip (empty YAML block): " << skill_md << '\n';
             continue;
         }
 
         SkillIndexEntry e = std::move(*parsed);
-        e.file_path = std::filesystem::weakly_canonical(p);
+        const std::string folder_name = skill_dir.filename().string();
 
-        if (seen_ids.count(e.id) != 0U) {
-            std::clog << "[SkillRegistry] duplicate id \"" << e.id << "\" skipped: " << p << '\n';
-            continue;
+        if (!e.name.empty() && !e.yaml_id.empty() && e.name != e.yaml_id) {
+            std::clog << "[SkillRegistry] warn: id/name mismatch in " << skill_md
+                      << " (canonical from name)\n";
+        }
+        if (!e.name.empty() && e.name != folder_name) {
+            std::clog << "[SkillRegistry] warn: name \"" << e.name << "\" != directory \"" << folder_name
+                      << "\" in " << skill_md << '\n';
         }
 
-        std::error_code ec;
-        const std::filesystem::path jail_candidate = scan_root / e.id;
-        if (std::filesystem::is_directory(jail_candidate, ec)) {
-            e.script_jail = std::filesystem::weakly_canonical(jail_candidate, ec);
+        std::string canonical;
+        if (!e.name.empty()) {
+            canonical = e.name;
+        } else if (!e.yaml_id.empty()) {
+            canonical = e.yaml_id;
+        } else {
+            canonical = folder_name;
+        }
+        e.id = std::move(canonical);
+
+        std::error_code c_md;
+        std::error_code c_dir;
+        const std::filesystem::path canon_md =
+            std::filesystem::weakly_canonical(skill_md, c_md);
+        const std::filesystem::path canon_dir =
+            std::filesystem::weakly_canonical(skill_dir, c_dir);
+        e.file_path = c_md ? skill_md : canon_md;
+        if (!c_dir) {
+            e.script_jail = canon_dir;
+        }
+
+        if (seen_ids.count(e.id) != 0U) {
+            std::clog << "[SkillRegistry] duplicate canonical id \"" << e.id << "\" skipped: " << skill_md
+                      << '\n';
+            continue;
         }
 
         seen_ids.insert(e.id);
@@ -158,7 +220,11 @@ std::optional<std::string> SkillRegistry::match(std::string_view user_text) cons
     std::optional<std::string> best_id;
 
     for (const auto& e : entries_) {
+        if (e.disable_model_invocation) {
+            continue;
+        }
         int score = 0;
+        score_canonical_in_user_text(hay, lower_copy(e.id), score);
         for (const auto& kw : e.trigger_keywords) {
             if (kw.empty()) {
                 continue;

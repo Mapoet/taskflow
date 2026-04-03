@@ -41,8 +41,7 @@ int main() {
     fs::remove_all(base, ec);
     assert(fs::create_directories(base));
     assert(fs::create_directories(base / "run"));
-
-    write_file(base / "run.skill.md",
+    write_file(base / "run" / "SKILL.md",
                std::string("---\nid: run\n---\n"));
     write_file(base / "run" / "hello.sh", std::string("#!/bin/sh\necho ok\n"));
 
@@ -68,7 +67,7 @@ int main() {
 
     {
         json r = bus.call_tool("run_skill_script",
-                               json{{"skill_id", "run"}, {"relative_path", "../run.skill.md"}})
+                               json{{"skill_id", "run"}, {"relative_path", "../SKILL.md"}})
                      .get();
         assert(r.contains("error"));
         assert(r["error"].at("code") == "validation_failed");

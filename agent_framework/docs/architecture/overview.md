@@ -28,7 +28,7 @@ Agent Framework 采用分层架构设计：
 - A2A（Agent2Agent）协议支持
 - **Skills & Harness（规划）**：`SKILL.md` 渐进式披露（L1 元数据 / L2 全文指令 / L3 资源与脚本），与 ToolBus 分工（**说明知识** vs **可调用工具**）
 
-详细架构设计请参考：`../../readme/guide_agent.md`；Skills 概念与 SkillHarness 模块拆解见 [`../guides/skills.md`](../guides/skills.md)。
+详细架构设计请参考：`../../readme/guide_agent.md`；Skills 概念与 SkillHarness 模块拆解见 [`../guides/skills.md`](../guides/skills.md)。**阶段 2/3 深化规划（记忆、Verifier、磁盘记忆、Faiss、动态 MCP 排期）**见 **[plan-detailed.v2.md](./plan-detailed.v2.md)**；总纲仍见 [`../guides/plan-detailed.md`](../guides/plan-detailed.md)。
 
 ## Skills 与 Harness（概念映射）
 
@@ -36,7 +36,7 @@ Agent Framework 采用分层架构设计：
 
 | SkillHarness 概念 | 本框架中的落点（计划 / 现有） | 说明 |
 |-------------------|-------------------------------|------|
-| Skill Registry（L1 元数据索引） | 新模块或 `graph_executor` 子组件；扫描 `*SKILL.md` Frontmatter | 启动或刷新时 **只加载元数据**，控制初始 token |
+| Skill Registry（L1 元数据索引） | 新模块或 `graph_executor` 子组件；扫描 **`<skill-folder>/SKILL.md`** Frontmatter | 启动或刷新时 **只加载元数据**，控制初始 token |
 | Skill Router | LLM 意图、关键词检索或 **阶段 3 向量召回** | 与 Agent 循环、条件节点配合 |
 | Skill Loader（L2/L3） | 与 `PromptRenderer` / 上下文管理衔接；L3 经 **ToolBus** 执行脚本 | L3 尽量 **子进程/沙箱**，结果摘要回注 LLM |
 | Execution Engine / Executors | **现有** `ToolBus` + MCP / 本地工具 | 确定性步骤优先走工具而非长上下文 |

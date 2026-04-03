@@ -2,7 +2,7 @@
 > 本框架以 **C++17** 实现。文中出现的 Python 片段仅说明解析与执行器**语义**；落地实现应对应 **C++ 目录扫描、Frontmatter/YAML 解析（如 yaml-cpp 或受限子集手写解析）、经由 ToolBus 的子进程/MCP 调用** 等。
 >
 > **推荐存储形态**  
-> 新技能建议统一为下文 **「单文件 `SKILL.md`（YAML Frontmatter + Markdown 正文）」** 一节所述格式。较早出现的 `skill.yaml` + `SKILL.md` 分文件布局仍可作兼容迁移路径，**不必**混用于同一技能。
+> 新技能建议统一为下文 **「单文件 `SKILL.md`（YAML Frontmatter + Markdown 正文）」** 一节所述格式，目录上为 **`<skills_root>/<skill-folder>/SKILL.md`**（与 Cursor / Agent Framework 的 `SkillRegistry` 扫描约定一致）。较早出现的 `skill.yaml` + `SKILL.md` 分文件布局仍可作兼容迁移路径，**不必**混用于同一技能。
 >
 > **措辞与可信度**  
 > 文中「国际标准」「前沿实践」「百万行验证」等指公开文章与大型工程中常见的**模式归纳**；**具体 API、字段与安全合规以各厂商与组织的当前文档为准**。其他设计文档引用本文时，勿将第三方营销表述理解为对本仓库实现状态的承诺。

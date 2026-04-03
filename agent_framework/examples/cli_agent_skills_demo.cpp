@@ -2,7 +2,7 @@
  * @file cli_agent_skills_demo.cpp
  * @brief CLI 示例：与 `cli_agent_demo` 等价全链路，默认从 **Cursor 技能目录**加载 Skills。
  *
- * **技能路径**（合并扫描，仅已存在目录参与）：
+ * **技能路径**（合并扫描，仅已存在目录参与）：每个技能为 **`<root>/<skill-folder>/SKILL.md`**。
  * - `$HOME/.cursor/skills`
  * - `$HOME/.cursor/skills-cursor`（Windows：`%USERPROFILE%` 下相同相对路径）
  *
@@ -304,6 +304,7 @@ int main(int argc, char** argv) {
     std::size_t mcp_services = 0;
     if (!skip_cursor_mcp) {
         std::clog << "[cli_agent_skills_demo] loading Cursor MCP config (--no-cursor-mcp to skip)...\n"
+                     "  (stdio/HTTP 每个服务可能阻塞至多 AGENT_MCP_REQUEST_TIMEOUT_MS，默认 60000 ms)\n"
                   << std::flush;
         const std::string mcp_cfg = resolve_cursor_mcp_config_path(cursor_mcp_json_arg);
         import_cursor_mcp_tools(*bus, mcp_cfg, mcp_dbg, &mcp_services);
@@ -327,14 +328,24 @@ int main(int argc, char** argv) {
             "你是一个能够调用外部工具的助手。\n"
             "若有与问题直接相关的工具，优先调用工具获取可核对的信息；若无完全对口工具，可结合现有工具输出与常识推理补全结论。\n"
             "不要编造无法核对的细节；若信息不足，请明确假设并给出合理区间。\n"
-            "若系统提示中带有 Active skill，请优先遵循该技能说明；可使用 run_skill_script 在技能目录 jail 内执行脚本（需配置 AGENT_SKILL_SCRIPT_ALLOWLIST）。\n"
+            "若系统提示中带有 Active skill，请优先遵循该技能说明；run_skill_script 的 skill_id 须为已索引技能的 canonical 名（勿编造；与 Cursor SKILL 的 name/目录名一致）。需配置 AGENT_SKILL_SCRIPT_ALLOWLIST。\n"
             "回答使用简体中文，结构清晰。\n";
     } else {
         cfg.system_prompt =
             "你是一个助手。当前未加载 MCP 工具；请基于常识与公开典型情况回答，并明确标注为估算。\n"
             "不要编造无法核对的细节；信息不足时请说明假设并给出合理区间。\n"
-            "若带有 Active skill 段，请优先遵循；脚本工具 run_skill_script 需 allowlist 与技能子目录。\n"
+            "若带有 Active skill 段，请优先遵循；run_skill_script 的 skill_id 须为已索引 canonical；需 allowlist。\n"
             "回答使用简体中文，结构清晰。\n";
+    }
+    if (env_truthy("AGENT_SKILL_INJECT_CATALOG") && deps.skills && deps.skills->registry) {
+        std::size_t cap = 2048;
+        if (const char* c = std::getenv("AGENT_SKILL_CATALOG_MAX_CHARS")) {
+            const int v = std::atoi(c);
+            if (v > 0) {
+                cap = static_cast<std::size_t>(v);
+            }
+        }
+        cfg.system_prompt += format_skill_catalog_l1(*deps.skills->registry, cap);
     }
     if (const char* m = std::getenv("AGENT_LLM_MODEL")) {
         cfg.model_config.model_name = m;

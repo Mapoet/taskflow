@@ -16,10 +16,10 @@
 
 | 编号 | 能力 |
 |------|------|
-| G1 | **L1 索引**：递归扫描 **`AGENT_SKILLS_DIR`** 下 **`*.skill.md`**，仅解析 **YAML Frontmatter** → 内存 **`SkillMeta`** 列表（id、name、description、trigger_keywords、tags、可选 `resources`） |
-| G2 | **路由**：对**当前用户句**（`LLMInput.user_prompt` 或与 wp5 一致的 `initial_user_message`）做 **关键词匹配**（trigger_keywords ∪ tags）；**0 或 1** 个命中技能（首版多命中取 **最高得分或字典序** 第一条，**文档化**） |
+| G1 | **L1 索引**：在每个技能根目录下扫描 **一层子目录** `<skill-folder>/SKILL.md`（文件名大小写敏感 `SKILL.md`），解析 **YAML Frontmatter**（含 Cursor：`name`、块标量 `description: >-` / `description: >` / `description: |`、`disable-model-invocation`；legacy `id`）；合并 **canonical key**（`name` > `id` > 目录名）写入索引 **`id`** 字段 → 内存列表（description、trigger_keywords、tags、`disable_model_invocation`、可选 `resources`） |
+| G2 | **路由**：对**当前用户句**做匹配；**省略** `disable_model_invocation` 的条目；在 **trigger_keywords ∪ tags** 之外，计 **canonical** 整段与 **`-` 分段** 子串分；**0 或 1** 个命中（多命中取最高分 + 字典序最小 canonical，**文档化**） |
 | G3 | **L2 注入**：加载命中文件的 **Markdown 正文**（去掉 frontmatter），按 **字符预算** `AGENT_SKILL_CONTEXT_MAX_CHARS` 截断，进入提示词链路 |
-| G4 | **L3**：`ToolBus` 注册 **`run_skill_script`**（名称固定或前缀 `skill_script`），参数：`skill_id`、`relative_path`；**真实路径**限制在 **`(AGENT_SKILLS_DIR / skill_id / canonical(relative_path))`**，禁止 **`..`** 越狱；执行 **白名单解释器/子进程**（见 §7） |
+| G4 | **L3**：`ToolBus` 注册 **`run_skill_script`**；参数 **`skill_id`** 须为 **canonical**（见 G1）；**真实路径**限制在 **`SkillIndexEntry::script_jail`** 下 **`canonical(relative_path)`**，禁止 **`..`** 越狱；执行 **白名单解释器/子进程**（见 §7） |
 | G5 | **与 wp5 集成**：在 **每轮外层用户输入** 或 **循环体内 LLM 调用前**，更新供 `LLMNode` 使用的 **`LLMInput` 片段**（技能附录）；不破坏现有 tool 循环 |
 | G6 | **单测**：Frontmatter 解析、`..` 拒绝、截断长度、`run_skill_script` schema 校验（wp2） |
 
@@ -43,7 +43,7 @@
 
 ## 3. 技能文件格式（锁定）
 
-与 [skills.md](./skills.md) 一致：**单文件 `.skill.md`**。
+与 [skills.md](./skills.md) 一致：每个技能为目录 **`<root>/<skill-folder>/`** 内单个 **`SKILL.md`**（Frontmatter + Markdown 正文）。
 
 ```markdown
 ---
@@ -233,7 +233,7 @@ flowchart TD
 | T5 | `register_skill_script_tool` | `skill_script_tool.cpp` + wp2 |
 | T6 | **SkillPrepare** 或 StateMerge 钩子；**wp5** `AgentThreadState` 字段 | `agent_loop_node` / `agent_templates` |
 | T7 | `build_cli_agent_graph`、`cli_agent_demo` env | wp6 |
-| T8 | `tests/test_skill_*.cpp`、`skills/demo.skill.md` 样例 | wp7 |
+| T8 | `tests/test_skill_*.cpp`、`skills/demo/SKILL.md` 样例 | wp7 |
 
 ---
 
@@ -263,7 +263,7 @@ flowchart TD
 
 ## 13. 完成定义（WP1.8 DoD）
 
-- [ ] 给定 `AGENT_SKILLS_DIR` 与示例 `*.skill.md`，**无 API key** 下单测可验证 L1/L2/L3。
+- [ ] 给定 `AGENT_SKILLS_DIR` 与示例 `SKILL.md`，**无 API key** 下单测可验证 L1/L2/L3。
 - [ ] `run_skill_script` 仅能在技能目录 jail 内执行。
 - [ ] **wp5** 跑通：**用户话**触发技能 → `LLMInput` 含附录 → 模型（或 mock）可看到技能正文。
 - [ ] **wp4** 单测或扩展测覆盖 **skill_block** 拼接顺序。
