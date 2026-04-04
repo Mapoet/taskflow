@@ -17,3 +17,6 @@
 	path = 3rd-party/faiss
 	url = https://github.com/facebookresearch/faiss.git
 
+[submodule "3rd-party/exprtk"]
+	path = 3rd-party/exprtk
+	url = https://github.com/ArashPartow/exprtk.git
