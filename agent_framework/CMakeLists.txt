@@ -96,6 +96,14 @@ else()
     message(WARNING "websocketpp not found in ${WEBSOCKETPP_DIR}. Run: git submodule update --init --recursive")
 endif()
 
+# ExprTk (Header-Only, mathematical expression parse/eval — MIT)
+set(EXPRTK_DIR ${THIRD_PARTY_DIR}/exprtk)
+if(EXISTS ${EXPRTK_DIR}/exprtk.hpp)
+    message(STATUS "Found ExprTk at: ${EXPRTK_DIR}")
+else()
+    message(STATUS "ExprTk not found (optional). Run: git submodule update --init 3rd-party/exprtk")
+endif()
+
 # Faiss (可选，需要编译)
 option(AGENT_BUILD_FAISS "Build Faiss vector database support" OFF)
 if(AGENT_BUILD_FAISS)
@@ -134,6 +142,10 @@ endif()
 
 if(EXISTS ${WEBSOCKETPP_DIR})
     include_directories(${WEBSOCKETPP_DIR})
+endif()
+
+if(EXISTS ${EXPRTK_DIR}/exprtk.hpp)
+    include_directories(${EXPRTK_DIR})
 endif()
 
 # 查找依赖（可选）
@@ -229,6 +241,9 @@ if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/toolbus/web_archive.cpp)
 endif()
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/toolbus/web_tools.cpp)
     list(APPEND AGENT_SOURCES src/toolbus/web_tools.cpp)
+endif()
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/toolbus/expr_tools.cpp)
+    list(APPEND AGENT_SOURCES src/toolbus/expr_tools.cpp)
 endif()
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/toolbus/news_sources_catalog.cpp)
     list(APPEND AGENT_SOURCES src/toolbus/news_sources_catalog.cpp)
@@ -373,6 +388,7 @@ set(AGENT_HEADERS
     include/agent/skill_services.hpp
     include/agent/skill_script_tool.hpp
     include/agent/internal/skill_frontmatter_parse.hpp
+    include/agent/expr_tools.hpp
 )
 
 # 创建库
@@ -424,6 +440,12 @@ endif()
 # 线程库（用于 std::thread）
 if(CMAKE_USE_PTHREADS_INIT)
     target_link_libraries(agent_framework PRIVATE Threads::Threads)
+endif()
+
+if(EXISTS ${EXPRTK_DIR}/exprtk.hpp)
+    target_compile_definitions(agent_framework PRIVATE AGENT_HAVE_EXPRTK=1)
+    target_compile_definitions(agent_framework PRIVATE exprtk_disable_rtl_io_file)
+    message(STATUS "Agent Framework: ExprTk enabled (AGENT_HAVE_EXPRTK)")
 endif()
 
 # MSVC 特殊处理：确保 C++20 支持
@@ -703,6 +725,26 @@ if(BUILD_TESTING)
             "AGENT_TEST_NEWS_JSON=\"${CMAKE_CURRENT_SOURCE_DIR}/tests/data/news_sources_test_catalog.json\"")
         add_test(NAME news_sources_catalog COMMAND test_news_sources)
         set_tests_properties(news_sources_catalog PROPERTIES ENVIRONMENT "AGENT_TOOL_ALLOWLIST=")
+    endif()
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_exprtk_smoke.cpp
+       AND EXISTS ${EXPRTK_DIR}/exprtk.hpp)
+        add_executable(test_exprtk_smoke tests/test_exprtk_smoke.cpp)
+        target_include_directories(test_exprtk_smoke PRIVATE ${EXPRTK_DIR})
+        add_test(NAME exprtk_smoke COMMAND test_exprtk_smoke)
+    endif()
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_expr_tools.cpp
+       AND EXISTS ${EXPRTK_DIR}/exprtk.hpp)
+        add_executable(test_expr_tools tests/test_expr_tools.cpp)
+        target_link_libraries(test_expr_tools PRIVATE agent_framework)
+        if(CMAKE_USE_PTHREADS_INIT)
+            target_link_libraries(test_expr_tools PRIVATE Threads::Threads)
+        endif()
+        add_test(NAME expr_tools_builtin COMMAND test_expr_tools)
+        set_tests_properties(expr_tools_builtin PROPERTIES ENVIRONMENT "AGENT_TOOL_ALLOWLIST=")
+        add_test(NAME expr_tools_builtin_allowlist_partial COMMAND test_expr_tools --allowlist-partial)
+        set_tests_properties(
+            expr_tools_builtin_allowlist_partial
+            PROPERTIES ENVIRONMENT "AGENT_TOOL_ALLOWLIST=expr_eval;AGENT_EXPR_ENABLE=1")
     endif()
 endif()
 

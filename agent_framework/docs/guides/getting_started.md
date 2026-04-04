@@ -67,6 +67,8 @@ make -j$(nproc)
 
 **内建网络工具（`web_*`）**：若 **`AGENT_WEB_ENABLE=1`**（及 `1`/`true`/`yes`/`on`）且构建已链接 **OpenSSL**（`CPPHTTPLIB_OPENSSL_SUPPORT`），则注册 **`web_search` / `web_fetch` / `web_rss_feed` / `web_fetch_archive`**；若同时设置 **`AGENT_NEWS_SOURCES_JSON`** 指向有效 v1 信源 JSON，则额外注册 **`web_configured_source`**（见 **[内建 web_* 工具](./builtin-web-tools.md)**）。常用变量：**`AGENT_WEB_ALLOW_HTTP=1`** 才允许 `http://`；**`AGENT_WEB_MAX_REDIRECTS`**、**`AGENT_WEB_MAX_RESPONSE_BYTES`**、**`AGENT_WEB_ALLOW_HOSTS`**（非空则严格主机白名单）；**`AGENT_WEB_SEARCH_MIN_INTERVAL_MS`**；归档解压需 **`AGENT_FS_ROOT`** 与可选 **`AGENT_WEB_EXTRACT_SUBDIR`**。工具名仍受 **`AGENT_TOOL_ALLOWLIST`** 约束；若用 allowlist 且启用信源文件，请包含 **`web_configured_source`**。
 
+**内建表达式工具（`expr_*`，ExprTk）**：若构建包含 **ExprTk**（存在 **`exprtk.hpp`**）且 **`AGENT_EXPR_ENABLE`** 未设为关闭值（**`0` / `false` / `off` / `no`**；未设置时默认开启），则注册 **`expr_eval` / `expr_validate` / `expr_batch_eval`**（详见 **[内建 expr_* 工具](./builtin-exprtk-tools.md)**）。常用变量：**`AGENT_EXPR_MAX_EXPR_BYTES`**（默认 `16384`）、**`AGENT_EXPR_MAX_LOOP_ITERS`**、**`AGENT_EXPR_PARSER_STACK_DEPTH`**、**`AGENT_EXPR_PARSER_NODE_DEPTH`**、**`AGENT_EXPR_DISABLE_CONTROL_FLOW`**。若设置 **`AGENT_TOOL_ALLOWLIST`**，须将 **`expr_eval,expr_validate,expr_batch_eval`** 一并列入，否则注册会失败。
+
 与 `simple_agent` 区别：`cli_agent_demo` 接真实 **WP1.5** 图（`build_cli_agent_graph_with_terminal_sink`）、**ToolBus** 演示工具 **add**、可选 **Cursor MCP**、**SIGINT** 合作式退出。
 
 ## WP1.8：Skills（可选）
