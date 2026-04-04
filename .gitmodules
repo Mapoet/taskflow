@@ -24,6 +24,7 @@
 [submodule "3rd-party/canvas_ity"]
 	path = 3rd-party/canvas_ity
 	url = https://github.com/a-e-k/canvas_ity.git
+
 [submodule "3rd-party/stb"]
 	path = 3rd-party/stb
 	url = https://github.com/nothings/stb.git
