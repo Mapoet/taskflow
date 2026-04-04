@@ -484,6 +484,132 @@ json expr_batch_eval_invoke(const json& j, const ExprConfig& cfg) {
     return json{{"values", std::move(values)}, {"expression", program}, {"warnings", warnings}};
 }
 
+json expr_schema_expression_field(std::size_t max_expr_bytes) {
+    return json{{"type", "string"},
+                {"maxLength", max_expr_bytes},
+                {"description",
+                 "ExprTk program (UTF-8). Single expression or multiple statements separated by ';'. "
+                 "maxLength matches runtime cap AGENT_EXPR_MAX_EXPR_BYTES. "
+                 "Trig expects radians unless you convert (e.g. deg2rad). "
+                 "Unknown identifiers fail at compile time (error codes parse_error / undefined_symbol)."}};
+}
+
+json expr_schema_variables_field(const char* role_suffix) {
+    std::string desc =
+        "Object map of scalar names to JSON numbers. Each key becomes a mutable double variable in the "
+        "symbol table before compile. External symbols are not assignable with ':=' from the program "
+        "(immutable symbol table). ";
+    desc += role_suffix;
+    desc += " Values must be JSON numbers (ToolBus schema subset allows additionalProperties: true only).";
+    return json{{"type", "object"},
+                {"additionalProperties", true},
+                {"description", std::move(desc)}};
+}
+
+json expr_schema_vectors_field(const char* role_suffix) {
+    std::string desc =
+        "Object map of vector names to JSON arrays of numbers. Each array is loaded as an ExprTk vector; "
+        "index with name[i] in the program. ";
+    desc += role_suffix;
+    desc += " Each value must be a JSON array whose elements are numbers.";
+    return json{{"type", "object"},
+                {"additionalProperties", true},
+                {"description", std::move(desc)}};
+}
+
+json expr_schema_constants_field(const char* role_suffix) {
+    std::string desc =
+        "Object map of constant names to JSON numbers. Registered as read-only before variables. "
+        "If a name cannot be added, a warning constant_ignored:<name> is emitted. ";
+    desc += role_suffix;
+    desc += " Values must be JSON numbers.";
+    return json{{"type", "object"},
+                {"additionalProperties", true},
+                {"description", std::move(desc)}};
+}
+
+json expr_batch_row_item_schema() {
+    json vars_in_row = json::object();
+    vars_in_row["type"] = "object";
+    vars_in_row["additionalProperties"] = true;
+    vars_in_row["description"] =
+        "Scalars to merge for this row before evaluation. May be omitted entirely to repeat the previous "
+        "row's numbers.";
+    json row = json::object();
+    row["type"] = "object";
+    row["description"] =
+        "Optional per-row scalar overrides. Omitted keys keep values carried from the previous row "
+        "(after that row's eval) or from top-level variables / 0.0 defaults for names only seen in later "
+        "rows.";
+    row["properties"] = json{{"variables", std::move(vars_in_row)}};
+    return row;
+}
+
+json expr_eval_tool_schema(const ExprConfig& cfg) {
+    json return_fmt = json::object();
+    return_fmt["type"] = "string";
+    return_fmt["enum"] = json::array({"scalar", "full"});
+    return_fmt["default"] = "scalar";
+    return_fmt["description"] =
+        "scalar (default): normal path returns numeric value in value; if the program invokes return(), "
+        "value is null and results lists typed values. full: when return() is used, also sets "
+        "return_format in the response; when no return(), results may be an empty array for symmetry "
+        "with tooling.";
+    json props = json::object();
+    props["expression"] = expr_schema_expression_field(cfg.max_expr_bytes);
+    props["variables"] =
+        expr_schema_variables_field("Use for inputs that appear as scalar symbols.");
+    props["vectors"] = expr_schema_vectors_field("Shared numeric vectors for this evaluation.");
+    props["constants"] = expr_schema_constants_field("Shared constants for this evaluation.");
+    props["return_format"] = std::move(return_fmt);
+    json s = json::object();
+    s["type"] = "object";
+    s["description"] = "Evaluate one ExprTk program once with the given symbol bindings.";
+    s["properties"] = std::move(props);
+    s["required"] = json::array({"expression"});
+    return s;
+}
+
+json expr_validate_tool_schema(const ExprConfig& cfg) {
+    json props = json::object();
+    props["expression"] = expr_schema_expression_field(cfg.max_expr_bytes);
+    props["variables"] =
+        expr_schema_variables_field("Ensures names used as scalars resolve during compile.");
+    props["vectors"] = expr_schema_vectors_field("Ensures vector symbols exist during compile.");
+    props["constants"] =
+        expr_schema_constants_field("Ensures constant names match expr_eval setup.");
+    json s = json::object();
+    s["type"] = "object";
+    s["description"] = "Parse-check only; same binding shape as expr_eval (no return_format).";
+    s["properties"] = std::move(props);
+    s["required"] = json::array({"expression"});
+    return s;
+}
+
+json expr_batch_eval_tool_schema(const ExprConfig& cfg) {
+    json rows_field = json::object();
+    rows_field["type"] = "array";
+    rows_field["minItems"] = 1;
+    rows_field["description"] =
+        "Ordered list of row objects. Length equals length of returned values.";
+    rows_field["items"] = expr_batch_row_item_schema();
+    json props = json::object();
+    props["expression"] = expr_schema_expression_field(cfg.max_expr_bytes);
+    props["variables"] = expr_schema_variables_field(
+        "Default scalars for all rows; keys also define which symbols participate in the batch unless "
+        "only rows supply names.");
+    props["vectors"] = expr_schema_vectors_field("Same vector bindings for every row evaluation.");
+    props["constants"] = expr_schema_constants_field("Same constant bindings for every row evaluation.");
+    props["rows"] = std::move(rows_field);
+    json s = json::object();
+    s["type"] = "object";
+    s["description"] =
+        "Batch scalar evaluation with one compile; see tool description string for row merge rules.";
+    s["properties"] = std::move(props);
+    s["required"] = json::array({"expression", "rows"});
+    return s;
+}
+
 void register_expr_tools_impl(ToolBus& bus) {
     const ExprConfig cfg = load_expr_config_from_env();
 
@@ -491,24 +617,14 @@ void register_expr_tools_impl(ToolBus& bus) {
         ToolMeta meta;
         meta.name = "expr_eval";
         meta.description =
-            "Evaluate a mathematical expression with ExprTk (double). Pass variables as JSON numbers, "
-            "vectors as number arrays, constants as read-only numbers. External symbols are immutable "
-            "(no := on them). Trigonometry uses radians (use deg2rad). Unknown symbols fail with "
-            "parse_error/undefined_symbol. Multi-statement programs use ';' between statements.";
-        meta.schema = json::parse(R"({
-            "type": "object",
-            "properties": {
-                "expression": {"type": "string", "maxLength": 16384},
-                "variables": {"type": "object", "additionalProperties": {"type": "number"}},
-                "vectors": {
-                    "type": "object",
-                    "additionalProperties": {"type": "array", "items": {"type": "number"}}
-                },
-                "constants": {"type": "object", "additionalProperties": {"type": "number"}},
-                "return_format": {"type": "string", "enum": ["scalar", "full"]}
-            },
-            "required": ["expression"]
-        })");
+            "Evaluate an ExprTk program (IEEE double). "
+            "Arguments: expression (required); optional variables (mutable scalars), vectors (name -> "
+            "number[]), constants (read-only scalars); optional return_format (scalar|full). "
+            "Outputs: value when the program yields a scalar without return(); returned/results when "
+            "return() is used; warnings for skipped constants. "
+            "Limits: AGENT_EXPR_MAX_LOOP_ITERS, parser stack/node depth env vars; optional "
+            "AGENT_EXPR_DISABLE_CONTROL_FLOW. External symbols are immutable (no ':=' on them).";
+        meta.schema = expr_eval_tool_schema(cfg);
         bus.register_local_tool(
             "expr_eval", [cfg](const json& args) { return expr_eval_invoke(args, cfg); }, meta);
     }
@@ -516,21 +632,11 @@ void register_expr_tools_impl(ToolBus& bus) {
         ToolMeta meta;
         meta.name = "expr_validate";
         meta.description =
-            "Parse-only check for an ExprTk expression; returns dependent variable/function/assignment "
-            "symbols without evaluating. Use the same variables/vectors/constants shape as expr_eval.";
-        meta.schema = json::parse(R"({
-            "type": "object",
-            "properties": {
-                "expression": {"type": "string", "maxLength": 16384},
-                "variables": {"type": "object", "additionalProperties": {"type": "number"}},
-                "vectors": {
-                    "type": "object",
-                    "additionalProperties": {"type": "array", "items": {"type": "number"}}
-                },
-                "constants": {"type": "object", "additionalProperties": {"type": "number"}}
-            },
-            "required": ["expression"]
-        })");
+            "Parse-only: compile the ExprTk program with the same variables/vectors/constants bindings "
+            "as expr_eval, but do not run value(). Returns ok, variables/functions/assignments symbol "
+            "lists, and warnings. Use to discover free symbols and arity before calling expr_eval or "
+            "expr_batch_eval.";
+        meta.schema = expr_validate_tool_schema(cfg);
         bus.register_local_tool(
             "expr_validate", [cfg](const json& args) { return expr_validate_invoke(args, cfg); }, meta);
     }
@@ -538,32 +644,14 @@ void register_expr_tools_impl(ToolBus& bus) {
         ToolMeta meta;
         meta.name = "expr_batch_eval";
         meta.description =
-            "Compile an ExprTk expression once, evaluate for each row of scalar variables. Top-level "
-            "variables and vectors apply to all rows; each row may override scalars via rows[].variables. "
-            "Does not support return(); any row non-finite or loop limit fails the whole call.";
-        meta.schema = json::parse(R"({
-            "type": "object",
-            "properties": {
-                "expression": {"type": "string", "maxLength": 16384},
-                "variables": {"type": "object", "additionalProperties": {"type": "number"}},
-                "vectors": {
-                    "type": "object",
-                    "additionalProperties": {"type": "array", "items": {"type": "number"}}
-                },
-                "constants": {"type": "object", "additionalProperties": {"type": "number"}},
-                "rows": {
-                    "type": "array",
-                    "minItems": 1,
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "variables": {"type": "object", "additionalProperties": {"type": "number"}}
-                        }
-                    }
-                }
-            },
-            "required": ["expression", "rows"]
-        })");
+            "Compile expression once, then call expression.value() once per rows[] entry. "
+            "Scalar set: union of every key appearing in top-level variables and in any rows[i].variables "
+            "(must be non-empty). Top-level variables seed defaults; vectors and constants are shared. "
+            "Per row: start from the resolved scalars after the previous row, merge rows[i].variables, "
+            "then evaluate. "
+            "Unsupported: return() (fails). Any non-finite value or loop-limit error fails the entire call. "
+            "Response values[] aligns 1:1 with rows[].";
+        meta.schema = expr_batch_eval_tool_schema(cfg);
         bus.register_local_tool(
             "expr_batch_eval", [cfg](const json& args) { return expr_batch_eval_invoke(args, cfg); },
             meta);

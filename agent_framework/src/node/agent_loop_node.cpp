@@ -288,7 +288,7 @@ AgentLoopNode::create(
             }
 
             if (log_at_least(LogLevel::Info)) {
-                std::clog << "[tool] name=" << c.name << " start\n";
+                std::clog << "\n[tool] name=" << c.name << " start\n";
                 std::clog.flush();
             }
             json result = toolbus->call_tool(c.name, c.arguments).get();

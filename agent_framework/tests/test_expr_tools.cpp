@@ -20,6 +20,7 @@ using json = nlohmann::json;
 void allowlist_partial_mode() {
     agent_framework::ToolBus bus;
     (void)::setenv("AGENT_EXPR_ENABLE", "1", 1);
+    (void)::setenv("AGENT_TOOL_ALLOWLIST", "expr_eval", 1);
     try {
         agent_framework::register_builtin_expr_tools_if_configured(bus);
         std::cerr << "test_expr_tools: expected invalid_argument from partial allowlist\n";
@@ -80,7 +81,10 @@ int main(int argc, char** argv) {
         assert(r.contains("error"));
         assert(r["error"]["code"] == "parse_error" || r["error"]["code"] == "undefined_symbol");
 
-        r = bus.call_tool("expr_validate", json{{"expression", "x + 1"}}).get();
+        r = bus.call_tool(
+                 "expr_validate",
+                 json{{"expression", "x + 1"}, {"variables", json{{"x", 0.0}}}})
+                .get();
         assert(!r.contains("error"));
         assert(r["ok"].get<bool>() == true);
         assert(r["variables"].is_array());
@@ -111,7 +115,10 @@ int main(int argc, char** argv) {
         (void)::setenv("AGENT_EXPR_MAX_LOOP_ITERS", "30", 1);
         ToolBus bus_loop;
         register_builtin_expr_tools_if_configured(bus_loop);
-        json r = bus_loop.call_tool("expr_eval", json{{"expression", "while (1 < 2) 1;"}}).get();
+        json r = bus_loop.call_tool(
+                         "expr_eval",
+                         json{{"expression", "for (var i := 0; i < 100; i += 1) { 1; }"}})
+                         .get();
         (void)::unsetenv("AGENT_EXPR_MAX_LOOP_ITERS");
         assert(r.contains("error"));
         assert(r["error"]["code"] == "loop_limit");
