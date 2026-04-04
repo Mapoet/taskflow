@@ -1,7 +1,7 @@
 /**
  * @file web_search_ddg.cpp
  * @brief DuckDuckGo html.duckduckgo.com 搜索（不重定向到非 duckduckgo.com）。
- * HTTPS 请求：若存在 HTTPS_PROXY / https_proxy / HTTP_PROXY / http_proxy 则经 HTTP 代理 CONNECT，否则直连。
+ * HTTPS 请求：代理与 `web_http_get` 共用（见 `load_web_http_upstream_proxy` / `web_http.cpp`）。
  * 人机验证：若识别到 DDG 挑战页，JSON 含 ddg_challenge.open_in_browser；设 AGENT_WEB_DDG_PAUSE_ON_CHALLENGE=1
  * 可在终端暂停，验证后可选 export AGENT_WEB_DDG_COOKIE=... 再按 Enter 重试一次。
  */
@@ -87,139 +87,6 @@ std::size_t ddg_max_body_bytes() {
         }
     }
     return 1048576;
-}
-
-/** 供 HTTPS CONNECT 使用的 HTTP 代理（与 curl 一致：读 HTTPS_PROXY，否则 HTTP_PROXY）。 */
-struct HttpsUpstreamProxy {
-    std::string host;
-    int port = 0;
-    std::string user;
-    std::string pass;
-};
-
-bool tolower_prefix_match(std::string_view s, std::string_view pref) {
-    if (s.size() < pref.size()) {
-        return false;
-    }
-    for (std::size_t i = 0; i < pref.size(); ++i) {
-        if (std::tolower(static_cast<unsigned char>(s[i])) !=
-            std::tolower(static_cast<unsigned char>(pref[i]))) {
-            return false;
-        }
-    }
-    return true;
-}
-
-/**
- * 解析常见形式：http(s)://host:port、host:port、user:pass@host:port、[::1]:port。
- * 不支持 socks5://（httplib 此路径为 HTTP CONNECT）。
- */
-bool parse_http_proxy_url(std::string s, HttpsUpstreamProxy& out) {
-    trim_inplace_str(s);
-    if (s.empty()) {
-        return false;
-    }
-    {
-        std::string low;
-        low.reserve(s.size());
-        for (char c : s) {
-            low += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-        }
-        if (low == "none" || low == "off" || low == "false" || low == "disable") {
-            return false;
-        }
-    }
-    while (tolower_prefix_match(s, "https://")) {
-        s.erase(0, 8);
-    }
-    while (tolower_prefix_match(s, "http://")) {
-        s.erase(0, 7);
-    }
-    trim_inplace_str(s);
-    if (s.empty()) {
-        return false;
-    }
-
-    const std::size_t at = s.find('@');
-    if (at != std::string::npos) {
-        std::string auth = s.substr(0, at);
-        s = s.substr(at + 1);
-        trim_inplace_str(s);
-        const std::size_t ac = auth.find(':');
-        if (ac != std::string::npos) {
-            out.user = auth.substr(0, ac);
-            out.pass = auth.substr(ac + 1);
-        } else {
-            out.user = std::move(auth);
-        }
-        trim_inplace_str(out.user);
-        trim_inplace_str(out.pass);
-    }
-
-    if (!s.empty() && s.front() == '[') {
-        const std::size_t br = s.find(']');
-        if (br == std::string::npos || br < 2) {
-            return false;
-        }
-        out.host = s.substr(1, br - 1);
-        if (br + 1 < s.size() && s[br + 1] == ':') {
-            const std::string ps = s.substr(br + 2);
-            if (ps.empty()) {
-                return false;
-            }
-            for (char c : ps) {
-                if (!std::isdigit(static_cast<unsigned char>(c))) {
-                    return false;
-                }
-            }
-            out.port = std::atoi(ps.c_str());
-        } else {
-            out.port = 8080;
-        }
-        return !out.host.empty() && out.port > 0 && out.port <= 65535;
-    }
-
-    const std::size_t colon = s.rfind(':');
-    if (colon != std::string::npos && colon + 1 < s.size()) {
-        const std::string port_str = s.substr(colon + 1);
-        bool all_digit = true;
-        for (char c : port_str) {
-            if (!std::isdigit(static_cast<unsigned char>(c))) {
-                all_digit = false;
-                break;
-            }
-        }
-        if (all_digit && !port_str.empty()) {
-            out.host = s.substr(0, colon);
-            trim_inplace_str(out.host);
-            out.port = std::atoi(port_str.c_str());
-            return !out.host.empty() && out.port > 0 && out.port <= 65535;
-        }
-    }
-
-    out.host = s;
-    trim_inplace_str(out.host);
-    out.port = 8080;
-    return !out.host.empty();
-}
-
-const char* ddg_proxy_env_raw() {
-    static const char* const keys[] = {"HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy"};
-    for (const char* k : keys) {
-        const char* v = std::getenv(k);
-        if (v && *v) {
-            return v;
-        }
-    }
-    return nullptr;
-}
-
-bool load_https_upstream_proxy(HttpsUpstreamProxy& out) {
-    const char* raw = ddg_proxy_env_raw();
-    if (!raw) {
-        return false;
-    }
-    return parse_http_proxy_url(std::string(raw), out);
 }
 
 std::string url_encode_query(const std::string& value) {
@@ -498,8 +365,8 @@ DdgFetchOutcome ddg_follow_https_get(std::string current,
         }
         cli.set_follow_location(false);
 
-        HttpsUpstreamProxy upstream_proxy;
-        if (load_https_upstream_proxy(upstream_proxy)) {
+        WebHttpUpstreamProxy upstream_proxy;
+        if (load_web_http_upstream_proxy(upstream_proxy)) {
             cli.set_proxy(upstream_proxy.host.c_str(), upstream_proxy.port);
             if (!upstream_proxy.user.empty()) {
                 cli.set_proxy_basic_auth(upstream_proxy.user.c_str(), upstream_proxy.pass.c_str());

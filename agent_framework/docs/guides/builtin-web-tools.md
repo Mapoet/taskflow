@@ -6,6 +6,40 @@
 
 **安全说明**：`web_*` 不是浏览器沙箱；默认应实现 **SSRF 缓解**（禁止或限制访问私网/元数据地址）、**响应体与解压后总大小上限**、**重定向次数上限**、**单 host 速率限制**。勿对不可信模型在无监督环境下放开 **任意 URL** 与 **任意解压路径**。
 
+## 出站代理、Cookie 与站点人机验证（`web_*` 共用）
+
+### 适用范围
+
+| 路径 | 说明 |
+|------|------|
+| **`web_http_get`** | **`web_fetch`**、**`web_rss_feed`**（GET feed）、**`web_fetch_archive`**（下载归档 URL）均经此实现出站。 |
+| **`web_search`** | 对 DuckDuckGo 使用独立 `SSLClient`，但 **HTTP(S) 代理解析与上列共用**（`load_web_http_upstream_proxy`）。 |
+| **`web_configured_source`** | 内部映射到 **`web_rss_feed` / `web_fetch`**，**继承**本节代理与 Cookie 规则；`api` 条目的 **`headers`** 并入 `web_fetch`。 |
+
+### HTTP 代理（CONNECT）
+
+| 变量 | 含义 | 未设置时 |
+|------|------|----------|
+| `HTTPS_PROXY` / `https_proxy` / `HTTP_PROXY` / `http_proxy` | 按序取**第一个非空**；值为 `http(s)://host:port` 或 `user:pass@host:port` 等；经 **HTTP CONNECT** 隧道（与 curl 一致） | **直连** |
+| （不支持） | `socks5://` 等 SOCKS 协议 | — |
+
+### 全进程 Cookie（可选）
+
+| 变量 | 含义 | 未设置时 |
+|------|------|----------|
+| `AGENT_WEB_HTTP_COOKIE` | 若本次请求的附加头映射中**未**包含键名 **`Cookie`**（大小写不敏感），则自动添加 `Cookie` 头 | 不添加 |
+
+**优先级**：**`web_fetch`** 参数 **`headers`** 中的 `Cookie`（及 **`web_configured_source` → `api` → `web_fetch`** 合并的头）**优先于** `AGENT_WEB_HTTP_COOKIE`。**`web_rss_feed`** 与 **`web_fetch_archive`** 当前无 `headers` 参数时，可依赖 **`AGENT_WEB_HTTP_COOKIE`** 访问需会话的 feed 或归档 URL。
+
+### 人机验证（与 `web_search` 的差异）
+
+| 工具 | 约定 |
+|------|------|
+| **`web_search`（DuckDuckGo）** | **专用**：JSON 含 **`ddg_challenge.open_in_browser`**；可选 **`AGENT_WEB_DDG_PAUSE_ON_CHALLENGE`** 阻塞 stdin 后重试；**`AGENT_WEB_DDG_COOKIE`** 仅作用于 DuckDuckGo 请求（与全站 **`AGENT_WEB_HTTP_COOKIE`** 分离，避免把任意站点 Cookie 发给 DDG）。 |
+| **`web_fetch` / `web_rss_feed` / `web_fetch_archive`** | **无**统一「暂停 + 固定验证 URL」内建流程；若遇登录页/挑战 HTML，由调用方在浏览器完成验证后，用 **`headers.Cookie`** 或 **`AGENT_WEB_HTTP_COOKIE`** 再试。 |
+
+---
+
 ## 与外部「搜索 / 抓取」MCP 的关系
 
 推荐策略与 `fs_*` 文档类似：
@@ -84,14 +118,15 @@ validate_query → 仅连接固定 host → GET /html/?q=... → 检查状态码
 
 ### 1.5 `web_search`（DuckDuckGo）环境变量
 
+**共用项**：**`HTTPS_PROXY` / `HTTP_PROXY`** 链、**`AGENT_WEB_USER_AGENT`** 等见上文 **「出站代理、Cookie 与站点人机验证」** 及 **§2.4**。全站 Cookie 用 **`AGENT_WEB_HTTP_COOKIE`**；仅 DuckDuckGo 人机验证重试用 **`AGENT_WEB_DDG_COOKIE`**（二者分离）。
+
 | 变量 | 含义 | 未设置时默认 |
 |------|------|----------------|
 | `AGENT_WEB_SEARCH_TIMEOUT_MS` | 仅 `web_search` 阶段的超时；可覆盖 `AGENT_WEB_TIMEOUT_MS` | 与 `AGENT_WEB_TIMEOUT_MS` 相同 |
 | `AGENT_WEB_SEARCH_MIN_INTERVAL_MS` | 两次 `web_search` 最小间隔（同进程，对 `html.duckduckgo.com`） | `1000` |
 | `AGENT_WEB_DDG_MAX_BODY_BYTES` | DuckDuckGo HTML 响应体解析前上限 | `1048576` |
-| `HTTPS_PROXY` / `https_proxy` / `HTTP_PROXY` / `http_proxy` | 按序取第一个非空；经 **HTTP CONNECT** 访问 DuckDuckGo（与 curl 常见用法一致） | 未设置则直连 |
 | `AGENT_WEB_DDG_PAUSE_ON_CHALLENGE` | 检测到人机验证页时：在 **stderr** 打印说明与链接，**阻塞**读 stdin 一行，再按当前环境重试本次搜索一次 | 关闭 |
-| `AGENT_WEB_DDG_COOKIE` | 请求携带的 `Cookie` 头；可在浏览器完成验证后从开发者工具复制，配合上一项在按 Enter 前 `export` | 无 |
+| `AGENT_WEB_DDG_COOKIE` | 仅发往 DuckDuckGo 的 `Cookie`；配合上一项在按 Enter 前 `export` | 无 |
 
 当响应被识别为 DuckDuckGo **人机验证 / anomaly** 页且解析结果为空时，成功返回的 JSON 会包含 **`ddg_challenge`**：`detected`、`open_in_browser`（建议在浏览器打开的搜索 URL）。若启用 `AGENT_WEB_DDG_PAUSE_ON_CHALLENGE`，重试后仍可能为空，此时 `interactive_retry` 等字段见返回体。
 
@@ -101,7 +136,7 @@ validate_query → 仅连接固定 host → GET /html/?q=... → 检查状态码
 
 ### 2.1 基础能力：`web_fetch`
 
-对 **单个 URL** 执行 **GET**（或 HEAD+GET），适用于 `text/plain`、`text/markdown`、`application/json`、`text/html`（可仅返回截断正文或后续再由可选步骤提取正文）等。
+对 **单个 URL** 执行 **GET**（或 HEAD+GET），适用于 `text/plain`、`text/markdown`、`application/json`、`text/html`（可仅返回截断正文或后续再由可选步骤提取正文）等。出站经 **`web_http_get`**：**`HTTPS_PROXY` / `HTTP_PROXY`** 与 **`AGENT_WEB_HTTP_COOKIE`** 见文首 **「出站代理、Cookie…」**；**`headers.Cookie` 优先于** 环境变量。目标站人机验证无统一内建暂停流程，需在浏览器验证后用 Cookie 重试。
 
 | 参数 | 类型 | 说明 |
 |------|------|------|
@@ -131,7 +166,7 @@ validate_query → 仅连接固定 host → GET /html/?q=... → 检查状态码
 
 ### 2.3 压缩包：`web_fetch_archive`（或 `web_fetch` + `archive: true`）
 
-支持从 URL 下载 **`application/zip`**、**`application/gzip`**（单文件 `.gz`）、**`application/x-tar`**、**`application/x-gzip` 与 tar 组合（`.tar.gz` / `.tgz`）** 等（具体以实现声明为准）。
+支持从 URL 下载 **`application/zip`**、**`application/gzip`**（单文件 `.gz`）、**`application/x-tar`**、**`application/x-gzip` 与 tar 组合（`.tar.gz` / `.tgz`）** 等（具体以实现声明为准）。**下载 GET** 经 **`web_http_get`**：**`HTTPS_PROXY` / `HTTP_PROXY`**、**`AGENT_WEB_HTTP_COOKIE`** 与文首 **「出站代理、Cookie…」** 一致。
 
 **硬要求（安全）**：
 
@@ -161,6 +196,8 @@ validate_query → 仅连接固定 host → GET /html/?q=... → 检查状态码
 
 ### 2.4 环境变量（建议）
 
+**出站代理与全站 Cookie**：**`HTTPS_PROXY` / `HTTP_PROXY` 链**、**`AGENT_WEB_HTTP_COOKIE`** 见文档开头 **「出站代理、Cookie 与站点人机验证（`web_*` 共用）」**；经 **`web_http_get`** 的 `web_fetch` / `web_rss_feed` / `web_fetch_archive` 与 **`web_search`**（代理解析共用）均适用。
+
 | 变量 | 含义 | 未设置时默认 |
 |------|------|----------------|
 | `AGENT_WEB_ENABLE` | 非空且为真 → 注册 `web_*` | 未设置 → **不注册** |
@@ -168,13 +205,14 @@ validate_query → 仅连接固定 host → GET /html/?q=... → 检查状态码
 | `AGENT_WEB_MAX_REDIRECTS` | 重定向上限 | `10` |
 | `AGENT_WEB_TIMEOUT_MS` | 连接+读超时 | `30000` |
 | `AGENT_WEB_USER_AGENT` | User-Agent | 含项目名与联系用途的固定串 |
+| `AGENT_WEB_HTTP_COOKIE` | 未在工具 `headers` 中提供 `Cookie` 时，为 **`web_fetch` / `web_rss_feed` / `web_fetch_archive`** 自动附加 `Cookie` | 无 |
 | `AGENT_WEB_ALLOW_HOSTS` | 逗号分隔 host 白名单；空表示**不启用白名单**（依赖 SSRF 黑名单实现） | 空 |
 | `AGENT_WEB_DENY_NETWORKS` | 可选；CIDR 黑名单（私网、链路本地等） | 建议默认拒绝 RFC1918 等 |
 | `AGENT_WEB_MAX_ARCHIVE_FILES` | 归档内文件数上限 | `1000` |
 | `AGENT_WEB_MAX_ARCHIVE_UNCOMPRESSED_BYTES` | 解压后总字节上限 | `52428800`（示例） |
 | `AGENT_WEB_MAX_ARCHIVE_SINGLE_FILE_BYTES` | 单成员上限 | `10485760`（示例） |
 
-（**`web_search`** 专用变量见 **§1.5**；`web_fetch` 等其它出站能力仍使用上表及 SSRF 相关变量。）
+（**`web_search`** 的 DuckDuckGo 专用项见 **§1.5**；**`AGENT_WEB_DDG_*`** 与全站 **`AGENT_WEB_HTTP_*`** 勿混用 Cookie。）
 
 ---
 
@@ -217,6 +255,11 @@ validate_query → 仅连接固定 host → GET /html/?q=... → 检查状态码
 
 - 对同一 `feed_url` 实施 **最小间隔**（例如每 host 每 N 秒一次），避免 Agent 循环高频刷源。
 - 固定 **User-Agent**；尊重站点 `robots.txt` 仅当实现浏览器式爬虫时强相关；**仅 GET Feed URL** 时仍建议在运维文档中说明使用场景。
+
+### 3.5 代理、Cookie 与验证页
+
+- **`web_rss_feed`** 的 HTTP GET 与 **`web_fetch`** 共用 **`web_http_get`**：**`HTTPS_PROXY` / `HTTP_PROXY`**、**`AGENT_WEB_HTTP_COOKIE`** 等行为与文档开头 **「出站代理、Cookie…」** 一致。
+- 若 Feed 需登录或返回人机验证 HTML：**无** DuckDuckGo 式 `ddg_challenge` 内建字段；请用 **`AGENT_WEB_HTTP_COOKIE`**（或后续若扩展工具参数 `headers`，则用显式 `Cookie`）在验证后重试。
 
 ---
 
@@ -352,6 +395,7 @@ validate_query → 仅连接固定 host → GET /html/?q=... → 检查状态码
 
 - **密钥**：示例 JSON 中 `api.*.headers` 可为空对象；生产环境在私有副本或加载代码中写入头，并从 **`AGENT_*` / 密钥管理** 读取。
 - **出站与 SSRF**：所有实际请求仍受 **`AGENT_WEB_*`**、SSRF 规则与 **`AGENT_TOOL_ALLOWLIST`** 约束。
+- **代理与 Cookie**：**`web_configured_source`** 触发的请求继承 **「出站代理、Cookie…」** 全文约定；未在 JSON `headers` 中写 `Cookie` 的 `rss` / `scrape` 拉取可走 **`AGENT_WEB_HTTP_COOKIE`**；**`web_search`** 的 DuckDuckGo 验证请用 **`AGENT_WEB_DDG_*`**，勿与全站 Cookie 混用。
 - **合并策略（v1）**：仅 **`AGENT_NEWS_SOURCES_JSON` 单一文件**；多文件 / 与内置默认合并留待后续版本约定。
 
 将本目录交给 LLM 时，可只注入 **source_id** 与简短说明，整条 JSON 不必进入 system prompt，避免上下文膨胀与误泄露。

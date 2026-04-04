@@ -1,6 +1,6 @@
 /**
  * @file web_http.cpp
- * @brief 受控 HTTP(S) GET：SSRF、重定向、流式体上限（对齐 builtin-web-tools 实施契约）
+ * @brief 受控 HTTP(S) GET：SSRF、重定向、流式体上限；HTTPS_PROXY/HTTP_PROXY（HTTP CONNECT）、AGENT_WEB_HTTP_COOKIE。
  */
 
 #include <agent/web_http.hpp>
@@ -534,7 +534,18 @@ const char* upstream_proxy_env_raw() {
     return nullptr;
 }
 
-bool extra_map_has_cookie_key(const std::map<std::string, std::string>& m) {
+} // namespace
+
+bool load_web_http_upstream_proxy(WebHttpUpstreamProxy& out) {
+    out = WebHttpUpstreamProxy{};
+    const char* raw = upstream_proxy_env_raw();
+    if (!raw) {
+        return false;
+    }
+    return parse_upstream_proxy_url(std::string(raw), out);
+}
+
+bool web_http_extra_headers_has_cookie(const std::map<std::string, std::string>& m) {
     for (const auto& kv : m) {
         std::string k = kv.first;
         for (char& c : k) {
@@ -557,17 +568,6 @@ void apply_upstream_proxy_to_httplib_client(ClientLike& cli) {
     if (!px.user.empty()) {
         cli.set_proxy_basic_auth(px.user.c_str(), px.pass.c_str());
     }
-}
-
-} // namespace
-
-bool load_web_http_upstream_proxy(WebHttpUpstreamProxy& out) {
-    out = WebHttpUpstreamProxy{};
-    const char* raw = upstream_proxy_env_raw();
-    if (!raw) {
-        return false;
-    }
-    return parse_upstream_proxy_url(std::string(raw), out);
 }
 
 WebHttpConfig load_web_http_config_from_env() {
@@ -612,6 +612,12 @@ WebHttpResult web_http_get(const std::string& url_in, const WebHttpConfig& cfg,
         for (const auto& kv : extra_headers) {
             headers.emplace(kv.first, kv.second);
         }
+        if (!web_http_extra_headers_has_cookie(extra_headers)) {
+            const std::string ck = env_str("AGENT_WEB_HTTP_COOKIE", "");
+            if (!ck.empty()) {
+                headers.emplace("Cookie", ck);
+            }
+        }
 
         std::string body;
         bool truncated = false;
@@ -643,12 +649,14 @@ WebHttpResult web_http_get(const std::string& url_in, const WebHttpConfig& cfg,
             httplib::SSLClient cli(pu->host, pu->port);
             apply_client_timeouts(cli, cfg.timeout_ms);
             cli.set_follow_location(false);
+            apply_upstream_proxy_to_httplib_client(cli);
             res_opt = cli.Get(pu->path_and_query.c_str(), headers, on_data);
 #endif
         } else {
             httplib::Client cli(pu->host, pu->port);
             apply_client_timeouts(cli, cfg.timeout_ms);
             cli.set_follow_location(false);
+            apply_upstream_proxy_to_httplib_client(cli);
             res_opt = cli.Get(pu->path_and_query.c_str(), headers, on_data);
         }
         httplib::Result res = std::move(*res_opt);
