@@ -196,31 +196,26 @@ int run_graph_once(tf::Executor& executor,
                    const AgentWorkflowDeps& deps,
                    const std::shared_ptr<internal::AgentThreadState>& state,
                    CLIHandler& cli) {
-    workflow::GraphBuilder builder("cli_agent_skills_demo");
-    CliAgentTerminalSinkOptions sink;
-    sink.sink_node_name = "CliSink";
-    sink.on_final_json = [&cli](const json& j) { cli.handle_final_result(j); };
-
-    CliAgentGraphOptions gopts;
-    gopts.stream_callback = [&cli](std::string_view tok) {
+    GraphExecutor gx;
+    ReactCliRunRequest req;
+    req.config = cfg;
+    req.deps = deps;
+    req.session = state;
+    req.options.sink.sink_node_name = "CliSink";
+    req.options.sink.on_final_json = [&cli](const json& j) { cli.handle_final_result(j); };
+    req.options.graph_options.stream_callback = [&cli](std::string_view tok) {
         if (!g_shutdown_requested.load()) {
             cli.handle_stream_token(tok);
         }
     };
-
     try {
-        build_cli_agent_graph_with_terminal_sink(builder, cfg, deps, state, sink, "AgentLoop",
-                                                 gopts);
+        WorkflowResult wr = gx.run_react_cli_sync(executor, req);
+        if (!wr.success) {
+            cli.handle_error(wr.error_message.value_or("run_react_cli_sync failed"));
+            return 1;
+        }
     } catch (const std::exception& e) {
-        cli.handle_error(std::string("build graph: ") + e.what());
-        return 1;
-    }
-
-    try {
-        auto fut = builder.run_async(executor);
-        fut.wait();
-    } catch (const std::exception& e) {
-        cli.handle_error(std::string("run: ") + e.what());
+        cli.handle_error(std::string("run_react_cli_sync: ") + e.what());
         return 1;
     }
     return 0;
@@ -366,7 +361,6 @@ int main(int argc, char** argv) {
         if (g_shutdown_requested.load()) {
             return 130;
         }
-        state->iteration = 0;
         state->skill_prompt_cache.reset();
         state->active_skill_id.reset();
         state->initial_user_prompt = line;

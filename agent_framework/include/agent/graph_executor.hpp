@@ -119,6 +119,49 @@ void build_cli_agent_graph_with_terminal_sink(
     const CliAgentGraphOptions& graph_options = CliAgentGraphOptions());
 
 // ============================================================================
+// WP2.0：ReAct CLI 统一运行请求 + 会话合并
+// ============================================================================
+
+/** @brief WP2.0 模板注册与文档用逻辑 id（执行请用 GraphExecutor::run_react_cli_sync） */
+inline constexpr const char* kWorkflowTemplateReactCli = "react_cli";
+
+/**
+ * @brief WP2.0：一轮 ReAct CLI 的可调选项
+ *
+ * require_final_json_callback=false 时仍向底层 Sink 注入空操作回调以满足构图校验；合并与会话写回照常执行。
+ */
+struct ReactCliRunOptions {
+    std::string loop_node_name = "AgentLoop";
+    CliAgentGraphOptions graph_options{};
+    CliAgentTerminalSinkOptions sink{};
+    bool require_final_json_callback = true;
+};
+
+/**
+ * @brief WP2.0：构建并运行一轮 CLI ReAct 图所需的聚合参数
+ */
+struct ReactCliRunRequest {
+    AgentConfig config;
+    AgentWorkflowDeps deps;
+    std::shared_ptr<internal::AgentThreadState> session;
+    ReactCliRunOptions options;
+};
+
+/**
+ * @brief WP2.0：将 Loop 出口 next_agent_state 合并回调用方 session（D11）
+ *
+ * 步骤摘要：校验 `next->history` 以 `session->history` 为前缀；取后缀为 delta；令
+ * `session->history = old + user(user_turn_snapshot) + delta`；复制 iteration / skill 字段；
+ * 清空 `last_error` 与 `initial_user_prompt`。前缀不一致时返回 false 且不修改 `session->history`
+ *（详见 docs/guides/phase-2-wp0.md §4）。
+ * @param user_turn_snapshot 本轮用户句（与运行前 session->initial_user_prompt 一致）
+ */
+bool merge_react_session_state(
+    internal::AgentThreadState& session,
+    const std::string& user_turn_snapshot,
+    const std::shared_ptr<internal::AgentThreadState>& next);
+
+// ============================================================================
 // 工作流模板接口
 // ============================================================================
 
@@ -225,7 +268,7 @@ private:
 // ============================================================================
 
 /**
- * @brief GraphExecutor 管理器
+ * @brief GraphExecutor：构图辅助 + WP2.0 统一入口 `run_react_cli_sync`（每轮后 `merge_react_session_state` 写回会话）
  */
 class GraphExecutor {
 public:
@@ -249,7 +292,7 @@ public:
                               const CliAgentTerminalSinkOptions& sink);
 
     /**
-     * @brief 构建自定义工作流
+     * @brief 构建自定义工作流（非 WP2.0；仍为占位实现）
      * @param config 工作流配置
      * @param builder 图构建器
      */
@@ -264,11 +307,31 @@ public:
                           std::shared_ptr<WorkflowTemplate> template_ptr);
     
     /**
-     * @brief 执行工作流
-     * @param workflow_name 工作流名称
-     * @return 工作流执行结果（异步 future）
+     * @brief WP2.0：同步构建并运行一轮 ReAct CLI 图，结束后合并会话状态
+     * @param executor Taskflow 执行器
+     * @param request 非空 session / deps；session->initial_user_prompt 非空
+     * @return WorkflowResult.outputs 与 CliOutputSink JSON 对齐（含 guard_*）
      */
-    std::future<WorkflowResult> execute(const std::string& workflow_name);
+    WorkflowResult run_react_cli_sync(tf::Executor& executor, const ReactCliRunRequest& request);
+
+    /**
+     * @brief WP2.0：异步包装 run_react_cli_sync（在另一线程等待 Taskflow future）
+     * @note 调用方须保证 `executor` 存活至返回的 `std::future` 完成（再 `wait`/`get`）。
+     */
+    std::future<WorkflowResult> run_react_cli_async(tf::Executor& executor,
+                                                      ReactCliRunRequest request);
+
+    /**
+     * @brief 注册 react_cli 逻辑模板名（ReActTemplate；build(json) 仍抛异常，仅用于发现/列表）
+     */
+    void register_react_cli_template();
+
+    /**
+     * @brief 已移除；请使用 run_react_cli_sync
+     * @deprecated
+     */
+    [[deprecated("use GraphExecutor::run_react_cli_sync")]] std::future<WorkflowResult>
+    execute(const std::string& workflow_name);
     
     /**
      * @brief 获取模板
