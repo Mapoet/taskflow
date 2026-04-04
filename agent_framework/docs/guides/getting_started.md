@@ -69,6 +69,8 @@ make -j$(nproc)
 
 **内建表达式工具（`expr_*`，ExprTk）**：若构建包含 **ExprTk**（存在 **`exprtk.hpp`**）且 **`AGENT_EXPR_ENABLE`** 未设为关闭值（**`0` / `false` / `off` / `no`**；未设置时默认开启），则注册 **`expr_eval` / `expr_validate` / `expr_batch_eval`**（详见 **[内建 expr_* 工具](./builtin-exprtk-tools.md)**）。常用变量：**`AGENT_EXPR_MAX_EXPR_BYTES`**（默认 `16384`）、**`AGENT_EXPR_MAX_LOOP_ITERS`**、**`AGENT_EXPR_PARSER_STACK_DEPTH`**、**`AGENT_EXPR_PARSER_NODE_DEPTH`**、**`AGENT_EXPR_DISABLE_CONTROL_FLOW`**。若设置 **`AGENT_TOOL_ALLOWLIST`**，须将 **`expr_eval,expr_validate,expr_batch_eval`** 一并列入，否则注册会失败。
 
+**内建绘图工具（`draw_*`，canvas_ity + stb）**：当编译单元同时具备 **canvas_ity** 与 **`stb_image_write.h`** 时，若 **`AGENT_DRAW_ENABLE`** 未设为关闭值（**`0` / `false` / `off` / `no`**；未设置时默认开启），则注册 **`draw_render`**（内存 PNG → **`png_base64`**）与 **`draw_export`**（在 **`AGENT_FS_ROOT`** 下原子写 PNG，语义对齐 **`fs_write`** 的确认覆盖）。门闩与模板说明见 **[内建 draw_* 工具](./builtin-draw-tools.md)**（**`AGENT_DRAW_MAX_WIDTH`** / **`AGENT_DRAW_MAX_HEIGHT`**、**`AGENT_DRAW_MAX_PIXELS`**、**`AGENT_DRAW_MAX_COMMANDS`**、**`AGENT_DRAW_MAX_OUTPUT_BYTES`**）。子模块初始化示例：`git submodule update --init 3rd-party/canvas_ity 3rd-party/stb`。若设置 **`AGENT_TOOL_ALLOWLIST`**，须将 **`draw_render`** 与 **`draw_export`** 一并列入，否则注册会失败。离线回归：**`ctest -R draw_tools`**。
+
 与 `simple_agent` 区别：`cli_agent_demo` 接真实 **WP1.5** 图（`build_cli_agent_graph_with_terminal_sink`）、**ToolBus** 演示工具 **add**、可选 **Cursor MCP**、**SIGINT** 合作式退出。
 
 ## WP1.8：Skills（可选）

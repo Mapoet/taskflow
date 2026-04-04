@@ -141,6 +141,8 @@ flowchart LR
 
 **可选：内建 `expr_*`（ExprTk，WP1.2 扩展）**：构建检测到 **`3rd-party/exprtk/exprtk.hpp`** 且 **`AGENT_EXPR_ENABLE`** 非关闭值时，`build_cli_agent_graph` 会注册 **`expr_eval` / `expr_validate` / `expr_batch_eval`**（门闩、循环与解析上限、Allowlist 与 **`ctest -R expr_tools`** 见 **[内建 expr_* 工具（ExprTk）](./builtin-exprtk-tools.md)**）。
 
+**可选：内建 `draw_*`（canvas_ity + stb，WP1.2 扩展）**：当 **`AGENT_HAVE_CANVAS_ITY`** 与 **`stb_image_write.h`** 在 **`draw_tools.cpp`** 编译单元中同时可用时，且 **`AGENT_DRAW_ENABLE`** 非关闭值时，`build_cli_agent_graph` 在 **`expr_*` 注册之后**调用 **`register_builtin_draw_tools_if_configured`**，注册 **`draw_render` / `draw_export`**（白名单 **`template_id`**、PNG **`png_base64`**、`AGENT_FS_ROOT` 下 **`draw_export`**）。详见 **[内建 draw_* 工具](./builtin-draw-tools.md)**；验收：**`ctest -R draw_tools`**，可选手测 **`cli_agent_demo`**。
+
 **可选：信源目录 JSON + `web_configured_source`**：当同时设置 **`AGENT_NEWS_SOURCES_JSON`**（v1 文件路径，见该文档「外部信源目录」）且 web 门闩满足时，注册 **`web_configured_source`**；离线回归 **`ctest -R news_sources`**（`test_news_sources`）。
 
 ---

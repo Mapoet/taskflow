@@ -8,6 +8,7 @@
 #include <agent/internal/agent_thread_state.hpp>
 #include <agent/internal/loop_io_keys.hpp>
 #include <agent/llm_client.hpp>
+#include <agent/draw_tools.hpp>
 #include <agent/expr_tools.hpp>
 #include <agent/fs_tools.hpp>
 #include <agent/news_sources_tool.hpp>
@@ -47,6 +48,7 @@ void build_cli_agent_graph_impl(workflow::GraphBuilder& builder,
     register_builtin_web_tools_if_configured(*deps.toolbus);
     register_web_configured_source_if_configured(*deps.toolbus);
     register_builtin_expr_tools_if_configured(*deps.toolbus);
+    register_builtin_draw_tools_if_configured(*deps.toolbus);
 
     auto [sys_src, _st] = builder.create_any_source(
         "SystemPrompt",

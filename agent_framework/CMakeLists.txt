@@ -269,6 +269,9 @@ endif()
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/toolbus/expr_tools.cpp)
     list(APPEND AGENT_SOURCES src/toolbus/expr_tools.cpp)
 endif()
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/toolbus/draw_tools.cpp)
+    list(APPEND AGENT_SOURCES src/toolbus/draw_tools.cpp)
+endif()
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/toolbus/news_sources_catalog.cpp)
     list(APPEND AGENT_SOURCES src/toolbus/news_sources_catalog.cpp)
 endif()
@@ -413,6 +416,7 @@ set(AGENT_HEADERS
     include/agent/skill_script_tool.hpp
     include/agent/internal/skill_frontmatter_parse.hpp
     include/agent/expr_tools.hpp
+    include/agent/draw_tools.hpp
 )
 
 # 创建库
@@ -480,6 +484,13 @@ endif()
 if(EXISTS ${STB_DIR}/stb_image.h AND EXISTS ${STB_DIR}/stb_image_write.h)
     target_compile_definitions(agent_framework PRIVATE AGENT_HAVE_STB_IMAGE=1)
     message(STATUS "Agent Framework: stb image headers enabled (AGENT_HAVE_STB_IMAGE)")
+endif()
+
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|AppleClang"
+   AND EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/toolbus/draw_tools.cpp)
+    set_source_files_properties(
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/toolbus/draw_tools.cpp
+        PROPERTIES COMPILE_OPTIONS "-Wno-missing-field-initializers")
 endif()
 
 # MSVC 特殊处理：确保 C++20 支持
@@ -792,6 +803,21 @@ if(BUILD_TESTING)
         set_tests_properties(
             expr_tools_builtin_allowlist_partial
             PROPERTIES ENVIRONMENT "AGENT_TOOL_ALLOWLIST=expr_eval;AGENT_EXPR_ENABLE=1")
+    endif()
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_draw_tools.cpp
+       AND EXISTS ${CANVAS_ITY_DIR}/canvas_ity.hpp
+       AND EXISTS ${STB_DIR}/stb_image_write.h)
+        add_executable(test_draw_tools tests/test_draw_tools.cpp)
+        target_link_libraries(test_draw_tools PRIVATE agent_framework)
+        if(CMAKE_USE_PTHREADS_INIT)
+            target_link_libraries(test_draw_tools PRIVATE Threads::Threads)
+        endif()
+        add_test(NAME draw_tools_builtin COMMAND test_draw_tools)
+        set_tests_properties(draw_tools_builtin PROPERTIES ENVIRONMENT "AGENT_TOOL_ALLOWLIST=")
+        add_test(NAME draw_tools_builtin_allowlist_partial COMMAND test_draw_tools --allowlist-partial)
+        set_tests_properties(
+            draw_tools_builtin_allowlist_partial
+            PROPERTIES ENVIRONMENT "AGENT_TOOL_ALLOWLIST=draw_render;AGENT_DRAW_ENABLE=1")
     endif()
 endif()
 
