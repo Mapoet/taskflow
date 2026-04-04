@@ -139,6 +139,8 @@ flowchart LR
 
 **可选：内建 `web_*`（WP1.2 扩展）**：在 **`AGENT_WEB_ENABLE`**、OpenSSL + **`CPPHTTPLIB_OPENSSL_SUPPORT`** 等条件满足时，`build_cli_agent_graph` 可额外注册 **`web_search` / `web_fetch` / `web_rss_feed` / `web_fetch_archive`**（SSRF、配额、`AGENT_TOOL_ALLOWLIST` 与离线单测约定见 **[内建 web_* 工具](./builtin-web-tools.md)**）。
 
+**可选：信源目录 JSON + `web_configured_source`**：当同时设置 **`AGENT_NEWS_SOURCES_JSON`**（v1 文件路径，见该文档「外部信源目录」）且 web 门闩满足时，注册 **`web_configured_source`**；离线回归 **`ctest -R news_sources`**（`test_news_sources`）。
+
 ---
 
 ### WP1.3 MCP

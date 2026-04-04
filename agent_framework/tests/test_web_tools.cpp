@@ -1,6 +1,10 @@
 /**
  * @file test_web_tools.cpp
- * @brief web_* 内建工具：DDG 解析 fixture、mock HTTP、SSRF、RSS、ZIP 解压（无公网）
+ * @brief web_* 内建工具：DDG 解析 fixture、mock HTTP、SSRF、RSS、ZIP 解压（无公网）；默认在 clog 打印结果摘要。
+ * 在线样例（可选）：设 AGENT_TEST_WEB_LIVE=1 在全部离线用例通过后调用 web_search，请求与
+ * https://html.duckduckgo.com/html/?q=%E8%A5%BF%E5%AE%89 相同形态的 HTML 端点；DDG 常对自动化流量返回人机验证（见外站说明），
+ * 默认不因空结果/错误失败。AGENT_TEST_WEB_LIVE_STRICT=1 时要求每次调用成功且 results 非空。
+ * web_search 遇人机验证时 JSON 含 ddg_challenge.open_in_browser；交互重试：AGENT_WEB_DDG_PAUSE_ON_CHALLENGE=1、AGENT_WEB_DDG_COOKIE。
  */
 
 #include <agent/fs_tools.hpp>
@@ -9,6 +13,7 @@
 #include <agent/web_tools.hpp>
 
 #include <cassert>
+#include <cctype>
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
@@ -16,6 +21,7 @@
 #include <iostream>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <thread>
 
 #if __has_include(<httplib/httplib.hpp>)
@@ -30,6 +36,52 @@
 
 namespace {
 
+// 默认将解析/工具返回摘要打到 stderr（clog）；设 AGENT_TEST_WEB_QUIET=1 可关闭（便于 CTest 静默跑）。
+bool web_test_show_query_results() {
+    const char* e = std::getenv("AGENT_TEST_WEB_QUIET");
+    if (!e || !*e) {
+        return true;
+    }
+    std::string s(e);
+    for (char& c : s) {
+        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    }
+    return !(s == "1" || s == "true" || s == "yes" || s == "on");
+}
+
+bool env_truthy_cstr(const char* v) {
+    if (!v || !*v) {
+        return false;
+    }
+    std::string s(v);
+    for (char& c : s) {
+        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    }
+    return s == "1" || s == "true" || s == "yes" || s == "on";
+}
+
+void clog_tool_json_for_test(std::string_view tag, const json& r) {
+    if (!web_test_show_query_results()) {
+        return;
+    }
+    json j = r;
+    if (j.contains("binary_preview_hex") && j["binary_preview_hex"].is_string()) {
+        const auto& hx = j["binary_preview_hex"].get_ref<const std::string&>();
+        j["binary_preview_hex"] = "<omitted; " + std::to_string(hx.size()) + " hex chars>";
+    }
+    static const char* long_keys[] = {"html", "text"};
+    for (const char* key : long_keys) {
+        if (!j.contains(key) || !j[key].is_string()) {
+            continue;
+        }
+        const auto& t = j[key].get_ref<const std::string&>();
+        if (t.size() > 400) {
+            j[key] = t.substr(0, 400) + "... <truncated, total " + std::to_string(t.size()) + " bytes>";
+        }
+    }
+    std::clog << "[test_web_tools] " << tag << ":\n" << j.dump(2) << "\n";
+}
+
 std::string read_all(const std::string& path) {
     std::ifstream in(path, std::ios::binary);
     if (!in) {
@@ -38,6 +90,59 @@ std::string read_all(const std::string& path) {
     std::stringstream ss;
     ss << in.rdbuf();
     return ss.str();
+}
+
+/**
+ * 对线上 DuckDuckGo HTML 搜索做抽样（与 web_search 相同：GET
+ * https://html.duckduckgo.com/html/?q=... ，由 web_search_ddg.cpp 构造）。
+ */
+void run_live_ddg_search_samples(agent_framework::ToolBus& bus) {
+    if (!env_truthy_cstr(std::getenv("AGENT_TEST_WEB_LIVE"))) {
+        return;
+    }
+    if (!std::getenv("AGENT_WEB_SEARCH_TIMEOUT_MS")) {
+        (void)::setenv("AGENT_WEB_SEARCH_TIMEOUT_MS", "12000", 0);
+    }
+    const bool strict = env_truthy_cstr(std::getenv("AGENT_TEST_WEB_LIVE_STRICT"));
+    std::clog << "[test_web_tools] LIVE: AGENT_TEST_WEB_LIVE=1 — 正在请求 DuckDuckGo HTML（可能被识别为 bot）\n";
+
+    static const struct {
+        const char* tag;
+        json args;
+    } k_cases[] = {
+        {"q_xi_an", json{{"query", std::string("\xE8\xA5\xBF\xE5\xAE\x89", 6)}, {"max_results", 6}}},
+        {"en_taskflow", json{{"query", "taskflow cpp parallel"}, {"max_results", 6}}},
+        {"site_wikipedia_gnu",
+         json{{"query", "GNU"}, {"site_filter", "wikipedia.org"}, {"max_results", 4}}},
+        {"latin_short", json{{"query", "openstreetmap"}, {"max_results", 5}}},
+    };
+
+    for (const auto& c : k_cases) {
+        json r = bus.call_tool("web_search", c.args).get();
+        clog_tool_json_for_test(std::string("web_search LIVE [") + c.tag + "]", r);
+
+        const bool has_err = r.contains("error");
+        const bool has_results =
+            r.contains("results") && r["results"].is_array() && !r["results"].empty();
+
+        if (strict) {
+            assert(!has_err && "AGENT_TEST_WEB_LIVE_STRICT: web_search returned error");
+            assert(has_results && "AGENT_TEST_WEB_LIVE_STRICT: expected non-empty results");
+            assert(r["results"][0].contains("url"));
+            assert(r["results"][0]["url"].is_string());
+            assert(!r["results"][0]["url"].get<std::string>().empty());
+            continue;
+        }
+        if (has_err) {
+            std::clog << "[test_web_tools] LIVE: " << c.tag << " error (network/HTTP/provider)\n";
+            continue;
+        }
+        if (!has_results) {
+            std::clog << "[test_web_tools] LIVE: " << c.tag
+                      << " empty results (DDG 人机验证或 HTML 改版；浏览器访问示例: "
+                         "https://html.duckduckgo.com/html/?q=%E8%A5%BF%E5%AE%89 )\n";
+        }
+    }
 }
 
 } // namespace
@@ -56,6 +161,12 @@ int main() {
     assert(hits.size() >= 1);
     assert(hits[0].title.find("Example") != std::string::npos);
     assert(hits[0].url.find("example.com") != std::string::npos);
+    if (web_test_show_query_results()) {
+        std::clog << "[test_web_tools] parse_duckduckgo_html_results: " << hits.size() << " hit(s)\n";
+        for (std::size_t i = 0; i < hits.size(); ++i) {
+            std::clog << "  [" << i << "] " << hits[i].title << "\n      " << hits[i].url << "\n";
+        }
+    }
 
     (void)::setenv("AGENT_WEB_ENABLE", "1", 1);
     (void)::setenv("AGENT_WEB_TEST_ALLOW_LOOPBACK", "1", 1);
@@ -101,11 +212,12 @@ int main() {
                                 json{{"url", "http://127.0.0.1:" + std::to_string(port) + "/minimal.zip"},
                                      {"max_bytes", static_cast<int>(zip_body.size() + 1024)}})
                      .get();
-      if (r.contains("error")) {
-          std::cerr << "web_fetch err: " << r.dump() << "\n";
-      }
-      assert(!r.contains("error"));
-      assert(r.contains("binary_preview_hex"));
+        if (r.contains("error")) {
+            std::cerr << "web_fetch err: " << r.dump() << "\n";
+        }
+        assert(!r.contains("error"));
+        assert(r.contains("binary_preview_hex"));
+        clog_tool_json_for_test("web_fetch (loopback zip)", r);
     }
 
     const std::string rss_xml = R"(
@@ -130,6 +242,7 @@ int main() {
         assert(r.contains("entries"));
         assert(r["entries"].is_array());
         assert(r["entries"].size() >= 1);
+        clog_tool_json_for_test("web_rss_feed (loopback)", r);
     }
 
     namespace fs = std::filesystem;
@@ -150,6 +263,7 @@ int main() {
         assert(!r.contains("error"));
         assert(r.contains("files"));
         assert(r["files"].size() >= 1);
+        clog_tool_json_for_test("web_fetch_archive (minimal.zip)", r);
     }
     {
         std::string bad_zip = read_all(data_dir + "/zip_slip.zip");
@@ -167,6 +281,8 @@ int main() {
 
     srv.stop();
     th.join();
+
+    run_live_ddg_search_samples(bus);
 
     std::clog << "test_web_tools: ok\n";
     return 0;

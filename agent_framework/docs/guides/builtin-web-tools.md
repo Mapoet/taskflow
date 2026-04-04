@@ -89,6 +89,11 @@ validate_query → 仅连接固定 host → GET /html/?q=... → 检查状态码
 | `AGENT_WEB_SEARCH_TIMEOUT_MS` | 仅 `web_search` 阶段的超时；可覆盖 `AGENT_WEB_TIMEOUT_MS` | 与 `AGENT_WEB_TIMEOUT_MS` 相同 |
 | `AGENT_WEB_SEARCH_MIN_INTERVAL_MS` | 两次 `web_search` 最小间隔（同进程，对 `html.duckduckgo.com`） | `1000` |
 | `AGENT_WEB_DDG_MAX_BODY_BYTES` | DuckDuckGo HTML 响应体解析前上限 | `1048576` |
+| `HTTPS_PROXY` / `https_proxy` / `HTTP_PROXY` / `http_proxy` | 按序取第一个非空；经 **HTTP CONNECT** 访问 DuckDuckGo（与 curl 常见用法一致） | 未设置则直连 |
+| `AGENT_WEB_DDG_PAUSE_ON_CHALLENGE` | 检测到人机验证页时：在 **stderr** 打印说明与链接，**阻塞**读 stdin 一行，再按当前环境重试本次搜索一次 | 关闭 |
+| `AGENT_WEB_DDG_COOKIE` | 请求携带的 `Cookie` 头；可在浏览器完成验证后从开发者工具复制，配合上一项在按 Enter 前 `export` | 无 |
+
+当响应被识别为 DuckDuckGo **人机验证 / anomaly** 页且解析结果为空时，成功返回的 JSON 会包含 **`ddg_challenge`**：`detected`、`open_in_browser`（建议在浏览器打开的搜索 URL）。若启用 `AGENT_WEB_DDG_PAUSE_ON_CHALLENGE`，重试后仍可能为空，此时 `interactive_retry` 等字段见返回体。
 
 ---
 
@@ -104,6 +109,7 @@ validate_query → 仅连接固定 host → GET /html/?q=... → 检查状态码
 | `max_bytes` | int | 可选；覆盖全局默认；超过则截断并标记 `truncated` 或返回 `body_too_large`（策略二选一，须在实现中固定） |
 | `follow_redirects` | bool | 默认 `true`；与 `max_redirects` 联用 |
 | `accept` | string | 可选；`Accept` 头，影响部分站点的内容协商 |
+| `headers` | object | 可选；string 键值附加请求头；**不得**包含 `User-Agent` |
 
 **内容类型分支（多格式解析）**：
 
@@ -218,7 +224,7 @@ validate_query → 仅连接固定 host → GET /html/?q=... → 检查状态码
 
 若设置 **`AGENT_TOOL_ALLOWLIST`**（逗号分隔），注册阶段须将所需 `web_*` 一并列入，例如：
 
-`web_search,web_fetch,web_fetch_archive,web_rss_feed`（外加仍需要的 `fs_*`、`run_skill_script` 等）。
+`web_search,web_fetch,web_fetch_archive,web_rss_feed,web_configured_source`（外加仍需要的 `fs_*`、`run_skill_script` 等）。
 
 ---
 
@@ -230,6 +236,7 @@ validate_query → 仅连接固定 host → GET /html/?q=... → 检查状态码
 | `web_fetch` | 单 URL GET；按类型处理 plain / markdown / json / html（及二进制预览策略） |
 | `web_fetch_archive` | 自 URL 下载 zip / tar.gz 等并在沙箱内解压；返回文件清单；防 Zip Slip 与解压炸弹 |
 | `web_rss_feed` | 拉取并解析 RSS/Atom；支持 `max_entries`、时间窗、`keywords` 与 `skip_keyword_filter`（对齐 `news_fetcher.fetch_rss` 语义） |
+| `web_configured_source` | 按 **`AGENT_NEWS_SOURCES_JSON`** 信源目录，用 **`kind` + `source_id`** 调用 `rss` / `api` / `scrape` 条目（内部映射 `web_rss_feed` / `web_fetch`） |
 
 （若实现中将归档与单文件合并为带 `mode` 的单一工具，须在文档与 Tool 名称中**二选一并全局一致**，避免模型混名。）
 
@@ -256,12 +263,18 @@ validate_query → 仅连接固定 host → GET /html/?q=... → 检查状态码
 | `rss_parse_error` | RSS/Atom 解析失败 |
 | `search_provider_error` | DuckDuckGo 请求失败或无可交付结果（HTTP 错误、超时、上游不可用等） |
 | `search_html_parse_error` | （可选）结果页 HTML 解析异常或与当前选择器不匹配 |
+| `invalid_arguments` | 参数非法（如 `web_fetch.headers` 含 **`User-Agent`**，或非 string 头值） |
+| `news_sources_invalid` | 信源目录 JSON 校验失败，或 `api` URL 拼接错误 |
+| `unknown_source` | `web_configured_source` 中 **`kind` + `source_id`** 在目录中不存在 |
+| `source_disabled` | 目录条目的 **`enabled`** 为 `false` |
+| `news_sources_not_configured` | （仅理论）目录句柄缺失；正常未设置 **`AGENT_NEWS_SOURCES_JSON`** 时 **不注册** 本工具 |
 
 ---
 
 ## 测试
 
 - 构建 **`test_web_tools`**（或并入现有测试目标）：对 **Mock HTTP 服务**（本机端口）验证：`web_fetch` 各类型、`web_rss_feed` 固定 XML fixture、`web_fetch_archive` Zip Slip 用例与体积上限。
+- 构建 **`test_news_sources`**：信源目录 v1 解析与 **`web_configured_source`** + mock HTTP（`ctest -R news_sources`）。
 - CI 默认 **无外网**；`web_search` 使用 **录制 HTML fixture**（黄金样例 + 正则/抽取断言）或标记 **`network` / manual**；避免 CI 依赖 DuckDuckGo 在线稳定性。
 - 运行示例：`ctest -R web_tools`（具体名称以 `CMakeLists.txt` 为准）。
 
@@ -281,8 +294,11 @@ validate_query → 仅连接固定 host → GET /html/?q=... → 检查状态码
 
 ## 外部信源目录（标准 JSON）
 
-本节定义一份与旧版 `news_fetcher` **兼容意图**的**静态目录**：用 JSON 描述多个 RSS、REST 类 API、以及仅含入口 URL 的「抓取」站点（**不**承诺内建 HTML 结构化抽取）。  
-**当前 `web_*` 仍按单 URL 调用**；该 JSON 供 **应用层、Skills 或后续专用工具** 在运行时加载，将 `source_id` 解析为 `feed_url` / `url` 后再调用 `web_rss_feed` / `web_fetch`。
+本节定义一份与旧版 `news_fetcher` **兼容意图**的**静态目录**：用 JSON 描述多个 RSS、REST 类 API、以及仅含入口 URL 的「抓取」站点（**不**承诺内建 HTML 结构化抽取）。
+
+**运行时（v1）**：在 **`AGENT_WEB_ENABLE`**、OpenSSL 与 **`AGENT_NEWS_SOURCES_JSON`**（指向可读 JSON 文件）均满足时，`build_cli_agent_graph` 会注册 **`web_configured_source`**：模型传入 **`kind`**（`rss` / `api` / `scrape`）与 **`source_id`**（与文件中该节键名一致），框架将条目解析为 `feed_url` 或带 query/header 的 GET URL，再调用 **`web_rss_feed` / `web_fetch`**。未设置路径或加载失败时 **不注册** 该工具（`AGENT_LOG_LEVEL=debug` 可打日志）。
+
+**`web_fetch` 补充**：可选参数 **`headers`**（对象为 string 键值；**禁止**传 `User-Agent`，与内置 UA 冲突）；与 **`accept`** 一并进入受控 GET 请求头。
 
 ### 示例文件路径
 
@@ -309,7 +325,7 @@ validate_query → 仅连接固定 host → GET /html/?q=... → 检查状态码
 | `url` | string | 是 | RSS 或 Atom 的 HTTPS（推荐）feed URL；对齐 `web_rss_feed.feed_url` |
 | `enabled` | boolean | 否 | 默认 `true`；`false` 时加载方应跳过 |
 
-**用法**：选中 `rss.<id>.url` 后调用 `web_rss_feed`，并可传 `max_entries`、`max_age_hours`、`keywords` 等。
+**用法**：由 **`web_configured_source`** 代为解析；或直接调用 `web_rss_feed` 并传入解析后的 `feed_url`。
 
 ### `api` 条目
 
@@ -320,7 +336,7 @@ validate_query → 仅连接固定 host → GET /html/?q=... → 检查状态码
 | `headers` | object | 否 | 字符串键值 → 作为 `web_fetch` 无法直接表达的头；实现层需合并进 HTTP 客户端或扩展工具。**勿**在检入文件中写真实 API Key |
 | `params` | object | 否 | 查询参数（字符串/数字等 JSON 类型）；实现层负责 `?key=value` 编码并与 `url` 合并 |
 
-**用法**：实现层将 `url` + `params` 拼成最终 GET URL，将 `headers` 加入请求，再调用 **`web_fetch`**（JSON 分支）或等价实现。密钥应来自 **环境变量**（例如加载 JSON 后由代码设置 `X-API-Key`）。
+**用法**：**`web_configured_source`** 将 `params` 按键 **字典序** 拼为 query（`url` 已有 `?` 时用 `&` 追加）；`headers` 经 **`web_fetch`** 发出。密钥请放在 **私有 JSON** 或运维注入，勿提交仓库。
 
 ### `scrape` 条目
 
@@ -336,6 +352,6 @@ validate_query → 仅连接固定 host → GET /html/?q=... → 检查状态码
 
 - **密钥**：示例 JSON 中 `api.*.headers` 可为空对象；生产环境在私有副本或加载代码中写入头，并从 **`AGENT_*` / 密钥管理** 读取。
 - **出站与 SSRF**：所有实际请求仍受 **`AGENT_WEB_*`**、SSRF 规则与 **`AGENT_TOOL_ALLOWLIST`** 约束。
-- **合并策略**：若同时存在「内置默认」与外部文件，由调用方约定 **仅文件 / 仅内置 / 深度合并**；本仓库示例文件不代表运行时自动加载（直至构图或工具显式读取该路径）。
+- **合并策略（v1）**：仅 **`AGENT_NEWS_SOURCES_JSON` 单一文件**；多文件 / 与内置默认合并留待后续版本约定。
 
 将本目录交给 LLM 时，可只注入 **source_id** 与简短说明，整条 JSON 不必进入 system prompt，避免上下文膨胀与误泄露。

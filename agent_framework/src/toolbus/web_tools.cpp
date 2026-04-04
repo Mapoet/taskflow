@@ -111,7 +111,8 @@ void register_builtin_web_tools_if_configured(ToolBus& bus) {
                 "url": {"type": "string"},
                 "max_bytes": {"type": "integer"},
                 "accept": {"type": "string"},
-                "extract_mode": {"type": "string"}
+                "extract_mode": {"type": "string"},
+                "headers": {"type": "object", "additionalProperties": true}
             },
             "required": ["url"]
         })");

@@ -82,7 +82,7 @@ std::string content_type_base(const std::string& ct) {
     return s;
 }
 
-json do_web_fetch(const json& j) {
+json do_web_fetch_impl(const json& j) {
     if (!j.contains("url") || !j["url"].is_string()) {
         return web_tool_error("invalid_url", "missing url");
     }
@@ -96,8 +96,24 @@ json do_web_fetch(const json& j) {
     }
 
     std::map<std::string, std::string> extra;
+    if (j.contains("headers") && j["headers"].is_object()) {
+        for (const auto& item : j["headers"].items()) {
+            if (!item.value().is_string()) {
+                return web_tool_error("invalid_arguments", "headers values must be strings");
+            }
+            std::string lower;
+            lower.reserve(item.key().size());
+            for (char c : item.key()) {
+                lower.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
+            }
+            if (lower == "user-agent") {
+                return web_tool_error("invalid_arguments", "User-Agent not allowed in headers");
+            }
+            extra.emplace(item.key(), item.value().get<std::string>());
+        }
+    }
     if (j.contains("accept") && j["accept"].is_string()) {
-        extra.emplace("Accept", j["accept"].get<std::string>());
+        extra["Accept"] = j["accept"].get<std::string>();
     }
 
     const auto hres = web_http_get(url, cfg, extra);
@@ -169,8 +185,12 @@ json do_web_fetch(const json& j) {
 
 } // namespace
 
+json do_web_fetch(const json& j) {
+    return do_web_fetch_impl(j);
+}
+
 json web_fetch_invoke(const json& j) {
-    return do_web_fetch(j);
+    return do_web_fetch_impl(j);
 }
 
 } // namespace agent_framework

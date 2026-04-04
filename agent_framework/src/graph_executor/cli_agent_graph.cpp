@@ -9,6 +9,7 @@
 #include <agent/internal/loop_io_keys.hpp>
 #include <agent/llm_client.hpp>
 #include <agent/fs_tools.hpp>
+#include <agent/news_sources_tool.hpp>
 #include <agent/web_tools.hpp>
 #include <agent/skill_script_tool.hpp>
 #include <agent/toolbus.hpp>
@@ -43,6 +44,7 @@ void build_cli_agent_graph_impl(workflow::GraphBuilder& builder,
     }
     register_builtin_fs_tools_if_configured(*deps.toolbus);
     register_builtin_web_tools_if_configured(*deps.toolbus);
+    register_web_configured_source_if_configured(*deps.toolbus);
 
     auto [sys_src, _st] = builder.create_any_source(
         "SystemPrompt",

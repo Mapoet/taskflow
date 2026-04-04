@@ -11,6 +11,7 @@
 #include <cstdlib>
 #include <ctime>
 #include <optional>
+#include <string_view>
 #include <arpa/inet.h>
 #include <netdb.h>
 #include <sys/socket.h>
@@ -417,7 +418,157 @@ void apply_client_timeouts(ClientLike& cli, int timeout_ms) {
     cli.set_write_timeout(sec, usec);
 }
 
+bool tolower_prefix_match_sv(std::string_view s, std::string_view pref) {
+    if (s.size() < pref.size()) {
+        return false;
+    }
+    for (std::size_t i = 0; i < pref.size(); ++i) {
+        if (std::tolower(static_cast<unsigned char>(s[i])) !=
+            std::tolower(static_cast<unsigned char>(pref[i]))) {
+            return false;
+        }
+    }
+    return true;
+}
+
+/**
+ * 解析 http(s)://host:port、host:port、user:pass@host:port、[::1]:port；不支持 socks5://。
+ */
+bool parse_upstream_proxy_url(std::string s, WebHttpUpstreamProxy& out) {
+    trim_inplace(s);
+    if (s.empty()) {
+        return false;
+    }
+    {
+        std::string low;
+        low.reserve(s.size());
+        for (char c : s) {
+            low += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        }
+        if (low == "none" || low == "off" || low == "false" || low == "disable") {
+            return false;
+        }
+    }
+    while (tolower_prefix_match_sv(s, "https://")) {
+        s.erase(0, 8);
+    }
+    while (tolower_prefix_match_sv(s, "http://")) {
+        s.erase(0, 7);
+    }
+    trim_inplace(s);
+    if (s.empty()) {
+        return false;
+    }
+
+    const std::size_t at = s.find('@');
+    if (at != std::string::npos) {
+        std::string auth = s.substr(0, at);
+        s = s.substr(at + 1);
+        trim_inplace(s);
+        const std::size_t ac = auth.find(':');
+        if (ac != std::string::npos) {
+            out.user = auth.substr(0, ac);
+            out.pass = auth.substr(ac + 1);
+        } else {
+            out.user = std::move(auth);
+        }
+        trim_inplace(out.user);
+        trim_inplace(out.pass);
+    }
+
+    if (!s.empty() && s.front() == '[') {
+        const std::size_t br = s.find(']');
+        if (br == std::string::npos || br < 2) {
+            return false;
+        }
+        out.host = s.substr(1, br - 1);
+        if (br + 1 < s.size() && s[br + 1] == ':') {
+            const std::string ps = s.substr(br + 2);
+            if (ps.empty()) {
+                return false;
+            }
+            for (char c : ps) {
+                if (!std::isdigit(static_cast<unsigned char>(c))) {
+                    return false;
+                }
+            }
+            out.port = std::atoi(ps.c_str());
+        } else {
+            out.port = 8080;
+        }
+        return !out.host.empty() && out.port > 0 && out.port <= 65535;
+    }
+
+    const std::size_t colon = s.rfind(':');
+    if (colon != std::string::npos && colon + 1 < s.size()) {
+        const std::string port_str = s.substr(colon + 1);
+        bool all_digit = true;
+        for (char c : port_str) {
+            if (!std::isdigit(static_cast<unsigned char>(c))) {
+                all_digit = false;
+                break;
+            }
+        }
+        if (all_digit && !port_str.empty()) {
+            out.host = s.substr(0, colon);
+            trim_inplace(out.host);
+            out.port = std::atoi(port_str.c_str());
+            return !out.host.empty() && out.port > 0 && out.port <= 65535;
+        }
+    }
+
+    out.host = s;
+    trim_inplace(out.host);
+    out.port = 8080;
+    return !out.host.empty();
+}
+
+const char* upstream_proxy_env_raw() {
+    static const char* const keys[] = {"HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy"};
+    for (const char* k : keys) {
+        const char* v = std::getenv(k);
+        if (v && *v) {
+            return v;
+        }
+    }
+    return nullptr;
+}
+
+bool extra_map_has_cookie_key(const std::map<std::string, std::string>& m) {
+    for (const auto& kv : m) {
+        std::string k = kv.first;
+        for (char& c : k) {
+            c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        }
+        if (k == "cookie") {
+            return true;
+        }
+    }
+    return false;
+}
+
+template <typename ClientLike>
+void apply_upstream_proxy_to_httplib_client(ClientLike& cli) {
+    WebHttpUpstreamProxy px;
+    if (!load_web_http_upstream_proxy(px) || !px.valid()) {
+        return;
+    }
+    cli.set_proxy(px.host.c_str(), px.port);
+    if (!px.user.empty()) {
+        cli.set_proxy_basic_auth(px.user.c_str(), px.pass.c_str());
+    }
+}
+
 } // namespace
+
+bool load_web_http_upstream_proxy(WebHttpUpstreamProxy& out) {
+    out = WebHttpUpstreamProxy{};
+    const char* raw = upstream_proxy_env_raw();
+    if (!raw) {
+        return false;
+    }
+    return parse_upstream_proxy_url(std::string(raw), out);
+}
 
 WebHttpConfig load_web_http_config_from_env() {
     WebHttpConfig c;

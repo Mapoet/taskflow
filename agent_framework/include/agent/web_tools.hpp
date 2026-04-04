@@ -13,6 +13,9 @@
 
 namespace agent_framework {
 
+/** @brief web_fetch 实现体；可选 headers（string 键值）；Accept 在 headers 之后写入可覆盖。 */
+json do_web_fetch(const json& j);
+
 json web_fetch_invoke(const json& j);
 json web_rss_feed_invoke(const json& j);
 json web_fetch_archive_invoke(const json& j);

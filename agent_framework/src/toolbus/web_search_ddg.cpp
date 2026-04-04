@@ -1,6 +1,9 @@
 /**
  * @file web_search_ddg.cpp
- * @brief DuckDuckGo html.duckduckgo.com 搜索（不重定向到非 duckduckgo.com）
+ * @brief DuckDuckGo html.duckduckgo.com 搜索（不重定向到非 duckduckgo.com）。
+ * HTTPS 请求：若存在 HTTPS_PROXY / https_proxy / HTTP_PROXY / http_proxy 则经 HTTP 代理 CONNECT，否则直连。
+ * 人机验证：若识别到 DDG 挑战页，JSON 含 ddg_challenge.open_in_browser；设 AGENT_WEB_DDG_PAUSE_ON_CHALLENGE=1
+ * 可在终端暂停，验证后可选 export AGENT_WEB_DDG_COOKIE=... 再按 Enter 重试一次。
  */
 
 #include <agent/web_http.hpp>
@@ -13,7 +16,9 @@
 #include <cstring>
 #include <ctime>
 #include <mutex>
+#include <iostream>
 #include <regex>
+#include <string_view>
 #include <thread>
 
 #if __has_include(<httplib/httplib.hpp>)
@@ -82,6 +87,139 @@ std::size_t ddg_max_body_bytes() {
         }
     }
     return 1048576;
+}
+
+/** 供 HTTPS CONNECT 使用的 HTTP 代理（与 curl 一致：读 HTTPS_PROXY，否则 HTTP_PROXY）。 */
+struct HttpsUpstreamProxy {
+    std::string host;
+    int port = 0;
+    std::string user;
+    std::string pass;
+};
+
+bool tolower_prefix_match(std::string_view s, std::string_view pref) {
+    if (s.size() < pref.size()) {
+        return false;
+    }
+    for (std::size_t i = 0; i < pref.size(); ++i) {
+        if (std::tolower(static_cast<unsigned char>(s[i])) !=
+            std::tolower(static_cast<unsigned char>(pref[i]))) {
+            return false;
+        }
+    }
+    return true;
+}
+
+/**
+ * 解析常见形式：http(s)://host:port、host:port、user:pass@host:port、[::1]:port。
+ * 不支持 socks5://（httplib 此路径为 HTTP CONNECT）。
+ */
+bool parse_http_proxy_url(std::string s, HttpsUpstreamProxy& out) {
+    trim_inplace_str(s);
+    if (s.empty()) {
+        return false;
+    }
+    {
+        std::string low;
+        low.reserve(s.size());
+        for (char c : s) {
+            low += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        }
+        if (low == "none" || low == "off" || low == "false" || low == "disable") {
+            return false;
+        }
+    }
+    while (tolower_prefix_match(s, "https://")) {
+        s.erase(0, 8);
+    }
+    while (tolower_prefix_match(s, "http://")) {
+        s.erase(0, 7);
+    }
+    trim_inplace_str(s);
+    if (s.empty()) {
+        return false;
+    }
+
+    const std::size_t at = s.find('@');
+    if (at != std::string::npos) {
+        std::string auth = s.substr(0, at);
+        s = s.substr(at + 1);
+        trim_inplace_str(s);
+        const std::size_t ac = auth.find(':');
+        if (ac != std::string::npos) {
+            out.user = auth.substr(0, ac);
+            out.pass = auth.substr(ac + 1);
+        } else {
+            out.user = std::move(auth);
+        }
+        trim_inplace_str(out.user);
+        trim_inplace_str(out.pass);
+    }
+
+    if (!s.empty() && s.front() == '[') {
+        const std::size_t br = s.find(']');
+        if (br == std::string::npos || br < 2) {
+            return false;
+        }
+        out.host = s.substr(1, br - 1);
+        if (br + 1 < s.size() && s[br + 1] == ':') {
+            const std::string ps = s.substr(br + 2);
+            if (ps.empty()) {
+                return false;
+            }
+            for (char c : ps) {
+                if (!std::isdigit(static_cast<unsigned char>(c))) {
+                    return false;
+                }
+            }
+            out.port = std::atoi(ps.c_str());
+        } else {
+            out.port = 8080;
+        }
+        return !out.host.empty() && out.port > 0 && out.port <= 65535;
+    }
+
+    const std::size_t colon = s.rfind(':');
+    if (colon != std::string::npos && colon + 1 < s.size()) {
+        const std::string port_str = s.substr(colon + 1);
+        bool all_digit = true;
+        for (char c : port_str) {
+            if (!std::isdigit(static_cast<unsigned char>(c))) {
+                all_digit = false;
+                break;
+            }
+        }
+        if (all_digit && !port_str.empty()) {
+            out.host = s.substr(0, colon);
+            trim_inplace_str(out.host);
+            out.port = std::atoi(port_str.c_str());
+            return !out.host.empty() && out.port > 0 && out.port <= 65535;
+        }
+    }
+
+    out.host = s;
+    trim_inplace_str(out.host);
+    out.port = 8080;
+    return !out.host.empty();
+}
+
+const char* ddg_proxy_env_raw() {
+    static const char* const keys[] = {"HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy"};
+    for (const char* k : keys) {
+        const char* v = std::getenv(k);
+        if (v && *v) {
+            return v;
+        }
+    }
+    return nullptr;
+}
+
+bool load_https_upstream_proxy(HttpsUpstreamProxy& out) {
+    const char* raw = ddg_proxy_env_raw();
+    if (!raw) {
+        return false;
+    }
+    return parse_http_proxy_url(std::string(raw), out);
 }
 
 std::string url_encode_query(const std::string& value) {
@@ -293,45 +431,62 @@ std::vector<WebSearchHit> parse_duckduckgo_html_results(std::string_view html, i
     return results;
 }
 
-json web_search_duckduckgo(const std::string& query, int max_results) {
-    if (query.empty()) {
-        return web_tool_error("invalid_url", "empty query");
+namespace {
+
+std::string ddg_cookie_from_env() {
+    const char* v = std::getenv("AGENT_WEB_DDG_COOKIE");
+    if (v && *v) {
+        return std::string(v);
     }
-    int cap = max_results;
-    if (cap <= 0) {
-        cap = 10;
+    return {};
+}
+
+bool ddg_pause_on_challenge_enabled() {
+    const char* e = std::getenv("AGENT_WEB_DDG_PAUSE_ON_CHALLENGE");
+    if (!e || !*e) {
+        return false;
     }
-    if (cap > 25) {
-        cap = 25;
+    std::string s(e);
+    for (char& c : s) {
+        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
     }
+    return s == "1" || s == "true" || s == "yes" || s == "on";
+}
 
-    ddg_wait_rate_limit();
+bool ddg_html_looks_like_bot_challenge(std::string_view html) {
+    if (html.size() < 40) {
+        return false;
+    }
+    return html.find("Unfortunately, bots use DuckDuckGo") != std::string_view::npos ||
+           html.find("anomaly-modal") != std::string_view::npos ||
+           html.find("challenge-form") != std::string_view::npos ||
+           html.find("js-anomaly-modal-submit") != std::string_view::npos;
+}
 
-#ifndef CPPHTTPLIB_OPENSSL_SUPPORT
-    return web_tool_error("search_provider_error", "https not available");
-#else
-    const int timeout_ms = ddg_search_timeout_ms();
-    const std::size_t max_body = ddg_max_body_bytes();
-    const std::string ua = env_str_local("AGENT_WEB_USER_AGENT", "agent-framework-web-tools/1.0");
-
-    std::string current = "https://html.duckduckgo.com/html/?q=" + url_encode_query(query);
-    int redirects = 0;
-
+struct DdgFetchOutcome {
+    bool net_ok = false;
+    json err;
     std::string body;
+    std::string final_url;
     bool truncated = false;
-    httplib::Headers hdrs;
-    hdrs.emplace("User-Agent", ua);
-    hdrs.emplace("Accept", "text/html");
+};
 
+DdgFetchOutcome ddg_follow_https_get(std::string current,
+                                     const std::string& ua,
+                                     const std::string& cookie,
+                                     int timeout_ms,
+                                     std::size_t max_body) {
+    DdgFetchOutcome out;
+    int redirects = 0;
     while (redirects <= 10) {
         std::string host, pathq;
         if (!split_https_url(current, host, pathq)) {
-            return web_tool_error("search_provider_error", "invalid ddg url");
+            out.err = web_tool_error("search_provider_error", "invalid ddg url");
+            return out;
         }
 
-        body.clear();
-        truncated = false;
-
+        std::string body;
+        bool truncated = false;
         httplib::SSLClient cli(host, 443);
         {
             int ms = timeout_ms <= 0 ? 30000 : timeout_ms;
@@ -342,6 +497,21 @@ json web_search_duckduckgo(const std::string& query, int max_results) {
             cli.set_write_timeout(sec, usec);
         }
         cli.set_follow_location(false);
+
+        HttpsUpstreamProxy upstream_proxy;
+        if (load_https_upstream_proxy(upstream_proxy)) {
+            cli.set_proxy(upstream_proxy.host.c_str(), upstream_proxy.port);
+            if (!upstream_proxy.user.empty()) {
+                cli.set_proxy_basic_auth(upstream_proxy.user.c_str(), upstream_proxy.pass.c_str());
+            }
+        }
+
+        httplib::Headers hdrs;
+        hdrs.emplace("User-Agent", ua);
+        hdrs.emplace("Accept", "text/html");
+        if (!cookie.empty()) {
+            hdrs.emplace("Cookie", cookie);
+        }
 
         auto on_data = [&body, max_body, &truncated](const char* data, std::size_t len) -> bool {
             if (len == 0) {
@@ -363,41 +533,104 @@ json web_search_duckduckgo(const std::string& query, int max_results) {
 
         const auto res = cli.Get(pathq.c_str(), hdrs, on_data);
         if (!res) {
-            return web_tool_error("timeout");
+            out.err = web_tool_error("timeout");
+            return out;
         }
 
         if (res->status == 301 || res->status == 302 || res->status == 303 || res->status == 307 ||
             res->status == 308) {
             if (++redirects > 10) {
-                return web_tool_error("too_many_redirects");
+                out.err = web_tool_error("too_many_redirects");
+                return out;
             }
             std::string loc = res->get_header_value("Location");
             trim_inplace_str(loc);
             std::string next = merge_ddg_relative(current, loc);
             if (next.empty()) {
-                return web_tool_error("search_provider_error", "bad redirect");
+                out.err = web_tool_error("search_provider_error", "bad redirect");
+                return out;
             }
             std::string nh;
             std::string pq;
             if (!split_https_url(next, nh, pq) || !is_ddg_trusted_host(nh)) {
-                return web_tool_error("url_disallowed");
+                out.err = web_tool_error("url_disallowed");
+                return out;
             }
             current = std::move(next);
             continue;
         }
 
-        if (res->status != 200) {
-            json e = web_tool_error("search_provider_error");
-            e["error"]["status"] = res->status;
-            return e;
+        if (res->status < 200 || res->status >= 300) {
+            out.err = web_tool_error("search_provider_error");
+            out.err["error"]["status"] = res->status;
+            return out;
         }
         if (truncated || body.size() > max_body) {
-            return web_tool_error("body_too_large");
+            out.err = web_tool_error("body_too_large");
+            return out;
         }
-        break;
+        out.net_ok = true;
+        out.body = std::move(body);
+        out.final_url = current;
+        out.truncated = truncated;
+        return out;
+    }
+    out.err = web_tool_error("too_many_redirects");
+    return out;
+}
+
+} // namespace
+
+json web_search_duckduckgo(const std::string& query, int max_results) {
+    if (query.empty()) {
+        return web_tool_error("invalid_url", "empty query");
+    }
+    int cap = max_results;
+    if (cap <= 0) {
+        cap = 10;
+    }
+    if (cap > 25) {
+        cap = 25;
     }
 
-    auto hits = parse_duckduckgo_html_results(body, cap);
+#ifndef CPPHTTPLIB_OPENSSL_SUPPORT
+    return web_tool_error("search_provider_error", "https not available");
+#else
+    const int timeout_ms = ddg_search_timeout_ms();
+    const std::size_t max_body = ddg_max_body_bytes();
+    const std::string ua = env_str_local("AGENT_WEB_USER_AGENT", "agent-framework-web-tools/1.0");
+    const std::string start_url = "https://html.duckduckgo.com/html/?q=" + url_encode_query(query);
+
+    ddg_wait_rate_limit();
+    std::string cookie = ddg_cookie_from_env();
+    auto fr = ddg_follow_https_get(start_url, ua, cookie, timeout_ms, max_body);
+    if (!fr.net_ok) {
+        return fr.err;
+    }
+
+    auto hits = parse_duckduckgo_html_results(fr.body, cap);
+    bool challenge = hits.empty() && ddg_html_looks_like_bot_challenge(fr.body);
+    bool did_interactive_retry = false;
+
+    if (challenge && ddg_pause_on_challenge_enabled()) {
+        did_interactive_retry = true;
+        std::cerr << "[web_search_ddg] DuckDuckGo 疑似人机验证页。请在浏览器打开:\n  " << start_url
+                  << "\n\n可选: 完成验证后从开发者工具复制 html.duckduckgo.com 请求的 Cookie，执行:\n"
+                     "  export AGENT_WEB_DDG_COOKIE='...'\n"
+                     "然后回到此终端按 Enter（将用当前 AGENT_WEB_DDG_COOKIE 重试一次；不设则空 Cookie 重试）。\n";
+        std::string line;
+        std::getline(std::cin, line);
+        (void)line;
+        ddg_wait_rate_limit();
+        cookie = ddg_cookie_from_env();
+        fr = ddg_follow_https_get(start_url, ua, cookie, timeout_ms, max_body);
+        if (!fr.net_ok) {
+            return fr.err;
+        }
+        hits = parse_duckduckgo_html_results(fr.body, cap);
+        challenge = hits.empty() && ddg_html_looks_like_bot_challenge(fr.body);
+    }
+
     json out = json::object();
     out["provider"] = "duckduckgo";
     out["query"] = query;
@@ -406,6 +639,18 @@ json web_search_duckduckgo(const std::string& query, int max_results) {
         out["results"].push_back({{"title", h.title}, {"url", h.url}, {"snippet", h.snippet}});
     }
     out["truncated"] = (static_cast<int>(hits.size()) >= cap);
+
+    if (challenge) {
+        json ch;
+        ch["detected"] = true;
+        ch["open_in_browser"] = start_url;
+        if (did_interactive_retry) {
+            ch["interactive_retry"] = true;
+            ch["note"] =
+                "已交互重试一次；若 results 仍为空，请确认 Cookie 与浏览器会话一致或稍后重试。";
+        }
+        out["ddg_challenge"] = std::move(ch);
+    }
     return out;
 #endif
 }

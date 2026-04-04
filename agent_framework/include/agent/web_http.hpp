@@ -18,6 +18,25 @@
 namespace agent_framework {
 
 /**
+ * @brief HTTP CONNECT 上游代理（HTTPS_PROXY / HTTP_PROXY 链解析结果）。
+ */
+struct WebHttpUpstreamProxy {
+    std::string host;
+    int port = 0;
+    std::string user;
+    std::string pass;
+    bool valid() const noexcept {
+        return !host.empty() && port > 0 && port <= 65535;
+    }
+};
+
+/**
+ * @brief 从 HTTPS_PROXY / https_proxy / HTTP_PROXY / http_proxy 读取并解析（与 curl 一致）。
+ * @return 解析成功且可用时为 true
+ */
+bool load_web_http_upstream_proxy(WebHttpUpstreamProxy& out);
+
+/**
  * @brief 与 builtin-web-tools.md「立项锁定」一致的抓取配置（环境变量在实现内读取）。
  */
 struct WebHttpConfig {
@@ -52,7 +71,7 @@ struct WebHttpResult {
 /**
  * @brief 对绝对 URL 执行 GET：每跳重定向后重新做 SSRF 校验；body 流式截断于 max_body_bytes。
  * @param url 必须以 http:// 或 https:// 开头（或由 allow_http 决定 https-only）
- * @param extra_headers 可选附加头（如 Accept）
+ * @param extra_headers 可选附加头（如 Accept、Cookie）；若未含 Cookie 且设置了 AGENT_WEB_HTTP_COOKIE，实现会自动附加。
  */
 WebHttpResult web_http_get(const std::string& url, const WebHttpConfig& cfg,
                            const std::map<std::string, std::string>& extra_headers = {});
