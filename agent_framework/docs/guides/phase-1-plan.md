@@ -2,8 +2,8 @@
 
 本文档在 [plan-detailed.md](./plan-detailed.md) **§4** 的工作包与交付定义之上，给出**可排期、可验收**的实现拆解、依赖顺序、配置与测试矩阵。阶段 2（A2A，及 **plan-detailed §5.4/§7** 中的 ImGui/TUI/Web 富界面）与阶段 3（RAG）仅在与阶段 1 的衔接处被引用，不纳入本文件范围。
 
-**文档版本**：0.4  
-**日期**：2026-04-03  
+**文档版本**：0.5  
+**日期**：2026-04-04  
 **上游依据**：`plan-detailed.md` v0.2（含 WP1.1–WP1.8）
 
 ---
@@ -285,6 +285,7 @@ flowchart LR
 - **Agent 循环**与 `build_cli_agent_graph` 应可复用为「任务处理器」：输入为结构化 `UserMessage`，输出为流式观测接口（阶段 1 用 stdout，阶段 2 映射到 SSE）。
 - **LLMOutput / ToolCall** 类型避免绑定 CLI 专用结构，便于 A2A Parts 映射。
 - **UI（与 A2A 并列规划，不阻塞阶段 1）**：**ImGui**、**TUI（ncurses 等）**、**Web** 在阶段 2 实现具体 `UIHandler` 子类或适配层；阶段 1 保持 `CLIHandler` 可测、DoD 可验收。详见 [plan-detailed.md](./plan-detailed.md) §7 与 [phase-1-wp6.md](./phase-1-wp6.md) §1.3。
+- **阶段 2 可执行拆解**（WP2.0–2.9、可选富界面）：见 **[phase-2-plan.md](./phase-2-plan.md)**（合并 `plan-detailed.md` §5 与 `plan-detailed.v2.md` §5–6）。
 
 ---
 
@@ -296,12 +297,15 @@ flowchart LR
 | 2026-04-01 | 0.2 | §1.2 / §6：ImGui、Web、TUI（ncurses）列为阶段 2；阶段 1 CLI-only + UI 接口预留。 |
 | 2026-04-03 | 0.3 | §2 依赖图：`SK --> TST`；§3 WP1.7 标 **BACKLOG**；§4 里程碑 M6/M7 调整为 **先 1.8 后完整 1.7**。 |
 | 2026-04-03 | 0.4 | D1 / WP1.6 / WP1.8：补充 **`cli_agent_skills_demo`** 与 Cursor 双目录 Skills；L3 jail 与多根扫描表述对齐实现。 |
+| 2026-04-04 | 0.5 | §6 / §8：链接 **phase-2-plan.md**、**plan-detailed.v2.md**（阶段 2 拆解入口）。 |
 
 ---
 
 ## 8. 相关链接
 
 - [plan-detailed.md](./plan-detailed.md) — 三阶段总规划  
+- [plan-detailed.v2.md](./plan-detailed.v2.md) — 阶段 2/3 深化包（Verifier、工具升格、输入 DSL、记忆）  
+- [phase-2-plan.md](./phase-2-plan.md) — 阶段 2 详细规划（WP2.x）  
 - [skills.md](./skills.md) — Skills / Harness 概念（WP1.8）  
 - [../architecture/overview.md](../architecture/overview.md) — 模块与 A2A 现状  
 - `readme/guide_agent.v3.md` — 设计长文（工作流语义）

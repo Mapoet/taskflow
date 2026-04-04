@@ -272,3 +272,4 @@ flowchart TB
 - Google **Agent2Agent（A2A）**：以官方发布的 **Specification** 与 **GitHub 组织下 A2A 相关仓库** 为准（搜索关键词：`Google A2A Agent2Agent protocol`）。
 - **MCP**：以 **Model Context Protocol** 官方规范与 SDK 行为为准（修订频繁，需锁定版本号）。
 - 本仓库现有说明：[architecture/overview.md](../architecture/overview.md) 中的「A2A HTTP 绑定（当前实现）」小节 — **阶段 2 完成后应更新该节以反映与 Google A2A 规范的对齐状态**。
+- 分阶段可执行拆解：[phase-1-plan.md](./phase-1-plan.md)（阶段 1）、[phase-2-plan.md](./phase-2-plan.md)（阶段 2，含与 [plan-detailed.v2.md](./plan-detailed.v2.md) 合并的 WP2.0/2.1b–d/2.7–2.9）。
