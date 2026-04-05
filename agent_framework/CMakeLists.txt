@@ -498,7 +498,9 @@ endif()
 
 if(OpenSSL_FOUND)
     target_link_libraries(agent_framework PRIVATE OpenSSL::SSL OpenSSL::Crypto)
-    target_compile_definitions(agent_framework PRIVATE CPPHTTPLIB_OPENSSL_SUPPORT)
+    # PUBLIC: cpp-httplib types (ClientImpl layout) depend on this macro; any TU that
+    # includes httplib.hpp (e.g. tests using httplib::Server) must match agent_framework.
+    target_compile_definitions(agent_framework PUBLIC CPPHTTPLIB_OPENSSL_SUPPORT)
     message(STATUS "Agent Framework: OpenSSL found, https enabled for cpp-httplib client")
 else()
     message(STATUS "Agent Framework: OpenSSL not found; HttplibClient https disabled (http only)")

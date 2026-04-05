@@ -176,7 +176,21 @@ httplib::Headers to_httplib_headers(const std::map<std::string, std::string>& he
     return h;
 }
 
-json execute_and_parse_json(const httplib::Result& result, const char* method_label) {
+bool looks_like_jsonrpc_error_envelope(const json& j) {
+    if (!j.is_object() || !j.contains("jsonrpc") || !j["jsonrpc"].is_string()) {
+        return false;
+    }
+    if (j["jsonrpc"].get<std::string>() != "2.0") {
+        return false;
+    }
+    if (!j.contains("error") || !j["error"].is_object()) {
+        return false;
+    }
+    return true;
+}
+
+json execute_and_parse_json(const httplib::Result& result, const char* method_label,
+                              bool return_jsonrpc_error_envelope_on_http_error) {
     if (!result) {
         std::ostringstream oss;
         oss << "HttplibClient: " << method_label << " failed, error code: "
@@ -188,6 +202,16 @@ json execute_and_parse_json(const httplib::Result& result, const char* method_la
     const int status = res.status;
 
     if (status < 200 || status >= 300) {
+        if (return_jsonrpc_error_envelope_on_http_error && !res.body.empty()) {
+            try {
+                json parsed = json::parse(res.body);
+                if (looks_like_jsonrpc_error_envelope(parsed)) {
+                    return parsed;
+                }
+            } catch (const json::exception&) {
+                // fall through to HTTP error
+            }
+        }
         std::ostringstream oss;
         oss << "HttplibClient: HTTP " << status << " on " << method_label << ": "
             << truncate_body(res.body, 512);
@@ -204,6 +228,33 @@ json execute_and_parse_json(const httplib::Result& result, const char* method_la
         throw std::runtime_error(std::string("HttplibClient: invalid JSON in response: ") + e.what() +
                                  " body=" + truncate_body(res.body, 256));
     }
+}
+
+json do_http_post_json(const std::string& url, const json& body,
+                       const std::map<std::string, std::string>& headers, int timeout_sec,
+                       const char* method_label, bool return_jsonrpc_error_on_http_error) {
+    ParsedHttpUrl parsed = parse_absolute_url(url);
+    httplib::Headers h = to_httplib_headers(headers);
+    const std::string payload = body.dump();
+
+    httplib::Result result(nullptr, httplib::Error::Unknown);
+    if (parsed.is_ssl) {
+#ifdef CPPHTTPLIB_OPENSSL_SUPPORT
+        httplib::SSLClient ssl_cli(parsed.host, parsed.port);
+        if (!ssl_cli.is_valid()) {
+            throw std::runtime_error("HttplibClient: invalid SSL client for URL: " + parsed.scheme_host_port);
+        }
+        apply_client_timeouts(ssl_cli, timeout_sec);
+        result = ssl_cli.Post(parsed.path_and_query.c_str(), h, payload, "application/json");
+#else
+        throw std::runtime_error("HttplibClient: https requires OpenSSL");
+#endif
+    } else {
+        httplib::Client cli(parsed.host, parsed.port);
+        apply_client_timeouts(cli, timeout_sec);
+        result = cli.Post(parsed.path_and_query.c_str(), h, payload, "application/json");
+    }
+    return execute_and_parse_json(result, method_label, return_jsonrpc_error_on_http_error);
 }
 
 } // namespace
@@ -274,28 +325,12 @@ json HttplibClient::post_llm(const std::string& url, const json& body,
 
 json HttplibClient::post(const std::string& url, const json& body,
                          const std::map<std::string, std::string>& headers) {
-    ParsedHttpUrl parsed = parse_absolute_url(url);
-    httplib::Headers h = to_httplib_headers(headers);
-    const std::string payload = body.dump();
+    return do_http_post_json(url, body, headers, timeout_sec_, "POST", false);
+}
 
-    httplib::Result result(nullptr, httplib::Error::Unknown);
-    if (parsed.is_ssl) {
-#ifdef CPPHTTPLIB_OPENSSL_SUPPORT
-        httplib::SSLClient ssl_cli(parsed.host, parsed.port);
-        if (!ssl_cli.is_valid()) {
-            throw std::runtime_error("HttplibClient: invalid SSL client for URL: " + parsed.scheme_host_port);
-        }
-        apply_client_timeouts(ssl_cli, timeout_sec_);
-        result = ssl_cli.Post(parsed.path_and_query.c_str(), h, payload, "application/json");
-#else
-        throw std::runtime_error("HttplibClient: https requires OpenSSL");
-#endif
-    } else {
-        httplib::Client cli(parsed.host, parsed.port);
-        apply_client_timeouts(cli, timeout_sec_);
-        result = cli.Post(parsed.path_and_query.c_str(), h, payload, "application/json");
-    }
-    return execute_and_parse_json(result, "POST");
+json HttplibClient::post_json_rpc(const std::string& url, const json& body,
+                                  const std::map<std::string, std::string>& headers) {
+    return do_http_post_json(url, body, headers, timeout_sec_, "POST", true);
 }
 
 json HttplibClient::get(const std::string& url,
@@ -320,7 +355,7 @@ json HttplibClient::get(const std::string& url,
         apply_client_timeouts(cli, timeout_sec_);
         result = cli.Get(parsed.path_and_query.c_str(), h);
     }
-    return execute_and_parse_json(result, "GET");
+    return execute_and_parse_json(result, "GET", false);
 }
 
 void HttplibClient::get_sse(const std::string& url,

@@ -5,6 +5,11 @@
 
 #include <agent/a2a/jsonrpc.hpp>
 
+#include <climits>
+#include <cstdint>
+#include <cstdlib>
+#include <string>
+
 namespace agent_framework {
 namespace a2a {
 namespace {
@@ -129,10 +134,28 @@ std::optional<int> try_get_jsonrpc_error_code(const json& response) {
         return std::nullopt;
     }
     const auto& e = response["error"];
-    if (!e.is_object() || !e.contains("code") || !e["code"].is_number_integer()) {
+    if (!e.is_object() || !e.contains("code")) {
         return std::nullopt;
     }
-    return e["code"].get<int>();
+    const auto& c = e["code"];
+    if (c.is_number_integer()) {
+        return c.get<int>();
+    }
+    if (c.is_number_unsigned()) {
+        return static_cast<int>(c.get<std::uint64_t>());
+    }
+    if (c.is_number_float()) {
+        return static_cast<int>(c.get<double>());
+    }
+    if (c.is_string()) {
+        const std::string s = c.get<std::string>();
+        char* end = nullptr;
+        const long v = std::strtol(s.c_str(), &end, 10);
+        if (end != s.c_str() && *end == '\0' && v >= INT_MIN && v <= INT_MAX) {
+            return static_cast<int>(v);
+        }
+    }
+    return std::nullopt;
 }
 
 std::optional<json> try_get_jsonrpc_result(const json& response) {

@@ -36,6 +36,13 @@ public:
     json post(const std::string& url, const json& body,
               const std::map<std::string, std::string>& headers = {}) override;
 
+    /**
+     * @brief POST JSON-RPC 2.0 请求：与 post() 相同，但若 HTTP 非 2xx 且 body 为合法 JSON-RPC
+     *        error 信封（含 jsonrpc 2.0 与 error 对象），则返回该 JSON 供映射为 A2aRpcException。
+     */
+    json post_json_rpc(const std::string& url, const json& body,
+                       const std::map<std::string, std::string>& headers = {});
+
     json get(const std::string& url,
              const std::map<std::string, std::string>& headers = {}) override;
 

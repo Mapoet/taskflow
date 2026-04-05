@@ -35,7 +35,7 @@ json a2a_jsonrpc_post(
         h["Content-Type"] = "application/json";
     }
 
-    json response = client.post(full_rpc_url, request, h);
+    json response = client.post_json_rpc(full_rpc_url, request, h);
 
     if (auto ec = try_get_jsonrpc_error_code(response)) {
         std::string msg = "JSON-RPC error";

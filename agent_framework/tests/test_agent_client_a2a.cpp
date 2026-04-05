@@ -54,6 +54,10 @@ int pick_listen_port() {
 void test_c1_jsonrpc_send() {
     const int port = pick_listen_port();
     httplib::Server srv;
+    // Add health check endpoint for server readiness
+    srv.Get("/health", [](const httplib::Request&, httplib::Response& res) {
+        res.set_content("OK", "text/plain");
+    });
     srv.Post("/", [](const httplib::Request& req, httplib::Response& res) {
         json body = json::parse(req.body);
         if (body.value("method", std::string()) != "SendMessage") {
@@ -72,6 +76,34 @@ void test_c1_jsonrpc_send() {
     std::thread th([&] { srv.listen("127.0.0.1", port); });
     while (!srv.is_running()) {
         std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+
+    // Wait for server to actually accept connections
+    bool server_ready = false;
+    const auto start = std::chrono::steady_clock::now();
+    constexpr auto timeout = std::chrono::seconds(5);
+
+    while (!server_ready && std::chrono::steady_clock::now() - start < timeout) {
+        try {
+            httplib::Client test_client("127.0.0.1", port);
+            test_client.set_connection_timeout(1, 0);
+            test_client.set_read_timeout(1, 0);
+            test_client.set_write_timeout(1, 0);
+            if (auto res = test_client.Get("/health")) {
+                server_ready = true;
+                std::cerr << "C-1: server health check passed" << std::endl;
+                break;
+            }
+        } catch (...) {
+            // Ignore and retry
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+
+    if (!server_ready) {
+        srv.stop();
+        th.join();
+        fail("C-1 server failed to become ready");
     }
 
     AgentClientOptions a2a_opts;
@@ -98,6 +130,10 @@ void test_c1_jsonrpc_send() {
 void test_c2_jsonrpc_error() {
     const int port = pick_listen_port();
     httplib::Server srv;
+    // Add health check endpoint for server readiness
+    srv.Get("/health", [](const httplib::Request&, httplib::Response& res) {
+        res.set_content("OK", "text/plain");
+    });
     srv.Post("/", [](const httplib::Request& req, httplib::Response& res) {
         json body = json::parse(req.body);
         json out = {{"jsonrpc", "2.0"},
@@ -109,6 +145,34 @@ void test_c2_jsonrpc_error() {
     std::thread th([&] { srv.listen("127.0.0.1", port); });
     while (!srv.is_running()) {
         std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+
+    // Wait for server to actually accept connections
+    bool server_ready = false;
+    const auto start = std::chrono::steady_clock::now();
+    constexpr auto timeout = std::chrono::seconds(5);
+
+    while (!server_ready && std::chrono::steady_clock::now() - start < timeout) {
+        try {
+            httplib::Client test_client("127.0.0.1", port);
+            test_client.set_connection_timeout(1, 0);
+            test_client.set_read_timeout(1, 0);
+            test_client.set_write_timeout(1, 0);
+            if (auto res = test_client.Get("/health")) {
+                server_ready = true;
+                std::cerr << "C-2: server health check passed" << std::endl;
+                break;
+            }
+        } catch (...) {
+            // Ignore and retry
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+
+    if (!server_ready) {
+        srv.stop();
+        th.join();
+        fail("C-2 server failed to become ready");
     }
 
     AgentClientOptions a2a_opts;
@@ -127,12 +191,20 @@ void test_c2_jsonrpc_error() {
         th.join();
         fail("C-2 expected exception");
     } catch (const A2aRpcException& e) {
+        std::cerr << "C-2 caught A2aRpcException: code=" << e.code() << ", what=" << e.what() << std::endl;
         if (e.code() != -32602) {
             srv.stop();
             th.join();
             fail("C-2 code");
         }
+        std::cerr << "C-2 test passed: correctly caught A2aRpcException with code -32602" << std::endl;
+    } catch (const std::exception& e) {
+        std::cerr << "C-2 caught std::exception: " << e.what() << std::endl;
+        srv.stop();
+        th.join();
+        fail("C-2 wrong exception type");
     } catch (...) {
+        std::cerr << "C-2 caught unknown exception" << std::endl;
         srv.stop();
         th.join();
         fail("C-2 wrong exception type");
@@ -146,6 +218,10 @@ void test_c3_legacy_rest() {
     const int port = pick_listen_port();
     std::string last_path;
     httplib::Server srv;
+    // Add health check endpoint for server readiness
+    srv.Get("/health", [](const httplib::Request&, httplib::Response& res) {
+        res.set_content("OK", "text/plain");
+    });
     srv.Post("/prefix/tasks/send", [&](const httplib::Request& req, httplib::Response& res) {
         last_path = req.path;
         json task_body = {{"task_id", "leg1"}, {"status", "pending"}, {"metadata", json::object()}};
@@ -155,6 +231,34 @@ void test_c3_legacy_rest() {
     std::thread th([&] { srv.listen("127.0.0.1", port); });
     while (!srv.is_running()) {
         std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+
+    // Wait for server to actually accept connections
+    bool server_ready = false;
+    const auto start = std::chrono::steady_clock::now();
+    constexpr auto timeout = std::chrono::seconds(5);
+
+    while (!server_ready && std::chrono::steady_clock::now() - start < timeout) {
+        try {
+            httplib::Client test_client("127.0.0.1", port);
+            test_client.set_connection_timeout(1, 0);
+            test_client.set_read_timeout(1, 0);
+            test_client.set_write_timeout(1, 0);
+            if (auto res = test_client.Get("/health")) {
+                server_ready = true;
+                std::cerr << "C-3: server health check passed" << std::endl;
+                break;
+            }
+        } catch (...) {
+            // Ignore and retry
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+
+    if (!server_ready) {
+        srv.stop();
+        th.join();
+        fail("C-3 server failed to become ready");
     }
 
     AgentClientOptions leg_opts;
@@ -182,6 +286,11 @@ void test_c4_get_sse() {
     const int port = pick_listen_port();
     httplib::Server srv;
 
+    // Add health check endpoint for server readiness
+    srv.Get("/health", [](const httplib::Request&, httplib::Response& res) {
+        res.set_content("OK", "text/plain");
+    });
+
     srv.Get("/sse", [](const httplib::Request&, httplib::Response& res) {
         AgentTask t1;
         t1.task_id = "s1";
@@ -198,6 +307,34 @@ void test_c4_get_sse() {
     std::thread th([&] { srv.listen("127.0.0.1", port); });
     while (!srv.is_running()) {
         std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+
+    // Wait for server to actually accept connections
+    bool server_ready = false;
+    const auto start = std::chrono::steady_clock::now();
+    constexpr auto timeout = std::chrono::seconds(5);
+
+    while (!server_ready && std::chrono::steady_clock::now() - start < timeout) {
+        try {
+            httplib::Client test_client("127.0.0.1", port);
+            test_client.set_connection_timeout(1, 0);
+            test_client.set_read_timeout(1, 0);
+            test_client.set_write_timeout(1, 0);
+            if (auto res = test_client.Get("/health")) {
+                server_ready = true;
+                std::cerr << "C-4: server health check passed" << std::endl;
+                break;
+            }
+        } catch (...) {
+            // Ignore and retry
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+
+    if (!server_ready) {
+        srv.stop();
+        th.join();
+        fail("C-4 server failed to become ready");
     }
 
     agent_framework::HttplibClient http;
@@ -236,13 +373,34 @@ void test_c4_get_sse() {
 } // namespace
 
 int main() {
-    try {
-        test_c1_jsonrpc_send();
-        test_c2_jsonrpc_error();
-        test_c3_legacy_rest();
-        test_c4_get_sse();
-    } catch (const std::exception& e) {
-        std::cerr << e.what() << "\n";
+    int passed = 0;
+    int failed = 0;
+
+    auto run_test = [&](auto test_func, const char* name) {
+        std::cerr << "=== Running " << name << " ===" << std::endl;
+        try {
+            test_func();
+            std::cerr << name << " PASSED" << std::endl;
+            ++passed;
+        } catch (const std::exception& e) {
+            std::cerr << name << " FAILED: " << e.what() << std::endl;
+            ++failed;
+        }
+    };
+
+    run_test(test_c1_jsonrpc_send, "C-1 JSON-RPC SendMessage");
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    run_test(test_c2_jsonrpc_error, "C-2 JSON-RPC error");
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    run_test(test_c3_legacy_rest, "C-3 Legacy REST");
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    run_test(test_c4_get_sse, "C-4 get_sse");
+
+    std::cerr << "\n=== Summary ===" << std::endl;
+    std::cerr << "Passed: " << passed << "/4" << std::endl;
+    std::cerr << "Failed: " << failed << "/4" << std::endl;
+
+    if (failed > 0) {
         return 1;
     }
     return 0;
