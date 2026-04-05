@@ -221,7 +221,22 @@ AgentLoopNode::create(
             std::cout.flush();
         }
         const auto t0 = std::chrono::steady_clock::now();
-        LLMOutput llm_out = llm_client->invoke(llm_in, "", stream_callback).get();
+        LLMOutput llm_out;
+        try {
+            llm_out = llm_client->invoke(llm_in, "", stream_callback).get();
+        } catch (const std::exception& e) {
+            if (dbg) {
+                std::cout << "[AgentLoop] LLM call threw exception: " << e.what() << "\n";
+                std::cout.flush();
+            }
+            // Set final state to break loop
+            shared->is_final = true;
+            shared->final_answer = std::string("[error] LLM call failed: ") + e.what();
+            shared->last_llm.is_final = true;
+            shared->last_llm.final_answer = shared->final_answer;
+            shared->last_llm.tool_calls.clear();
+            return {};
+        }
         const auto t1 = std::chrono::steady_clock::now();
         if (dbg) {
             const auto ms =
@@ -432,6 +447,12 @@ AgentLoopNode::create(
     };
 
     auto exit_func = [shared](const std::unordered_map<std::string, std::any>&) -> std::unordered_map<std::string, std::any> {
+        const char* dbg_env = std::getenv("AGENT_TEST_AGENT_LOOP_DEBUG");
+        const bool dbg = dbg_env && std::string(dbg_env) != "0";
+        if (dbg) {
+            std::cout << "[AgentLoop] exit_func called, final_answer='" << shared->final_answer << "' is_final=" << shared->is_final << "\n";
+            std::cout.flush();
+        }
         return {
             {std::string(internal::kFinalAnswer), std::any{shared->final_answer}},
             {std::string(internal::kNextAgentState), std::any{shared->state}},

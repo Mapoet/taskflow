@@ -47,26 +47,28 @@ Agent Framework 采用分层架构设计：
 
 ## A2A HTTP 绑定（当前实现）
 
-**规范目标（线协议唯一权威）**：[`docs/guides/a2a-spec-tracker.md`](../guides/a2a-spec-tracker.md)（JSON-RPC 方法名、Task/Message **ProtoJSON**、`StreamResponse` / SSE 载荷）。**WP2.1** 已提供 `sse_framing`、`wire_mapping`、`dispatch_table`（无 HTTP 路由变更）。
+**双栈（必读）**：默认 **`AgentClient` / `AgentServer` 主路径为 JSON-RPC 2.0**（POST 到 Card `api_endpoint` 拆出的 **JSON-RPC 基 URL + `AgentClientOptions::json_rpc_path`**，方法名见 tracker，如 **`SendMessage`** / **`GetTask`**）。**Legacy REST**（`/tasks/send`、`/tasks/get` 等）仅在显式开关下启用（`AGENT_SERVER_LEGACY_REST` / `AGENT_CLIENT_USE_LEGACY_REST`）。线协议细节以 [`docs/guides/a2a-spec-tracker.md`](../guides/a2a-spec-tracker.md)、[`docs/guides/agent-client.md`](../guides/agent-client.md)、`include/agent/a2a/client_config.hpp` 为准。
 
-下表为 **legacy REST + JSON**（在 **WP2.2 / WP2.4** 切换默认路径前仍可能为运行时行为），**非** A2A v1 规范正文绑定：
+**Well-Known Agent Card（RFC 8615）**：默认路径 **`/.well-known/agent-card.json`**（可配置）。
 
-本仓库内 **AgentClient** 与 **AgentServer** 的 HTTP 语义已对齐为 **REST + JSON**（非 JSON-RPC）：
+**Legacy REST 对照表**（与 JSON-RPC 并行可选；**非**规范默认绑定）：
 
-| 操作 | 方法 | 路径（相对 `agent_endpoint` 前缀） | 请求体 / 查询 | 成功响应要点 |
-|------|------|--------------------------------------|---------------|--------------|
-| 发现 Agent Card | GET | `/.well-known/agent-card`（或调用方传入的 path） | — | AgentCard JSON 根对象 |
+| 操作 | 方法 | 路径（相对 legacy 前缀） | 请求体 / 查询 | 成功响应要点 |
+|------|------|--------------------------|---------------|--------------|
+| 发现 Agent Card | GET | `/.well-known/agent-card.json`（或调用方 path） | — | AgentCard JSON |
 | 发送任务 | POST | `/tasks/send` | `message`, `metadata`, 可选 `session_id` | `{"task": ...}` |
 | 获取任务 | GET | `/tasks/get?task_id=` | query | `{"task": ...}` |
 | 取消任务 | POST | `/tasks/cancel` | `{"task_id": ...}` | `{"success": true}` |
 | 更新任务 | POST | `/tasks/update` | `task_id`, `message` | `{"task": ...}` |
-| SSE 订阅 | GET | `/tasks/sendSubscribe?task_id=` | query | `text/event-stream`（流式，客户端侧待完善） |
+| SSE 订阅（legacy 对照） | GET | `/tasks/sendSubscribe?task_id=`（常量 `kTaskSseSubscribePathQueryPrefix`） | query | `text/event-stream`；可与 JSON-RPC 任务创建配套使用 |
 | Webhook 设置 | POST | `/tasks/pushNotification/set` | `task_id`, `webhook_url` | `{"success": true}` |
 | Webhook 查询 | GET | `/tasks/pushNotification/get?task_id=` | query | `webhook_url` 等 |
 
 底层 HTTP 由 **HttplibClient**（cpp-httplib）执行。`https` 需在 CMake 中检测到 OpenSSL 并定义 `CPPHTTPLIB_OPENSSL_SUPPORT`。
 
-**HTTPAgentTransport** 仍为 **JSON-RPC 2.0** POST 到 `base_url + endpoint`，用于需要 RPC 形态的调用方，与上表 REST 绑定不同。
+**HTTPAgentTransport** 与默认 **`AgentClient`** 使用 **同一套 JSON-RPC method/path 常量**（`dispatch_table` / tracker），避免与上表 REST 混为两套「默认 Client」叙事。
+
+**多 Agent 编排（WP2.agent2agent）**：本地进程可通过 `ToolBus` 注册 **`a2a.send_message`**，经 **`A2aPeerRegistry`**（`peers.json`）发现多个远端并各持 **`AgentClient`**；详见 [`docs/guides/phase-2-wp-agent2agent.md`](../guides/phase-2-wp-agent2agent.md)、[`docs/guides/a2a-orchestrator.md`](../guides/a2a-orchestrator.md)。
 
 ---
 
@@ -2701,8 +2703,8 @@ sequenceDiagram
     participant Tools as ToolBus
     participant SSE as SSEConnection<br/>SSE连接
 
-    Note over Client,Server: 阶段1: 任务创建
-    Client->>Server: 1. send_task()<br/>POST /tasks/send<br/>AgentMessage
+    Note over Client,Server: 阶段1: 任务创建（默认 JSON-RPC）
+    Client->>Server: 1. send_task() → POST json_rpc_path<br/>JSON-RPC SendMessage（ProtoJSON params）
     Server->>Server: 2. 验证认证<br/>validate_authentication()
     Server->>Server: 3. 生成任务ID<br/>generate_task_id()
     Server->>Server: 4. 创建AgentTask<br/>status=QUEUED
@@ -2736,9 +2738,9 @@ sequenceDiagram
     SSE-->>Client: 23. 最终状态更新
     Server->>Server: 24. 清理任务资源
 
-    Note over Client,Server: 阶段6: 客户端查询
-    Client->>Server: 25. get_task()<br/>GET /tasks/get?task_id=xxx
-    Server-->>Client: 26. 返回完整AgentTask<br/>(包含所有messages和artifacts)
+    Note over Client,Server: 阶段6: 客户端查询（默认 JSON-RPC GetTask；legacy 为 GET /tasks/get）
+    Client->>Server: 25. get_task() → JSON-RPC GetTask<br/>（或 legacy GET /tasks/get）
+    Server-->>Client: 26. 返回完整 AgentTask<br/>(messages / artifacts)
 ```
 
 ### A2A 协议通信架构
@@ -2753,8 +2755,8 @@ graph TB
     end
     
     subgraph "网络通信"
-        HTTP_REQ[HTTP Request<br/>JSON-RPC 2.0<br/>POST /tasks/send]
-        SSE_STREAM[SSE Stream<br/>text/event-stream<br/>GET /tasks/sendSubscribe]
+        HTTP_REQ[HTTP Request<br/>JSON-RPC 2.0<br/>POST json_rpc_path]
+        SSE_STREAM[SSE Stream<br/>text/event-stream<br/>GET /tasks/sendSubscribe?task_id=]
         WEBHOOK[Webhook<br/>HTTP POST<br/>任务更新通知]
     end
     

@@ -1,0 +1,19 @@
+{
+  "peers": [
+    {
+      "id": "worker",
+      "origin": "http://127.0.0.1:9001",
+      "well_known_path": "/.well-known/agent-card.json",
+      "default_timeout_ms": 120000
+    },
+    {
+      "id": "reviewer",
+      "origin": "http://127.0.0.1:9002",
+      "well_known_path": "/.well-known/agent-card.json",
+      "auth": {
+        "type": "bearer",
+        "token_env": "AGENT_A2A_LIVE_TOKEN"
+      }
+    }
+  ]
+}

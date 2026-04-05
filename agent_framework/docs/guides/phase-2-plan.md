@@ -2,7 +2,7 @@
 
 本文档在 [plan-detailed.md](./plan-detailed.md) **§5**（A2A、WP2.1–2.6、§5.4 富界面、§7 UI 表）与 [plan-detailed.v2.md](./plan-detailed.v2.md) **§5–6**（Identity / ExecutionContext、§5.1 多轮与输入 DSL、WP2.0 / 2.1b–2.1d / 2.7–2.9、Verifier、工作记忆压缩）之上，给出**可排期、可验收**的实现拆解、依赖顺序与阶段边界。阶段 3（RAG、Faiss、磁盘记忆深化、动态 MCP / WP3.7 等）仅在衔接处引用，**不纳入本文件 DoD**。
 
-**文档版本**：0.16  
+**文档版本**：0.18  
 **日期**：2026-04-05  
 **上游依据**：`plan-detailed.md` v0.3（§5–§8）；`plan-detailed.v2.md` v0.6-v2；[phase-1-plan.md](./phase-1-plan.md)（阶段 1 交付与衔接）
 
@@ -75,6 +75,7 @@
 | **WP2.4** | v0.3 | AgentClient 与 Facade 一致；legacy REST 策略 |
 | **WP2.5** | v0.3 | 认证：Bearer、API Key、可选 OAuth |
 | **WP2.6** | v0.3 | 一致性/契约测试与 fixture |
+| **WP2.agent2agent** | 编排 | peers.json、`A2aPeerRegistry`、ToolBus `a2a.send_message`、`cli_a2a_orchestrator_demo`（依赖 WP2.0/2.4/2.1） |
 | **WP2.7** | v2 | 输入质控 Tier A+B；**ExecutionContext**；§5.1 DSL |
 | **WP2.8** | v2 | Verifier 子图（第二套 LLM） |
 | **WP2.9** | v2 | 工作记忆 + 偏早压缩；失败回退 |
@@ -307,6 +308,23 @@ flowchart TB
 
 ---
 
+### WP2.agent2agent 多 Agent 编排（库 + demo）
+
+**目标**：在**本地编排进程**内通过 ToolBus 注册 **`a2a.send_message`**（及可选按 peer 别名工具），对 `peers.json` 中多个远端执行 **Well-Known 发现 → JSON-RPC `SendMessage` → SSE 或 `GetTask` 等待**；维护 `peer_id → contextId` 会话书；与 WP2.1b `side_effect`、WP2.1d allowlist 全链一致。
+
+**详案**（API 表、`peers.json` 字段、DoD、与 Tier D 测试关系）：**[phase-2-wp-agent2agent.md](./phase-2-wp-agent2agent.md)**。用户指南：**[a2a-orchestrator.md](./a2a-orchestrator.md)**。
+
+| ID | 任务 | 说明 |
+|----|------|------|
+| a2a-orch.1 | **Registry** | `A2aPeerRegistry`：`split_json_rpc_url` 等与 Card 对齐的单一实现 |
+| a2a-orch.2 | **Wait + session** | `run_remote_task_and_wait`、`PeerSessionBook` |
+| a2a-orch.3 | **ToolBus** | `register_a2a_orchestrator_tools`、schema、`Write` |
+| a2a-orch.4 | **Demo + 单测** | `cli_a2a_orchestrator_demo`、`test_a2a_peer_registry`、`test_a2a_orchestrator_tools` |
+
+**依赖**：**WP2.0**、**WP2.1/2.1a**、**WP2.4**；**软**：WP2.5（`auth`）、WP2.1c（大 payload）。
+
+---
+
 ### WP2.7 输入质控与 ExecutionContext
 
 **目标**：Tier A+B；拼装 `LLMInput` 前写入 **ExecutionContext**（cwd、允许 MCP 集合、策略版本）；**§5.1** `@` / `/cmd` Tier A 覆盖。
@@ -413,7 +431,9 @@ flowchart TB
 | [phase-2-wp4.md](./phase-2-wp4.md) | WP2.4 |
 | [agent-client.md](./agent-client.md) | WP2.4 用户文档（JSON-RPC / Legacy / env） |
 | [phase-2-wp5.md](./phase-2-wp5.md) | WP2.5 |
-| `phase-2-wp6.md` | WP2.6 |
+| [phase-2-wp6.md](./phase-2-wp6.md) | WP2.6 |
+| [phase-2-wp-agent2agent.md](./phase-2-wp-agent2agent.md) | WP2.agent2agent |
+| [a2a-orchestrator.md](./a2a-orchestrator.md) | WP2.agent2agent 用户指南 |
 | [phase-2-wp7.md](./phase-2-wp7.md) | WP2.7 |
 | [phase-2-wp8.md](./phase-2-wp8.md) | WP2.8 |
 | [phase-2-wp9.md](./phase-2-wp9.md) | WP2.9 |
@@ -444,6 +464,7 @@ flowchart TB
 | 2026-04-04 | 0.15 | **WP2.U** 链至 **[phase-2-wpu.md](./phase-2-wpu.md)**；§1.3、§4、§8；富界面详案 v0.2 |
 | 2026-04-05 | 0.16 | **D7** 下增加子项进度说明（1b/1d 已落地，**1c** 待 [phase-2-wp1c.md](./phase-2-wp1c.md)）；**WP2.1d** 小节标注实现状态 |
 | 2026-04-05 | 0.17 | **WP2.1c** 实现与 [context-budget.md](./context-budget.md)；D7 子项进度更新 |
+| 2026-04-05 | 0.18 | **WP2.agent2agent**：总表、§4、§8 索引；[phase-2-wp-agent2agent.md](./phase-2-wp-agent2agent.md)、[a2a-orchestrator.md](./a2a-orchestrator.md) |
 
 ---
 

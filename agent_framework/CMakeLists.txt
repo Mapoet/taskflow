@@ -414,6 +414,12 @@ endif()
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/a2a/dispatch_table.cpp)
     list(APPEND AGENT_SOURCES src/a2a/dispatch_table.cpp)
 endif()
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/a2a/peer_registry.cpp)
+    list(APPEND AGENT_SOURCES src/a2a/peer_registry.cpp)
+endif()
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/a2a/orchestration.cpp)
+    list(APPEND AGENT_SOURCES src/a2a/orchestration.cpp)
+endif()
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/agent/task_state_machine.cpp)
     list(APPEND AGENT_SOURCES src/agent/task_state_machine.cpp)
 endif()
@@ -445,6 +451,8 @@ set(AGENT_HEADERS
     include/agent/a2a/sse_framing.hpp
     include/agent/a2a/wire_mapping.hpp
     include/agent/a2a/dispatch_table.hpp
+    include/agent/a2a/peer_registry.hpp
+    include/agent/a2a/orchestration.hpp
     include/agent/task_state_machine.hpp
     include/node/node_factory.hpp
     include/node/llm_node.hpp
@@ -608,6 +616,24 @@ if(AGENT_BUILD_EXAMPLES)
                 target_compile_options(cli_agent_skills_demo PRIVATE /std:c++20)
             endif()
             list(APPEND _agent_framework_example_targets cli_agent_skills_demo)
+        endif()
+    endif()
+
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/examples/cli_a2a_orchestrator_demo.cpp)
+        if(NOT EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/../3rd-party/CLI11/CLI11.hpp)
+            message(WARNING "cli_a2a_orchestrator_demo: missing CLI11 (same as cli_agent_skills_demo)")
+        else()
+            add_executable(cli_a2a_orchestrator_demo examples/cli_a2a_orchestrator_demo.cpp)
+            target_include_directories(cli_a2a_orchestrator_demo PRIVATE
+                ${CMAKE_CURRENT_SOURCE_DIR}/../3rd-party/CLI11)
+            target_link_libraries(cli_a2a_orchestrator_demo PRIVATE agent_framework)
+            if(CMAKE_USE_PTHREADS_INIT)
+                target_link_libraries(cli_a2a_orchestrator_demo PRIVATE Threads::Threads)
+            endif()
+            if(MSVC AND CMAKE_CXX_STANDARD GREATER_EQUAL 20)
+                target_compile_options(cli_a2a_orchestrator_demo PRIVATE /std:c++20)
+            endif()
+            list(APPEND _agent_framework_example_targets cli_a2a_orchestrator_demo)
         endif()
     endif()
 
@@ -904,6 +930,25 @@ if(BUILD_TESTING)
         endif()
         add_test(NAME a2a_live_multi_agent COMMAND test_a2a_live_multi_agent)
         set_tests_properties(a2a_live_multi_agent PROPERTIES
+            ENVIRONMENT "AGENT_TOOL_ALLOWLIST=;AGENT_CLIENT_USE_LEGACY_REST=0")
+    endif()
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_a2a_peer_registry.cpp)
+        add_executable(test_a2a_peer_registry tests/test_a2a_peer_registry.cpp)
+        target_link_libraries(test_a2a_peer_registry PRIVATE agent_framework)
+        if(CMAKE_USE_PTHREADS_INIT)
+            target_link_libraries(test_a2a_peer_registry PRIVATE Threads::Threads)
+        endif()
+        add_test(NAME a2a_peer_registry COMMAND test_a2a_peer_registry)
+        set_tests_properties(a2a_peer_registry PROPERTIES ENVIRONMENT "AGENT_CLIENT_USE_LEGACY_REST=0")
+    endif()
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_a2a_orchestrator_tools.cpp)
+        add_executable(test_a2a_orchestrator_tools tests/test_a2a_orchestrator_tools.cpp)
+        target_link_libraries(test_a2a_orchestrator_tools PRIVATE agent_framework)
+        if(CMAKE_USE_PTHREADS_INIT)
+            target_link_libraries(test_a2a_orchestrator_tools PRIVATE Threads::Threads)
+        endif()
+        add_test(NAME a2a_orchestrator_tools COMMAND test_a2a_orchestrator_tools)
+        set_tests_properties(a2a_orchestrator_tools PROPERTIES
             ENVIRONMENT "AGENT_TOOL_ALLOWLIST=;AGENT_CLIENT_USE_LEGACY_REST=0")
     endif()
     if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_a2a_tier_e.cpp)

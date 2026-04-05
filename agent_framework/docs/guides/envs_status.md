@@ -235,7 +235,16 @@
 
 **示例二进制 / demo**：`AGENT_SERVER_DEMO_ROLE`（`echo` \| `integration-worker` \| `integration-reviewer`）、`AGENT_SERVER_CARD_PUBLIC_BASE`、`AGENT_SERVER_AUTH_TOKEN` — [agent_server_demo.cpp](../../examples/agent_server_demo.cpp)；画像表见 [tests/fixtures/a2a/agents/README.md](../../tests/fixtures/a2a/agents/README.md)。
 
-### 3.13 测试 / 示例专用（CMake 或二进制）
+### 3.13 A2A 编排（WP2.agent2agent）
+
+| 名称 | 功能 | 读取位置 | 主文档 |
+|------|------|----------|--------|
+| （配置文件）`peers.json` 内 `auth.token_env` | 启动编排进程时从命名环境变量注入 Bearer，**不**写入仓库 | `peer_registry.cpp` `resolve_peer_auth_config` | [a2a-orchestrator.md](./a2a-orchestrator.md) |
+| `AGENT_TOOL_ALLOWLIST` | 若为非空快照，须包含 `a2a.send_message`（及可选 `a2a.send_message__<peer_id>`） | [toolbus.cpp](../../src/toolbus/toolbus.cpp) | [tool-call-hooks.md](./tool-call-hooks.md)、[a2a-orchestrator.md](./a2a-orchestrator.md) |
+
+与 Tier C/D **live** 闸门共用：`AGENT_A2A_LIVE_TOKEN` 等仍见 §3.12。
+
+### 3.14 测试 / 示例专用（CMake 或二进制）
 
 | 名称 | 用途 | 典型设置处 |
 |------|------|------------|

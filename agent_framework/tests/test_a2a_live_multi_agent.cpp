@@ -2,6 +2,7 @@
  * @file test_a2a_live_multi_agent.cpp
  * @brief Tier D: two base URLs, worker → reviewer handoff (agent_server_demo roles)
  */
+#include <agent/a2a/peer_registry.hpp>
 #include <agent/agent_client.hpp>
 #include <agent/types.hpp>
 
@@ -20,38 +21,11 @@ using agent_framework::AgentMessage;
 using agent_framework::AgentPart;
 using agent_framework::AgentTask;
 using agent_framework::AgentTaskStatus;
+using agent_framework::a2a::make_rpc_agent_client_for_card;
 
 void fail(const char* m) {
     std::cerr << "test_a2a_live_multi_agent: " << m << "\n";
     std::exit(1);
-}
-
-void split_api_endpoint(const std::string& api_ep, std::string& out_base, std::string& out_path) {
-    const std::size_t scheme = api_ep.find("://");
-    if (scheme == std::string::npos) {
-        fail("split_api_endpoint");
-    }
-    const std::size_t path_start = api_ep.find('/', scheme + 3);
-    if (path_start == std::string::npos) {
-        out_base = api_ep;
-        out_path = "/";
-        return;
-    }
-    out_base = api_ep.substr(0, path_start);
-    out_path = api_ep.substr(path_start);
-    if (out_path.empty()) {
-        out_path = "/";
-    }
-}
-
-AgentClient make_rpc_client_for_card(const AgentCard& card) {
-    std::string rpc_base;
-    std::string rpc_path;
-    split_api_endpoint(card.api_endpoint, rpc_base, rpc_path);
-    AgentClientOptions rpc_opts;
-    rpc_opts.use_legacy_rest = false;
-    rpc_opts.json_rpc_path = rpc_path;
-    return AgentClient(rpc_base, rpc_opts);
 }
 
 void apply_token(AgentClient& c) {
@@ -112,8 +86,11 @@ void run_once(const std::string& origin_a, const std::string& origin_b) {
         fail("skills must differ");
     }
 
-    AgentClient ra = make_rpc_client_for_card(ca);
-    AgentClient rb = make_rpc_client_for_card(cb);
+    json empty_auth;
+    std::shared_ptr<AgentClient> ra_ptr = make_rpc_agent_client_for_card(ca, empty_auth);
+    std::shared_ptr<AgentClient> rb_ptr = make_rpc_agent_client_for_card(cb, empty_auth);
+    AgentClient& ra = *ra_ptr;
+    AgentClient& rb = *rb_ptr;
     apply_token(ra);
     apply_token(rb);
 
