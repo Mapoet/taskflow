@@ -115,8 +115,6 @@ private:
     bool connected_ = false;            // 连接状态
     std::unique_ptr<HTTPClient> http_client_; // HttplibClient
     std::atomic<std::uint64_t> jsonrpc_next_id_{1};
-
-    json send_http_post(const json& payload);
 };
 
 } // namespace agent_framework

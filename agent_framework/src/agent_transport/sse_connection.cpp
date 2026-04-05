@@ -1,79 +1,91 @@
 /**
  * @file sse_connection.cpp
- * @brief SSE 连接管理器实现（A2A 协议）
- * @author Mapoet
- * @version 0.1
- * @date 2025-01-XX
+ * @brief SSE 客户端：get_sse + SseParser + StreamResponse（WP2.4）
  */
 #include <agent/sse_connection.hpp>
-#include <iostream>
-#include <sstream>
-#include <thread>
-#include <chrono>
-#include <nlohmann/json.hpp>
+#include <agent/agent_client.hpp>
+#include <agent/a2a/sse_framing.hpp>
+#include <agent/a2a/wire_mapping.hpp>
 
-// TODO: 实现 SSEConnection
-// 需要引入实际的 HTTP 客户端库（如 httplib）来接收 SSE 流
+#include <cstdlib>
+#include <iostream>
 
 namespace agent_framework {
+namespace {
 
-SSEConnection::SSEConnection(const std::string& endpoint, const std::string& task_id)
-    : endpoint_(endpoint), task_id_(task_id), event_stream_(nullptr), active_(false) {
-    // TODO: 初始化 SSE 连接
+bool env_truthy(const char* v) {
+    if (!v || !*v) {
+        return false;
+    }
+    return v[0] == '1' || v[0] == 'y' || v[0] == 'Y' || v[0] == 't' || v[0] == 'T';
 }
+
+bool sse_legacy_payload_enabled() {
+    return env_truthy(std::getenv("AGENT_CLIENT_SSE_LEGACY_PAYLOAD"));
+}
+
+} // namespace
+
+SSEConnection::SSEConnection(const std::string& endpoint, const std::string& task_id, HTTPClient* http)
+    : endpoint_(endpoint), task_id_(task_id), http_client_(http) {}
 
 SSEConnection::~SSEConnection() {
     close();
-    if (event_thread_.joinable()) {
-        event_thread_.join();
+}
+
+void SSEConnection::subscribe(const std::map<std::string, std::string>& headers,
+                              std::function<void(const AgentTask&)> on_status_update,
+                              std::function<void(const AgentArtifact&)> on_artifact_update) {
+    std::thread prev;
+    {
+        std::lock_guard<std::mutex> lock(connection_mutex_);
+        if (event_thread_.joinable()) {
+            cancelled_.store(true, std::memory_order_release);
+            prev = std::move(event_thread_);
+        }
+        on_status_update_ = std::move(on_status_update);
+        on_artifact_update_ = std::move(on_artifact_update);
+        request_headers_ = headers;
+
+        cancelled_.store(false, std::memory_order_release);
+        active_ = true;
+        event_thread_ = std::thread(&SSEConnection::event_thread_func, this);
+    }
+    if (prev.joinable()) {
+        prev.join();
     }
 }
 
-void SSEConnection::subscribe(
-    std::function<void(const AgentTask&)> on_status_update,
-    std::function<void(const AgentArtifact&)> on_artifact_update
-) {
-    std::lock_guard<std::mutex> lock(connection_mutex_);
-    
-    on_status_update_ = on_status_update;
-    on_artifact_update_ = on_artifact_update;
-    
-    // TODO: 启动 SSE 连接
-    // 1. 发送 GET 请求到 endpoint_，设置 Accept: text/event-stream
-    // 2. 创建 event_stream_ 响应对象
-    // 3. 启动 event_thread_ 处理 SSE 事件流
-    
-    active_ = true;
-    
-    // 启动事件处理线程
-    event_thread_ = std::thread(&SSEConnection::event_thread_func, this);
-}
-
-void SSEConnection::reconnect(const std::string& /* last_event_id */) {
-    std::lock_guard<std::mutex> lock(connection_mutex_);
-    
-    close();
-    
-    // TODO: 使用 last_event_id 重新连接
-    // 在 GET 请求中添加 Last-Event-ID Header
-    
-    active_ = true;
-    event_thread_ = std::thread(&SSEConnection::event_thread_func, this);
+void SSEConnection::reconnect(const std::string& last_event_id) {
+    std::thread prev;
+    {
+        std::lock_guard<std::mutex> lock(connection_mutex_);
+        if (event_thread_.joinable()) {
+            cancelled_.store(true, std::memory_order_release);
+            prev = std::move(event_thread_);
+        }
+        request_headers_["Last-Event-ID"] = last_event_id;
+        cancelled_.store(false, std::memory_order_release);
+        active_ = true;
+        event_thread_ = std::thread(&SSEConnection::event_thread_func, this);
+    }
+    if (prev.joinable()) {
+        prev.join();
+    }
 }
 
 void SSEConnection::close() {
-    std::lock_guard<std::mutex> lock(connection_mutex_);
-    
-    if (!active_) {
-        return;
+    std::thread prev;
+    {
+        std::lock_guard<std::mutex> lock(connection_mutex_);
+        cancelled_.store(true, std::memory_order_release);
+        active_ = false;
+        if (event_thread_.joinable()) {
+            prev = std::move(event_thread_);
+        }
     }
-    
-    active_ = false;
-    // TODO: 关闭 SSE 连接
-    // 在实现时，需要删除 httplib::Response* 对象
-    if (event_stream_) {
-        // delete static_cast<httplib::Response*>(event_stream_);  // TODO: 实现时取消注释
-        event_stream_ = nullptr;
+    if (prev.joinable()) {
+        prev.join();
     }
 }
 
@@ -82,49 +94,71 @@ bool SSEConnection::is_active() const {
     return active_;
 }
 
-void SSEConnection::handle_event(const std::string& event_data) {
+void SSEConnection::handle_sse_event(const std::string& data_payload) {
     try {
-        // TODO: 解析 SSE 事件数据（JSON 格式）
-        // 根据事件类型调用相应的回调
-        
-        json event_json = json::parse(event_data);
-        std::string event_type = event_json.value("type", "");
-        
-        if (event_type == "task_status_update") {
+        a2a::SseEvent ev;
+        ev.data = data_payload;
+
+        AgentTask task;
+        if (a2a::try_parse_task_status_sse(ev, task)) {
             if (on_status_update_) {
-                AgentTask task = AgentTask::from_json(event_json["task"]);
                 on_status_update_(task);
             }
-        } else if (event_type == "artifact_update") {
-            if (on_artifact_update_) {
-                AgentArtifact artifact = AgentArtifact::from_json(event_json["artifact"]);
-                on_artifact_update_(artifact);
+            return;
+        }
+
+        json root = json::parse(data_payload);
+        if (root.contains("artifactUpdate") && root["artifactUpdate"].is_object()) {
+            const json& au = root["artifactUpdate"];
+            if (au.contains("artifact") && on_artifact_update_) {
+                AgentArtifact art = a2a::artifact_from_a2a_wire(au["artifact"]);
+                on_artifact_update_(art);
+            }
+            return;
+        }
+
+        if (sse_legacy_payload_enabled() && root.contains("type")) {
+            const std::string event_type = root.value("type", "");
+            if (event_type == "task_status_update" && root.contains("task") && on_status_update_) {
+                AgentTask t = AgentTask::from_json(root["task"]);
+                on_status_update_(t);
+            } else if (event_type == "artifact_update" && root.contains("artifact") && on_artifact_update_) {
+                AgentArtifact a = AgentArtifact::from_json(root["artifact"]);
+                on_artifact_update_(a);
             }
         }
     } catch (const std::exception& e) {
-        std::cerr << "Error handling SSE event: " << e.what() << std::endl;
+        std::cerr << "SSEConnection: parse error: " << e.what() << "\n";
     }
 }
 
 void SSEConnection::event_thread_func() {
-    // TODO: 实现 SSE 事件流处理
-    // 1. 从 event_stream_ 读取 SSE 格式的事件
-    // 2. 解析每个事件（格式：data: {...}\n\n）
-    // 3. 调用 handle_event 处理事件
-    
-    while (active_) {
-        // TODO: 读取 SSE 事件流
-        // std::string line;
-        // if (读取一行) {
-        //     if (line.starts_with("data: ")) {
-        //         std::string data = line.substr(6);
-        //         handle_event(data);
-        //     }
-        // }
-        
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    if (!http_client_) {
+        return;
     }
+
+    a2a::SseParser parser;
+
+    try {
+        http_client_->get_sse(
+            endpoint_,
+            request_headers_,
+            [&](std::string_view chunk) {
+                parser.feed(chunk);
+                std::vector<a2a::SseEvent> evs;
+                parser.drain_events(evs);
+                for (const auto& ev : evs) {
+                    handle_sse_event(ev.data);
+                }
+            },
+            0,
+            &cancelled_);
+    } catch (const std::exception& e) {
+        std::cerr << "SSEConnection: get_sse: " << e.what() << "\n";
+    }
+
+    std::lock_guard<std::mutex> lock(connection_mutex_);
+    active_ = false;
 }
 
 } // namespace agent_framework
-

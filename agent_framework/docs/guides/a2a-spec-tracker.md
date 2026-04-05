@@ -40,6 +40,10 @@
 - **运行时状态迁移**（合法边、非法边拒绝）由 C++ **`try_transition`**（`include/agent/task_state_machine.hpp`）执行；Wire 层仍通过 **`agent_task_status_to_a2a_state` / `agent_task_status_from_a2a_state`**（`wire_mapping`）编解码。
 - **超时失败**：本仓库在 `Task.metadata` 使用键 **`a2a_failure_reason`**，超时取字面 **`timeout`**（与 §6.4 `TASK_STATE_FAILED` 并存；详见 [agent-server.md](./agent-server.md)）。
 
+### 2.2 WP2.4 Client literals（索引）
+
+- **JSON-RPC method 字符串与默认 path** 的 C++ 单一源：[include/agent/a2a/client_config.hpp](../../include/agent/a2a/client_config.hpp)（须与本文件 **§3** 方法名一致；详见 [agent-client.md](./agent-client.md)）。
+
 ---
 
 ## 3. JSON-RPC 方法表

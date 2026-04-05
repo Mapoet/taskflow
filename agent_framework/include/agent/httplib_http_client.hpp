@@ -8,10 +8,12 @@
 #ifndef __AGENT_HTTPLIB_HTTP_CLIENT_H__
 #define __AGENT_HTTPLIB_HTTP_CLIENT_H__
 
+#include <atomic>
 #include <functional>
 #include <map>
 #include <memory>
 #include <string>
+#include <string_view>
 
 #include <agent/agent_client.hpp>
 #include <agent/types.hpp>
@@ -36,6 +38,12 @@ public:
 
     json get(const std::string& url,
              const std::map<std::string, std::string>& headers = {}) override;
+
+    void get_sse(const std::string& url,
+                 const std::map<std::string, std::string>& headers,
+                 const std::function<void(std::string_view chunk)>& on_chunk,
+                 int timeout_sec,
+                 const std::atomic<bool>* cancel_flag) override;
 
     /**
      * @brief POST JSON；失败时抛出 llm_http_error（含 HTTP 状态与 Retry-After）

@@ -3,8 +3,10 @@
  * @brief Agent 传输层实现（HTTP + JSON-RPC 2.0，底层使用 HttplibClient）
  */
 #include <agent/agent_transport.hpp>
+#include <agent/a2a/jsonrpc_client.hpp>
 #include <agent/httplib_http_client.hpp>
 
+#include <map>
 #include <stdexcept>
 
 namespace agent_framework {
@@ -33,17 +35,15 @@ json HTTPAgentTransport::send_request(const std::string& method, const json& par
         throw std::runtime_error("HTTPAgentTransport: not connected");
     }
 
-    const std::uint64_t request_id =
-        jsonrpc_next_id_.fetch_add(1, std::memory_order_relaxed);
+    auto* hc = dynamic_cast<HttplibClient*>(http_client_.get());
+    if (!hc) {
+        throw std::runtime_error("HTTPAgentTransport: expected HttplibClient");
+    }
 
-    json request = {
-        {"jsonrpc", "2.0"},
-        {"method", method},
-        {"params", params},
-        {"id", request_id}
-    };
-
-    return send_http_post(request);
+    const std::string url = AgentClient::join_url(base_url_, current_endpoint_);
+    std::map<std::string, std::string> headers;
+    headers["Content-Type"] = "application/json";
+    return a2a::a2a_jsonrpc_post(*hc, url, method, params, headers, jsonrpc_next_id_);
 }
 
 bool HTTPAgentTransport::is_connected() const {
@@ -52,23 +52,6 @@ bool HTTPAgentTransport::is_connected() const {
 
 std::string HTTPAgentTransport::get_transport_type() const {
     return "http";
-}
-
-json HTTPAgentTransport::send_http_post(const json& payload) {
-    const std::string url = AgentClient::join_url(base_url_, current_endpoint_);
-    std::map<std::string, std::string> headers;
-    headers["Content-Type"] = "application/json";
-    json response = http_client_->post(url, payload, headers);
-
-    if (response.contains("error")) {
-        const auto& err = response["error"];
-        if (err.is_object() && err.contains("message")) {
-            throw std::runtime_error("JSON-RPC error: " + err["message"].get<std::string>());
-        }
-        throw std::runtime_error("JSON-RPC error: unknown error object");
-    }
-
-    return response;
 }
 
 } // namespace agent_framework

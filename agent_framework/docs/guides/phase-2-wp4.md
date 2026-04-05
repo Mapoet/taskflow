@@ -42,7 +42,7 @@
 | `AGENT_CLIENT_USE_LEGACY_REST` | `0` | `1`：**仅**走现有 REST 路径与 body（回归/过渡）；`0`：**A2A JSON-RPC** 路径（tracker 规定） |
 | `AGENT_CLIENT_JSON_RPC_PATH` | **空** | 非空则 **覆盖** tracker 默认的 **相对路径**（便于单测）；**生产**应留空以使用编译期常量（来自 tracker 生成或手抄） |
 
-**规则**：**同一进程**内模式 **不变**（首次 `AgentClient` 构造或首次 RPC 时 `std::call_once` 读 env）；**禁止**运行中混用（避免 `id` 与连接状态错乱）。
+**规则**：`AgentClient` 在 **构造时** 合并 `AgentClientOptions` 与环境变量（未覆盖的字段来自 `getenv`），之后实例行为固定。**生产**宜在启动时设好 env 或使用显式 `options`。**多实例**：同一进程内不同客户端可用不同 `AgentClientOptions`，无需改 env。**线程安全**：不要在其他线程仍可能执行 `AgentClient` 回调或异步任务时并发修改上述 env；需要切换模式时请用显式 `options` 构造新客户端，或串行化 env 修改与异步完成。
 
 ### 3.2 默认策略与废弃时间表（文档强制）
 
@@ -151,7 +151,7 @@
 |----|------|------|
 | **C-1** | 本地 `httplib::Server` 返回 **固定** JSON-RPC `result` | `send_task` 返回 **正确** `task_id` |
 | **C-2** | `error` 对象 | 抛出 **`A2aRpcException`** 或带 `code` 的 runtime_error |
-| **C-3** | `AGENT_CLIENT_USE_LEGACY_REST=1` | 请求路径 **仍为** `/tasks/send`（子进程测） |
+| **C-3** | `AgentClientOptions::use_legacy_rest = true` | 请求路径 **仍为** `/tasks/send` |
 | **C-4** | `get_sse` 推送两帧 WP2.1 事件 | 回调 **次数** 与解析 **正确** |
 
 ### 10.2 回归

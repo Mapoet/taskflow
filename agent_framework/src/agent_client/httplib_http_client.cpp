@@ -10,6 +10,7 @@
 #include <optional>
 #include <sstream>
 #include <stdexcept>
+#include <string_view>
 #include <utility>
 
 #if __has_include(<httplib/httplib.hpp>)
@@ -27,9 +28,52 @@ namespace agent_framework {
 namespace {
 
 struct ParsedHttpUrl {
-    std::string scheme_host_port; // e.g. http://localhost:8080
+    std::string scheme_host_port; // e.g. http://localhost:8080（调试用）
     std::string path_and_query;   // e.g. /tasks/send?x=1
+    std::string host;             // 不含 scheme，如 127.0.0.1 或 [::1]
+    int port = 80;
+    bool is_ssl = false;
 };
+
+/**
+ * @brief 从 authority 中 host[:port] 段解析 host 与端口（支持 IPv6 [addr]:port）
+ */
+void parse_host_and_port(std::string_view hp, bool is_ssl, std::string& host_out, int& port_out) {
+    port_out = is_ssl ? 443 : 80;
+    if (hp.empty()) {
+        throw std::runtime_error("HttplibClient: empty host in URL");
+    }
+    if (hp.front() == '[') {
+        const std::size_t closing = hp.find(']');
+        if (closing == std::string_view::npos) {
+            throw std::runtime_error("HttplibClient: malformed IPv6 host in URL");
+        }
+        host_out = std::string(hp.substr(1, closing - 1));
+        if (closing + 1 < hp.size()) {
+            if (hp[closing + 1] != ':') {
+                throw std::runtime_error("HttplibClient: malformed host:port after IPv6");
+            }
+            port_out = std::stoi(std::string(hp.substr(closing + 2)));
+        }
+        return;
+    }
+    const std::size_t colon = hp.rfind(':');
+    if (colon != std::string_view::npos && colon > 0) {
+        bool port_digits = true;
+        for (std::size_t i = colon + 1; i < hp.size(); ++i) {
+            if (!std::isdigit(static_cast<unsigned char>(hp[i]))) {
+                port_digits = false;
+                break;
+            }
+        }
+        if (port_digits && colon + 1 < hp.size()) {
+            host_out = std::string(hp.substr(0, colon));
+            port_out = std::stoi(std::string(hp.substr(colon + 1)));
+            return;
+        }
+    }
+    host_out = std::string(hp);
+}
 
 void trim_in_place(std::string& s) {
     while (!s.empty() && std::isspace(static_cast<unsigned char>(s.front()))) {
@@ -41,7 +85,7 @@ void trim_in_place(std::string& s) {
 }
 
 /**
- * @brief 将绝对 http(s) URL 拆成 httplib::Client 构造串与 path（含 query）
+ * @brief 将绝对 http(s) URL 拆成 host、port、path（含 query），供 Client(host,port) 使用
  */
 ParsedHttpUrl parse_absolute_url(const std::string& url_raw) {
     std::string url = url_raw;
@@ -53,10 +97,12 @@ ParsedHttpUrl parse_absolute_url(const std::string& url_raw) {
     const std::string http = "http://";
     const std::string https = "https://";
     std::size_t after_scheme = 0;
+    bool is_ssl = false;
     if (url.rfind(http, 0) == 0) {
         after_scheme = http.size();
     } else if (url.rfind(https, 0) == 0) {
         after_scheme = https.size();
+        is_ssl = true;
 #ifndef CPPHTTPLIB_OPENSSL_SUPPORT
         throw std::runtime_error(
             "HttplibClient: https requires OpenSSL (define CPPHTTPLIB_OPENSSL_SUPPORT and link OpenSSL)");
@@ -83,23 +129,35 @@ ParsedHttpUrl parse_absolute_url(const std::string& url_raw) {
     ParsedHttpUrl out;
     out.scheme_host_port = authority;
     out.path_and_query = path_query;
+    out.is_ssl = is_ssl;
+    constexpr std::string_view http_sv("http://");
+    constexpr std::string_view https_sv("https://");
+    const std::string_view auth_view(authority);
+    if (is_ssl) {
+        if (auth_view.size() < https_sv.size() || auth_view.compare(0, https_sv.size(), https_sv) != 0) {
+            throw std::runtime_error("HttplibClient: internal URL parse error");
+        }
+        parse_host_and_port(auth_view.substr(https_sv.size()), is_ssl, out.host, out.port);
+    } else {
+        if (auth_view.size() < http_sv.size() || auth_view.compare(0, http_sv.size(), http_sv) != 0) {
+            throw std::runtime_error("HttplibClient: internal URL parse error");
+        }
+        parse_host_and_port(auth_view.substr(http_sv.size()), is_ssl, out.host, out.port);
+    }
     return out;
 }
 
-void apply_default_timeouts(httplib::Client& cli) {
-    cli.set_connection_timeout(CPPHTTPLIB_CONNECTION_TIMEOUT_SECOND,
-                               CPPHTTPLIB_CONNECTION_TIMEOUT_USECOND);
-    cli.set_read_timeout(CPPHTTPLIB_READ_TIMEOUT_SECOND, CPPHTTPLIB_READ_TIMEOUT_USECOND);
-    cli.set_write_timeout(CPPHTTPLIB_WRITE_TIMEOUT_SECOND, CPPHTTPLIB_WRITE_TIMEOUT_USECOND);
-}
-
-void apply_timeouts_for_sec(httplib::Client& cli, int sec) {
+template <typename ClientLike>
+void apply_client_timeouts(ClientLike& cli, int sec) {
     if (sec > 0) {
         cli.set_connection_timeout(sec, 0);
         cli.set_read_timeout(sec, 0);
         cli.set_write_timeout(sec, 0);
     } else {
-        apply_default_timeouts(cli);
+        cli.set_connection_timeout(CPPHTTPLIB_CONNECTION_TIMEOUT_SECOND,
+                                   CPPHTTPLIB_CONNECTION_TIMEOUT_USECOND);
+        cli.set_read_timeout(CPPHTTPLIB_READ_TIMEOUT_SECOND, CPPHTTPLIB_READ_TIMEOUT_USECOND);
+        cli.set_write_timeout(CPPHTTPLIB_WRITE_TIMEOUT_SECOND, CPPHTTPLIB_WRITE_TIMEOUT_USECOND);
     }
 }
 
@@ -171,16 +229,27 @@ json HttplibClient::post_llm(const std::string& url, const json& body,
                              const std::map<std::string, std::string>& headers,
                              const std::string& provider) {
     ParsedHttpUrl parsed = parse_absolute_url(url);
-    httplib::Client cli(parsed.scheme_host_port.c_str());
-    if (!cli.is_valid()) {
-        throw llm_http_error(0, provider, "HttplibClient: invalid client for " + parsed.scheme_host_port,
-                             std::nullopt);
-    }
-    apply_timeouts_for_sec(cli, timeout_sec_);
-
     httplib::Headers h = to_httplib_headers(headers);
     const std::string payload = body.dump();
-    auto result = cli.Post(parsed.path_and_query.c_str(), h, payload, "application/json");
+
+    httplib::Result result(nullptr, httplib::Error::Unknown);
+    if (parsed.is_ssl) {
+#ifdef CPPHTTPLIB_OPENSSL_SUPPORT
+        httplib::SSLClient ssl_cli(parsed.host, parsed.port);
+        if (!ssl_cli.is_valid()) {
+            throw llm_http_error(0, provider, "HttplibClient: invalid SSL client for " + parsed.scheme_host_port,
+                                 std::nullopt);
+        }
+        apply_client_timeouts(ssl_cli, timeout_sec_);
+        result = ssl_cli.Post(parsed.path_and_query.c_str(), h, payload, "application/json");
+#else
+        throw std::runtime_error("HttplibClient: https requires OpenSSL");
+#endif
+    } else {
+        httplib::Client cli(parsed.host, parsed.port);
+        apply_client_timeouts(cli, timeout_sec_);
+        result = cli.Post(parsed.path_and_query.c_str(), h, payload, "application/json");
+    }
     if (!result) {
         std::ostringstream oss;
         oss << "POST transport error " << static_cast<int>(result.error());
@@ -206,30 +275,120 @@ json HttplibClient::post_llm(const std::string& url, const json& body,
 json HttplibClient::post(const std::string& url, const json& body,
                          const std::map<std::string, std::string>& headers) {
     ParsedHttpUrl parsed = parse_absolute_url(url);
-    httplib::Client cli(parsed.scheme_host_port.c_str());
-    if (!cli.is_valid()) {
-        throw std::runtime_error("HttplibClient: invalid client for URL: " + parsed.scheme_host_port);
-    }
-    apply_timeouts_for_sec(cli, timeout_sec_);
-
     httplib::Headers h = to_httplib_headers(headers);
     const std::string payload = body.dump();
-    auto result = cli.Post(parsed.path_and_query.c_str(), h, payload, "application/json");
+
+    httplib::Result result(nullptr, httplib::Error::Unknown);
+    if (parsed.is_ssl) {
+#ifdef CPPHTTPLIB_OPENSSL_SUPPORT
+        httplib::SSLClient ssl_cli(parsed.host, parsed.port);
+        if (!ssl_cli.is_valid()) {
+            throw std::runtime_error("HttplibClient: invalid SSL client for URL: " + parsed.scheme_host_port);
+        }
+        apply_client_timeouts(ssl_cli, timeout_sec_);
+        result = ssl_cli.Post(parsed.path_and_query.c_str(), h, payload, "application/json");
+#else
+        throw std::runtime_error("HttplibClient: https requires OpenSSL");
+#endif
+    } else {
+        httplib::Client cli(parsed.host, parsed.port);
+        apply_client_timeouts(cli, timeout_sec_);
+        result = cli.Post(parsed.path_and_query.c_str(), h, payload, "application/json");
+    }
     return execute_and_parse_json(result, "POST");
 }
 
 json HttplibClient::get(const std::string& url,
                           const std::map<std::string, std::string>& headers) {
     ParsedHttpUrl parsed = parse_absolute_url(url);
-    httplib::Client cli(parsed.scheme_host_port.c_str());
-    if (!cli.is_valid()) {
-        throw std::runtime_error("HttplibClient: invalid client for URL: " + parsed.scheme_host_port);
+    httplib::Headers h = to_httplib_headers(headers);
+
+    httplib::Result result(nullptr, httplib::Error::Unknown);
+    if (parsed.is_ssl) {
+#ifdef CPPHTTPLIB_OPENSSL_SUPPORT
+        httplib::SSLClient ssl_cli(parsed.host, parsed.port);
+        if (!ssl_cli.is_valid()) {
+            throw std::runtime_error("HttplibClient: invalid SSL client for URL: " + parsed.scheme_host_port);
+        }
+        apply_client_timeouts(ssl_cli, timeout_sec_);
+        result = ssl_cli.Get(parsed.path_and_query.c_str(), h);
+#else
+        throw std::runtime_error("HttplibClient: https requires OpenSSL");
+#endif
+    } else {
+        httplib::Client cli(parsed.host, parsed.port);
+        apply_client_timeouts(cli, timeout_sec_);
+        result = cli.Get(parsed.path_and_query.c_str(), h);
     }
-    apply_timeouts_for_sec(cli, timeout_sec_);
+    return execute_and_parse_json(result, "GET");
+}
+
+void HttplibClient::get_sse(const std::string& url,
+                            const std::map<std::string, std::string>& headers,
+                            const std::function<void(std::string_view chunk)>& on_chunk,
+                            int timeout_sec,
+                            const std::atomic<bool>* cancel_flag) {
+    ParsedHttpUrl parsed = parse_absolute_url(url);
+    const int eff = timeout_sec > 0 ? timeout_sec : timeout_sec_;
 
     httplib::Headers h = to_httplib_headers(headers);
-    auto result = cli.Get(parsed.path_and_query.c_str(), h);
-    return execute_and_parse_json(result, "GET");
+    if (!httplib::detail::has_header(h, "Accept")) {
+        h.emplace("Accept", "text/event-stream");
+    }
+
+    bool headers_ok = true;
+    int response_status = -1;
+
+    auto response_handler = [&](const httplib::Response& res) {
+        response_status = res.status;
+        headers_ok = (res.status >= 200 && res.status < 300);
+        return true;
+    };
+    auto content_receiver = [&](const char* data, std::size_t data_length) {
+        if (cancel_flag && cancel_flag->load(std::memory_order_acquire)) {
+            return false;
+        }
+        if (!headers_ok) {
+            return true;
+        }
+        on_chunk(std::string_view(data, data_length));
+        return true;
+    };
+
+    httplib::Result result(nullptr, httplib::Error::Unknown);
+    if (parsed.is_ssl) {
+#ifdef CPPHTTPLIB_OPENSSL_SUPPORT
+        httplib::SSLClient ssl_cli(parsed.host, parsed.port);
+        if (!ssl_cli.is_valid()) {
+            throw std::runtime_error("HttplibClient: invalid SSL client for URL: " + parsed.scheme_host_port);
+        }
+        apply_client_timeouts(ssl_cli, eff);
+        result = ssl_cli.Get(parsed.path_and_query.c_str(), h, response_handler, content_receiver);
+#else
+        throw std::runtime_error("HttplibClient: https requires OpenSSL");
+#endif
+    } else {
+        httplib::Client cli(parsed.host, parsed.port);
+        apply_client_timeouts(cli, eff);
+        result = cli.Get(parsed.path_and_query.c_str(), h, response_handler, content_receiver);
+    }
+
+    if (!result) {
+        const auto err = result.error();
+        if (err == httplib::Error::Read || err == httplib::Error::Canceled) {
+            return;
+        }
+        std::ostringstream oss;
+        oss << "HttplibClient: get_sse transport error " << static_cast<int>(err);
+        throw std::runtime_error(oss.str());
+    }
+
+    if (response_status >= 200 && response_status < 300) {
+        return;
+    }
+    std::ostringstream oss;
+    oss << "HttplibClient: get_sse HTTP " << response_status;
+    throw std::runtime_error(oss.str());
 }
 
 void HttplibClient::post_sse(const std::string& url, const json& body,
@@ -238,12 +397,7 @@ void HttplibClient::post_sse(const std::string& url, const json& body,
                                  on_event,
                              int timeout_sec) {
     ParsedHttpUrl parsed = parse_absolute_url(url);
-    httplib::Client cli(parsed.scheme_host_port.c_str());
-    if (!cli.is_valid()) {
-        throw std::runtime_error("HttplibClient: invalid client for URL: " + parsed.scheme_host_port);
-    }
     const int eff = timeout_sec > 0 ? timeout_sec : timeout_sec_;
-    apply_timeouts_for_sec(cli, eff);
 
     httplib::Request req;
     req.method = "POST";
@@ -318,7 +472,24 @@ void HttplibClient::post_sse(const std::string& url, const json& body,
 
     httplib::Response res;
     httplib::Error err = httplib::Error::Success;
-    const bool ok = cli.send(req, res, err);
+    bool ok = false;
+    if (parsed.is_ssl) {
+#ifdef CPPHTTPLIB_OPENSSL_SUPPORT
+        httplib::SSLClient ssl_cli(parsed.host, parsed.port);
+        if (!ssl_cli.is_valid()) {
+            throw llm_http_error(0, "httplib", "HttplibClient: invalid SSL client for " + parsed.scheme_host_port,
+                                 std::nullopt);
+        }
+        apply_client_timeouts(ssl_cli, eff);
+        ok = ssl_cli.send(req, res, err);
+#else
+        throw std::runtime_error("HttplibClient: https requires OpenSSL");
+#endif
+    } else {
+        httplib::Client cli(parsed.host, parsed.port);
+        apply_client_timeouts(cli, eff);
+        ok = cli.send(req, res, err);
+    }
     if (!ok) {
         std::ostringstream oss;
         oss << "HttplibClient: post_sse transport error " << static_cast<int>(err);

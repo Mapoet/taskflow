@@ -399,6 +399,9 @@ endif()
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/a2a/jsonrpc.cpp)
     list(APPEND AGENT_SOURCES src/a2a/jsonrpc.cpp)
 endif()
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/a2a/jsonrpc_client.cpp)
+    list(APPEND AGENT_SOURCES src/a2a/jsonrpc_client.cpp)
+endif()
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/a2a/wire_card.cpp)
     list(APPEND AGENT_SOURCES src/a2a/wire_card.cpp)
 endif()
@@ -436,6 +439,8 @@ set(AGENT_HEADERS
     include/agent/httplib_http_client.hpp
     include/agent/agent_server.hpp
     include/agent/a2a/jsonrpc.hpp
+    include/agent/a2a/client_config.hpp
+    include/agent/a2a/jsonrpc_client.hpp
     include/agent/a2a/wire_card.hpp
     include/agent/a2a/sse_framing.hpp
     include/agent/a2a/wire_mapping.hpp
@@ -819,6 +824,16 @@ if(BUILD_TESTING)
         endif()
         add_test(NAME agent_server_wp23 COMMAND test_agent_server_wp23)
         set_tests_properties(agent_server_wp23 PROPERTIES ENVIRONMENT "AGENT_TOOL_ALLOWLIST=")
+    endif()
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_agent_client_a2a.cpp)
+        add_executable(test_agent_client_a2a tests/test_agent_client_a2a.cpp)
+        target_link_libraries(test_agent_client_a2a PRIVATE agent_framework)
+        if(CMAKE_USE_PTHREADS_INIT)
+            target_link_libraries(test_agent_client_a2a PRIVATE Threads::Threads)
+        endif()
+        add_test(NAME agent_client_a2a COMMAND test_agent_client_a2a)
+        set_tests_properties(agent_client_a2a PROPERTIES ENVIRONMENT
+            "AGENT_TOOL_ALLOWLIST=;AGENT_CLIENT_USE_LEGACY_REST=0")
     endif()
     if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_agent_loop_wp5.cpp)
         add_executable(test_agent_loop_wp5 tests/test_agent_loop_wp5.cpp)

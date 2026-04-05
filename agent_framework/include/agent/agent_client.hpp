@@ -8,6 +8,7 @@
 #ifndef __AGENT_CLIENT_H__
 #define __AGENT_CLIENT_H__
 
+#include <atomic>
 #include <string>
 #include <future>
 #include <map>
@@ -15,13 +16,26 @@
 #include <memory>
 #include <functional>
 #include <optional>
+#include <string_view>
 #include <agent/types.hpp>
 #include <agent/sse_connection.hpp>
 #include <nlohmann/json.hpp>
 
 namespace agent_framework {
-    
+
 using json = nlohmann::json;
+
+/**
+ * @brief Per-instance wire configuration for AgentClient.
+ *
+ * Unset fields are filled from the process environment once at construction
+ * (`AGENT_CLIENT_USE_LEGACY_REST`, `AGENT_CLIENT_JSON_RPC_PATH`). Explicit
+ * values override env for that instance only.
+ */
+struct AgentClientOptions {
+    std::optional<bool> use_legacy_rest;
+    std::optional<std::string> json_rpc_path;
+};
 
 /**
  * @brief HTTP 抽象（JSON GET/POST），具体实现见 HttplibClient
@@ -33,19 +47,35 @@ public:
                       const std::map<std::string, std::string>& headers = {}) = 0;
     virtual json get(const std::string& url,
                      const std::map<std::string, std::string>& headers = {}) = 0;
+
+    /**
+     * @brief GET incremental body (SSE / chunked). Stops early if cancel_flag becomes true.
+     */
+    virtual void get_sse(const std::string& url,
+                         const std::map<std::string, std::string>& headers,
+                         const std::function<void(std::string_view chunk)>& on_chunk,
+                         int timeout_sec,
+                         const std::atomic<bool>* cancel_flag) = 0;
 };
 
 /**
  * @brief Agent 客户端（A2A 协议）
  * 用于作为客户端与其他 Agent 系统通信
+ *
+ * @note Wire 模式与 JSON-RPC path 在构造时确定（见 AgentClientOptions 与环境变量）。
+ *       默认 JSON-RPC 下 `agent_endpoint` 不参与 RPC URL；Legacy 下用于拼接 `/tasks/…`。
+ * @note 返回 `std::future` 的 API 在 **当前调用线程** 内同步完成 HTTP（`std::packaged_task`），
+ *       再返回已就绪的 future；避免 libstdc++ 对 `deferred` 使用线程池导致与 httplib/OpenSSL 冲突。
  */
 class AgentClient {
 public:
     /**
      * @brief 构造函数
      * @param server_url 服务器基础 URL（如 "https://agent.example.com"）
+     * @param options 可选；未指定字段在构造时从环境变量读取一次后固化到本实例
      */
-    explicit AgentClient(const std::string& server_url);
+    explicit AgentClient(const std::string& server_url,
+                         const AgentClientOptions& options = AgentClientOptions{});
     
     /**
      * @brief 析构函数
@@ -170,11 +200,15 @@ public:
     
 private:
     std::string server_url_;                                            // 服务器基础 URL
+    const bool use_legacy_rest_;                                        // Legacy REST vs JSON-RPC（构造时固化）
+    const std::string json_rpc_path_;                                   // JSON-RPC POST path（构造时固化）
     json auth_config_;                                                  // 认证配置
     mutable std::mutex auth_mutex_;                                    // 认证互斥锁
     
     // HTTP 客户端（HttplibClient：REST 与 AgentServer 对齐）
     std::unique_ptr<HTTPClient> http_client_;
+
+    std::atomic<std::uint64_t> jsonrpc_next_id_{1};
     
     // SSE 连接管理（key: "agent_endpoint:task_id"）
     std::map<std::string, std::unique_ptr<SSEConnection>> sse_connections_;

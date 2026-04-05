@@ -411,6 +411,7 @@ flowchart TB
 | [phase-2-wp2.md](./phase-2-wp2.md) | WP2.2 |
 | [phase-2-wp3.md](./phase-2-wp3.md) | WP2.3 |
 | [phase-2-wp4.md](./phase-2-wp4.md) | WP2.4 |
+| [agent-client.md](./agent-client.md) | WP2.4 用户文档（JSON-RPC / Legacy / env） |
 | [phase-2-wp5.md](./phase-2-wp5.md) | WP2.5 |
 | `phase-2-wp6.md` | WP2.6 |
 | [phase-2-wp7.md](./phase-2-wp7.md) | WP2.7 |
