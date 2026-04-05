@@ -116,11 +116,17 @@ void test_c1_jsonrpc_send() {
     p.text = std::string("hi");
     msg.parts.push_back(std::move(p));
 
-    AgentTask t = cli.send_task("", msg, std::nullopt, json::object()).get();
-    if (t.task_id != "task-c1") {
+    try {
+        AgentTask t = cli.send_task("", msg, std::nullopt, json::object()).get();
+        if (t.task_id != "task-c1") {
+            srv.stop();
+            th.join();
+            fail("C-1 task_id");
+        }
+    } catch (...) {
         srv.stop();
         th.join();
-        fail("C-1 task_id");
+        throw;
     }
     srv.stop();
     th.join();
@@ -271,7 +277,13 @@ void test_c3_legacy_rest() {
     p.text = std::string("x");
     msg.parts.push_back(std::move(p));
 
-    (void)cli.send_task("/prefix", msg, std::nullopt, json::object()).get();
+    try {
+        (void)cli.send_task("/prefix", msg, std::nullopt, json::object()).get();
+    } catch (...) {
+        srv.stop();
+        th.join();
+        throw;
+    }
     if (last_path.find("/tasks/send") == std::string::npos) {
         srv.stop();
         th.join();
@@ -284,6 +296,7 @@ void test_c3_legacy_rest() {
 /** C-4: get_sse + StreamResponse ×2 */
 void test_c4_get_sse() {
     const int port = pick_listen_port();
+    std::cerr << "C-4: starting test on port " << port << std::endl;
     httplib::Server srv;
 
     // Add health check endpoint for server readiness
@@ -343,29 +356,34 @@ void test_c4_get_sse() {
     std::atomic<bool> cancel{false};
     agent_framework::a2a::SseParser parser;
 
-    http.get_sse(
-        "http://127.0.0.1:" + std::to_string(port) + "/sse",
-        {},
-        [&](std::string_view chunk) {
-            parser.feed(chunk);
-            std::vector<agent_framework::a2a::SseEvent> evs;
-            parser.drain_events(evs);
-            for (const auto& ev : evs) {
-                AgentTask tmp;
-                if (agent_framework::a2a::try_parse_task_status_sse(ev, tmp)) {
-                    ++status_count;
+    try {
+        http.get_sse(
+            "http://127.0.0.1:" + std::to_string(port) + "/sse",
+            {},
+            [&](std::string_view chunk) {
+                parser.feed(chunk);
+                std::vector<agent_framework::a2a::SseEvent> evs;
+                parser.drain_events(evs);
+                for (const auto& ev : evs) {
+                    AgentTask tmp;
+                    if (agent_framework::a2a::try_parse_task_status_sse(ev, tmp)) {
+                        ++status_count;
+                    }
                 }
-            }
-        },
-        5,
-        &cancel);
+            },
+            5,
+            &cancel);
 
-    if (status_count.load() < 2) {
+        if (status_count.load() < 2) {
+            srv.stop();
+            th.join();
+            fail("C-4 status frames");
+        }
+    } catch (...) {
         srv.stop();
         th.join();
-        fail("C-4 status frames");
+        throw;
     }
-
     srv.stop();
     th.join();
 }
