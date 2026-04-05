@@ -18,6 +18,7 @@
 #include <thread>
 #include <atomic>
 #include <agent/types.hpp>
+#include <agent/task_state_machine.hpp>
 #include <nlohmann/json.hpp>
 
 namespace workflow {
@@ -89,7 +90,8 @@ public:
     void set_task_handler(
         std::function<std::future<AgentTask>(
             const AgentTask& task,
-            std::shared_ptr<workflow::GraphBuilder> builder
+            std::shared_ptr<workflow::GraphBuilder> builder,
+            std::shared_ptr<TaskControl> task_control
         )> handler
     );
 
@@ -112,12 +114,16 @@ private:
     void* http_server_{nullptr};
     AgentCard agent_card_;
     std::map<std::string, AgentTask> active_tasks_;
+    std::map<std::string, std::shared_ptr<TaskControl>> task_controls_;
     std::map<std::string, std::vector<std::shared_ptr<internal::SseServerChannel>>> sse_subscribers_;
     std::map<std::string, std::string> webhook_urls_;
     mutable std::mutex tasks_mutex_;
     mutable std::mutex sse_mutex_;
 
-    std::function<std::future<AgentTask>(const AgentTask&, std::shared_ptr<workflow::GraphBuilder>)>
+    std::function<std::future<AgentTask>(
+        const AgentTask&,
+        std::shared_ptr<workflow::GraphBuilder>,
+        std::shared_ptr<TaskControl>)>
         task_handler_;
     std::function<bool(const std::map<std::string, std::string>&)> auth_validator_;
 
@@ -133,7 +139,8 @@ private:
     void dispatch_worker_loop();
     void run_agent_task_on_executor(const std::string& task_id,
                                     AgentTask task_snapshot,
-                                    std::shared_ptr<workflow::GraphBuilder> builder);
+                                    std::shared_ptr<workflow::GraphBuilder> builder,
+                                    std::shared_ptr<TaskControl> control);
 
     void setup_routes();
     void register_jsonrpc_methods();

@@ -258,7 +258,7 @@ flowchart TB
 | 2.3.1 | **映射表** | submitted/working/… 以官方为准 |
 | 2.3.2 | **取消** | 合作式取消与资源清理 |
 
-**产出**：`task_state_machine.*`、`task_control.hpp`、wire 状态转换、`a2a-spec-tracker.md` §Task state；与 `agent_server` / `agent_loop_node` 修改协同。
+**产出**：`task_state_machine.*`（含 `TaskControl`）、wire 状态转换、`a2a-spec-tracker.md` §Task state；与 `agent_server` / `agent_loop_node` 修改协同。
 
 ---
 

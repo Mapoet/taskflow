@@ -23,6 +23,7 @@
 namespace agent_framework {
 
 class LLMClient;
+class TaskControl;
 class ToolBus;
 
 namespace internal {
@@ -46,6 +47,7 @@ struct AgentWorkflowDeps {
  */
 struct CliAgentGraphOptions {
     std::function<void(std::string_view)> stream_callback{};
+    std::shared_ptr<TaskControl> task_control{};
 };
 
 /**

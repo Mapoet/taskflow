@@ -1886,7 +1886,8 @@ public:
     void set_task_handler(
         std::function<std::future<AgentTask>(
             const AgentTask& task,
-            std::shared_ptr<wf::GraphBuilder> builder
+            std::shared_ptr<wf::GraphBuilder> builder,
+            std::shared_ptr<TaskControl> task_control
         )> handler
     );
     

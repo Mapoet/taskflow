@@ -34,6 +34,12 @@
 | Content-Type | 请求/响应 JSON 正文由 WP2.2 设为 `application/json` |
 | HTTP+JSON / gRPC | 规范另有 **`/message:send`、`GET /tasks/{id}`** 等绑定（见 `a2a.proto` `google.api.http`）。本仓库 **主目标**为 JSON-RPC 绑定；REST 路径为 **legacy**（见 §7）。 |
 
+### 2.1 Task state（WP2.3 索引）
+
+- **Wire 字符串 ↔ `AgentTaskStatus`** 的**唯一权威对照表**见 **§6.4**（`TASK_STATE_*` ↔ `PENDING` / `WORKING` / …）。
+- **运行时状态迁移**（合法边、非法边拒绝）由 C++ **`try_transition`**（`include/agent/task_state_machine.hpp`）执行；Wire 层仍通过 **`agent_task_status_to_a2a_state` / `agent_task_status_from_a2a_state`**（`wire_mapping`）编解码。
+- **超时失败**：本仓库在 `Task.metadata` 使用键 **`a2a_failure_reason`**，超时取字面 **`timeout`**（与 §6.4 `TASK_STATE_FAILED` 并存；详见 [agent-server.md](./agent-server.md)）。
+
 ---
 
 ## 3. JSON-RPC 方法表

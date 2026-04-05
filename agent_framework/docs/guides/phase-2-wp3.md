@@ -156,8 +156,7 @@ std::optional<AgentTaskStatus> agent_task_status_from_a2a_wire(std::string_view)
 
 | 路径 | 职责 |
 |------|------|
-| `include/agent/task_control.hpp` | `TaskControl`、工厂函数 |
-| `include/agent/task_state_machine.hpp` + `src/agent/task_state_machine.cpp` | `try_transition`、非法迁移 |
+| `include/agent/task_state_machine.hpp` + `src/agent/task_state_machine.cpp` | `TaskControl`、`try_transition`、非法迁移 |
 | `src/a2a/task_state_wire.cpp`（或与现有 wire 合并） | §3.2 转换函数 |
 | [`agent_server.cpp`](../../src/agent_server/agent_server.cpp) | `task_controls_`、cancel/timeout 接线、队列与 worker 协作 |
 | [`agent_loop_node.cpp`](../../src/node/agent_loop_node.cpp)（或共享态注入） | cancel/timeout **检查点** |

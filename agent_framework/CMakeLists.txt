@@ -411,6 +411,9 @@ endif()
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/a2a/dispatch_table.cpp)
     list(APPEND AGENT_SOURCES src/a2a/dispatch_table.cpp)
 endif()
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/agent/task_state_machine.cpp)
+    list(APPEND AGENT_SOURCES src/agent/task_state_machine.cpp)
+endif()
 
 # 头文件
 set(AGENT_HEADERS
@@ -437,6 +440,7 @@ set(AGENT_HEADERS
     include/agent/a2a/sse_framing.hpp
     include/agent/a2a/wire_mapping.hpp
     include/agent/a2a/dispatch_table.hpp
+    include/agent/task_state_machine.hpp
     include/node/node_factory.hpp
     include/node/llm_node.hpp
     include/node/knowledge_base_node.hpp
@@ -780,6 +784,15 @@ if(BUILD_TESTING)
         add_test(NAME a2a_wire_mapping COMMAND test_a2a_wire_mapping)
         set_tests_properties(a2a_wire_mapping PROPERTIES ENVIRONMENT "AGENT_TOOL_ALLOWLIST=")
     endif()
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_task_state_machine.cpp)
+        add_executable(test_task_state_machine tests/test_task_state_machine.cpp)
+        target_link_libraries(test_task_state_machine PRIVATE agent_framework)
+        if(CMAKE_USE_PTHREADS_INIT)
+            target_link_libraries(test_task_state_machine PRIVATE Threads::Threads)
+        endif()
+        add_test(NAME task_state_machine_wp23 COMMAND test_task_state_machine)
+        set_tests_properties(task_state_machine_wp23 PROPERTIES ENVIRONMENT "AGENT_TOOL_ALLOWLIST=")
+    endif()
     if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_a2a_dispatch_table.cpp)
         add_executable(test_a2a_dispatch_table tests/test_a2a_dispatch_table.cpp)
         target_link_libraries(test_a2a_dispatch_table PRIVATE agent_framework)
@@ -797,6 +810,15 @@ if(BUILD_TESTING)
         endif()
         add_test(NAME agent_server_wp22 COMMAND test_agent_server_wp22)
         set_tests_properties(agent_server_wp22 PROPERTIES ENVIRONMENT "AGENT_TOOL_ALLOWLIST=")
+    endif()
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_agent_server_wp23.cpp)
+        add_executable(test_agent_server_wp23 tests/test_agent_server_wp23.cpp)
+        target_link_libraries(test_agent_server_wp23 PRIVATE agent_framework)
+        if(CMAKE_USE_PTHREADS_INIT)
+            target_link_libraries(test_agent_server_wp23 PRIVATE Threads::Threads)
+        endif()
+        add_test(NAME agent_server_wp23 COMMAND test_agent_server_wp23)
+        set_tests_properties(agent_server_wp23 PROPERTIES ENVIRONMENT "AGENT_TOOL_ALLOWLIST=")
     endif()
     if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_agent_loop_wp5.cpp)
         add_executable(test_agent_loop_wp5 tests/test_agent_loop_wp5.cpp)

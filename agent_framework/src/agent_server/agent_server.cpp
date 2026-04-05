@@ -14,6 +14,7 @@
 #include <agent/context_budget.hpp>
 #include <agent/internal/sse_server_channel.hpp>
 #include <agent/internal/task_dispatch_queue.hpp>
+#include <agent/task_state_machine.hpp>
 #include <agent/types.hpp>
 #include <workflow/nodeflow.hpp>
 
@@ -126,6 +127,59 @@ std::string sse_ping_interval_sec() {
     return std::string(v);
 }
 
+bool task_status_is_terminal(AgentTaskStatus s) {
+    return s == AgentTaskStatus::COMPLETED || s == AgentTaskStatus::FAILED ||
+           s == AgentTaskStatus::CANCELLED;
+}
+
+long env_long(const char* var, long default_val) {
+    const char* v = std::getenv(var);
+    if (!v || !v[0]) {
+        return default_val;
+    }
+    char* end = nullptr;
+    long x = std::strtol(v, &end, 10);
+    if (end == v) {
+        return default_val;
+    }
+    return x;
+}
+
+int compute_effective_task_timeout_sec(const json& metadata) {
+    long max_s = env_long("AGENT_TASK_MAX_TIMEOUT_SEC", 86400);
+    if (max_s < 1) {
+        max_s = 1;
+    }
+    if (max_s > 86400 * 366) {
+        max_s = 86400 * 366;
+    }
+    long def_sec = env_long("AGENT_TASK_DEFAULT_TIMEOUT_SEC", 0);
+    if (def_sec < 0) {
+        def_sec = 0;
+    }
+    if (def_sec > max_s) {
+        std::clog << "[AgentServer] AGENT_TASK_DEFAULT_TIMEOUT_SEC clamped to max\n";
+        def_sec = max_s;
+    }
+
+    int from_meta = -1;
+    if (metadata.contains("timeout_sec") && metadata["timeout_sec"].is_number_integer()) {
+        from_meta = static_cast<int>(metadata["timeout_sec"].get<int>());
+    } else if (metadata.contains("timeout_sec") && metadata["timeout_sec"].is_number_unsigned()) {
+        from_meta = static_cast<int>(metadata["timeout_sec"].get<std::uint64_t>());
+    }
+
+    int base = (from_meta >= 0) ? from_meta : static_cast<int>(def_sec);
+    if (base < 0) {
+        base = 0;
+    }
+    if (base > max_s) {
+        std::clog << "[AgentServer] metadata timeout_sec clamped to AGENT_TASK_MAX_TIMEOUT_SEC\n";
+        base = static_cast<int>(max_s);
+    }
+    return base;
+}
+
 } // namespace
 
 AgentServer::AgentServer(int port) : port_(port) {}
@@ -198,36 +252,113 @@ void AgentServer::dispatch_worker_loop() {
 
 void AgentServer::run_agent_task_on_executor(const std::string& task_id,
                                              AgentTask task_snapshot,
-                                             std::shared_ptr<workflow::GraphBuilder> builder) {
+                                             std::shared_ptr<workflow::GraphBuilder> builder,
+                                             std::shared_ptr<TaskControl> control) {
     (void)process_executor_;
+    (void)task_snapshot;
     // WP2.0: replace with GraphExecutor::execute using process_executor_
+    if (!task_handler_ || !control) {
+        return;
+    }
     try {
-        if (!task_handler_) {
-            return;
-        }
+        AgentTask snap;
         {
             std::lock_guard<std::mutex> lk(tasks_mutex_);
             auto it = active_tasks_.find(task_id);
-            if (it != active_tasks_.end()) {
-                it->second.status = AgentTaskStatus::WORKING;
-                it->second.updated_at = std::chrono::system_clock::now();
+            if (it == active_tasks_.end()) {
+                task_controls_.erase(task_id);
+                return;
             }
+            if (task_status_is_terminal(it->second.status)) {
+                task_controls_.erase(task_id);
+                return;
+            }
+            if (it->second.status == AgentTaskStatus::PENDING) {
+                if (control->is_cancel_requested()) {
+                    std::string terr;
+                    try_transition(it->second, AgentTaskStatus::CANCELLED, &terr);
+                    push_task_status_update(task_id, it->second);
+                    task_controls_.erase(task_id);
+                    return;
+                }
+                std::string terr;
+                if (!try_transition(it->second, AgentTaskStatus::WORKING, &terr)) {
+                    return;
+                }
+                control->arm_working_deadline(control->effective_timeout_sec());
+            }
+            snap = it->second;
         }
-        std::future<AgentTask> fut = task_handler_(task_snapshot, builder);
-        fut.wait();
+
+        std::future<AgentTask> fut = task_handler_(snap, builder, control);
+        for (;;) {
+            if (fut.wait_for(std::chrono::milliseconds(50)) == std::future_status::ready) {
+                break;
+            }
+            control->check_deadline_now();
+        }
         AgentTask done = fut.get();
+        control->check_deadline_now();
 
         std::lock_guard<std::mutex> lk(tasks_mutex_);
-        active_tasks_[task_id] = done;
-        push_task_status_update(task_id, done);
+        auto it = active_tasks_.find(task_id);
+        if (it == active_tasks_.end()) {
+            task_controls_.erase(task_id);
+            return;
+        }
+
+        if (task_status_is_terminal(it->second.status)) {
+            task_controls_.erase(task_id);
+            return;
+        }
+
+        if (it->second.status != AgentTaskStatus::WORKING) {
+            return;
+        }
+
+        if (control->is_cancel_requested()) {
+            std::string terr;
+            try_transition(it->second, AgentTaskStatus::CANCELLED, &terr);
+            push_task_status_update(task_id, it->second);
+            task_controls_.erase(task_id);
+            return;
+        }
+        if (control->is_deadline_exceeded()) {
+            std::string terr;
+            try_transition(it->second, AgentTaskStatus::FAILED, &terr);
+            it->second.metadata["a2a_failure_reason"] = "timeout";
+            push_task_status_update(task_id, it->second);
+            task_controls_.erase(task_id);
+            return;
+        }
+
+        it->second.messages = std::move(done.messages);
+        it->second.artifacts = std::move(done.artifacts);
+        it->second.metadata = std::move(done.metadata);
+        it->second.session_id = std::move(done.session_id);
+
+        AgentTaskStatus target = done.status;
+        if (target == AgentTaskStatus::WORKING) {
+            target = AgentTaskStatus::COMPLETED;
+        }
+        std::string terr;
+        if (!try_transition(it->second, target, &terr)) {
+            try_transition(it->second, AgentTaskStatus::FAILED, nullptr);
+        }
+        push_task_status_update(task_id, it->second);
+        if (task_status_is_terminal(it->second.status)) {
+            task_controls_.erase(task_id);
+        }
     } catch (...) {
         std::lock_guard<std::mutex> lk(tasks_mutex_);
         auto it = active_tasks_.find(task_id);
-        if (it != active_tasks_.end()) {
-            it->second.status = AgentTaskStatus::FAILED;
+        if (it != active_tasks_.end() && it->second.status == AgentTaskStatus::WORKING) {
+            std::string terr;
+            try_transition(it->second, AgentTaskStatus::FAILED, &terr);
             it->second.updated_at = std::chrono::system_clock::now();
             push_task_status_update(task_id, it->second);
         }
+        task_controls_.erase(task_id);
     }
 }
 
@@ -311,6 +442,10 @@ void AgentServer::stop() {
     dispatch_workers_.clear();
     workers_started_ = false;
     task_queue_.reset();
+    {
+        std::lock_guard<std::mutex> lk(tasks_mutex_);
+        task_controls_.clear();
+    }
     routes_ready_ = false;
 }
 
@@ -319,7 +454,10 @@ void AgentServer::register_agent_card(const AgentCard& card) {
 }
 
 void AgentServer::set_task_handler(
-    std::function<std::future<AgentTask>(const AgentTask&, std::shared_ptr<workflow::GraphBuilder>)> handler
+    std::function<std::future<AgentTask>(
+        const AgentTask&,
+        std::shared_ptr<workflow::GraphBuilder>,
+        std::shared_ptr<TaskControl>)> handler
 ) {
     task_handler_ = std::move(handler);
 }
@@ -533,9 +671,13 @@ json AgentServer::jsonrpc_send_message(const json& params) {
 
     AgentTask task = create_task_from_message_wire(msg, session_id, metadata);
 
+    auto control = std::make_shared<TaskControl>();
+    control->set_effective_timeout_sec(compute_effective_task_timeout_sec(metadata));
+
     {
         std::lock_guard<std::mutex> lk(tasks_mutex_);
         active_tasks_[task.task_id] = task;
+        task_controls_[task.task_id] = control;
     }
 
     auto builder = std::make_shared<workflow::GraphBuilder>("AgentTask_" + task.task_id);
@@ -543,11 +685,12 @@ json AgentServer::jsonrpc_send_message(const json& params) {
     if (task_handler_ && task_queue_) {
         const std::string tid = task.task_id;
         AgentTask snap = task;
-        if (!task_queue_->try_push([this, tid, snap, builder]() {
-                run_agent_task_on_executor(tid, snap, builder);
+        if (!task_queue_->try_push([this, tid, snap, builder, control]() {
+                run_agent_task_on_executor(tid, snap, builder, control);
             })) {
             std::lock_guard<std::mutex> lk(tasks_mutex_);
             active_tasks_.erase(tid);
+            task_controls_.erase(tid);
             throw a2a::JsonRpcInvokeError(
                 -32001, "queue_full",
                 json{{"max_queued", static_cast<int>(task_queue_->max_queued())}});
@@ -581,8 +724,32 @@ json AgentServer::jsonrpc_cancel_task(const json& params) {
     if (it == active_tasks_.end()) {
         throw a2a::JsonRpcInvokeError(a2a::JsonRpcErrorCode::invalid_params, "Invalid params: unknown task id");
     }
-    it->second.status = AgentTaskStatus::CANCELLED;
-    it->second.updated_at = std::chrono::system_clock::now();
+    if (task_status_is_terminal(it->second.status)) {
+        return a2a::task_to_a2a_wire(it->second);
+    }
+    std::shared_ptr<TaskControl> ctrl;
+    auto tc = task_controls_.find(id);
+    if (tc != task_controls_.end()) {
+        ctrl = tc->second;
+    } else {
+        ctrl = std::make_shared<TaskControl>();
+        task_controls_[id] = ctrl;
+    }
+    ctrl->request_cancel();
+
+    if (it->second.status == AgentTaskStatus::PENDING) {
+        std::string terr;
+        if (try_transition(it->second, AgentTaskStatus::CANCELLED, &terr)) {
+            push_task_status_update(id, it->second);
+            task_controls_.erase(id);
+        }
+    } else if (it->second.status == AgentTaskStatus::INPUT_REQUIRED) {
+        std::string terr;
+        if (try_transition(it->second, AgentTaskStatus::CANCELLED, &terr)) {
+            push_task_status_update(id, it->second);
+            task_controls_.erase(id);
+        }
+    }
     return a2a::task_to_a2a_wire(it->second);
 }
 
@@ -616,20 +783,25 @@ void AgentServer::handle_tasks_send(const httplib::Request& req, httplib::Respon
         task.created_at = std::chrono::system_clock::now();
         task.updated_at = task.created_at;
 
+        auto control = std::make_shared<TaskControl>();
+        control->set_effective_timeout_sec(compute_effective_task_timeout_sec(metadata));
+
         {
             std::lock_guard<std::mutex> lock(tasks_mutex_);
             active_tasks_[task.task_id] = task;
+            task_controls_[task.task_id] = control;
         }
 
         auto builder = std::make_shared<workflow::GraphBuilder>("AgentTask_" + task.task_id);
         if (task_handler_ && task_queue_) {
             const std::string tid = task.task_id;
             AgentTask snap = task;
-            if (!task_queue_->try_push([this, tid, snap, builder]() {
-                    run_agent_task_on_executor(tid, snap, builder);
+            if (!task_queue_->try_push([this, tid, snap, builder, control]() {
+                    run_agent_task_on_executor(tid, snap, builder, control);
                 })) {
                 std::lock_guard<std::mutex> lk(tasks_mutex_);
                 active_tasks_.erase(tid);
+                task_controls_.erase(tid);
                 res.status = 503;
                 res.set_content(json{{"error", "queue_full"}}.dump(), "application/json");
                 return;
@@ -678,15 +850,33 @@ void AgentServer::handle_tasks_cancel(const httplib::Request& req, httplib::Resp
         std::lock_guard<std::mutex> lock(tasks_mutex_);
         auto it = active_tasks_.find(task_id);
 
-        if (it != active_tasks_.end()) {
-            it->second.status = AgentTaskStatus::CANCELLED;
-            it->second.updated_at = std::chrono::system_clock::now();
-
-            res.set_content(json{{"success", true}}.dump(), "application/json");
-        } else {
+        if (it == active_tasks_.end()) {
             res.status = 404;
             res.set_content(json{{"error", "Task not found"}}.dump(), "application/json");
+            return;
         }
+        if (task_status_is_terminal(it->second.status)) {
+            res.set_content(json{{"success", true}}.dump(), "application/json");
+            return;
+        }
+        std::shared_ptr<TaskControl> ctrl;
+        auto tc = task_controls_.find(task_id);
+        if (tc != task_controls_.end()) {
+            ctrl = tc->second;
+        } else {
+            ctrl = std::make_shared<TaskControl>();
+            task_controls_[task_id] = ctrl;
+        }
+        ctrl->request_cancel();
+        if (it->second.status == AgentTaskStatus::PENDING ||
+            it->second.status == AgentTaskStatus::INPUT_REQUIRED) {
+            std::string terr;
+            if (try_transition(it->second, AgentTaskStatus::CANCELLED, &terr)) {
+                push_task_status_update(task_id, it->second);
+                task_controls_.erase(task_id);
+            }
+        }
+        res.set_content(json{{"success", true}}.dump(), "application/json");
     } catch (const std::exception& e) {
         res.status = 400;
         res.set_content(json{{"error", e.what()}}.dump(), "application/json");
@@ -714,6 +904,10 @@ void AgentServer::handle_tasks_update(const httplib::Request& req, httplib::Resp
         }
 
         it->second.messages.push_back(additional);
+        if (it->second.status == AgentTaskStatus::INPUT_REQUIRED) {
+            std::string terr;
+            try_transition(it->second, AgentTaskStatus::WORKING, &terr);
+        }
         it->second.updated_at = std::chrono::system_clock::now();
         res.set_content(json{{"task", it->second.to_json()}}.dump(), "application/json");
     } catch (const std::exception& e) {

@@ -21,6 +21,8 @@
 
 namespace agent_framework {
 
+class TaskControl;
+
 struct SkillServices;
 
 namespace node {
@@ -49,6 +51,7 @@ public:
      *   - "tool_calls": 工具调用列表
      * @param stream_callback 可选；传给 `LLMClient::invoke` 的流式 token 回调（WP1.6）
      * @param skills 可选 WP1.8；`nullptr` 关闭技能路由与 `skill_block` 注入
+     * @param task_control 可选 WP2.3；协作式取消与 deadline 检查（AgentServer 注入）
      * @return (节点指针, 任务句柄)
      */
     static std::pair<std::shared_ptr<workflow::LoopNode>, tf::Task>
@@ -63,7 +66,8 @@ public:
         const std::vector<std::pair<std::string, std::string>>& input_specs,
         const std::vector<std::string>& output_keys,
         std::function<void(std::string_view)> stream_callback = nullptr,
-        std::shared_ptr<SkillServices> skills = nullptr
+        std::shared_ptr<SkillServices> skills = nullptr,
+        std::shared_ptr<TaskControl> task_control = nullptr
     );
 
 private:

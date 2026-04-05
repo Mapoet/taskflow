@@ -3,6 +3,7 @@
  * @brief AgentServer WP2.2：健康检查、JSON-RPC、异步 handler、SSE（S-1–S-4，E-1–E-2）
  */
 #include <agent/agent_server.hpp>
+#include <agent/task_state_machine.hpp>
 #include <agent/a2a/sse_framing.hpp>
 #include <agent/a2a/wire_mapping.hpp>
 #include <agent/types.hpp>
@@ -245,7 +246,9 @@ int main() {
         card.api_endpoint = "http://127.0.0.1:9/rpc";
         server.register_agent_card(card);
 
-        server.set_task_handler([](AgentTask t, std::shared_ptr<workflow::GraphBuilder>) {
+        server.set_task_handler([](AgentTask t,
+                                   std::shared_ptr<workflow::GraphBuilder>,
+                                   std::shared_ptr<agent_framework::TaskControl>) {
             return std::async(std::launch::async, [t]() mutable {
                 for (const auto& m : t.messages) {
                     for (const auto& p : m.parts) {

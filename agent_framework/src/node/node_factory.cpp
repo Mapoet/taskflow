@@ -152,6 +152,7 @@ NodeFactory::create_memory_sink(
     const std::string& session_id,
     const std::vector<std::pair<std::string, std::string>>& input_specs
 ) {
+    (void)input_specs;
     // TODO: 实现记忆存储 Sink 节点
     throw std::runtime_error("create_memory_sink not yet implemented");
 }
@@ -178,6 +179,7 @@ NodeFactory::create_agent_loop_node(
         vector_store,
         input_specs,
         output_keys,
+        nullptr,
         nullptr,
         nullptr
     );

@@ -11,6 +11,7 @@
 #include "agent/internal/loop_io_keys.hpp"
 #include "agent/skill_services.hpp"
 #include "agent/context_budget.hpp"
+#include "agent/task_state_machine.hpp"
 #include "agent/toolbus.hpp"
 #include <any>
 #include <functional>
@@ -128,7 +129,8 @@ AgentLoopNode::create(
     const std::vector<std::pair<std::string, std::string>>& input_specs,
     const std::vector<std::string>& output_keys,
     std::function<void(std::string_view)> stream_callback,
-    std::shared_ptr<SkillServices> skills
+    std::shared_ptr<SkillServices> skills,
+    std::shared_ptr<TaskControl> task_control
 ) {
     // NOTE: workflow::create_loop_decl currently does NOT pass body outputs into condition_func.
     // Therefore WP1.5 loop uses closure state:
@@ -144,11 +146,24 @@ AgentLoopNode::create(
     };
     auto shared = std::make_shared<Shared>();
 
-    auto body_func = [agent_config, llm_client, toolbus, shared, stream_callback, skills](
+    auto body_func = [agent_config, llm_client, toolbus, shared, stream_callback, skills, task_control](
                          const std::unordered_map<std::string, std::any>& inps)
         -> std::unordered_map<std::string, std::any> {
         const char* dbg_env = std::getenv("AGENT_TEST_AGENT_LOOP_DEBUG");
         const bool dbg = dbg_env && std::string(dbg_env) != "0";
+
+        if (task_control) {
+            task_control->check_deadline_now();
+            if (task_control->is_deadline_exceeded() || task_control->is_cancel_requested()) {
+                shared->is_final = true;
+                shared->final_answer = task_control->is_cancel_requested() ? "[task] cancelled"
+                                                                         : "[task] timeout";
+                shared->last_llm.is_final = true;
+                shared->last_llm.final_answer = shared->final_answer;
+                shared->last_llm.tool_calls.clear();
+                return {};
+            }
+        }
 
         auto st = std::any_cast<std::shared_ptr<internal::AgentThreadState>>(
             inps.at(std::string(internal::kAgentState)));
@@ -392,7 +407,20 @@ AgentLoopNode::create(
         return {};
     };
 
-    auto condition_func = [agent_config, shared](const std::unordered_map<std::string, std::any>&) -> int {
+    auto condition_func = [agent_config, shared, task_control](const std::unordered_map<std::string, std::any>&)
+        -> int {
+        if (task_control) {
+            task_control->check_deadline_now();
+            if (task_control->is_deadline_exceeded() || task_control->is_cancel_requested()) {
+                shared->is_final = true;
+                shared->final_answer = task_control->is_cancel_requested() ? "[task] cancelled"
+                                                                           : "[task] timeout";
+                shared->last_llm.is_final = true;
+                shared->last_llm.final_answer = shared->final_answer;
+                shared->last_llm.tool_calls.clear();
+                return 1;
+            }
+        }
         const int it = shared->state ? shared->state->iteration : 0;
         if (it >= agent_config.max_iterations) {
             return 1;
