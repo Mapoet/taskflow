@@ -217,6 +217,12 @@ endif()
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/prompt_renderer/history_formatter.cpp)
     list(APPEND AGENT_SOURCES src/prompt_renderer/history_formatter.cpp)
 endif()
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/context_budget/context_budget.cpp)
+    list(APPEND AGENT_SOURCES src/context_budget/context_budget.cpp)
+endif()
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/context_budget/context_budget_meter.cpp)
+    list(APPEND AGENT_SOURCES src/context_budget/context_budget_meter.cpp)
+endif()
 
 # WP1.8 Skills
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/skills/skill_frontmatter_parse.cpp)
@@ -406,6 +412,7 @@ set(AGENT_HEADERS
     include/agent/llm_client.hpp
     include/agent/prompt_renderer.hpp
     include/agent/schema_validate.hpp
+    include/agent/context_budget.hpp
     include/agent/mcp_protocol.hpp
     include/agent/toolbus.hpp
     include/agent/mcp_client.hpp
@@ -802,6 +809,38 @@ if(BUILD_TESTING)
         add_test(NAME tool_orchestration COMMAND test_tool_orchestration)
         set_tests_properties(tool_orchestration PROPERTIES
             ENVIRONMENT "AGENT_TOOL_ALLOWLIST=;AGENT_TOOL_PARALLEL_READS=;AGENT_TOOL_MAX_PARALLEL=")
+    endif()
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_tool_call_hooks.cpp)
+        add_executable(test_tool_call_hooks tests/test_tool_call_hooks.cpp)
+        target_link_libraries(test_tool_call_hooks PRIVATE agent_framework)
+        if(CMAKE_USE_PTHREADS_INIT)
+            target_link_libraries(test_tool_call_hooks PRIVATE Threads::Threads)
+        endif()
+        add_test(NAME tool_call_hooks_wp21d COMMAND test_tool_call_hooks)
+        set_tests_properties(tool_call_hooks_wp21d PROPERTIES ENVIRONMENT "AGENT_TOOL_ALLOWLIST=")
+        add_test(NAME tool_call_hooks_wp21d_h5 COMMAND test_tool_call_hooks --h5)
+        set_tests_properties(tool_call_hooks_wp21d_h5 PROPERTIES ENVIRONMENT "AGENT_TOOL_ALLOWLIST=")
+    endif()
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_context_budget.cpp)
+        add_executable(test_context_budget tests/test_context_budget.cpp)
+        target_link_libraries(test_context_budget PRIVATE agent_framework)
+        if(CMAKE_USE_PTHREADS_INIT)
+            target_link_libraries(test_context_budget PRIVATE Threads::Threads)
+        endif()
+        add_test(NAME context_budget_wp21c COMMAND test_context_budget)
+        set_tests_properties(context_budget_wp21c PROPERTIES
+            ENVIRONMENT "AGENT_TOOL_ALLOWLIST=;AGENT_BUDGET_MAX_TOOL_RESULT_JSON_BYTES=;AGENT_BUDGET_MAX_INJECTION_BYTES=;AGENT_BUDGET_MAX_COMBINED_PROMPT_ATTACH_BYTES=;AGENT_BUDGET_MAX_RENDERED_MESSAGES_BYTES=;AGENT_CONTEXT_BUDGET_SPILL_DIR=;AGENT_CONTEXT_BUDGET_STRICT=;AGENT_BUDGET_MAX_WIRE_MESSAGE_BYTES=")
+    endif()
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_agent_loop_context_budget_wp21c.cpp)
+        add_executable(test_agent_loop_context_budget_wp21c
+                       tests/test_agent_loop_context_budget_wp21c.cpp)
+        target_link_libraries(test_agent_loop_context_budget_wp21c PRIVATE agent_framework)
+        if(CMAKE_USE_PTHREADS_INIT)
+            target_link_libraries(test_agent_loop_context_budget_wp21c PRIVATE Threads::Threads)
+        endif()
+        add_test(NAME agent_loop_context_budget_i1_wp21c COMMAND test_agent_loop_context_budget_wp21c)
+        set_tests_properties(agent_loop_context_budget_i1_wp21c PROPERTIES
+            ENVIRONMENT "AGENT_TOOL_ALLOWLIST=;AGENT_BUDGET_MAX_TOOL_RESULT_JSON_BYTES=8192;AGENT_BUDGET_MAX_INJECTION_BYTES=;AGENT_BUDGET_MAX_COMBINED_PROMPT_ATTACH_BYTES=;AGENT_BUDGET_MAX_RENDERED_MESSAGES_BYTES=;AGENT_CONTEXT_BUDGET_SPILL_DIR=;AGENT_CONTEXT_BUDGET_STRICT=;AGENT_BUDGET_MAX_WIRE_MESSAGE_BYTES=")
     endif()
     if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_skill_registry.cpp)
         add_executable(test_skill_registry tests/test_skill_registry.cpp)

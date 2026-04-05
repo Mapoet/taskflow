@@ -6,8 +6,8 @@
 
 **不交付**：异步 hook、子进程 hook、远程策略服务；**WP2.7** `ExecutionContext` 全量注入（v1 仅 **可选** `ToolInvocationContext` 占位字段）；工具结果截断（**WP2.1c**）；读并行编排（**WP2.1b** 已完成则仅声明 **hook 须线程安全**）。
 
-**文档版本**：0.1  
-**日期**：2026-04-04  
+**文档版本**：0.2  
+**日期**：2026-04-05  
 **上游依据**：[phase-2-plan.md](./phase-2-plan.md) v0.6；[plan-detailed.v2.md](./plan-detailed.v2.md) §6.1；[`toolbus.cpp`](../../src/toolbus/toolbus.cpp)（`call_tool` 顺序）；[phase-2-wp1b.md](./phase-2-wp1b.md)（并行下 hook 并发）
 
 ---
@@ -22,18 +22,18 @@
 
 ---
 
-## 2. 现状：`call_tool` 顺序（基线）
+## 2. `call_tool` 顺序（已实现，WP2.1d）
 
-[`ToolBus::call_tool`](../../src/toolbus/toolbus.cpp) 当前顺序：
+[`ToolBus::call_tool`](../../src/toolbus/toolbus.cpp) **当前**顺序（与 [tool-call-hooks.md](./tool-call-hooks.md) 一致）：
 
 1. `load_allowlist_once`
-2. `find_tool(name)` → 不存在则 **`unknown_tool`** future
-3. `is_tool_allowed(name)` → 否则 **`tool_not_allowed`** future
-4. `validate_tool_arguments(schema, arguments, err)` → 失败则返回 `err` future
-5. `tool->call(name, arguments)`
+2. `find_tool(name)` → 不存在则 **`unknown_tool`** future（**不调 hook**）
+3. `is_tool_allowed(name)` → 否则 **`tool_not_allowed`** future（**不调 hook**）
+4. 在 **`hooks_mutex_`** 下拷贝 `hooks_` → 释放锁后按序执行 **全部** `ToolCallHook`；参数自 `arguments` 拷贝为 `current`，支持 `Allow` / `Deny` / `Replace`（见 §3.4）
+5. `validate_tool_arguments(schema, current, err)` → 失败则返回 `err` future
+6. `tool->call(name, current)`
 
-**WP2.1d 插入点（固定）**：在 **步骤 4 之前**、**步骤 3 之后** 执行 **全部 hooks**（见 §4.1）。  
-**理由**：工具必须在 allowlist 内才进入 hook；hook 可 **deny** 已允许工具；改参后仍须 **schema 校验**。
+**设计要点**：仅 **已注册且 allowlist 通过** 的请求进入步骤 4；`Replace` 后必须用 **`current`** 重新过 schema；工具名始终为调用时的 `name`，hook 不可改名。
 
 ---
 
@@ -85,7 +85,7 @@ using ToolCallHook =
 
 ### 3.5 Hook 异常
 
-- Hook **抛异常**：默认 **转为 Deny**，`code: hook_threw`，`details.exception: e.what()`（**截断** 至 512 字节 UTF-8）；可选 env **`AGENT_TOOL_HOOK_THROW_ABORT=1`** 时 **`std::terminate` 或 rethrow** — **默认必须为 Deny**，不终止进程。
+- Hook **抛异常**：默认 **转为** `hook_threw` JSON（`details.exception` 为 `e.what()` 的 **UTF-8 安全前缀**，≤512 字节）；可选 env **`AGENT_TOOL_HOOK_THROW_ABORT`**（`1` / `true` / `yes` / `on`）时 **rethrow**，由调用方处理 — **默认不** `std::terminate`。
 
 ---
 
@@ -135,10 +135,11 @@ using ToolCallHook =
 
 | 路径 | 变更 |
 |------|------|
-| [`include/agent/types.hpp`](../../include/agent/types.hpp) 或 **`include/agent/tool_hook.hpp`** | `ToolHookVerdict`、`ToolHookResult`、`ToolCallHook` typedef（避免 types.hpp 过大时可独立头文件） |
-| [`include/agent/toolbus.hpp`](../../include/agent/toolbus.hpp) | `add_tool_call_hook`、`clear_tool_call_hooks`、`hook_count`；`#include` hook 类型 |
-| [`src/toolbus/toolbus.cpp`](../../src/toolbus/toolbus.cpp) | `call_tool` 插入 §3.4 逻辑；错误码常量 |
-| [`docs/guides/tool-call-hooks.md`](./tool-call-hooks.md) | 新建 |
+| [`include/agent/types.hpp`](../../include/agent/types.hpp) | `ToolHookVerdict` |
+| [`include/agent/toolbus.hpp`](../../include/agent/toolbus.hpp) | `ToolHookResult`、`ToolCallHook`；`add_tool_call_hook`、`clear_tool_call_hooks`、`tool_call_hook_count` |
+| [`src/toolbus/toolbus.cpp`](../../src/toolbus/toolbus.cpp) | `call_tool` 插入 §3.4 逻辑；`hook_denied` / `hook_invalid_replace` / `hook_threw` |
+| [`tests/test_tool_call_hooks.cpp`](../../tests/test_tool_call_hooks.cpp) | H-1–H-7；`--h5` 子模式 |
+| [`docs/guides/tool-call-hooks.md`](./tool-call-hooks.md) | 用户文档 |
 
 **可选**：`getting_started.md` 一句链到 `tool-call-hooks.md`（若维护者希望 discoverability；**非 DoD 硬性**）。
 
@@ -154,14 +155,14 @@ using ToolCallHook =
 | **H-2** | hook `Deny` | `code == hook_denied`，**未**调用工具函数 |
 | **H-3** | hook `Replace` 合法参数 | 工具收到 **替换后** 参数；schema 失败时 **不** call |
 | **H-4** | 两 hook：先 Replace 再 Allow | 第二 hook 看到 **已替换** 的 `arguments` |
-| **H-5** | 工具 **不在** allowlist | **不** 调 hook（可在 hook 内置 `std::atomic` 计数器验证） |
+| **H-5** | 工具 **不在** allowlist | **不** 调 hook（`std::atomic` 计数器）；生产路径下 `register_local_tool` 与 allowlist 同时生效，**`tool_not_allowed`** 由单测 **`ToolBusCallHookTestPeer`** 注入表项 + `--h5` 子进程命中（见 [tool-call-hooks.md](./tool-call-hooks.md) §单测） |
 | **H-6** | hook 抛异常 | 返回 `hook_threw`，**不** 崩溃 |
 | **H-7** | `Replace` 缺 `replaced_arguments` | `hook_invalid_replace` 或等价 Deny |
 
 ### 7.2 CTest
 
-- `add_test(NAME tool_call_hooks_wp21d ...)`  
-- `ENVIRONMENT`：`AGENT_TOOL_ALLOWLIST=` 或按需设为子集，与 H-5 一致。
+- `tool_call_hooks_wp21d`：`COMMAND test_tool_call_hooks`，`ENVIRONMENT`：`AGENT_TOOL_ALLOWLIST=`  
+- `tool_call_hooks_wp21d_h5`：`COMMAND test_tool_call_hooks --h5`（进程内最先设置 `AGENT_TOOL_ALLOWLIST=ok_only`，覆盖 H-5）
 
 ---
 
@@ -169,7 +170,7 @@ using ToolCallHook =
 
 ```mermaid
 flowchart TD
-  P1[PR1: tool_hook.hpp 类型 + ToolBus API 声明]
+  P1[PR1: types.hpp / toolbus.hpp hook 类型 + ToolBus API]
   P2[PR2: call_tool 插入 + 快照锁 + 错误 JSON]
   P3[PR3: test_tool_call_hooks H-1–H-7]
   P4[PR4: tool-call-hooks.md]
@@ -182,10 +183,10 @@ flowchart TD
 
 ## 9. 验收清单（DoD）
 
-- [ ] **`call_tool` 顺序** 与 §2、§4.3 **一致**（代码注释引用本文件或 `tool-call-hooks.md`）。  
-- [ ] **H-1–H-7** 全绿。  
-- [ ] **`tool-call-hooks.md`** 已合并且含 allowlist 组合表。  
-- [ ] **默认无 hook** 时 **零** 可测行为变化（回归 `test_toolbus_wp2` 等）。  
+- [x] **`call_tool` 顺序** 与 §2、§4.3 **一致**（`toolbus.hpp` / `toolbus.cpp` Doxygen 指向 `tool-call-hooks.md`）。  
+- [x] **H-1–H-7** 全绿（`ctest -R tool_call_hooks_wp21d`，含 `--h5`）。  
+- [x] **`tool-call-hooks.md`** 已合并且含 allowlist 组合表。  
+- [x] **默认无 hook** 时行为与既有 ToolBus 一致（回归 `test_toolbus_wp2`）。  
 
 ---
 
@@ -204,3 +205,4 @@ flowchart TD
 | 日期 | 版本 | 说明 |
 |------|------|------|
 | 2026-04-04 | 0.1 | 初稿：Hook 类型、链式规则、顺序、线程安全、测试与 PR |
+| 2026-04-05 | 0.2 | §2 更新为已实现顺序；§3.5 与实现一致（rethrow）；H-5 注 test peer；§9 DoD 已勾选 |

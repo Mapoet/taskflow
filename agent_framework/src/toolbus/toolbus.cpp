@@ -1,6 +1,6 @@
 /**
  * @file toolbus.cpp
- * @brief ToolBus implementation (WP1.2)
+ * @brief ToolBus implementation (WP1.2, WP2.1d hooks)
  */
 
 #include "agent/toolbus.hpp"
@@ -19,6 +19,8 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <string_view>
+#include <optional>
 #include <unordered_set>
 
 namespace agent_framework {
@@ -81,6 +83,88 @@ bool is_tool_allowed(const std::string& name) {
         return true;
     }
     return al->count(name) != 0U;
+}
+
+bool env_hook_throw_abort() {
+    const char* v = std::getenv("AGENT_TOOL_HOOK_THROW_ABORT");
+    if (v == nullptr || v[0] == '\0') {
+        return false;
+    }
+    std::string s;
+    s.reserve(std::strlen(v));
+    for (const char* p = v; *p != '\0'; ++p) {
+        s.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(*p))));
+    }
+    return s == "1" || s == "true" || s == "yes" || s == "on";
+}
+
+/** UTF-8 safe prefix: drop trailing continuation bytes if cut mid-codepoint */
+std::string truncate_utf8_chars(const char* what, std::size_t max_bytes) {
+    if (what == nullptr) {
+        return {};
+    }
+    std::string_view sv(what);
+    if (sv.size() <= max_bytes) {
+        return std::string(sv);
+    }
+    std::size_t n = max_bytes;
+    while (n > 0 && (static_cast<unsigned char>(sv[n - 1]) & 0xC0u) == 0x80u) {
+        --n;
+    }
+    return std::string(sv.substr(0, n));
+}
+
+/**
+ * Runs hook chain on `current` (copy-in-out). Returns error object if short-circuited.
+ */
+std::optional<json> run_tool_call_hooks(const std::string& name, json& current,
+                                        const std::vector<ToolCallHook>& hooks_copy) {
+    for (std::size_t i = 0; i < hooks_copy.size(); ++i) {
+        try {
+            ToolHookResult r = hooks_copy[i](name, current);
+            switch (r.verdict) {
+            case ToolHookVerdict::Allow:
+                break;
+            case ToolHookVerdict::Deny: {
+                const std::string msg = r.deny_message.empty() ? "hook denied" : r.deny_message;
+                json det = r.deny_details.is_object() ? r.deny_details : json::object();
+                det["hook_index"] = i;
+                return json{{"error", msg}, {"code", "hook_denied"}, {"details", std::move(det)}};
+            }
+            case ToolHookVerdict::Replace:
+                if (!r.replaced_arguments.has_value() || !r.replaced_arguments->is_object()) {
+                    json det = json::object();
+                    det["hook_index"] = i;
+                    return json{{"error", "invalid hook Replace arguments"},
+                                 {"code", "hook_invalid_replace"},
+                                 {"details", std::move(det)}};
+                }
+                current = std::move(*r.replaced_arguments);
+                break;
+            }
+        } catch (const std::exception& e) {
+            if (env_hook_throw_abort()) {
+                throw;
+            }
+            json det = json::object();
+            det["hook_index"] = i;
+            det["exception"] = truncate_utf8_chars(e.what(), 512);
+            return json{{"error", "tool call hook threw an exception"},
+                        {"code", "hook_threw"},
+                        {"details", std::move(det)}};
+        } catch (...) {
+            if (env_hook_throw_abort()) {
+                throw;
+            }
+            json det = json::object();
+            det["hook_index"] = i;
+            det["exception"] = "non-standard exception";
+            return json{{"error", "tool call hook threw an exception"},
+                        {"code", "hook_threw"},
+                        {"details", std::move(det)}};
+        }
+    }
+    return std::nullopt;
 }
 
 std::string env_or_empty(const char* key) {
@@ -230,6 +314,24 @@ void ToolBus::register_api_tool(const std::string& /*name*/, const std::string& 
     throw std::logic_error("WP1.3: API tool not implemented (register_api_tool)");
 }
 
+void ToolBus::add_tool_call_hook(ToolCallHook hook) {
+    if (!hook) {
+        throw std::invalid_argument("add_tool_call_hook: hook is empty");
+    }
+    std::lock_guard<std::mutex> lock(hooks_mutex_);
+    hooks_.push_back(std::move(hook));
+}
+
+void ToolBus::clear_tool_call_hooks() {
+    std::lock_guard<std::mutex> lock(hooks_mutex_);
+    hooks_.clear();
+}
+
+std::size_t ToolBus::tool_call_hook_count() const {
+    std::lock_guard<std::mutex> lock(hooks_mutex_);
+    return hooks_.size();
+}
+
 std::future<json> ToolBus::call_tool(const std::string& name, const json& arguments) {
     load_allowlist_once();
     auto tool = find_tool(name);
@@ -243,13 +345,27 @@ std::future<json> ToolBus::call_tool(const std::string& name, const json& argume
                                             {"code", "tool_not_allowed"},
                                             {"details", json{{"name", name}}}});
     }
+
+    std::vector<ToolCallHook> hooks_copy;
+    {
+        std::lock_guard<std::mutex> lock(hooks_mutex_);
+        hooks_copy = hooks_;
+    }
+
+    json current = arguments;
+    if (!hooks_copy.empty()) {
+        if (auto hook_err = run_tool_call_hooks(name, current, hooks_copy)) {
+            return make_ready_json_future(std::move(*hook_err));
+        }
+    }
+
     json err = json::object();
     ToolMeta tm = tool->get_tool_meta(name);
     const json& schema = tm.schema;
-    if (!validate_tool_arguments(schema, arguments, err)) {
+    if (!validate_tool_arguments(schema, current, err)) {
         return make_ready_json_future(std::move(err));
     }
-    return tool->call(name, arguments);
+    return tool->call(name, current);
 }
 
 std::vector<ToolMeta> ToolBus::export_as_llm_tools() const {

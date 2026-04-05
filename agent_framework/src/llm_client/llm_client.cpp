@@ -95,6 +95,16 @@ std::future<LLMOutput> LLMClient::invoke(
     const std::string& provider,
     std::function<void(std::string_view)> stream_callback) {
     const RenderedPrompt rendered = render_prompt(input, provider);
+    if (rendered.context_budget_blocked) {
+        return std::async(std::launch::deferred, []() {
+            LLMOutput o;
+            o.is_final = true;
+            o.final_answer =
+                "[context_budget] blocked: AGENT_CONTEXT_BUDGET_STRICT and combined budget still exceeded "
+                "after truncation";
+            return o;
+        });
+    }
     return invoke_with_rendered_prompt(rendered, provider, std::move(stream_callback));
 }
 

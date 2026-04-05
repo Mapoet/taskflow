@@ -26,6 +26,10 @@ cmake -DCMAKE_BUILD_TYPE=Release ..
 make -j$(nproc)
 ```
 
+## WP2.1c：上下文预算（可选阅读）
+
+工具结果与注入文本的字节上限、`_af_truncation` 形态与 CTest 说明见 **[context-budget.md](./context-budget.md)**。
+
 ## WP1.1 LLMClient 环境变量（库自测）
 
 配置 `AGENT_LLM_PROVIDER`（`openai` 或 `anthropic`）、`OPENAI_API_KEY` / `ANTHROPIC_API_KEY`，可选 `AGENT_OPENAI_BASE_URL`、`AGENT_ANTHROPIC_BASE_URL`、`AGENT_HTTP_TIMEOUT_SEC`、`AGENT_LLM_MAX_RETRIES`、`AGENT_LLM_MODEL`。使用 `LLMClient::from_env()` 注册默认适配器后，须再 `set_prompt_renderer(...)` 才能调用 `invoke`。构建时开启 `BUILD_TESTING` 并运行 `ctest -R llm_client_wp1`（或 `test_llm_client_wp1`）可做无网络的夹具单测。
@@ -64,7 +68,7 @@ make -j$(nproc)
 
 **Cursor MCP**（与 `test_agent_loop_wp5` 一致）：默认在注册 **add** 之后加载 Cursor `mcp.json`；路径为 `--cursor-mcp-json` → 环境变量 `AGENT_TEST_CURSOR_MCP_JSON` → 空则由 `ToolBus` 使用 `AGENT_MCP_CONFIG_PATH` 或 `~/.cursor/mcp.json`。跳过：`--no-cursor-mcp` 或 `AGENT_TEST_SKIP_CURSOR_MCP` / `AGENT_CLI_SKIP_CURSOR_MCP=1`。详细导入日志：`-v` 或 `AGENT_TEST_AGENT_LOOP_DEBUG=1`。程序会在 **stderr** 打印「加载 MCP / REPL ready / running agent loop」；若启动或提问后长时间无 **stdout** 输出，多为 LLM 首包或 HTTP 慢，可调大 `AGENT_HTTP_TIMEOUT_SEC`，或先用 `--no-cursor-mcp` 排除 MCP 初始化耗时。
 
-**具体如何编辑 `mcp.json`（在 `~/.cursor/mcp.json` 上追加、工具命名、`url`/`command` 规则、与 allowlist 关系）**：见 **[Cursor 格式 mcp.json 配置指南](./cursor_mcp_json.md)**。
+**具体如何编辑 `mcp.json`（在 `~/.cursor/mcp.json` 上追加、工具命名、`url`/`command` 规则、与 allowlist 关系）**：见 **[Cursor 格式 mcp.json 配置指南](./cursor_mcp_json.md)**。在代码侧对 `ToolBus::call_tool` 做调用前策略（放行 / 拒绝 / 改参）时，见 **[工具调用前 Hook（WP2.1d）](./tool-call-hooks.md)**。
 
 **内建文件系统工具（`fs_*`）**：若设置环境变量 **`AGENT_FS_ROOT`** 为已存在目录，构图时会额外注册 **`fs_read` / `fs_write` / `fs_list_dir` / `fs_mkdir` / `fs_delete` / `fs_search` / `fs_grep` / `fs_replace`**（路径监禁、配额与确认写删见 **[内建 fs_* 工具](./builtin-fs-tools.md)**）。若仍使用 Cursor 的 **filesystem MCP**，建议二选一或明确两套根目录策略，以免模型混用。
 

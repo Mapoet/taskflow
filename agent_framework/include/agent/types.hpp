@@ -86,6 +86,25 @@ enum class ToolSideEffect {
  */
 std::optional<ToolSideEffect> tool_side_effect_from_string(std::string_view s);
 
+/**
+ * @brief WP2.1d：工具调用前 hook 对单次调用的裁决
+ */
+enum class ToolHookVerdict {
+    Allow,   ///< 继续链；参数为当前累积值
+    Deny,    ///< 短路；返回 hook_denied future
+    Replace  ///< 整对象替换参数后继续链
+};
+
+/**
+ * @brief WP2.1c：`_af_truncation.kind`（与 context-budget.md schema 一致）
+ */
+enum class AfTruncationKind {
+    tool_result,
+    user_injection,
+    llm_context,
+    wire_payload
+};
+
 // ============================================================================
 // 记忆管理相关类型（提前定义，供 LLMInput 使用）
 // ============================================================================
@@ -146,6 +165,8 @@ struct RenderedPrompt {
     std::optional<std::string> image_data;  // 图像 base64（已嵌入 messages）
     std::optional<std::string> audio_data;  // 音频 base64（已嵌入 messages）
     int total_tokens = 0;                   // 估算的总 token 数
+    /** WP2.1c：`AGENT_CONTEXT_BUDGET_STRICT=1` 且合并/注入后仍超限时为 true，调用方应跳过 LLM */
+    bool context_budget_blocked = false;
 };
 
 /**

@@ -1,6 +1,6 @@
 /**
  * @file toolbus.hpp
- * @brief ToolBus 模块：统一工具管理接口；WP2.1b 编排 API（`ToolOrchestrationOptions` / `execute_tool_calls_sequenced`）亦在本文件末尾声明
+ * @brief ToolBus 模块：统一工具管理接口；WP2.1d 调用前 hook 见 `add_tool_call_hook`；WP2.1b 编排 API 在本文件末尾
  * @author Mapoet
  * @version 0.1
  * @date 2025-01-XX
@@ -24,6 +24,34 @@
 #include "mcp_client.hpp"
 
 namespace agent_framework {
+
+namespace detail {
+/** @brief 仅单测注入工具以覆盖 tool_not_allowed 路径；勿用于生产 */
+struct ToolBusCallHookTestPeer;
+}
+
+// ============================================================================
+// WP2.1d：调用前 hook（`ToolHookVerdict` 见 types.hpp）
+// ============================================================================
+
+/**
+ * @brief 单次 hook 回调的返回值
+ */
+struct ToolHookResult {
+    ToolHookVerdict verdict = ToolHookVerdict::Allow;
+    /** verdict == Replace 时必填：下一轮 hook 与 schema 校验使用该对象（须为 JSON object） */
+    std::optional<json> replaced_arguments;
+    /** verdict == Deny 时建议使用非空文案 */
+    std::string deny_message;
+    /** 并入返回 JSON 的 details（须为 object 时才会合并字段） */
+    json deny_details = json::object();
+};
+
+/**
+ * @brief 调用前 hook：同步、可链式；不得修改 tool_name（由 ToolBus 固定传入）
+ */
+using ToolCallHook =
+    std::function<ToolHookResult(const std::string& tool_name, const json& arguments)>;
 
 // ============================================================================
 // 工具接口
@@ -231,11 +259,26 @@ public:
     
     /**
      * @brief 统一调用接口
+     *
+     * 顺序（WP2.1d）：load allowlist → find_tool → is_tool_allowed → **tool call hooks**
+     * → validate_tool_arguments → tool->call。详见 docs/guides/tool-call-hooks.md。
+     *
      * @param name 工具名称
      * @param arguments 调用参数（JSON 格式）
      * @return 工具执行结果（JSON 格式，异步 future）
      */
     std::future<json> call_tool(const std::string& name, const json& arguments);
+
+    /**
+     * @brief 追加调用前 hook（链尾）；空函数抛 std::invalid_argument
+     */
+    void add_tool_call_hook(ToolCallHook hook);
+
+    /** @brief 清空 hook 链（测试 / demo） */
+    void clear_tool_call_hooks();
+
+    /** @brief 当前注册的 hook 数量 */
+    std::size_t tool_call_hook_count() const;
     
     /**
      * @brief 导出工具列表（供 LLM 使用）
@@ -283,11 +326,15 @@ public:
      */
     CursorMcpImportResult register_mcp_from_cursor_config(const std::string& config_path = "",
                                                          bool register_all = true);
-    
+
 private:
+    friend struct detail::ToolBusCallHookTestPeer;
+
     std::map<std::string, std::shared_ptr<ToolInterface>> tools_;
     mutable std::mutex tools_mutex_;
     std::unordered_set<std::string> mcp_services_;
+    std::vector<ToolCallHook> hooks_;
+    mutable std::mutex hooks_mutex_;
     
     /**
      * @brief 根据工具名称查找工具接口

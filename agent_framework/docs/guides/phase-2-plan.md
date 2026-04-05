@@ -2,8 +2,8 @@
 
 本文档在 [plan-detailed.md](./plan-detailed.md) **§5**（A2A、WP2.1–2.6、§5.4 富界面、§7 UI 表）与 [plan-detailed.v2.md](./plan-detailed.v2.md) **§5–6**（Identity / ExecutionContext、§5.1 多轮与输入 DSL、WP2.0 / 2.1b–2.1d / 2.7–2.9、Verifier、工作记忆压缩）之上，给出**可排期、可验收**的实现拆解、依赖顺序与阶段边界。阶段 3（RAG、Faiss、磁盘记忆深化、动态 MCP / WP3.7 等）仅在衔接处引用，**不纳入本文件 DoD**。
 
-**文档版本**：0.15  
-**日期**：2026-04-04  
+**文档版本**：0.16  
+**日期**：2026-04-05  
 **上游依据**：`plan-detailed.md` v0.3（§5–§8）；`plan-detailed.v2.md` v0.6-v2；[phase-1-plan.md](./phase-1-plan.md)（阶段 1 交付与衔接）
 
 ---
@@ -25,6 +25,8 @@
 | D9 | **Verifier** | 框架内**第二套 LLM 子图**；输出结构化 `ok` / `issues` / `suggested_action`；默认无写工具；事件进 SSE + 日志（**WP2.8**，详 **[phase-2-wp8.md](./phase-2-wp8.md)**、[plan-detailed.v2.md](./plan-detailed.v2.md) §6.2） |
 | D10 | **工作记忆最小集** | 偏早压缩钩子（阈值可配）；槽位预算可导出；压缩失败**回退**；与 `/memory compact` 等 **§5.1** 命令共用策略入口（**WP2.9**，详 **[phase-2-wp9.md](./phase-2-wp9.md)**、[agents/memory.md](../agents/memory.md) §5） |
 | D11 | **多轮状态** | 单次运行结束后 **`NextAgentState`（含 `history`）写回**会话对象；REPL 与 A2A 请求均可延续上下文（**WP2.0** + [plan-detailed.v2.md](./plan-detailed.v2.md) §5.1） |
+
+**D7 子项进度**：**WP2.1b**、**WP2.1d**（见上）已落地；**WP2.1c**（工具结果与用户注入预算、截断/可选 spill）已实现，用户指南 **[context-budget.md](./context-budget.md)**，验收 **[phase-2-wp1c.md](./phase-2-wp1c.md)** §11；**完整 D7** 仍以文档与测试矩阵为准持续维护。
 
 ### 1.2 明确不包含（阶段 2 不做 / 非必达）
 
@@ -224,6 +226,8 @@ flowchart TB
 |----|------|------|
 | 2.1d.1 | **Hook** | allow / deny / 改参；与 `AGENT_TOOL_ALLOWLIST` 组合 |
 
+**实现状态**：已合入（`types.hpp`：`ToolHookVerdict`；`toolbus.hpp`：hook 类型与 `ToolBus::add_tool_call_hook` / `call_tool` 链）、用户文档 **[tool-call-hooks.md](./tool-call-hooks.md)**、`getting_started.md` 链接、CTest `tool_call_hooks_wp21d` / `tool_call_hooks_wp21d_h5`）；详案 **§9 DoD** 已勾选。
+
 **验收**：见详案 §7–§9；与 Agent 循环集成可在 **无 hook** 路径做回归，**有 hook** 至少一条（可选扩展现有 loop 测）。
 
 ---
@@ -403,6 +407,7 @@ flowchart TB
 | [phase-2-wp1b.md](./phase-2-wp1b.md) | WP2.1b |
 | [phase-2-wp1c.md](./phase-2-wp1c.md) | WP2.1c |
 | [phase-2-wp1d.md](./phase-2-wp1d.md) | WP2.1d |
+| [tool-call-hooks.md](./tool-call-hooks.md) | WP2.1d 用户文档（`call_tool` 顺序、allowlist、错误码） |
 | [phase-2-wp2.md](./phase-2-wp2.md) | WP2.2 |
 | [phase-2-wp3.md](./phase-2-wp3.md) | WP2.3 |
 | [phase-2-wp4.md](./phase-2-wp4.md) | WP2.4 |
@@ -436,6 +441,8 @@ flowchart TB
 | 2026-04-04 | 0.13 | **WP2.8** 链至 **[phase-2-wp8.md](./phase-2-wp8.md)**；D9、§4、§8 索引；Verifier 详案 v0.1 |
 | 2026-04-04 | 0.14 | **WP2.9** 链至 **[phase-2-wp9.md](./phase-2-wp9.md)**；D10、§4、§8 索引；工作记忆详案 v0.2 |
 | 2026-04-04 | 0.15 | **WP2.U** 链至 **[phase-2-wpu.md](./phase-2-wpu.md)**；§1.3、§4、§8；富界面详案 v0.2 |
+| 2026-04-05 | 0.16 | **D7** 下增加子项进度说明（1b/1d 已落地，**1c** 待 [phase-2-wp1c.md](./phase-2-wp1c.md)）；**WP2.1d** 小节标注实现状态 |
+| 2026-04-05 | 0.17 | **WP2.1c** 实现与 [context-budget.md](./context-budget.md)；D7 子项进度更新 |
 
 ---
 

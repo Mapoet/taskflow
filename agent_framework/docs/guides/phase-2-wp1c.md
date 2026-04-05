@@ -114,7 +114,9 @@
 
 2. **用户注入**：物化完成后、合并进 `LLMInput` 前，应用 **注入帽**；若超，**从尾部截断** 注入块并加 `_af_truncation` 块插入 `context` 前缀或后缀（**固定前缀** `"\n<!-- af_injection_truncated -->\n"` + JSON 一行，便于 Tier A 识别 — 或仅用 JSON 字段，**二选一字面写进 `context-budget.md`**）。
 
-**`AgentConfig.extra_config` 键名**：与 env **同名去 `AGENT_` 前缀** 或小写键 — **实现选一种并在文档唯一列出**。
+**合并帽与持久 history**：v1 合并帽在 **`PromptRenderer::render` 内对 history 副本** 生效，**不**写回 `AgentThreadState`；会话 state 仍保留完整 `tool_result`（与 [context-budget.md](./context-budget.md) 一致）。
+
+**`AgentConfig.extra_config` 键名**：与 env **同名去 `AGENT_` 前缀**（实现以此为准）。
 
 ---
 
@@ -122,15 +124,14 @@
 
 | 路径 | 职责 |
 |------|------|
-| `include/agent/context_budget.hpp` | `struct AfTruncationMeta { ... };`；`json wrap_truncated_payload(AfTruncationMeta, std::string_view preview_utf8);` |
-| `src/agent/context_budget.cpp` | `std::size_t utf8_json_dump_bytes(const json&)`；`std::string utf8_safe_truncate(std::string_view s, std::size_t max_bytes)`；`json apply_per_result_cap(const json& in, std::size_t max_bytes, std::string_view kind)` |
-| `include/agent/context_budget_meter.hpp` | `class ContextBudgetMeter`：`reset_for_turn()`；`bool consume_tool_result(json& in_out)`；`bool consume_injection(std::string& in_out)`；`bool enforce_combined(...)` — 持有所需上限（构造时读 env） |
-| `src/agent/context_budget_meter.cpp` | 实现 §6 算法；**线程安全**：若与 WP2.1b 并行工具同进程，**每个工具结果在合并入 history 前** 在 **单线程** 点调用（AgentLoop 主 functor）— **禁止** 多线程同时 `consume` 同一 `Meter` |
-| `src/node/agent_loop_node.cpp` | 在 `toolbus->call_tool` 返回后、`Message` 入 `history` 前调用 `apply_per_result_cap` 或 `meter.consume_tool_result` |
-| `src/prompt_renderer/prompt_renderer.cpp` | `truncate_prompt`：在 **渲染完成后** 对 `rendered.messages` 做 **总字节扫描**（或调用 `enforce_combined_on_rendered`）；**或** 在渲染前对 `LLMInput` 调用 `meter` — **实现选一点**，PR 内不得两处重复扣减 |
+| `include/agent/context_budget.hpp` | `ContextBudgetLimits`、`ContextBudgetMeter`、`apply_injection_cap`、`apply_per_tool_result_budget`、`utf8_safe_truncate`、`json_utf8_dump_bytes`、`apply_wire_payload_cap` 等（`AfTruncationKind` 在 `types.hpp`） |
+| `src/context_budget/context_budget.cpp` | 方案 S 包装、spill、env/extra_config 解析 |
+| `src/context_budget/context_budget_meter.cpp` | 合并帽、注入帽（`<<AF_INJ>>` 分隔合并串） |
+| `src/node/agent_loop_node.cpp` | `apply_per_tool_result_budget`（`append_tool_message` 与 `tool_agg`） |
+| `src/prompt_renderer/prompt_renderer.cpp` | `apply_injection_cap` + 合并帽副本 + `truncate_prompt` 总消息 dump 帽 |
 | `docs/guides/context-budget.md` | §环境变量、§三层帽、§`_af_*` schema、§与 WP2.7 / A2A 的调用点、§与内建工具自有 `truncated` 的关系 |
 
-**WP2.7 衔接**：在 `UserInputPreprocessor` 设计稿或 `phase-2-wp7.md`（后续）中要求：物化步骤末尾调用 `context_budget::apply_injection_cap(std::string& blob)` 或 `Meter::consume_injection`。
+**WP2.7 衔接**：物化步骤末尾可调用 **`apply_injection_cap`**（`context_budget_meter.hpp`，三字段 UTF-8 注入帽）。
 
 **A2A 衔接**：`wire_mapping` 或 `AgentTask::to_json` 前增加 **可选** `apply_wire_cap(json&, max)`，默认值与 `AGENT_BUDGET_MAX_WIRE_MESSAGE_BYTES`（**新建 env**，默认 4MiB）— 写入 WP2.1c DoD 为 **可选条**，避免阻塞 CLI。
 
@@ -195,10 +196,10 @@ flowchart TD
 
 ## 11. 验收清单（DoD）
 
-- [ ] **三层帽** 环境变量与默认值实现一致；`context-budget.md` 已合并。
-- [ ] 单测 **B-1–B-5** 全绿；集成 **I-1** 绿；**I-2** 绿或与 PR4 同时合入。
-- [ ] 默认配置下 **不** 改变「小结果」的 JSON 形状（**无** `_af_truncation` 或仅在 `original<=cap` 时原样）。
-- [ ] WP2.7 详案（后续）可引用 **`apply_injection_cap` / `Meter::consume_injection`** 函数签名 **不改**（若需改，同步本文件 §7）。
+- [x] **三层帽** 环境变量与默认值实现一致；[`context-budget.md`](./context-budget.md) 已合并。
+- [x] 单测 **B-1–B-5** 全绿；集成 **I-1** 绿；**I-2** 绿或与 PR4 同时合入。
+- [x] 默认配置下 **不** 改变「小结果」的 JSON 形状（**无** `_af_truncation` 或仅在 `original<=cap` 时原样）。
+- [x] WP2.7 详案（后续）可引用 **`apply_injection_cap`** 与 **`ContextBudgetMeter::apply_combined_to_history_slice`**（`context_budget.hpp`）；若需改签名，同步本文件 §7 与 `context-budget.md`。
 
 ---
 
@@ -217,3 +218,4 @@ flowchart TD
 | 日期 | 版本 | 说明 |
 |------|------|------|
 | 2026-04-04 | 0.1 | 初稿：三层预算、包装 JSON、UTF-8 截断、spill、测试与 PR 顺序 |
+| 2026-04-05 | 0.2 | WP2.1c 实现落地：DoD 勾选；指向 `context-budget.md` |

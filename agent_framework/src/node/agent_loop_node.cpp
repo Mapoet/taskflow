@@ -10,6 +10,7 @@
 #include "agent/internal/agent_thread_state.hpp"
 #include "agent/internal/loop_io_keys.hpp"
 #include "agent/skill_services.hpp"
+#include "agent/context_budget.hpp"
 #include "agent/toolbus.hpp"
 #include <any>
 #include <functional>
@@ -259,6 +260,8 @@ AgentLoopNode::create(
             return toolbus->get_tool_meta(std::string(nm)).side_effect;
         };
 
+        const ContextBudgetLimits ctx_budget_limits = ContextBudgetLimits::load(&agent_config);
+
         auto trigger_repeat_guard = [&](const CallSpec& c, const std::string& call_key) {
             const int iter = shared->state ? shared->state->iteration : 0;
             const std::string details = trunc_copy(call_key, guard_trunc);
@@ -285,6 +288,7 @@ AgentLoopNode::create(
                 std::clog << "\n[tool] name=" << c.name << " start\n";
                 std::clog.flush();
             }
+            apply_per_tool_result_budget(result, ctx_budget_limits, AfTruncationKind::tool_result);
             const bool warn_code =
                 result.is_object() && result.contains("code") && result["code"].is_string();
             Message tm;
@@ -441,7 +445,8 @@ void AgentLoopNode::build_loop_body(
     (void)llm_task;
 
     // ToolAggregator: WP2.1b orchestration (same as loop body minus repeat guard)
-    auto tool_agg = [toolbus, agent_config](
+    const ContextBudgetLimits tool_agg_budget = ContextBudgetLimits::load(&agent_config);
+    auto tool_agg = [toolbus, agent_config, tool_agg_budget](
                         const std::unordered_map<std::string, std::any>& inps)
         -> std::unordered_map<std::string, std::any> {
         const LLMOutput llm_out = std::any_cast<LLMOutput>(inps.at(std::string(internal::kLlmOutput)));
@@ -467,13 +472,14 @@ void AgentLoopNode::build_loop_body(
         std::vector<json> results =
             execute_tool_calls_sequenced(toolbus, calls, orch_opts, classify_side);
         for (std::size_t idx = 0; idx < calls.size(); ++idx) {
-            const json& result = results[idx];
+            json result = results[idx];
+            apply_per_tool_result_budget(result, tool_agg_budget, AfTruncationKind::tool_result);
             Message m;
             m.role = "tool";
             m.content = "";
             m.tool_call_id = calls[idx].tool_call_id;
             m.tool_name = calls[idx].name;
-            m.tool_result = result;
+            m.tool_result = std::move(result);
             m.timestamp = std::time(nullptr);
             if (result.is_object() && result.contains("code") && result["code"].is_string()) {
                 had_error = true;

@@ -4,6 +4,7 @@
  */
 
 #include "agent/prompt_renderer.hpp"
+#include "agent/context_budget.hpp"
 
 #include <cctype>
 #include <iostream>
@@ -164,16 +165,37 @@ int PromptRenderer::estimate_tokens(const RenderedPrompt& rendered) {
 
 RenderedPrompt PromptRenderer::truncate_prompt(const RenderedPrompt& rendered,
                                                const std::string& model_name) {
-    int budget = -1;
+    RenderedPrompt out = rendered;
+    const ContextBudgetLimits limits = ContextBudgetLimits::load(nullptr);
+    int budget_tokens = -1;
     {
         std::lock_guard<std::mutex> lock(formatters_mutex_);
-        auto it = max_tokens_map_.find(model_name);
+        const auto it = max_tokens_map_.find(model_name);
         if (it != max_tokens_map_.end()) {
-            budget = it->second;
+            budget_tokens = it->second;
         }
     }
-    (void)budget;
-    return rendered;
+    std::size_t cap_bytes = limits.max_rendered_messages_bytes;
+    if (budget_tokens > 0) {
+        const std::size_t from_tok = static_cast<std::size_t>(budget_tokens) * 4u;
+        cap_bytes = (cap_bytes == 0) ? from_tok : std::min(cap_bytes, from_tok);
+    }
+    if (cap_bytes == 0) {
+        out.total_tokens = estimate_tokens(out);
+        return out;
+    }
+    auto total_dump = [&out]() -> std::size_t {
+        std::size_t s = 0;
+        for (const auto& m : out.messages) {
+            s += json_utf8_dump_bytes(m);
+        }
+        return s;
+    };
+    while (total_dump() > cap_bytes && out.messages.size() > 2) {
+        out.messages.erase(out.messages.begin() + 1);
+    }
+    out.total_tokens = estimate_tokens(out);
+    return out;
 }
 
 void PromptRenderer::integrate_multimodal_input(RenderedPrompt& rendered, const LLMInput& input) {
@@ -223,28 +245,38 @@ RenderedPrompt PromptRenderer::render(const LLMInput& input, const std::string& 
     std::string user_user_prompt =
         render_user_template(input.user_prompt, input.extra_variables, missing_user);
 
+    const ContextBudgetLimits budget_limits = ContextBudgetLimits::load(nullptr);
+    std::string ctx_work = input.context;
+    std::string skill_body = input.skill_block.value_or("");
+    std::string inj_user = user_user_prompt;
+    std::string af_injection_meta;
+    apply_injection_cap(ctx_work, skill_body, inj_user, budget_limits, af_injection_meta);
+
     std::vector<std::string> missing_all = missing_sys;
     missing_all.insert(missing_all.end(), missing_user.begin(), missing_user.end());
     std::sort(missing_all.begin(), missing_all.end());
     missing_all.erase(std::unique(missing_all.begin(), missing_all.end()), missing_all.end());
 
     std::string system_block = user_system_prompt;
-    if (input.skill_block && !input.skill_block->empty()) {
+    if (!skill_body.empty()) {
         const std::string sid =
             (input.active_skill_id && !input.active_skill_id->empty()) ? *input.active_skill_id
                                                                        : std::string("unknown");
         system_block += "\n\n## Active skill (id: ";
         system_block += sid;
         system_block += ")\n";
-        system_block += *input.skill_block;
+        system_block += skill_body;
     }
-    if (!input.context.empty()) {
+    if (!ctx_work.empty()) {
         system_block += "\n\n## Retrieved context\n";
-        system_block += input.context;
+        system_block += ctx_work;
+    }
+    if (!af_injection_meta.empty()) {
+        system_block += af_injection_meta;
     }
     vars["system_prompt"] = system_block;
-    vars["user_prompt"] = user_user_prompt;
-    vars["context"] = input.context;
+    vars["user_prompt"] = inj_user;
+    vars["context"] = ctx_work;
     vars["tools_text"] = OpenAIToolFormatter().format_tools_as_text(input.tools);
 
     RenderedPrompt rendered;
@@ -261,11 +293,18 @@ RenderedPrompt PromptRenderer::render(const LLMInput& input, const std::string& 
         rendered.messages.push_back(
             json{{"role", "system"}, {"content", build_missing_vars_system_notice(missing_all)}});
     }
-    const std::vector<Message> history_trunc = hf->truncate(input.history, max_hist);
-    for (const auto& jm : hf->format_as_messages(history_trunc)) {
+    std::vector<Message> history_work = hf->truncate(input.history, max_hist);
+    ContextBudgetMeter::apply_combined_to_history_slice(history_work, inj_user, ctx_work, skill_body,
+                                                          budget_limits);
+    if (budget_limits.context_budget_strict &&
+        ContextBudgetMeter::combined_attach_bytes(history_work, inj_user, ctx_work, skill_body) >
+            budget_limits.max_combined_prompt_attach_bytes) {
+        rendered.context_budget_blocked = true;
+    }
+    for (const auto& jm : hf->format_as_messages(history_work)) {
         rendered.messages.push_back(jm);
     }
-    rendered.messages.push_back(json{{"role", "user"}, {"content", user_user_prompt}});
+    rendered.messages.push_back(json{{"role", "user"}, {"content", inj_user}});
 
     std::shared_ptr<ToolFormatter> tf = get_tool_formatter(model_name);
     if (!tf) {
@@ -277,8 +316,9 @@ RenderedPrompt PromptRenderer::render(const LLMInput& input, const std::string& 
     rendered.image_data = input.image_data;
     rendered.audio_data = input.audio_data;
     integrate_multimodal_input(rendered, input);
-    rendered.total_tokens = estimate_tokens(rendered);
-    return truncate_prompt(rendered, model_name);
+    RenderedPrompt trimmed = truncate_prompt(rendered, model_name);
+    trimmed.context_budget_blocked = rendered.context_budget_blocked;
+    return trimmed;
 }
 
 } // namespace agent_framework

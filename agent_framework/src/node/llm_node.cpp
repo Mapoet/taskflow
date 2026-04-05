@@ -35,6 +35,15 @@ LLMNode::create(
             throw std::runtime_error("LLMNode: prompt_renderer is null");
         }
         RenderedPrompt rendered = prompt_renderer->render(llm_input, model_name);
+        if (rendered.context_budget_blocked) {
+            LLMOutput blocked_out;
+            blocked_out.is_final = true;
+            blocked_out.final_answer =
+                "[context_budget] blocked: AGENT_CONTEXT_BUDGET_STRICT and combined budget still exceeded "
+                "after truncation";
+            return std::unordered_map<std::string, std::any>{
+                {std::string(internal::kLlmOutput), std::any{std::move(blocked_out)}}};
+        }
 
         // 3. 调用 LLM（使用已渲染提示词）
         std::future<LLMOutput> future =
