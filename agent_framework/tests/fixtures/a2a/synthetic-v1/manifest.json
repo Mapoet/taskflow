@@ -1,0 +1,51 @@
+{
+  "bundle_id": "synthetic-v1",
+  "tracker_revision": "a2a-spec-tracker.md §1 2026-04-05",
+  "spec_version": "1.0",
+  "fixtures": [
+    {
+      "id": "jr_send_message_request",
+      "path": "jsonrpc/send_message_request.json",
+      "kind": "jsonrpc_request",
+      "assert": "parse_ok",
+      "applicable_tiers": ["A"]
+    },
+    {
+      "id": "jr_send_message_response",
+      "path": "jsonrpc/send_message_response.json",
+      "kind": "jsonrpc_response",
+      "assert": "jsonrpc_envelope_ok",
+      "applicable_tiers": ["A"]
+    },
+    {
+      "id": "jr_error_invalid_params",
+      "path": "jsonrpc/error_invalid_params.json",
+      "kind": "jsonrpc_response",
+      "assert": "jsonrpc_error_ok",
+      "applicable_tiers": ["A"]
+    },
+    {
+      "id": "card_with_skills",
+      "path": "jsonrpc/card_with_skills.json",
+      "kind": "agent_card_json",
+      "assert": "round_trip_types",
+      "applicable_tiers": ["A", "B"]
+    },
+    {
+      "id": "task_wire_roundtrip",
+      "path": "jsonrpc/task_wire.json",
+      "kind": "task_wire",
+      "assert": "round_trip_types",
+      "ignore_json_keys": ["timestamp"],
+      "applicable_tiers": ["A"]
+    },
+    {
+      "id": "sse_task_updates_multi",
+      "path": "sse/task_updates_multi.sse.txt",
+      "kind": "sse_stream",
+      "assert": "sse_parse_ok",
+      "expected_min_events": 2,
+      "applicable_tiers": ["A"]
+    }
+  ]
+}

@@ -1,7 +1,7 @@
 # WP2.a2a-test：A2A 完整集成 Online Live 测试 — 实施计划
 
 **路径**：`agent_framework/docs/guides/a2a-integration-tests.md`  
-**版本**：0.1  
+**版本**：0.2  
 **日期**：2026-04-05  
 **状态**：实施计划（与代码里程碑对齐，随 WP 完成度滚动更新）
 
@@ -221,8 +221,8 @@
 
 | 策略 | 约定 |
 |------|------|
-| **默认 PR** | 仅 **Tier A**（及现有 `test_a2a_*`）；**不**要求网络、**不** listen 高位端口（或 sandbox 允许 localhost） |
-| **nightly / main** | 可启用 **Tier B**（`AGENT_A2A_INTEGRATION_LOOPBACK=1`），runner 需支持 **本机 TCP** |
+| **默认 PR** | **Tier A**：`a2a_contract_json`、`a2a_contract_sse` 与既有 `test_a2a_*`；**不**要求网络。**Tier B**：在 CI 中可对 `a2a_loopback_integration` 注入 `AGENT_A2A_INTEGRATION_LOOPBACK=1`（见根 `.github/workflows/ubuntu.yml` `debug-test-cpp20`） |
+| **nightly / main** | 与默认 PR 相同策略即可；亦可单独 job 仅跑 `ctest -R 'a2a_loopback_integration'` |
 | **Live** | **仅** `workflow_dispatch` 或 **人工批准** job，注入 `AGENT_A2A_LIVE_*` **Repository secrets** 或 **内网 runner** |
 | **密钥** | **禁止** commit；使用 CI secrets 或 `~/.config/agent/live.env`（`.gitignore`） |
 
@@ -230,12 +230,12 @@
 
 ## 7. 交付物清单（WP2.a2a-test DoD）
 
-- [ ] **Tier A**：tracker 对齐的 **方法/wire/SSE** 断言 + WP2.6 黄金文件 **或** 等价单测覆盖。
-- [ ] **Tier B**：`a2a_loopback_*` 目标；文档 **§4.2** 环境变量与 **端口** 约定；**并发探针**用例。
-- [ ] **Tier C**：`a2a_live_smoke` + **可复制 shell 脚本**（curl 版至少 1 份）。
-- [ ] **Tier D**：**T-D-A / T-D-B** fixture 说明 + `a2a_live_multi_agent`（可默认 `SKIP`）。
-- [ ] **Tier E**：轻量 QPS 与鉴权负例 **至少各 1**（有 WP2.5 时）。
-- [ ] **本文件修订记录** 更新版本号与日期。
+- [x] **Tier A**：`tests/fixtures/a2a/synthetic-v1/` + `manifest.json`；`a2a_contract_json`、`a2a_contract_sse`；`a2a_fixture_regen`（维护者）；与既有 `test_a2a_*` 并存。
+- [x] **Tier B**：CTest `a2a_loopback_integration`（`AGENT_A2A_INTEGRATION_LOOPBACK=1`）；Well-Known `url` 与动态端口一致；并发 `N=16` 短任务。
+- [x] **Tier C**：`a2a_live_smoke`；[`tests/scripts/a2a_live_curl_smoke.sh`](../tests/scripts/a2a_live_curl_smoke.sh)；示例服务 [`agent_server_demo`](../../examples/agent_server_demo.cpp)（`AGENT_BUILD_EXAMPLES=ON`）。
+- [x] **Tier D**：[`tests/fixtures/a2a/agents/README.md`](../tests/fixtures/a2a/agents/README.md)（T-D-A/B）；`a2a_live_multi_agent`（默认 `SKIP`）。
+- [x] **Tier E**：`a2a_tier_e`（`AGENT_A2A_TIER_E=1`）；Well-Known + SendMessage 各 100 次计时日志；8MiB 大 body；可选 `AGENT_A2A_TIER_E_AUTH_TOKEN` 触发 401 负例。
+- [x] **本文件修订记录** 更新版本号与日期。
 
 ---
 
@@ -244,16 +244,30 @@
 | 日期 | 版本 | 说明 |
 |------|------|------|
 | 2026-04-05 | 0.1 | 初稿：WP2.a2a-test 分层、依赖矩阵、多 Agent 画像、CI 闸门、与 phase-2-plan / tracker / wp6 衔接 |
+| 2026-04-05 | 0.2 | 落地：`synthetic-v1` bundle、`a2a_contract_*`、`a2a_loopback_integration`、`a2a_live_smoke`、`a2a_live_multi_agent`、`a2a_tier_e`、`agent_server_demo`、curl 脚本、agents README；DoD 勾选 |
 
 ---
 
-## 9. 附录 B：方法名与路径（占位）
+## 9. 附录 B：方法名与路径（摘自 `a2a-spec-tracker.md` §3 / §2，2026-04-05）
 
-**在 WP2.1 完成并更新 `a2a-spec-tracker.md` §3 后**，将以下内容替换为 **从 tracker 复制的表格**（本占位 **不**作为实现依据）：
+权威仍以 **[a2a-spec-tracker.md](./a2a-spec-tracker.md)** 为准；下表仅便於测试与运维速查。
 
 | 类别 | 规范 method 字符串 | 备注 |
 |------|-------------------|------|
-| 任务创建 | *（待 WP2.1 填入）* | 与官方 A2A 一致 |
-| 任务查询 | *（待填入）* | |
-| 任务取消 | *（待填入）* | |
-| SSE 订阅 | *（HTTP 路径与方法见 WP2.2 文档）* | |
+| 任务创建 | `SendMessage` | `SendMessageResponse`：`task` 或 `message` |
+| 流式消息 | `SendStreamingMessage` | 流：`StreamResponse` |
+| 任务查询 | `GetTask` | `params.id` |
+| 列表 | `ListTasks` | |
+| 任务取消 | `CancelTask` | |
+| 流式订阅 | `SubscribeToTask` | HTTP+JSON 侧仓库选用 `GET /tasks/sendSubscribe?task_id=`（tracker §2） |
+| Push 配置 | `CreateTaskPushNotificationConfig`、`GetTaskPushNotificationConfig`、`ListTaskPushNotificationConfigs`、`DeleteTaskPushNotificationConfig` | |
+| 扩展 Card | `GetExtendedAgentCard` | |
+| Well-Known | — | `GET /.well-known/agent-card.json` |
+| JSON-RPC POST | — | 单一路径：Card 的 `url`（或 `AGENT_SERVER_JSON_RPC_PATH`） |
+
+### 附录 C：Tier E 基线（首次本地跑 `AGENT_A2A_TIER_E=1` 后人工填入）
+
+| 步骤 | 样本数 | p95 / 总耗时（ms） | 日期 / 机器 |
+|------|--------|-------------------|-------------|
+| GET Well-Known | 100 | （待填） | |
+| POST SendMessage | 100 | （待填） | |

@@ -222,17 +222,18 @@
 
 **Phase 3 建议**：Verifier 启用策略应挂在 **图模板 / `AgentConfig`**，而非全局 env。
 
-### 3.12 A2A 集成测试闸门（规划 / CI）
+### 3.12 A2A 集成测试闸门（WP2.a2a-test）
 
-| 名称 | 功能 | 主文档 |
-|------|------|--------|
-| `AGENT_A2A_INTEGRATION_LOOPBACK` | Tier B 启用 | [a2a-integration-tests.md](./a2a-integration-tests.md) |
-| `AGENT_A2A_LIVE_TEST`, `AGENT_A2A_LIVE_BASE_URL` | Tier C live | 同上 |
-| `AGENT_A2A_LIVE_TOKEN` | Live 鉴权 | 同上 |
-| `AGENT_A2A_MULTI_LIVE`, `AGENT_A2A_LIVE_AGENT_A_URL`, `AGENT_A2A_LIVE_AGENT_B_URL` | Tier D 多 Agent | 同上 |
-| `AGENT_A2A_UPDATE_GOLDENS` | 重写黄金 fixture | [phase-2-wp6.md](./phase-2-wp6.md) |
+| 名称 | 功能 | 读取位置 | 主文档 |
+|------|------|----------|--------|
+| `AGENT_A2A_INTEGRATION_LOOPBACK` | Tier B：`test_a2a_loopback_integration` | `tests/test_a2a_loopback_integration.cpp` | [a2a-integration-tests.md](./a2a-integration-tests.md) |
+| `AGENT_A2A_LIVE_TEST`, `AGENT_A2A_LIVE_BASE_URL` | Tier C：`test_a2a_live_smoke`（`http://` 源站 + 负例 JSON-RPC） | `tests/test_a2a_live_smoke.cpp` | 同上 |
+| `AGENT_A2A_LIVE_TOKEN` | Bearer，写入 `AgentClient::set_authentication` | `test_a2a_live_smoke.cpp` / `test_a2a_live_multi_agent.cpp` | 同上 |
+| `AGENT_A2A_MULTI_LIVE`, `AGENT_A2A_LIVE_AGENT_A_URL`, `AGENT_A2A_LIVE_AGENT_B_URL` | Tier D：`test_a2a_live_multi_agent` | `tests/test_a2a_live_multi_agent.cpp` | 同上 |
+| `AGENT_A2A_TIER_E`, `AGENT_A2A_TIER_E_AUTH_TOKEN`（可选） | Tier E：QPS + 大 body + 鉴权负例 | `tests/test_a2a_tier_e.cpp` | 同上 |
+| `AGENT_A2A_UPDATE_GOLDENS` | 维护者重写 golden（`a2a_fixture_regen`） | `tools/a2a_fixture_regen.cpp` | [phase-2-wp6.md](./phase-2-wp6.md) |
 
-**实现说明**：上述变量由 **测试驱动或未来可执行文件** 读取；未在核心库统一封装时，表中不强制 `src/` 路径（以实际测试代码为准）。
+**示例二进制 / demo**：`AGENT_SERVER_DEMO_ROLE`（`echo` \| `integration-worker` \| `integration-reviewer`）、`AGENT_SERVER_CARD_PUBLIC_BASE`、`AGENT_SERVER_AUTH_TOKEN` — [agent_server_demo.cpp](../../examples/agent_server_demo.cpp)；画像表见 [tests/fixtures/a2a/agents/README.md](../../tests/fixtures/a2a/agents/README.md)。
 
 ### 3.13 测试 / 示例专用（CMake 或二进制）
 
@@ -311,8 +312,8 @@ flowchart LR
 | 仅文档 / 未实现 | `AGENT_TOOL_HOOK_WARN_MS` | [phase-2-wp1d.md](./phase-2-wp1d.md) 规划，无 `getenv` |
 | 仅文档 / 未实现 | `AGENT_WEB_DENY_NETWORKS` | [builtin-web-tools.md](./builtin-web-tools.md) 描述，源码无对应键 |
 | 仅文档（规划） | `AGENT_VERIFIER*` 全家 | 见 [phase-2-wp8.md](./phase-2-wp8.md)，库内无读取 |
-| 仅文档（规划） | `AGENT_A2A_*` 集成测试闸门部分 | 以未来/现有测试二进制为准；核心库不统一导出 |
-| 仅文档（规划） | `AGENT_A2A_UPDATE_GOLDENS` | WP2.6 流程；依赖专用 regen 可执行文件，非运行时库 |
+| 已实现（测试 / 工具） | `AGENT_A2A_INTEGRATION_LOOPBACK` 等 | 见 §3.12；核心库不统一导出 |
+| 已实现（维护者） | `AGENT_A2A_UPDATE_GOLDENS` | `a2a_fixture_regen` 可执行文件（BUILD_TESTING） |
 | 文档计划 vs 当前 CMake | `AGENT_TEST_DATA_DIR` | [phase-1-wp7.md](./phase-1-wp7.md) 提及；当前 [CMakeLists.txt](../../CMakeLists.txt) 未检索到同名定义（可能已改用 `AGENT_TEST_FIXTURES` 等） |
 | 文档示例 / 非主路径 | `AGENT_MCP_SERVER_CMD`, `AGENT_MCP_SERVER_ARGS`, `AGENT_MCP_HTTP_URL`, `AGENT_MCP_AUTH_HEADER` | [phase-1-wp3.md](./phase-1-wp3.md)；当前主路径为 Cursor `mcp.json` + `AGENT_MCP_CONFIG_PATH` |
 | 实现存在 / guides 分散 | `AGENT_WEB_MAX_ARCHIVE_DOWNLOAD_BYTES` | 在 `web_archive.cpp`；主表已列；builtin-web 可补充一行防遗漏 |

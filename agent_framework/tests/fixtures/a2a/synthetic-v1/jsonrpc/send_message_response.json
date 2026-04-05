@@ -1,0 +1,16 @@
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "result": {
+    "task": {
+      "id": "task-syn-1",
+      "status": {
+        "state": "TASK_STATE_SUBMITTED",
+        "timestamp": "2026-04-05T00:00:00.000Z"
+      },
+      "history": [],
+      "artifacts": [],
+      "metadata": {}
+    }
+  }
+}

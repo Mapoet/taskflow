@@ -1,0 +1,24 @@
+{
+  "name": "FixtureSkillAgent",
+  "description": "Synthetic card with non-empty skills (WP2.a2a-test Tier A)",
+  "url": "https://example.invalid/a2a/rpc",
+  "version": "1.0.0",
+  "capabilities": {
+    "streaming": true,
+    "pushNotifications": false,
+    "stateTransitionHistory": false
+  },
+  "defaultInputModes": ["text/plain"],
+  "defaultOutputModes": ["text/plain"],
+  "skills": [
+    {
+      "id": "skill_echo",
+      "name": "skill_echo",
+      "description": "Echo fixture skill",
+      "tags": ["fixture", "echo"],
+      "inputModes": ["text/plain"],
+      "outputModes": ["text/plain"]
+    }
+  ],
+  "securitySchemes": {}
+}

@@ -1,0 +1,17 @@
+{
+  "jsonrpc": "2.0",
+  "method": "SendMessage",
+  "id": 1,
+  "params": {
+    "message": {
+      "messageId": "m-fix-req",
+      "role": "ROLE_USER",
+      "parts": [
+        {
+          "text": "fixture hello",
+          "mediaType": "text/plain"
+        }
+      ]
+    }
+  }
+}
