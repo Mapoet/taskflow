@@ -105,6 +105,8 @@ PromptRenderer::PromptRenderer()
     register_tool_formatter("openai-*", std::make_shared<OpenAIToolFormatter>());
     register_tool_formatter("deepseek-*", std::make_shared<OpenAIToolFormatter>());
     register_tool_formatter("claude-*", std::make_shared<AnthropicToolFormatter>());
+    // Unit/integration tests use ModelAdapter names like "fake-two-read-tools".
+    register_tool_formatter("fake-*", std::make_shared<OpenAIToolFormatter>());
 }
 
 PromptRenderer::PromptRenderer(std::shared_ptr<PromptTemplate> template_ptr)
