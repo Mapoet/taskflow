@@ -11,6 +11,9 @@
 #include <agent/a2a/sse_framing.hpp>
 #include <agent/types.hpp>
 
+#include <optional>
+#include <string>
+
 namespace agent_framework {
 namespace a2a {
 
@@ -35,6 +38,14 @@ AgentTaskStatus agent_task_status_from_a2a_state(std::string_view state);
  * @return 若根对象含 `statusUpdate` 且可解析 taskId/state 则 true，并写入 out（仅填充 task_id、status、updated_at）
  */
 bool try_parse_task_status_sse(const SseEvent& event, AgentTask& out);
+
+/** @brief StreamResponse.statusUpdate 根对象（ProtoJSON） */
+json stream_response_status_update(const AgentTask& task);
+
+/** @brief StreamResponse.artifactUpdate 根对象（ProtoJSON） */
+json stream_response_artifact_update(const AgentArtifact& artifact,
+                                     const std::string& task_id,
+                                     const std::optional<std::string>& context_id);
 
 } // namespace a2a
 } // namespace agent_framework

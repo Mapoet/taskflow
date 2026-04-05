@@ -338,5 +338,33 @@ bool try_parse_task_status_sse(const SseEvent& event, AgentTask& out) {
     return true;
 }
 
+json stream_response_status_update(const AgentTask& task) {
+    json su;
+    su["taskId"] = task.task_id;
+    if (task.session_id.has_value()) {
+        su["contextId"] = *task.session_id;
+    }
+    su["status"] = task_status_to_wire(task.status, task.updated_at);
+    json root;
+    root["statusUpdate"] = std::move(su);
+    return root;
+}
+
+json stream_response_artifact_update(const AgentArtifact& artifact,
+                                     const std::string& task_id,
+                                     const std::optional<std::string>& context_id) {
+    json au;
+    au["taskId"] = task_id;
+    if (context_id.has_value()) {
+        au["contextId"] = *context_id;
+    }
+    au["artifact"] = artifact_to_a2a_wire(artifact);
+    au["append"] = false;
+    au["lastChunk"] = true;
+    json root;
+    root["artifactUpdate"] = std::move(au);
+    return root;
+}
+
 } // namespace a2a
 } // namespace agent_framework

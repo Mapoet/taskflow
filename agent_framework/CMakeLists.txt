@@ -387,6 +387,12 @@ endif()
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/agent_server/agent_server.cpp)
     list(APPEND AGENT_SOURCES src/agent_server/agent_server.cpp)
 endif()
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/agent_server/task_dispatch_queue.cpp)
+    list(APPEND AGENT_SOURCES src/agent_server/task_dispatch_queue.cpp)
+endif()
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/agent_server/sse_server_channel.cpp)
+    list(APPEND AGENT_SOURCES src/agent_server/sse_server_channel.cpp)
+endif()
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/agent_types_serialization.cpp)
     list(APPEND AGENT_SOURCES src/agent_types_serialization.cpp)
 endif()
@@ -444,6 +450,8 @@ set(AGENT_HEADERS
     include/agent/skill_services.hpp
     include/agent/skill_script_tool.hpp
     include/agent/internal/skill_frontmatter_parse.hpp
+    include/agent/internal/task_dispatch_queue.hpp
+    include/agent/internal/sse_server_channel.hpp
     include/agent/expr_tools.hpp
     include/agent/draw_tools.hpp
 )
@@ -780,6 +788,15 @@ if(BUILD_TESTING)
         endif()
         add_test(NAME a2a_dispatch_table COMMAND test_a2a_dispatch_table)
         set_tests_properties(a2a_dispatch_table PROPERTIES ENVIRONMENT "AGENT_TOOL_ALLOWLIST=")
+    endif()
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_agent_server_wp22.cpp)
+        add_executable(test_agent_server_wp22 tests/test_agent_server_wp22.cpp)
+        target_link_libraries(test_agent_server_wp22 PRIVATE agent_framework)
+        if(CMAKE_USE_PTHREADS_INIT)
+            target_link_libraries(test_agent_server_wp22 PRIVATE Threads::Threads)
+        endif()
+        add_test(NAME agent_server_wp22 COMMAND test_agent_server_wp22)
+        set_tests_properties(agent_server_wp22 PROPERTIES ENVIRONMENT "AGENT_TOOL_ALLOWLIST=")
     endif()
     if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_agent_loop_wp5.cpp)
         add_executable(test_agent_loop_wp5 tests/test_agent_loop_wp5.cpp)

@@ -15,23 +15,36 @@
 #include <mutex>
 #include <memory>
 #include <functional>
+#include <thread>
+#include <atomic>
 #include <agent/types.hpp>
-#include <agent/sse_connection.hpp>
 #include <nlohmann/json.hpp>
 
-// 前向声明 workflow 和 httplib
 namespace workflow {
-    class GraphBuilder;
+class GraphBuilder;
+}
+
+namespace tf {
+class Executor;
 }
 
 namespace httplib {
-    class Server;
-    class Request;
-    class Response;
+class Server;
+class Request;
+class Response;
 }
 
 namespace agent_framework {
-    
+
+namespace internal {
+class TaskDispatchQueue;
+class SseServerChannel;
+}
+
+namespace a2a {
+class DispatchTable;
+}
+
 using json = nlohmann::json;
 
 /**
@@ -42,39 +55,36 @@ class AgentServer {
 public:
     /**
      * @brief 构造函数
-     * @param port 服务器端口（默认 8080）
+     * @param port 服务器端口（默认 8080）；传入 0 时 start() 使用系统分配临时端口（见 bound_port()）
      */
     explicit AgentServer(int port = 8080);
-    
-    /**
-     * @brief 析构函数
-     */
+
     ~AgentServer();
-    
+
+    AgentServer(const AgentServer&) = delete;
+    AgentServer& operator=(const AgentServer&) = delete;
+
     /**
-     * @brief 启动服务器（阻塞调用）
+     * @brief 启动服务器（阻塞调用 listen）
      */
     void start();
-    
+
     /**
      * @brief 停止服务器
      */
     void stop();
-    
+
+    /** @brief listen 成功后实际绑定的端口（port==0 时有效） */
+    int bound_port() const { return bound_port_; }
+
     /**
      * @brief 注册本 Agent 的 Agent Card
      * @param card Agent Card
      */
     void register_agent_card(const AgentCard& card);
-    
+
     /**
      * @brief 设置任务处理器（将 Agent Task 转换为 workflow 执行）
-     * @param handler 任务处理器函数
-     * 
-     * handler 签名：
-     * ```cpp
-     * std::future<AgentTask>(const AgentTask& task, std::shared_ptr<workflow::GraphBuilder> builder)
-     * ```
      */
     void set_task_handler(
         std::function<std::future<AgentTask>(
@@ -82,137 +92,84 @@ public:
             std::shared_ptr<workflow::GraphBuilder> builder
         )> handler
     );
-    
+
     /**
      * @brief 设置认证验证器
-     * @param validator 验证器函数
-     * 
-     * validator 签名：
-     * ```cpp
-     * bool(const std::map<std::string, std::string>& headers)
-     * ```
      */
     void set_authentication_validator(
         std::function<bool(const std::map<std::string, std::string>& headers)> validator
     );
-    
-    /**
-     * @brief 推送任务状态更新（通过 SSE）
-     * @param task_id 任务 ID
-     * @param task 任务对象
-     */
+
     void push_task_status_update(const std::string& task_id, const AgentTask& task);
-    
-    /**
-     * @brief 推送 Artifact 更新（通过 SSE）
-     * @param task_id 任务 ID
-     * @param artifact Artifact 对象
-     */
+
     void push_artifact_update(const std::string& task_id, const AgentArtifact& artifact);
-    
-    /**
-     * @brief 通过 Webhook 通知任务更新
-     * @param task_id 任务 ID
-     * @param task 任务对象
-     */
+
     void notify_task_update_via_webhook(const std::string& task_id, const AgentTask& task);
-    
+
 private:
-    int port_;                                                              // 服务器端口
-    void* http_server_;                                                     // httplib::Server*，在实现文件中转换为具体类型（避免头文件依赖）
-    AgentCard agent_card_;                                                  // Agent Card
-    std::map<std::string, AgentTask> active_tasks_;                        // 活动任务（key: task_id）
-    std::map<std::string, std::vector<std::shared_ptr<SSEConnection>>> sse_subscribers_;  // SSE 订阅者（key: task_id）
-    std::map<std::string, std::string> webhook_urls_;                      // Webhook URL（key: task_id）
-    mutable std::mutex tasks_mutex_;                                       // 任务互斥锁
-    mutable std::mutex sse_mutex_;                                         // SSE 互斥锁
-    
-    // 任务处理器（将 Agent Task 转换为 workflow）
-    std::function<std::future<AgentTask>(const AgentTask&, std::shared_ptr<workflow::GraphBuilder>)> task_handler_;
-    
-    // 认证验证器
+    int port_;
+    int bound_port_{-1};
+    void* http_server_{nullptr};
+    AgentCard agent_card_;
+    std::map<std::string, AgentTask> active_tasks_;
+    std::map<std::string, std::vector<std::shared_ptr<internal::SseServerChannel>>> sse_subscribers_;
+    std::map<std::string, std::string> webhook_urls_;
+    mutable std::mutex tasks_mutex_;
+    mutable std::mutex sse_mutex_;
+
+    std::function<std::future<AgentTask>(const AgentTask&, std::shared_ptr<workflow::GraphBuilder>)>
+        task_handler_;
     std::function<bool(const std::map<std::string, std::string>&)> auth_validator_;
-    
-    /**
-     * @brief 设置 HTTP 路由
-     */
+
+    std::unique_ptr<internal::TaskDispatchQueue> task_queue_;
+    std::vector<std::thread> dispatch_workers_;
+    std::shared_ptr<tf::Executor> process_executor_;
+    std::unique_ptr<a2a::DispatchTable> rpc_dispatch_;
+    std::atomic<bool> routes_ready_{false};
+    std::atomic<bool> workers_started_{false};
+
+    void ensure_runtime();
+    void start_dispatch_workers();
+    void dispatch_worker_loop();
+    void run_agent_task_on_executor(const std::string& task_id,
+                                    AgentTask task_snapshot,
+                                    std::shared_ptr<workflow::GraphBuilder> builder);
+
     void setup_routes();
-    
-    /**
-     * @brief 处理 /.well-known/agent-card 请求
-     * @param res HTTP 响应
-     */
+    void register_jsonrpc_methods();
+
     void handle_well_known_agent_card(httplib::Response& res);
-    
-    /**
-     * @brief 处理 /tasks/send 请求（创建/更新任务）
-     * @param req HTTP 请求
-     * @param res HTTP 响应
-     */
+    void handle_health(httplib::Response& res);
+
+    void handle_jsonrpc_post(const httplib::Request& req, httplib::Response& res);
+
     void handle_tasks_send(const httplib::Request& req, httplib::Response& res);
-    
-    /**
-     * @brief 处理 /tasks/get 请求（获取任务状态）
-     * @param req HTTP 请求
-     * @param res HTTP 响应
-     */
     void handle_tasks_get(const httplib::Request& req, httplib::Response& res);
-    
-    /**
-     * @brief 处理 /tasks/cancel 请求（取消任务）
-     * @param req HTTP 请求
-     * @param res HTTP 响应
-     */
     void handle_tasks_cancel(const httplib::Request& req, httplib::Response& res);
-    
-    /**
-     * @brief 处理 /tasks/update 请求（追加消息）
-     */
     void handle_tasks_update(const httplib::Request& req, httplib::Response& res);
-    
-    /**
-     * @brief 处理 /tasks/sendSubscribe 请求（订阅 SSE 更新）
-     * @param req HTTP 请求
-     * @param res HTTP 响应
-     */
     void handle_tasks_send_subscribe(const httplib::Request& req, httplib::Response& res);
-    
-    /**
-     * @brief 处理 /tasks/resubscribe 请求（重新订阅）
-     * @param req HTTP 请求
-     * @param res HTTP 响应
-     */
     void handle_tasks_resubscribe(const httplib::Request& req, httplib::Response& res);
-    
-    /**
-     * @brief 处理 /tasks/pushNotification/set 请求（设置 Webhook）
-     * @param req HTTP 请求
-     * @param res HTTP 响应
-     */
     void handle_push_notification_set(const httplib::Request& req, httplib::Response& res);
-    
-    /**
-     * @brief 处理 /tasks/pushNotification/get 请求（获取 Webhook 配置）
-     * @param req HTTP 请求
-     * @param res HTTP 响应
-     */
     void handle_push_notification_get(const httplib::Request& req, httplib::Response& res);
-    
-    /**
-     * @brief 验证请求认证
-     * @param req HTTP 请求
-     * @return 是否认证通过
-     */
+
     bool validate_authentication(const httplib::Request& req);
-    
-    /**
-     * @brief 生成唯一任务 ID
-     * @return 任务 ID
-     */
+
+    json jsonrpc_send_message(const json& params);
+    json jsonrpc_get_task(const json& params);
+    json jsonrpc_cancel_task(const json& params);
+    json jsonrpc_list_tasks(const json& params);
+
+    AgentTask create_task_from_message_wire(const AgentMessage& initial_message,
+                                            const std::optional<std::string>& session_id,
+                                            const json& metadata);
+
     static std::string generate_task_id();
+    static std::map<std::string, std::string> lower_headers(const httplib::Request& req);
+
+    void remove_sse_channel(const std::string& task_id,
+                            const std::shared_ptr<internal::SseServerChannel>& ch);
 };
 
 } // namespace agent_framework
 
 #endif // __AGENT_SERVER_H__
-

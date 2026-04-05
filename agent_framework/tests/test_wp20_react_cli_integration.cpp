@@ -87,7 +87,7 @@ public:
     void configure(const ModelConfig& /*config*/) override {}
 
     std::string get_model_name() const override {
-        return "two-turn-hist-fake";
+        return "fake-model-two-turn-hist";
     }
 
     bool supports_multimodal() const override {

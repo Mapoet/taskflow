@@ -28,6 +28,9 @@
 | 字符编码 | **UTF-8**，**无 BOM** |
 | Well-Known Agent Card | **HTTP GET**，路径 **`/.well-known/agent-card.json`**（RFC 8615） |
 | JSON-RPC HTTP | **单一路径**：**POST** 至 Agent Card 声明的 **JSON-RPC 基 URL**（与 **Helloworld / 单接口** 示例一致：无 per-method path）。**`params` 必须为 object**（见 §8）。 |
+| JSON-RPC 路径（本仓库实现） | 默认从 **`AgentCard::api_endpoint` 的 URL 路径** 推导；空路径则为 **`/`**。环境变量 **`AGENT_SERVER_JSON_RPC_PATH`** 非空时覆盖。 |
+| JSON-RPC HTTP 状态码 | **一律 HTTP 200** 承载 JSON-RPC 信封（含 `error`）；与常见 JSON-RPC over HTTP 一致。 |
+| SubscribeToTask（HTTP 侧，WP2.2） | 本仓库选用 **legacy 对照** 路径：**`GET /tasks/sendSubscribe?task_id=<id>`**（tracker §7）；规范 **`GET /tasks/{id}:subscribe`** 留待 WP2.4 等与客户端一并扩展。 |
 | Content-Type | 请求/响应 JSON 正文由 WP2.2 设为 `application/json` |
 | HTTP+JSON / gRPC | 规范另有 **`/message:send`、`GET /tasks/{id}`** 等绑定（见 `a2a.proto` `google.api.http`）。本仓库 **主目标**为 JSON-RPC 绑定；REST 路径为 **legacy**（见 §7）。 |
 
@@ -269,3 +272,4 @@ WP2.2 起 **禁止** 再向线路上发送无 `StreamResponse` 包裹的自定�
 |------|------|------|
 | 2026-04-05 | 0.1 | WP2.1a：§1–2、§4 Card、§8 JSON-RPC、初版 §7 |
 | 2026-04-05 | 0.2 | **WP2.1**：§3 方法表、§5 `StreamResponse` SSE、§5.1 Identity、§6 ProtoJSON 映射与状态表、§7 legacy 对照、§4.1 v1 Card 差异说明 |
+| 2026-04-05 | 0.3 | **WP2.2**：§2 增补 JSON-RPC 路径解析、HTTP 200 错误信封、`sendSubscribe` HTTP 绑定字面量 |
