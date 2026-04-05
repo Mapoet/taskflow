@@ -1,0 +1,15 @@
+{
+  "name": "FixtureAgent",
+  "description": "Fixture agent for WP2.1a",
+  "url": "https://example.org/rpc",
+  "version": "2.0.0",
+  "capabilities": {
+    "streaming": true,
+    "pushNotifications": false,
+    "stateTransitionHistory": false
+  },
+  "defaultInputModes": ["text/plain"],
+  "defaultOutputModes": ["text/plain"],
+  "skills": [],
+  "securitySchemes": {}
+}

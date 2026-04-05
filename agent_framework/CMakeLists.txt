@@ -382,6 +382,12 @@ endif()
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/agent_types_serialization.cpp)
     list(APPEND AGENT_SOURCES src/agent_types_serialization.cpp)
 endif()
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/a2a/jsonrpc.cpp)
+    list(APPEND AGENT_SOURCES src/a2a/jsonrpc.cpp)
+endif()
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/a2a/wire_card.cpp)
+    list(APPEND AGENT_SOURCES src/a2a/wire_card.cpp)
+endif()
 
 # 头文件
 set(AGENT_HEADERS
@@ -402,6 +408,8 @@ set(AGENT_HEADERS
     include/agent/agent_client.hpp
     include/agent/httplib_http_client.hpp
     include/agent/agent_server.hpp
+    include/agent/a2a/jsonrpc.hpp
+    include/agent/a2a/wire_card.hpp
     include/node/node_factory.hpp
     include/node/llm_node.hpp
     include/node/knowledge_base_node.hpp
@@ -696,6 +704,32 @@ if(BUILD_TESTING)
         endif()
         add_test(NAME wp20_react_cli_integration COMMAND test_wp20_react_cli_integration)
         set_tests_properties(wp20_react_cli_integration PROPERTIES ENVIRONMENT "AGENT_TOOL_ALLOWLIST=")
+    endif()
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_a2a_jsonrpc.cpp)
+        add_executable(test_a2a_jsonrpc tests/test_a2a_jsonrpc.cpp)
+        target_link_libraries(test_a2a_jsonrpc PRIVATE agent_framework)
+        if(CMAKE_USE_PTHREADS_INIT)
+            target_link_libraries(test_a2a_jsonrpc PRIVATE Threads::Threads)
+        endif()
+        add_test(NAME a2a_jsonrpc COMMAND test_a2a_jsonrpc)
+        set_tests_properties(a2a_jsonrpc PROPERTIES ENVIRONMENT "AGENT_TOOL_ALLOWLIST=")
+    endif()
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_a2a_wire_card.cpp)
+        add_executable(test_a2a_wire_card tests/test_a2a_wire_card.cpp)
+        target_link_libraries(test_a2a_wire_card PRIVATE agent_framework)
+        if(CMAKE_USE_PTHREADS_INIT)
+            target_link_libraries(test_a2a_wire_card PRIVATE Threads::Threads)
+        endif()
+        target_compile_definitions(test_a2a_wire_card PRIVATE
+            "AGENT_TEST_A2A_FIXTURE_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}\"")
+        add_test(NAME a2a_wire_card COMMAND test_a2a_wire_card)
+        set_tests_properties(a2a_wire_card PROPERTIES ENVIRONMENT "AGENT_TOOL_ALLOWLIST=")
+    endif()
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_a2a_tracker_present.cpp)
+        add_executable(test_a2a_tracker_present tests/test_a2a_tracker_present.cpp)
+        target_compile_definitions(test_a2a_tracker_present PRIVATE
+            "AGENT_TEST_A2A_TRACKER_PATH=\"${CMAKE_CURRENT_SOURCE_DIR}/docs/guides/a2a-spec-tracker.md\"")
+        add_test(NAME a2a_tracker_present COMMAND test_a2a_tracker_present)
     endif()
     if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_agent_loop_wp5.cpp)
         add_executable(test_agent_loop_wp5 tests/test_agent_loop_wp5.cpp)
