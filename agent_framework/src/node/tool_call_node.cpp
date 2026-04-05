@@ -4,7 +4,7 @@
  */
 
 #include "node/tool_call_node.hpp"
-#include <mutex>
+
 #include <vector>
 
 namespace agent_framework {
@@ -40,43 +40,34 @@ ToolCallNode::create_parallel(
     workflow::GraphBuilder& builder,
     const std::string& name,
     std::shared_ptr<ToolBus> toolbus,
-    const std::vector<std::pair<std::string, std::string>>& input_specs
-) {
-    // 创建共享状态
-    auto shared_results = std::make_shared<std::vector<json>>();
-    auto results_mutex = std::make_shared<std::mutex>();
-    
-    // 使用普通节点实现并行工具调用（等待所有调用完成）
-    auto parallel_functor = [toolbus, shared_results, results_mutex](
-        const std::unordered_map<std::string, std::any>& inputs
-    ) -> std::unordered_map<std::string, std::any> {
-        // 提取工具调用列表
-        std::vector<CallSpec> call_list = std::any_cast<std::vector<CallSpec>>(
-            inputs.at("call_list")
-        );
-        
-        // 并行执行所有工具调用（使用 std::async）
-        std::vector<std::future<json>> futures;
-        for (const auto& call_spec : call_list) {
-            auto future = toolbus->call_tool(call_spec.name, call_spec.arguments);
-            futures.push_back(std::move(future));
-        }
-        
-        // 收集所有结果
+    const std::vector<std::pair<std::string, std::string>>& input_specs,
+    const ToolOrchestrationOptions& orch_opts) {
+    auto parallel_functor = [toolbus, orch_opts](
+        const std::unordered_map<std::string, std::any>& inputs)
+        -> std::unordered_map<std::string, std::any> {
+        std::vector<CallSpec> call_list =
+            std::any_cast<std::vector<CallSpec>>(inputs.at("call_list"));
+        auto classify = [toolbus](std::string_view nm) -> ToolSideEffect {
+            return toolbus->get_tool_meta(std::string(nm)).side_effect;
+        };
+        std::vector<json> raw =
+            execute_tool_calls_sequenced(toolbus, call_list, orch_opts, classify);
+        std::vector<json> results;
+        results.reserve(raw.size());
         std::vector<std::string> tool_names;
-        for (size_t i = 0; i < futures.size(); ++i) {
-            json result = futures[i].get();
-            result["tool_name"] = call_list[i].name;
-            shared_results->push_back(result);
+        tool_names.reserve(call_list.size());
+        for (std::size_t i = 0; i < raw.size(); ++i) {
+            json one = std::move(raw[i]);
+            one["tool_name"] = call_list[i].name;
             tool_names.push_back(call_list[i].name);
+            results.push_back(std::move(one));
         }
-        
         return {
-            {"results", std::any{*shared_results}},
-            {"tool_names", std::any{tool_names}}
+            {"results", std::any{std::move(results)}},
+            {"tool_names", std::any{std::move(tool_names)}}
         };
     };
-    
+
     return builder.create_any_node(
         name,
         input_specs,
@@ -97,26 +88,6 @@ std::unordered_map<std::string, std::any> ToolCallNode::execute_single_tool(
         {"result", std::any{result}},
         {"tool_name", std::any{call_spec.name}}
     };
-}
-
-void ToolCallNode::execute_parallel_tool(
-    const CallSpec& call_spec,
-    std::shared_ptr<std::vector<json>> shared_results,
-    std::shared_ptr<std::mutex> results_mutex,
-    std::shared_ptr<ToolBus> toolbus
-) {
-    // 调用工具
-    auto future = toolbus->call_tool(call_spec.name, call_spec.arguments);
-    json result = future.get();
-    
-    // 添加工具名称到结果中
-    result["tool_name"] = call_spec.name;
-    
-    // 线程安全地添加到共享结果列表
-    {
-        std::lock_guard<std::mutex> lock(*results_mutex);
-        shared_results->push_back(result);
-    }
 }
 
 } // namespace node

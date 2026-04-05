@@ -265,6 +265,14 @@ std::vector<ToolMeta> ToolBus::export_as_llm_tools() const {
     return out;
 }
 
+ToolMeta ToolBus::get_tool_meta(const std::string& name) const {
+    auto tool = find_tool(name);
+    if (tool == nullptr) {
+        return ToolMeta{};
+    }
+    return tool->get_tool_meta(name);
+}
+
 std::optional<ToolInfo> ToolBus::get_tool_info(const std::string& name) const {
     auto tool = find_tool(name);
     if (tool == nullptr) {

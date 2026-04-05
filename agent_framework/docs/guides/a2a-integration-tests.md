@@ -81,7 +81,7 @@
 
 **步骤（须实现为稳定单测或可执行文件）**：
 
-1. **JSON-RPC 通用层**（WP2.1a）：非法 batch、notification、`params` 为 array、缺 `id` 等 → 与 §5 错误码一致（与现有 `test_a2a_jsonrpc` 同族扩展）。
+1. **JSON-RPC 通用层**（WP2.1a）：非法 batch、notification、`params` 为 array、缺 `id` 等 → 与 **tracker §8** 错误码一致（与现有 `test_a2a_jsonrpc` 同族扩展）。
 2. **Card round-trip**：`card_min.json` 及 **至少一份「含非空 `skills`」** fixture → `from_a2a_wire` → `to_a2a_wire` → **语义字段**一致（允许 tracker 已声明的 **非保留字段丢失**，与 WP2.1a 未知键策略一致）；**必填键缺失** → `std::invalid_argument` 或项目统一错误类型。
 3. **任务 wire**（WP2.1）：对每个已支持的 **Task/Message/Artifact** JSON 样例：**parse → 内部类型 → serialize** 与黄金文件 `equals_after_parse`（**WP2.6** 流程：`AGENT_A2A_UPDATE_GOLDENS=1` 仅人工门禁更新）。
 4. **SSE 事件**（WP2.1）：对每种注册的事件名，**单行 `data:` JSON** 与 **多帧** 样例解析成功，且 **未知事件** 策略与实现文档一致（丢弃 / 记录 / 严格失败 — **须在 tracker 或 wp2 文档锁定一种**）。
@@ -144,7 +144,7 @@
 2. 校验 **TLS**（若 `https`）：证书主机名匹配或 CI 使用 **受信测试 CA**（文档说明 `SSL_CERT_FILE`）。
 3. 跑 **与 Tier B 同序** 的发现 → 创建任务 → SSE 或轮询至完成。
 4. **负例**（须各至少 1 条）：
-   - 非法 JSON body → **Parse error** 行为与 §5 一致；
+   - 非法 JSON body → **Parse error** 行为与 tracker **§8** 一致；
    - 未知 `method` → `-32601`；
    - 畸形 `params`（缺必填键）→ `-32602`；
    - **WP2.7**：若启用严格输入策略，**恶意 `@file` 路径** → `-32602` 且 `message` 前缀 **`input_policy_violation`**（与 [phase-2-wp7.md](./phase-2-wp7.md) 一致）。

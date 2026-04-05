@@ -214,6 +214,7 @@ void register_web_configured_source_if_configured(ToolBus& bus) {
             },
             "required": ["kind", "source_id"]
         })");
+    meta.side_effect = ToolSideEffect::ReadOnly;
     bus.register_local_tool(
         "web_configured_source",
         [cat](const json& args) { return web_configured_source_invoke(cat, args); }, meta);

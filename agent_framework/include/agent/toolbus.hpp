@@ -1,6 +1,6 @@
 /**
  * @file toolbus.hpp
- * @brief ToolBus 模块：统一工具管理接口
+ * @brief ToolBus 模块：统一工具管理接口；WP2.1b 编排 API（`ToolOrchestrationOptions` / `execute_tool_calls_sequenced`）亦在本文件末尾声明
  * @author Mapoet
  * @version 0.1
  * @date 2025-01-XX
@@ -18,6 +18,7 @@
 #include <future>
 #include <mutex>
 #include <optional>
+#include <string_view>
 #include <utility>
 
 #include "mcp_client.hpp"
@@ -241,6 +242,11 @@ public:
      * @return 工具元数据列表
      */
     std::vector<ToolMeta> export_as_llm_tools() const;
+
+    /**
+     * @brief 工具元数据（含 WP2.1b side_effect）；未知工具返回空 ToolMeta
+     */
+    ToolMeta get_tool_meta(const std::string& name) const;
     
     /**
      * @brief 查询工具信息
@@ -290,6 +296,33 @@ private:
      */
     std::shared_ptr<ToolInterface> find_tool(const std::string& name) const;
 };
+
+// ============================================================================
+// 工具编排（WP2.1b，经 ToolBus::call_tool 执行）
+// ============================================================================
+
+/**
+ * @brief 解析后的编排开关（AgentConfig + 环境变量）
+ */
+struct ToolOrchestrationOptions {
+    bool enable_parallel_reads = false;
+    int max_parallel_reads = 4;
+};
+
+ToolOrchestrationOptions resolve_tool_orchestration_options(const AgentConfig& cfg);
+
+/**
+ * @brief 按工具名解析副作用（通常来自 ToolBus::get_tool_meta(name).side_effect）
+ */
+using ToolSideEffectResolver = std::function<ToolSideEffect(std::string_view tool_name)>;
+
+/**
+ * @brief 读并行（有上限）+ 写/Unknown 串行；结果顺序与 calls 一致
+ */
+std::vector<json> execute_tool_calls_sequenced(std::shared_ptr<ToolBus> bus,
+                                               const std::vector<CallSpec>& calls,
+                                               const ToolOrchestrationOptions& opts,
+                                               ToolSideEffectResolver classify);
 
 } // namespace agent_framework
 

@@ -126,6 +126,7 @@ void register_skill_script_tool(ToolBus& bus, const std::shared_ptr<SkillService
         },
         "required": ["skill_id", "relative_path"]
     })");
+    meta.side_effect = ToolSideEffect::Write;
 
     auto reg = services->registry;
 

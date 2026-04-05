@@ -10,6 +10,7 @@
 #include "agent/internal/agent_thread_state.hpp"
 #include "agent/internal/loop_io_keys.hpp"
 #include "agent/skill_services.hpp"
+#include "agent/toolbus.hpp"
 #include <any>
 #include <functional>
 #include <unordered_map>
@@ -241,7 +242,7 @@ AgentLoopNode::create(
         }
         shared->state->history.push_back(std::move(a));
 
-        // tools (sequential)
+        // tools: WP2.1b orchestration (read parallel + cap) + repeat guard
         std::vector<CallSpec> calls = llm_out.tool_calls;
         if (static_cast<int>(calls.size()) > agent_config.max_tool_calls_per_iteration) {
             calls.resize(static_cast<std::size_t>(agent_config.max_tool_calls_per_iteration));
@@ -252,68 +253,129 @@ AgentLoopNode::create(
         if (guard_repeat_on) {
             seen_calls.reserve(calls.size());
         }
-        for (const auto& c : calls) {
-            if (dbg) {
-                std::cout << "[AgentLoop] calling tool " << c.name << " args=" << c.arguments.dump()
-                          << "\n";
-                std::cout.flush();
+
+        const ToolOrchestrationOptions orch_opts = resolve_tool_orchestration_options(agent_config);
+        auto classify_side = [toolbus](std::string_view nm) -> ToolSideEffect {
+            return toolbus->get_tool_meta(std::string(nm)).side_effect;
+        };
+
+        auto trigger_repeat_guard = [&](const CallSpec& c, const std::string& call_key) {
+            const int iter = shared->state ? shared->state->iteration : 0;
+            const std::string details = trunc_copy(call_key, guard_trunc);
+            shared->is_final = true;
+            shared->final_answer =
+                "[guard] reason=repeat_tool_call_in_iteration iter=" + std::to_string(iter) +
+                "\nDetected repeated tool call within the same iteration. "
+                "Please avoid calling the same tool with identical arguments repeatedly. "
+                "If inputs are missing, state the assumptions or request the missing fields.\n"
+                "tool_call_key(truncated): " +
+                details + "\n";
+            shared->last_llm.is_final = true;
+            shared->last_llm.final_answer = shared->final_answer;
+            shared->last_llm.tool_calls.clear();
+            if (log_at_least(LogLevel::Warn)) {
+                std::clog << "[guard] reason=repeat_tool_call_in_iteration iter=" << iter
+                          << " tool=" << c.name << "\n";
+                std::clog.flush();
             }
+        };
 
-            const std::string call_key = c.name + "\n" + c.arguments.dump();
-            if (guard_repeat_on) {
-                if (seen_calls.find(call_key) != seen_calls.end()) {
-                    const int iter = shared->state ? shared->state->iteration : 0;
-                    const std::string details = trunc_copy(call_key, guard_trunc);
-                    shared->is_final = true;
-                    shared->final_answer =
-                        "[guard] reason=repeat_tool_call_in_iteration iter=" +
-                        std::to_string(iter) +
-                        "\nDetected repeated tool call within the same iteration. "
-                        "Please avoid calling the same tool with identical arguments repeatedly. "
-                        "If inputs are missing, state the assumptions or request the missing fields.\n"
-                        "tool_call_key(truncated): " +
-                        details + "\n";
-                    shared->last_llm.is_final = true;
-                    shared->last_llm.final_answer = shared->final_answer;
-                    shared->last_llm.tool_calls.clear();
-
-                    if (log_at_least(LogLevel::Warn)) {
-                        std::clog << "[guard] reason=repeat_tool_call_in_iteration iter=" << iter
-                                  << " tool=" << c.name << "\n";
-                        std::clog.flush();
-                    }
-                    break;
-                }
-                seen_calls.insert(call_key);
-            }
-
+        auto append_tool_message = [&](const CallSpec& c, json result) {
             if (log_at_least(LogLevel::Info)) {
                 std::clog << "\n[tool] name=" << c.name << " start\n";
                 std::clog.flush();
             }
-            json result = toolbus->call_tool(c.name, c.arguments).get();
+            const bool warn_code =
+                result.is_object() && result.contains("code") && result["code"].is_string();
             Message tm;
             tm.role = "tool";
             tm.tool_call_id = c.tool_call_id;
             tm.tool_name = c.name;
-            tm.tool_result = result;
+            tm.tool_result = std::move(result);
             tm.timestamp = std::time(nullptr);
             shared->state->history.push_back(std::move(tm));
             if (log_at_least(LogLevel::Info)) {
                 std::clog << "[tool] name=" << c.name << " done\n";
                 std::clog.flush();
             }
-            if (result.is_object() && result.contains("code") && result["code"].is_string()) {
-                if (log_at_least(LogLevel::Warn)) {
-                    std::clog << "[tool] name=" << c.name << " warn code=" << result["code"].dump()
-                              << "\n";
-                    std::clog.flush();
-                }
+            if (warn_code && log_at_least(LogLevel::Warn)) {
+                const Message& back = shared->state->history.back();
+                std::clog << "[tool] name=" << c.name
+                          << " warn code=" << (*back.tool_result)["code"].dump() << "\n";
+                std::clog.flush();
             }
             if (dbg) {
-                std::cout << "[AgentLoop] tool " << c.name << " result=" << result.dump() << "\n";
+                const Message& back = shared->state->history.back();
+                std::cout << "[AgentLoop] tool " << c.name << " result=" << back.tool_result->dump()
+                          << "\n";
                 std::cout.flush();
             }
+        };
+
+        bool stop_tools = false;
+        for (std::size_t i = 0; i < calls.size() && !stop_tools && toolbus;) {
+            const ToolSideEffect se = classify_side(calls[i].name);
+            const bool parallel_read_group =
+                orch_opts.enable_parallel_reads && se == ToolSideEffect::ReadOnly;
+
+            if (!parallel_read_group) {
+                const CallSpec& c = calls[i];
+                if (dbg) {
+                    std::cout << "[AgentLoop] calling tool " << c.name << " args=" << c.arguments.dump()
+                              << "\n";
+                    std::cout.flush();
+                }
+                const std::string call_key = c.name + "\n" + c.arguments.dump();
+                if (guard_repeat_on) {
+                    if (seen_calls.find(call_key) != seen_calls.end()) {
+                        trigger_repeat_guard(c, call_key);
+                        break;
+                    }
+                    seen_calls.insert(call_key);
+                }
+                json result = toolbus->call_tool(c.name, c.arguments).get();
+                append_tool_message(c, std::move(result));
+                ++i;
+                continue;
+            }
+
+            std::size_t j = i + 1;
+            while (j < calls.size() && classify_side(calls[j].name) == ToolSideEffect::ReadOnly) {
+                ++j;
+            }
+
+            bool group_abort = false;
+            for (std::size_t k = i; k < j; ++k) {
+                const CallSpec& c = calls[k];
+                const std::string call_key = c.name + "\n" + c.arguments.dump();
+                if (guard_repeat_on) {
+                    if (seen_calls.find(call_key) != seen_calls.end()) {
+                        trigger_repeat_guard(c, call_key);
+                        group_abort = true;
+                        break;
+                    }
+                    seen_calls.insert(call_key);
+                }
+            }
+            if (group_abort) {
+                break;
+            }
+
+            std::vector<CallSpec> sub(calls.begin() + static_cast<std::ptrdiff_t>(i),
+                                      calls.begin() + static_cast<std::ptrdiff_t>(j));
+            for (const auto& c : sub) {
+                if (dbg) {
+                    std::cout << "[AgentLoop] calling tool (read group) " << c.name
+                              << " args=" << c.arguments.dump() << "\n";
+                    std::cout.flush();
+                }
+            }
+            std::vector<json> part =
+                execute_tool_calls_sequenced(toolbus, sub, orch_opts, classify_side);
+            for (std::size_t t = 0; t < sub.size(); ++t) {
+                append_tool_message(sub[t], std::move(part[t]));
+            }
+            i = j;
         }
 
         shared->state->iteration += 1;
@@ -378,7 +440,7 @@ void AgentLoopNode::build_loop_body(
         nullptr);
     (void)llm_task;
 
-    // ToolAggregator: sequential tool execution
+    // ToolAggregator: WP2.1b orchestration (same as loop body minus repeat guard)
     auto tool_agg = [toolbus, agent_config](
                         const std::unordered_map<std::string, std::any>& inps)
         -> std::unordered_map<std::string, std::any> {
@@ -391,19 +453,32 @@ void AgentLoopNode::build_loop_body(
             calls.resize(static_cast<std::size_t>(agent_config.max_tool_calls_per_iteration));
         }
 
-        for (const auto& c : calls) {
-            json result = toolbus->call_tool(c.name, c.arguments).get();
+        if (!toolbus || calls.empty()) {
+            return {
+                {std::string(internal::kToolMessages), std::any{tool_msgs}},
+                {std::string(internal::kToolHadError), std::any{had_error}}
+            };
+        }
+
+        const ToolOrchestrationOptions orch_opts = resolve_tool_orchestration_options(agent_config);
+        auto classify_side = [toolbus](std::string_view nm) -> ToolSideEffect {
+            return toolbus->get_tool_meta(std::string(nm)).side_effect;
+        };
+        std::vector<json> results =
+            execute_tool_calls_sequenced(toolbus, calls, orch_opts, classify_side);
+        for (std::size_t idx = 0; idx < calls.size(); ++idx) {
+            const json& result = results[idx];
             Message m;
             m.role = "tool";
             m.content = "";
-            m.tool_name = c.name;
+            m.tool_call_id = calls[idx].tool_call_id;
+            m.tool_name = calls[idx].name;
             m.tool_result = result;
             m.timestamp = std::time(nullptr);
-            tool_msgs.push_back(std::move(m));
-
             if (result.is_object() && result.contains("code") && result["code"].is_string()) {
                 had_error = true;
             }
+            tool_msgs.push_back(std::move(m));
         }
 
         return {

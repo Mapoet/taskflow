@@ -47,6 +47,10 @@ Agent Framework 采用分层架构设计：
 
 ## A2A HTTP 绑定（当前实现）
 
+**规范目标（线协议唯一权威）**：[`docs/guides/a2a-spec-tracker.md`](../guides/a2a-spec-tracker.md)（JSON-RPC 方法名、Task/Message **ProtoJSON**、`StreamResponse` / SSE 载荷）。**WP2.1** 已提供 `sse_framing`、`wire_mapping`、`dispatch_table`（无 HTTP 路由变更）。
+
+下表为 **legacy REST + JSON**（在 **WP2.2 / WP2.4** 切换默认路径前仍可能为运行时行为），**非** A2A v1 规范正文绑定：
+
 本仓库内 **AgentClient** 与 **AgentServer** 的 HTTP 语义已对齐为 **REST + JSON**（非 JSON-RPC）：
 
 | 操作 | 方法 | 路径（相对 `agent_endpoint` 前缀） | 请求体 / 查询 | 成功响应要点 |

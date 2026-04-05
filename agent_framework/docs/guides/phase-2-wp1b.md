@@ -116,8 +116,8 @@ enum class ToolSideEffect {
 
 | 路径 | 职责 |
 |------|------|
-| `include/agent/tool_side_effect.hpp` | `enum class ToolSideEffect`；`ToolSideEffect tool_side_effect_from_string(std::string_view)`（可选，供配置） |
-| `include/agent/tool_orchestration.hpp` | `struct ToolOrchestrationOptions { bool enable_parallel_reads; int max_parallel_reads; }`；`ToolOrchestrationOptions resolve_tool_orchestration_options(const AgentConfig&)` + 读 env 的重载或内部调用 |
+| `include/agent/types.hpp` | `enum class ToolSideEffect`；`tool_side_effect_from_string(std::string_view)`（可选，供配置） |
+| `include/agent/toolbus.hpp` | `ToolOrchestrationOptions`、`resolve_tool_orchestration_options`、`ToolSideEffectResolver`、`execute_tool_calls_sequenced`（与 `ToolBus` 同头文件） |
 | `src/toolbus/tool_orchestration.cpp`（或 `src/node/tool_orchestration.cpp`） | `std::vector<json> execute_tool_calls_sequenced(std::shared_ptr<ToolBus> bus, const std::vector<CallSpec>& calls, const ToolOrchestrationOptions&, SideEffectResolver)`；**副作用解析器**签名：`ToolSideEffect(std::string_view tool_name)`，由调用方传入 lambda：内部 `bus->get_tool_meta(name)` 读元数据 |
 | `include/agent/types.hpp` | 在 **`ToolMeta`** 增加 `ToolSideEffect side_effect = ToolSideEffect::Unknown;`（或 `std::optional` + 默认 unknown）— **与 JSON 导出无关字段**，`export_as_llm_tools` **不**需把该字段发给 LLM（避免污染 OpenAI schema） |
 | `include/agent/toolbus.hpp` / `toolbus.cpp` | `register_local_tool` / MCP 注册路径：允许传入 `ToolSideEffect` 或从 `ToolMeta` 读取；`get_tool_meta` 已存在，返回结构 **含** `side_effect` |

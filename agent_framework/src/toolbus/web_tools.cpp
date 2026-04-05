@@ -96,6 +96,7 @@ void register_builtin_web_tools_if_configured(ToolBus& bus) {
             },
             "required": ["query"]
         })");
+        meta.side_effect = ToolSideEffect::ReadOnly;
         bus.register_local_tool(
             "web_search", [](const json& args) { return web_search_invoke(args); }, meta);
     }
@@ -116,6 +117,7 @@ void register_builtin_web_tools_if_configured(ToolBus& bus) {
             },
             "required": ["url"]
         })");
+        meta.side_effect = ToolSideEffect::ReadOnly;
         bus.register_local_tool(
             "web_fetch", [](const json& args) { return web_fetch_invoke(args); }, meta);
     }
@@ -152,6 +154,7 @@ void register_builtin_web_tools_if_configured(ToolBus& bus) {
             },
             "required": ["url"]
         })");
+        meta.side_effect = ToolSideEffect::Write;
         bus.register_local_tool(
             "web_fetch_archive", [](const json& args) { return web_fetch_archive_invoke(args); },
             meta);

@@ -908,6 +908,7 @@ void register_draw_tools_impl(ToolBus& bus) {
             "Templates: line_series_uniform_x, line_series_dual_batch, bar_chart, area_under_line, "
             "sparkline (default 120x32 if width/height omitted), scatter_rows.";
         meta.schema = schema_draw_render;
+        meta.side_effect = ToolSideEffect::ReadOnly;
         bus.register_local_tool(
             "draw_render", [cfg](const json& args) { return invoke_draw_render(args, cfg); }, meta);
     }
@@ -931,6 +932,7 @@ void register_draw_tools_impl(ToolBus& bus) {
         req.push_back("confirm_overwrite");
         schema_export["required"] = std::move(req);
         meta.schema = std::move(schema_export);
+        meta.side_effect = ToolSideEffect::Write;
         bus.register_local_tool(
             "draw_export", [cfg](const json& args) { return invoke_draw_export(args, cfg); }, meta);
     }

@@ -2,8 +2,8 @@
 
 本文档将 [phase-2-plan.md](./phase-2-plan.md) **§4 WP2.1** 与交付项 **D2** 中属于「**协议与载荷**」的部分落实为可执行任务。**须先完成 [WP2.1a](./phase-2-wp1a.md)**（`a2a-spec-tracker.md` 初稿含 Card、**通用** `jsonrpc` 层、`wire_card`）；本 WP 接续 **任务 method 表、Task/Message/SSE**。**WP2.1 交付的是与 HTTP 监听无关的编解码与映射**；**httplib 路由、listen、executor 投递** 属 **WP2.2**；**任务状态机与取消语义** 属 **WP2.3**；**AgentClient 改为走 Facade** 属 **WP2.4**。本 WP 与 WP2.1a 共同提供 **唯一权威的线协议契约**（以 `a2a-spec-tracker.md` 为根）。
 
-**文档版本**：0.1  
-**日期**：2026-04-04  
+**文档版本**：0.2  
+**日期**：2026-04-05  
 **上游依据**：[phase-2-plan.md](./phase-2-plan.md) v0.2；[plan-detailed.md](./plan-detailed.md) §3、§5.2；[plan-detailed.v2.md](./plan-detailed.v2.md) §5（Identity 字段进入 SSE 的约定）
 
 ---
@@ -228,11 +228,12 @@ flowchart TD
 
 ## 11. 验收清单（DoD）
 
-- [ ] `docs/guides/a2a-spec-tracker.md` 已合并主分支且含 §4 全部小节。
-- [ ] JSON-RPC 单测 **JR-1–JR-7**（或等价）全部通过。
-- [ ] SSE framing 单测 **SSE-1–SSE-4** 全部通过。
-- [ ] Wire mapping 单测 **W-1–W-3** 全部通过。
-- [ ] `overview.md` 或 `plan-detailed.md` 引用处增加一句：**线协议以 a2a-spec-tracker 为准**（可选小 PR，可与 T0 同交）。
+- [x] `docs/guides/a2a-spec-tracker.md` 已合并主分支且含 §3 方法表、§5 SSE、`§6` Task/Message 映射、§7 legacy 对照；§4 含 v1 Card 与 WP2.1a 兼容层说明。
+- [x] JSON-RPC 单测 **JR-1–JR-7**（`test_a2a_jsonrpc`）全部通过；分发层 **JR-5/JR-6**（`test_a2a_dispatch_table`）。
+- [x] SSE framing 单测 **SSE-1–SSE-5**（`test_a2a_sse_framing`，含 `id:`）全部通过。
+- [x] Wire mapping 单测 **W-1–W-3**（`test_a2a_wire_mapping` + `tests/fixtures/a2a/task_min_v1.json`）。
+- [x] `overview.md` A2A 小节：**线协议以 a2a-spec-tracker 为准** + legacy 表标注。
+- [x] **禁止项**：`AgentServer` 未在 WP2.1 注册已对齐 A2A 的生产 JSON-RPC 路由（仍为既有 REST stub）。
 
 ---
 
@@ -241,6 +242,7 @@ flowchart TD
 | 日期 | 版本 | 说明 |
 |------|------|------|
 | 2026-04-04 | 0.1 | 初稿：WP2.1 边界、tracker、jsonrpc/sse/wire 文件清单、测试与 PR 顺序 |
+| 2026-04-05 | 0.2 | WP2.1 落地：`sse_framing`、`wire_mapping`、`dispatch_table`、CTest、tracker v0.2、overview 引用 |
 
 ---
 

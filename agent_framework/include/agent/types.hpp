@@ -12,6 +12,7 @@
 #include <nlohmann/json.hpp>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <vector>
 #include <optional>
 #include <map>
@@ -71,6 +72,20 @@ enum class FusionStrategy {
     HYBRID          // 混合融合（综合多种方式）
 };
 
+/**
+ * @brief 工具副作用类别（WP2.1b 编排；Unknown 在编排上等价于 Write/串行）
+ */
+enum class ToolSideEffect {
+    Unknown = 0,
+    ReadOnly = 1,
+    Write = 2
+};
+
+/**
+ * @brief 从配置字符串解析副作用（大小写不敏感）；无法识别时返回 nullopt
+ */
+std::optional<ToolSideEffect> tool_side_effect_from_string(std::string_view s);
+
 // ============================================================================
 // 记忆管理相关类型（提前定义，供 LLMInput 使用）
 // ============================================================================
@@ -98,6 +113,8 @@ struct ToolMeta {
     std::string name;              // 工具名称
     json schema;                  // JSON Schema 描述（OpenAI Function Calling 格式）
     std::string description;       // 工具说明
+    /** WP2.1b：编排用；不进入 LLM tools JSON（tool_formatter 仅导出 name/schema/description） */
+    ToolSideEffect side_effect = ToolSideEffect::Unknown;
 };
 
 /**
@@ -327,6 +344,10 @@ struct AgentConfig {
     int max_tool_calls_per_iteration = 5;  // 每次迭代最大工具调用数
     bool enable_memory = true;     // 是否启用记忆
     bool enable_knowledge_base = true;  // 是否启用知识库
+    /** WP2.1b：是否允许连续 ReadOnly 工具并行（默认 false，与历史串行一致） */
+    bool enable_parallel_read_tools = false;
+    /** WP2.1b：ReadOnly 组内最大并发；<=0 在 resolve 时视为 1 */
+    int max_parallel_read_tools = 4;
     std::map<std::string, json> extra_config;  // 额外配置
 };
 

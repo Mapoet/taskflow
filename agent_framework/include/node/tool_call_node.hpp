@@ -46,25 +46,20 @@ public:
     );
     
     /**
-     * @brief 创建并行工具调用节点（使用 create_for_each）
-     * @param builder 图构建器
-     * @param name 节点名称
-     * @param toolbus ToolBus 实例
-     * @param input_specs 输入规格：
-     *   - {"ToolCallList", "call_list"} - 工具调用列表（std::vector<CallSpec>）
-     * @return (节点指针, 任务句柄)
-     * 
-     * 输出键：
-     *   - "results": 所有工具执行结果列表（std::vector<json>）
-     *   - "tool_names": 工具名称列表（std::vector<std::string>）
+     * @brief 创建多工具调用节点（WP2.1b：`execute_tool_calls_sequenced`）
+     *
+     * 默认 `orch_opts.enable_parallel_reads == false` 时顺序执行。
+     * `orch_opts.enable_parallel_reads == true` 时仅对连续 `ReadOnly` 工具并行（受 `max_parallel_reads` 限制）。
+     *
+     * 输出：每个 result JSON 含 `tool_name` 字段（与历史兼容）。
      */
     static std::pair<std::shared_ptr<workflow::AnyNode>, tf::Task>
     create_parallel(
         workflow::GraphBuilder& builder,
         const std::string& name,
         std::shared_ptr<ToolBus> toolbus,
-        const std::vector<std::pair<std::string, std::string>>& input_specs
-    );
+        const std::vector<std::pair<std::string, std::string>>& input_specs,
+        const ToolOrchestrationOptions& orch_opts = ToolOrchestrationOptions{});
 
 private:
     /**
@@ -75,18 +70,6 @@ private:
      */
     static std::unordered_map<std::string, std::any> execute_single_tool(
         const CallSpec& call_spec,
-        std::shared_ptr<ToolBus> toolbus
-    );
-    
-    /**
-     * @brief 执行并行工具调用（for_each 回调）
-     * @param call_spec 单个工具调用规范
-     * @param shared_results 共享结果列表（由 for_each 提供）
-     */
-    static void execute_parallel_tool(
-        const CallSpec& call_spec,
-        std::shared_ptr<std::vector<json>> shared_results,
-        std::shared_ptr<std::mutex> results_mutex,
         std::shared_ptr<ToolBus> toolbus
     );
 };

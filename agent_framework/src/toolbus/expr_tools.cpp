@@ -625,6 +625,7 @@ void register_expr_tools_impl(ToolBus& bus) {
             "Limits: AGENT_EXPR_MAX_LOOP_ITERS, parser stack/node depth env vars; optional "
             "AGENT_EXPR_DISABLE_CONTROL_FLOW. External symbols are immutable (no ':=' on them).";
         meta.schema = expr_eval_tool_schema(cfg);
+        meta.side_effect = ToolSideEffect::ReadOnly;
         bus.register_local_tool(
             "expr_eval", [cfg](const json& args) { return expr_eval_invoke(args, cfg); }, meta);
     }
@@ -637,6 +638,7 @@ void register_expr_tools_impl(ToolBus& bus) {
             "lists, and warnings. Use to discover free symbols and arity before calling expr_eval or "
             "expr_batch_eval.";
         meta.schema = expr_validate_tool_schema(cfg);
+        meta.side_effect = ToolSideEffect::ReadOnly;
         bus.register_local_tool(
             "expr_validate", [cfg](const json& args) { return expr_validate_invoke(args, cfg); }, meta);
     }
@@ -652,6 +654,7 @@ void register_expr_tools_impl(ToolBus& bus) {
             "Unsupported: return() (fails). Any non-finite value or loop-limit error fails the entire call. "
             "Response values[] aligns 1:1 with rows[].";
         meta.schema = expr_batch_eval_tool_schema(cfg);
+        meta.side_effect = ToolSideEffect::ReadOnly;
         bus.register_local_tool(
             "expr_batch_eval", [cfg](const json& args) { return expr_batch_eval_invoke(args, cfg); },
             meta);

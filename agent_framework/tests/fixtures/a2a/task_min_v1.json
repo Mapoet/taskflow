@@ -1,0 +1,22 @@
+{
+  "id": "task-fixture-1",
+  "contextId": "ctx-99",
+  "status": {
+    "state": "TASK_STATE_WORKING",
+    "timestamp": "2026-04-05T12:00:00.000Z"
+  },
+  "history": [
+    {
+      "messageId": "m1",
+      "role": "ROLE_USER",
+      "parts": [
+        {
+          "text": "hello",
+          "mediaType": "text/plain"
+        }
+      ]
+    }
+  ],
+  "artifacts": [],
+  "metadata": {}
+}

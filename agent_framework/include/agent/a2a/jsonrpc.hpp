@@ -18,7 +18,7 @@
 namespace agent_framework {
 namespace a2a {
 
-/** @brief JSON-RPC 2.0 标准错误码子集（见 a2a-spec-tracker.md §7） */
+/** @brief JSON-RPC 2.0 标准错误码子集（见 a2a-spec-tracker.md §8.4） */
 namespace JsonRpcErrorCode {
 inline constexpr int parse_error = -32700;
 inline constexpr int invalid_request = -32600;
@@ -45,7 +45,7 @@ using JsonRpcParseResult = std::variant<JsonRpcRequest, ::json>;
 /**
  * @brief 解析 JSON-RPC 2.0 单请求体（UTF-8）
  *
- * 策略见 docs/guides/a2a-spec-tracker.md §7：不支持 notification、不支持 batch、params 若存在须为 object。
+ * 策略见 docs/guides/a2a-spec-tracker.md §8.1：不支持 notification、不支持 batch、params 若存在须为 object。
  */
 JsonRpcParseResult parse_jsonrpc_request(std::string_view body_utf8);
 
