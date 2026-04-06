@@ -386,7 +386,7 @@ flowchart TB
 |--------|------|---------|
 | M1 | WP2.0 最小可用 + 会话写回 + 单测 | 2.0 |
 | M2 | **WP2.1a** + WP2.1 + WP2.2 + WP2.3 打通 happy path + SSE | 2.1a–2.3 |
-| M3 | WP2.4 + WP2.5 + WP2.6 契约门禁 | 2.4–2.6 |
+| M3 | WP2.4 + WP2.5 + WP2.6 契约门禁（`ctest -R 'a2a_contract_json|a2a_contract_sse'`；另见 `a2a_contract_loopback`） | 2.4–2.6 |
 | M4 | WP2.1b–2.1d 工具链升格 | 2.1b–d |
 | M5 | WP2.7 输入质控 + §5.1 DSL 最小集 | 2.7 |
 | M6 | WP2.8 Verifier 接入主图 | 2.8 |

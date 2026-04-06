@@ -11,6 +11,8 @@ jobs:
       run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DCMAKE_BUILD_BENCHMARKS=ON -DCMAKE_BUILD_PROFILER=ON -DCMAKE_CXX_STANDARD=17
     - name: build
       run: cmake --build build --parallel 10
+    # Full ctest includes Agent Framework M3 targets: a2a_contract_json, a2a_contract_sse,
+    # a2a_contract_loopback (when TF_BUILD_AGENT_FRAMEWORK=ON).
     - name: test
       run: cd build ; ctest --output-on-failure
   
@@ -72,6 +74,8 @@ jobs:
       run: cmake --build build --parallel 10
     - name: test
       run: cd build ; ctest --output-on-failure
+    - name: WP2.6 M3 contract gate
+      run: cd build && ctest -R 'a2a_contract_json|a2a_contract_sse' --output-on-failure
     - name: A2A Tier B loopback
       run: cd build && AGENT_A2A_INTEGRATION_LOOPBACK=1 AGENT_CLIENT_USE_LEGACY_REST=0 AGENT_TOOL_ALLOWLIST= ctest -R a2a_loopback_integration --output-on-failure
 

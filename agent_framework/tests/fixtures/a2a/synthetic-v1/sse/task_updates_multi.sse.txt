@@ -1,4 +1,6 @@
+event: status.working
 data: {"statusUpdate":{"taskId":"task-sse-1","contextId":"ctx-sse","status":{"state":"TASK_STATE_WORKING","timestamp":"2026-04-05T00:00:00.000Z"}}}
 
+event: status.completed
 data: {"statusUpdate":{"taskId":"task-sse-1","contextId":"ctx-sse","status":{"state":"TASK_STATE_COMPLETED","timestamp":"2026-04-05T00:00:01.000Z"}}}
 

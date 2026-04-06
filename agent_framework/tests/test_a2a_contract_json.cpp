@@ -8,8 +8,10 @@
 
 #include "a2a_contract_helpers.hpp"
 
+#include <cstdint>
 #include <cstdlib>
 #include <iostream>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <variant>
@@ -44,6 +46,24 @@ static void check_jsonrpc_request(const std::string& path) {
     }
     if (req->method.empty()) {
         fail("empty method " + path);
+    }
+}
+
+static void check_jsonrpc_expect_error(const std::string& body,
+                                       const std::optional<int>& expected_code,
+                                       const std::string& fixture_id) {
+    a2a::JsonRpcParseResult pr = a2a::parse_jsonrpc_request(body);
+    const json* err_obj = std::get_if<json>(&pr);
+    if (!err_obj) {
+        fail("expect_jsonrpc_error_response: got request for " + fixture_id);
+    }
+    auto code = a2a::try_get_jsonrpc_error_code(*err_obj);
+    if (!code) {
+        fail("expect_jsonrpc_error_response: missing error.code for " + fixture_id);
+    }
+    if (expected_code.has_value() && *code != *expected_code) {
+        fail("expect_jsonrpc_error_response: code mismatch for " + fixture_id + " got " +
+             std::to_string(*code));
     }
 }
 
@@ -101,6 +121,31 @@ static void check_task_roundtrip(const std::string& path, const std::vector<std:
     }
 }
 
+static std::optional<int> read_optional_error_code(const json& entry) {
+    if (!entry.contains("expected_error_code")) {
+        return std::nullopt;
+    }
+    const auto& c = entry["expected_error_code"];
+    if (c.is_number_integer()) {
+        return c.get<int>();
+    }
+    if (c.is_number_unsigned()) {
+        return static_cast<int>(c.get<std::uint64_t>());
+    }
+    return std::nullopt;
+}
+
+static void check_task_dual_golden(const std::string& path_a,
+                                   const std::string& path_b,
+                                   const std::vector<std::string>& ignore_keys,
+                                   const std::string& fixture_id) {
+    json ja = h::read_json_file(path_a);
+    json jb = h::read_json_file(path_b);
+    if (!h::json_equal_after_canonical(ja, jb, ignore_keys)) {
+        fail("equals_after_parse canonical mismatch for " + fixture_id);
+    }
+}
+
 int main() {
     try {
         const std::string mpath = bundle_dir() + "/manifest.json";
@@ -112,12 +157,19 @@ int main() {
             if (!e.contains("kind") || !e.contains("path") || !e.contains("assert")) {
                 fail("fixture entry missing kind/path/assert");
             }
+            const std::string fid = e.value("id", std::string("<no id>"));
             const std::string kind = e["kind"].get<std::string>();
             const std::string rel = e["path"].get<std::string>();
             const std::string assertv = e["assert"].get<std::string>();
             const std::string full = bundle_dir() + "/" + rel;
             if (kind == "jsonrpc_request" && assertv == "parse_ok") {
                 check_jsonrpc_request(full);
+            } else if (kind == "jsonrpc_request_raw" && assertv == "expect_jsonrpc_error_response") {
+                std::string body = h::read_text_file(full);
+                check_jsonrpc_expect_error(body, read_optional_error_code(e), fid);
+            } else if (kind == "jsonrpc_request" && assertv == "expect_jsonrpc_error_response") {
+                json j = h::read_json_file(full);
+                check_jsonrpc_expect_error(j.dump(), read_optional_error_code(e), fid);
             } else if (kind == "jsonrpc_response" && assertv == "jsonrpc_envelope_ok") {
                 check_jsonrpc_envelope_ok(full);
             } else if (kind == "jsonrpc_response" && assertv == "jsonrpc_error_ok") {
@@ -125,11 +177,16 @@ int main() {
             } else if (kind == "agent_card_json" && assertv == "round_trip_types") {
                 check_agent_card_roundtrip(full);
             } else if (kind == "task_wire" && assertv == "round_trip_types") {
-                check_task_roundtrip(full, read_ignore_keys(e));
+                const auto ignores = read_ignore_keys(e);
+                check_task_roundtrip(full, ignores);
+                if (e.contains("equals_after_parse") && e["equals_after_parse"].is_string()) {
+                    const std::string rel_b = e["equals_after_parse"].get<std::string>();
+                    check_task_dual_golden(full, bundle_dir() + "/" + rel_b, ignores, fid);
+                }
             } else if (kind == "sse_stream") {
                 continue;
             } else {
-                fail("unsupported fixture kind/assert: " + kind + " / " + assertv);
+                fail("unsupported fixture kind/assert: " + kind + " / " + assertv + " id=" + fid);
             }
         }
     } catch (const std::exception& ex) {

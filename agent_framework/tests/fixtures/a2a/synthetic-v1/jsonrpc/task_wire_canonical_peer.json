@@ -1,0 +1,22 @@
+{
+  "id": "task-syn-rt",
+  "contextId": "ctx-syn",
+  "status": {
+    "state": "TASK_STATE_WORKING",
+    "timestamp": "2026-04-05T12:00:00.000Z"
+  },
+  "history": [
+    {
+      "messageId": "m-rt",
+      "role": "ROLE_USER",
+      "parts": [
+        {
+          "text": "roundtrip",
+          "mediaType": "text/plain"
+        }
+      ]
+    }
+  ],
+  "artifacts": [],
+  "metadata": {}
+}

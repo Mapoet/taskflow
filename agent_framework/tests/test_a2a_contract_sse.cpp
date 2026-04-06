@@ -10,6 +10,7 @@
 #include <nlohmann/json.hpp>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 #ifndef AGENT_TEST_A2A_ROOT
 #define AGENT_TEST_A2A_ROOT "."
@@ -34,6 +35,10 @@ int main() {
             if (!e.contains("kind") || e["kind"].get<std::string>() != "sse_stream") {
                 continue;
             }
+            const std::string assertv = e.contains("assert") ? e["assert"].get<std::string>() : std::string();
+            if (assertv != "sse_parse_ok" && assertv != "sse_event_count") {
+                fail("unsupported sse assert: " + assertv);
+            }
             const std::string rel = e["path"].get<std::string>();
             const std::string full = bundle_dir() + "/" + rel;
             std::string raw = h::read_text_file(full);
@@ -47,6 +52,22 @@ int main() {
             }
             if (evs.size() < min_ev) {
                 fail("too few SSE events in " + full);
+            }
+            if (e.contains("expected_event_names") && e["expected_event_names"].is_array()) {
+                std::vector<std::string> expected;
+                for (const auto& n : e["expected_event_names"]) {
+                    if (n.is_string()) {
+                        expected.push_back(n.get<std::string>());
+                    }
+                }
+                if (expected.size() != evs.size()) {
+                    fail("expected_event_names count mismatch in " + full);
+                }
+                for (std::size_t i = 0; i < evs.size(); ++i) {
+                    if (evs[i].event != expected[i]) {
+                        fail("SSE event name mismatch at index " + std::to_string(i) + " in " + full);
+                    }
+                }
             }
             for (const auto& ev : evs) {
                 if (ev.data.empty()) {

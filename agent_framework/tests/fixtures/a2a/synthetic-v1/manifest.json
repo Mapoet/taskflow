@@ -11,6 +11,22 @@
       "applicable_tiers": ["A"]
     },
     {
+      "id": "jr_request_invalid_json",
+      "path": "jsonrpc/request_invalid_json.txt",
+      "kind": "jsonrpc_request_raw",
+      "assert": "expect_jsonrpc_error_response",
+      "expected_error_code": -32700,
+      "applicable_tiers": ["A"]
+    },
+    {
+      "id": "jr_request_batch_rejected",
+      "path": "jsonrpc/request_batch_rejected.json",
+      "kind": "jsonrpc_request",
+      "assert": "expect_jsonrpc_error_response",
+      "expected_error_code": -32600,
+      "applicable_tiers": ["A"]
+    },
+    {
       "id": "jr_send_message_response",
       "path": "jsonrpc/send_message_response.json",
       "kind": "jsonrpc_response",
@@ -37,6 +53,7 @@
       "kind": "task_wire",
       "assert": "round_trip_types",
       "ignore_json_keys": ["timestamp"],
+      "equals_after_parse": "jsonrpc/task_wire_canonical_peer.json",
       "applicable_tiers": ["A"]
     },
     {
@@ -45,6 +62,7 @@
       "kind": "sse_stream",
       "assert": "sse_parse_ok",
       "expected_min_events": 2,
+      "expected_event_names": ["status.working", "status.completed"],
       "applicable_tiers": ["A"]
     }
   ]

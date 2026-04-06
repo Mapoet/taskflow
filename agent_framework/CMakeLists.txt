@@ -947,6 +947,19 @@ if(BUILD_TESTING)
         set_tests_properties(a2a_contract_sse PROPERTIES
             ENVIRONMENT "AGENT_TOOL_ALLOWLIST=;AGENT_A2A_UPDATE_GOLDENS=")
     endif()
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_a2a_contract_loopback.cpp)
+        add_executable(test_a2a_contract_loopback tests/test_a2a_contract_loopback.cpp)
+        target_link_libraries(test_a2a_contract_loopback PRIVATE agent_framework)
+        if(CMAKE_USE_PTHREADS_INIT)
+            target_link_libraries(test_a2a_contract_loopback PRIVATE Threads::Threads)
+        endif()
+        target_compile_definitions(test_a2a_contract_loopback PRIVATE
+            "AGENT_TEST_A2A_ROOT=\"${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/a2a\"")
+        add_test(NAME a2a_contract_loopback COMMAND test_a2a_contract_loopback
+            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+        set_tests_properties(a2a_contract_loopback PROPERTIES
+            ENVIRONMENT "AGENT_TOOL_ALLOWLIST=;AGENT_CLIENT_USE_LEGACY_REST=0")
+    endif()
     if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_a2a_loopback_integration.cpp)
         add_executable(test_a2a_loopback_integration tests/test_a2a_loopback_integration.cpp)
         target_link_libraries(test_a2a_loopback_integration PRIVATE agent_framework)

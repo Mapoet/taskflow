@@ -240,6 +240,7 @@
 | `AGENT_A2A_MULTI_LIVE`, `AGENT_A2A_LIVE_AGENT_A_URL`, `AGENT_A2A_LIVE_AGENT_B_URL` | Tier D：`test_a2a_live_multi_agent` | `tests/test_a2a_live_multi_agent.cpp` | 同上 |
 | `AGENT_A2A_TIER_E`, `AGENT_A2A_TIER_E_AUTH_TOKEN`（可选） | Tier E：QPS + 大 body + 鉴权负例 | `tests/test_a2a_tier_e.cpp` | 同上 |
 | `AGENT_A2A_UPDATE_GOLDENS` | 维护者重写 golden（`a2a_fixture_regen`） | `tools/a2a_fixture_regen.cpp` | [phase-2-wp6.md](./phase-2-wp6.md) |
+| `AGENT_A2A_CONTRACT_TEST_BEARER` | WP2.6 `a2a_contract_loopback` L-2：非空则测 Bearer 401/200 | `tests/test_a2a_contract_loopback.cpp` | [tests/fixtures/a2a/README.md](../../tests/fixtures/a2a/README.md) |
 
 **示例二进制 / demo**：`AGENT_SERVER_DEMO_ROLE`（`echo` \| `integration-worker` \| `integration-reviewer`）、`AGENT_SERVER_CARD_PUBLIC_BASE`、`AGENT_SERVER_AUTH_TOKEN` — [agent_server_demo.cpp](../../examples/agent_server_demo.cpp)；画像表见 [tests/fixtures/a2a/agents/README.md](../../tests/fixtures/a2a/agents/README.md)。
 
