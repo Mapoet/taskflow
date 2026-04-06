@@ -14,6 +14,8 @@
 namespace agent_framework {
 namespace {
 
+constexpr const char* kA2aSubmitTaskName = "a2a_submit_task";
+
 void ascii_lower_inplace(std::string& s) {
     for (char& c : s) {
         c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
@@ -47,6 +49,25 @@ ToolOrchestrationOptions resolve_tool_orchestration_options(const AgentConfig& c
     }
     o.max_parallel_reads = maxp;
 
+    o.enable_parallel_a2a_submits = cfg.enable_parallel_a2a_submits;
+    int maxa = cfg.max_parallel_a2a_submits;
+    if (maxa <= 0) {
+        maxa = 1;
+    }
+    o.max_parallel_a2a_submits = maxa;
+
+    if (const char* e = std::getenv("AGENT_A2A_MAX_PARALLEL_SUBMITS")) {
+        if (e[0] != '\0') {
+            try {
+                const int v = std::stoi(std::string(e));
+                if (v >= 1) {
+                    o.max_parallel_a2a_submits = v;
+                }
+            } catch (...) {
+            }
+        }
+    }
+
     if (const char* e = std::getenv("AGENT_TOOL_PARALLEL_READS")) {
         if (e[0] != '\0') {
             if (env_falsy(e)) {
@@ -73,6 +94,9 @@ ToolOrchestrationOptions resolve_tool_orchestration_options(const AgentConfig& c
     if (o.max_parallel_reads <= 0) {
         o.max_parallel_reads = 1;
     }
+    if (o.max_parallel_a2a_submits <= 0) {
+        o.max_parallel_a2a_submits = 1;
+    }
     return o;
 }
 
@@ -89,10 +113,36 @@ std::vector<json> execute_tool_calls_sequenced(std::shared_ptr<ToolBus> bus,
 
     const bool parallel_on = opts.enable_parallel_reads;
     const int max_p = std::max(1, opts.max_parallel_reads);
+    const bool a2a_parallel_on = opts.enable_parallel_a2a_submits;
+    const int max_a2a = std::max(1, opts.max_parallel_a2a_submits);
 
     std::size_t i = 0;
     while (i < n) {
         const ToolSideEffect se = classify(calls[i].name);
+
+        if (a2a_parallel_on && calls[i].name == kA2aSubmitTaskName) {
+            std::size_t j = i + 1;
+            while (j < n && calls[j].name == kA2aSubmitTaskName) {
+                ++j;
+            }
+            const std::size_t glen = j - i;
+            const std::size_t chunk = static_cast<std::size_t>(max_a2a);
+            for (std::size_t chunk_start = 0; chunk_start < glen; chunk_start += chunk) {
+                const std::size_t chunk_end = std::min(chunk_start + chunk, glen);
+                std::vector<std::future<json>> futs;
+                futs.reserve(chunk_end - chunk_start);
+                for (std::size_t t = chunk_start; t < chunk_end; ++t) {
+                    const std::size_t gi = i + t;
+                    futs.push_back(bus->call_tool(calls[gi].name, calls[gi].arguments));
+                }
+                for (std::size_t u = 0; u < futs.size(); ++u) {
+                    results[i + chunk_start + u] = futs[u].get();
+                }
+            }
+            i = j;
+            continue;
+        }
+
         if (!parallel_on || !is_readonly_for_grouping(se)) {
             results[i] = bus->call_tool(calls[i].name, calls[i].arguments).get();
             ++i;

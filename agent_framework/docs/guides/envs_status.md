@@ -235,12 +235,17 @@
 
 **示例二进制 / demo**：`AGENT_SERVER_DEMO_ROLE`（`echo` \| `integration-worker` \| `integration-reviewer`）、`AGENT_SERVER_CARD_PUBLIC_BASE`、`AGENT_SERVER_AUTH_TOKEN` — [agent_server_demo.cpp](../../examples/agent_server_demo.cpp)；画像表见 [tests/fixtures/a2a/agents/README.md](../../tests/fixtures/a2a/agents/README.md)。
 
-### 3.13 A2A 编排（WP2.agent2agent）
+### 3.13 A2A 编排（WP2.agent2agent + WP2.agents）
 
 | 名称 | 功能 | 读取位置 | 主文档 |
 |------|------|----------|--------|
 | （配置文件）`peers.json` 内 `auth.token_env` | 启动编排进程时从命名环境变量注入 Bearer，**不**写入仓库 | `peer_registry.cpp` `resolve_peer_auth_config` | [a2a-orchestrator.md](./a2a-orchestrator.md) |
-| `AGENT_TOOL_ALLOWLIST` | 若为非空快照，须包含 `a2a.send_message`（及可选 `a2a.send_message__<peer_id>`） | [toolbus.cpp](../../src/toolbus/toolbus.cpp) | [tool-call-hooks.md](./tool-call-hooks.md)、[a2a-orchestrator.md](./a2a-orchestrator.md) |
+| `AGENT_TOOL_ALLOWLIST` | 若为非空快照，须包含 `a2a_send_message`（及可选 `a2a_send_message__<peer_id>`）；细粒度模式另需 `a2a_submit_task`、`a2a_wait_tasks` 等 | [toolbus.cpp](../../src/toolbus/toolbus.cpp) | [tool-call-hooks.md](./tool-call-hooks.md)、[a2a-orchestrator.md](./a2a-orchestrator.md) |
+| `AGENT_A2A_MAX_PARALLEL_SUBMITS` | 合法正整数时覆盖同轮并行 `a2a_submit_task` 上限（否则用 `AgentConfig::max_parallel_a2a_submits`，默认 `4`） | [tool_orchestration.cpp](../../src/toolbus/tool_orchestration.cpp) `resolve_tool_orchestration_options` | [tool-orchestration.md](./tool-orchestration.md)、[plan-detailed-multi-agents.md](./plan-detailed-multi-agents.md) |
+| `AGENT_A2A_CANCEL_ON_NEW_TURN` | 非 `0`/`false`/`off`/`no` 时：`OutboundTaskSupervisor` 会话策略为「新用户轮取消活动子任务」；CLI demo 每行前调用 `on_user_turn_barrier` | [outbound_task_supervisor.cpp](../../src/a2a/outbound_task_supervisor.cpp) | [a2a-orchestrator.md](./a2a-orchestrator.md) |
+| `AGENT_A2A_SUBTASK_LOG` | `none` 关闭通道 A；否则（如 `stderr`）向监督器日志槽输出子任务行 | 同上 | [plan-detailed-multi-agents.md](./plan-detailed-multi-agents.md) |
+| `AGENT_A2A_SUBTASK_CONTEXT_MAX_EVENTS` | 注入 LLM 的 digest 事件条数上限（默认 `8`） | [agent_loop_node.cpp](../../src/node/agent_loop_node.cpp) | [context-budget.md](./context-budget.md)、[a2a-orchestrator.md](./a2a-orchestrator.md) |
+| `AGENT_A2A_SUBTASK_CONTEXT_BYTES` | digest 字节上限（与 `format_digest_for_llm` 截断一致） | 同上 | 同上 |
 
 与 Tier C/D **live** 闸门共用：`AGENT_A2A_LIVE_TOKEN` 等仍见 §3.12。
 
@@ -308,7 +313,7 @@ flowchart LR
 |------|----------|----------|
 | `AgentClientOptions` | `use_legacy_rest`、`json_rpc_path`；构造时固化 | [agent-client.md](./agent-client.md) |
 | `AgentConfig.extra_config` | 预算键：去掉前缀 `AGENT_` 后与 env **同名键**；**extra 优先** | [context-budget.md](./context-budget.md) |
-| `AgentConfig`（编排字段） | `enable_parallel_read_tools`、`max_parallel_read_tools`；可被 `AGENT_TOOL_PARALLEL_READS` / `AGENT_TOOL_MAX_PARALLEL` **覆盖** | [tool-orchestration.md](./tool-orchestration.md) |
+| `AgentConfig`（编排字段） | `enable_parallel_read_tools`、`max_parallel_read_tools`（`AGENT_TOOL_*` 覆盖）；**WP2.agents**：`enable_parallel_a2a_submits`、`max_parallel_a2a_submits`（`AGENT_A2A_MAX_PARALLEL_SUBMITS` 可覆盖） | [tool-orchestration.md](./tool-orchestration.md) |
 
 **仍主要依赖 env、尚无实例覆盖的生产变量（节选）**：`AGENT_TOOL_ALLOWLIST`（进程快照）、`AGENT_MCP_REQUEST_TIMEOUT_MS`、`AGENT_FS_ROOT` 系、`AGENT_WEB_*` 系（除未来重构）、`AGENT_SKILLS_DIR` 系、`AGENT_LOG_LEVEL`（分散读取）、`AGENT_SERVER_*`（Server 进程级）。
 

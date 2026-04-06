@@ -420,6 +420,12 @@ endif()
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/a2a/orchestration.cpp)
     list(APPEND AGENT_SOURCES src/a2a/orchestration.cpp)
 endif()
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/a2a/a2a_task_monitor.cpp)
+    list(APPEND AGENT_SOURCES src/a2a/a2a_task_monitor.cpp)
+endif()
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/a2a/outbound_task_supervisor.cpp)
+    list(APPEND AGENT_SOURCES src/a2a/outbound_task_supervisor.cpp)
+endif()
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/agent/task_state_machine.cpp)
     list(APPEND AGENT_SOURCES src/agent/task_state_machine.cpp)
 endif()
@@ -453,6 +459,8 @@ set(AGENT_HEADERS
     include/agent/a2a/dispatch_table.hpp
     include/agent/a2a/peer_registry.hpp
     include/agent/a2a/orchestration.hpp
+    include/agent/a2a/a2a_task_monitor.hpp
+    include/agent/a2a/outbound_task_supervisor.hpp
     include/agent/task_state_machine.hpp
     include/node/node_factory.hpp
     include/node/llm_node.hpp
@@ -949,6 +957,26 @@ if(BUILD_TESTING)
         endif()
         add_test(NAME a2a_orchestrator_tools COMMAND test_a2a_orchestrator_tools)
         set_tests_properties(a2a_orchestrator_tools PROPERTIES
+            ENVIRONMENT "AGENT_TOOL_ALLOWLIST=;AGENT_CLIENT_USE_LEGACY_REST=0")
+    endif()
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_a2a_outbound_supervisor.cpp)
+        add_executable(test_a2a_outbound_supervisor tests/test_a2a_outbound_supervisor.cpp)
+        target_link_libraries(test_a2a_outbound_supervisor PRIVATE agent_framework)
+        if(CMAKE_USE_PTHREADS_INIT)
+            target_link_libraries(test_a2a_outbound_supervisor PRIVATE Threads::Threads)
+        endif()
+        add_test(NAME a2a_outbound_supervisor COMMAND test_a2a_outbound_supervisor)
+        set_tests_properties(a2a_outbound_supervisor PROPERTIES
+            ENVIRONMENT "AGENT_TOOL_ALLOWLIST=;AGENT_CLIENT_USE_LEGACY_REST=0")
+    endif()
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_a2a_multitool_orchestration.cpp)
+        add_executable(test_a2a_multitool_orchestration tests/test_a2a_multitool_orchestration.cpp)
+        target_link_libraries(test_a2a_multitool_orchestration PRIVATE agent_framework)
+        if(CMAKE_USE_PTHREADS_INIT)
+            target_link_libraries(test_a2a_multitool_orchestration PRIVATE Threads::Threads)
+        endif()
+        add_test(NAME a2a_multitool_orchestration COMMAND test_a2a_multitool_orchestration)
+        set_tests_properties(a2a_multitool_orchestration PROPERTIES
             ENVIRONMENT "AGENT_TOOL_ALLOWLIST=;AGENT_CLIENT_USE_LEGACY_REST=0")
     endif()
     if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_a2a_tier_e.cpp)

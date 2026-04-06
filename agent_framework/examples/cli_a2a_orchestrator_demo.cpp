@@ -6,6 +6,7 @@
 #include "cli_multiline_tty.hpp"
 
 #include <agent/a2a/orchestration.hpp>
+#include <agent/a2a/outbound_task_supervisor.hpp>
 #include <agent/a2a/peer_registry.hpp>
 #include <agent/graph_executor.hpp>
 #include <agent/internal/agent_thread_state.hpp>
@@ -212,8 +213,13 @@ int main(int argc, char** argv) {
             std::clog << "[a2a:" << peer_id << "] " << line << '\n';
         };
     }
+
+    OutboundSessionPolicy sup_pol;
+    auto supervisor = std::make_shared<OutboundTaskSupervisor>(registry, session_book, sup_pol);
+    supervisor->set_remote_log(orch_opts.on_remote_log);
+
     try {
-        register_a2a_orchestrator_tools(*bus, registry, session_book, orch_opts);
+        register_a2a_orchestrator_tools(*bus, registry, session_book, supervisor, orch_opts);
     } catch (const std::exception& e) {
         std::cerr << "[error] register A2A tools: " << e.what() << '\n';
         return 1;
@@ -229,15 +235,25 @@ int main(int argc, char** argv) {
     cfg.name = "cli_a2a_orchestrator_demo";
     cfg.system_prompt =
         "You are an orchestrator with access to remote agents via A2A.\n"
-        "Tool `" +
-        std::string(kA2aOrchestratorToolSendMessage) +
-        "` sends a user message to a peer. Required arguments: peer_id, user_text. "
-        "Optional: continue_session (default true), metadata (object).\n"
         "Peers loaded: " +
         join_peer_ids(pids) +
         ".\n"
-        "Pick the correct peer_id before calling. Reply concisely; use tools when the user asks to "
-        "delegate work.\n";
+        "Fine-grained tools: `" +
+        std::string(kA2aToolSubmitTask) +
+        "` (peer_id, user_text; optional timeout_ms, monitor, continue_session, metadata), `" +
+        std::string(kA2aToolGetTaskStatus) +
+        "` (local_handle or peer_id+remote_task_id), `" + std::string(kA2aToolWaitTasks) +
+        "` (handles[] or peer_task_pairs[], mode=all|any, timeout_ms), `" +
+        std::string(kA2aToolCancelTask) + "`, `" + std::string(kA2aToolExtendTimeout) +
+        "` (local_handle, extra_ms), `" + std::string(kA2aToolListSubtasks) +
+        "` (since_seq, peer_id?, limit).\n"
+        "Sync convenience: `" +
+        std::string(kA2aOrchestratorToolSendMessage) +
+        "` waits until the remote task completes in one step.\n"
+        "Prefer batching: multiple `" +
+        std::string(kA2aToolSubmitTask) +
+        "` then one `" + std::string(kA2aToolWaitTasks) + "`.\n"
+        "Reply concisely; pick the correct peer_id.\n";
 
     if (const char* m = std::getenv("AGENT_LLM_MODEL")) {
         cfg.model_config.model_name = m;
@@ -258,10 +274,14 @@ int main(int argc, char** argv) {
 
     tf::Executor executor;
     auto state = std::make_shared<internal::AgentThreadState>();
+    state->outbound_supervisor = supervisor;
 
     auto exec_line = [&](const std::string& line) -> int {
         if (g_shutdown_requested.load()) {
             return 130;
+        }
+        if (state->outbound_supervisor) {
+            state->outbound_supervisor->on_user_turn_barrier();
         }
         state->skill_prompt_cache.reset();
         state->active_skill_id.reset();

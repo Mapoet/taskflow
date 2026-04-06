@@ -2,7 +2,7 @@
 
 本文档在 [plan-detailed.md](./plan-detailed.md) **§5**（A2A、WP2.1–2.6、§5.4 富界面、§7 UI 表）与 [plan-detailed.v2.md](./plan-detailed.v2.md) **§5–6**（Identity / ExecutionContext、§5.1 多轮与输入 DSL、WP2.0 / 2.1b–2.1d / 2.7–2.9、Verifier、工作记忆压缩）之上，给出**可排期、可验收**的实现拆解、依赖顺序与阶段边界。阶段 3（RAG、Faiss、磁盘记忆深化、动态 MCP / WP3.7 等）仅在衔接处引用，**不纳入本文件 DoD**。
 
-**文档版本**：0.18  
+**文档版本**：0.19  
 **日期**：2026-04-05  
 **上游依据**：`plan-detailed.md` v0.3（§5–§8）；`plan-detailed.v2.md` v0.6-v2；[phase-1-plan.md](./phase-1-plan.md)（阶段 1 交付与衔接）
 
@@ -76,6 +76,7 @@
 | **WP2.5** | v0.3 | 认证：Bearer、API Key、可选 OAuth |
 | **WP2.6** | v0.3 | 一致性/契约测试与 fixture |
 | **WP2.agent2agent** | 编排 | peers.json、`A2aPeerRegistry`、ToolBus `a2a.send_message`、`cli_a2a_orchestrator_demo`（依赖 WP2.0/2.4/2.1） |
+| **WP2.agents** | 多 Agent 协同 | 并行 submit、wait/cancel/extend、`OutboundTaskSupervisor`、三通道可观测、WP2.1b submit 例外；详 **[plan-detailed-multi-agents.md](./plan-detailed-multi-agents.md)**（依赖 WP2.agent2agent、WP2.1b、WP2.1c、WP2.0） |
 | **WP2.7** | v2 | 输入质控 Tier A+B；**ExecutionContext**；§5.1 DSL |
 | **WP2.8** | v2 | Verifier 子图（第二套 LLM） |
 | **WP2.9** | v2 | 工作记忆 + 偏早压缩；失败回退 |
@@ -433,6 +434,7 @@ flowchart TB
 | [phase-2-wp5.md](./phase-2-wp5.md) | WP2.5 |
 | [phase-2-wp6.md](./phase-2-wp6.md) | WP2.6 |
 | [phase-2-wp-agent2agent.md](./phase-2-wp-agent2agent.md) | WP2.agent2agent |
+| [plan-detailed-multi-agents.md](./plan-detailed-multi-agents.md) | **WP2.agents** 多 Agent 协同详案 |
 | [a2a-orchestrator.md](./a2a-orchestrator.md) | WP2.agent2agent 用户指南 |
 | [phase-2-wp7.md](./phase-2-wp7.md) | WP2.7 |
 | [phase-2-wp8.md](./phase-2-wp8.md) | WP2.8 |
@@ -465,6 +467,7 @@ flowchart TB
 | 2026-04-05 | 0.16 | **D7** 下增加子项进度说明（1b/1d 已落地，**1c** 待 [phase-2-wp1c.md](./phase-2-wp1c.md)）；**WP2.1d** 小节标注实现状态 |
 | 2026-04-05 | 0.17 | **WP2.1c** 实现与 [context-budget.md](./context-budget.md)；D7 子项进度更新 |
 | 2026-04-05 | 0.18 | **WP2.agent2agent**：总表、§4、§8 索引；[phase-2-wp-agent2agent.md](./phase-2-wp-agent2agent.md)、[a2a-orchestrator.md](./a2a-orchestrator.md) |
+| 2026-04-05 | 0.19 | **WP2.agents**：[plan-detailed-multi-agents.md](./plan-detailed-multi-agents.md) 纳入 §2 总表与 §8 |
 
 ---
 

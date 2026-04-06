@@ -150,6 +150,8 @@ struct LLMInput {
     std::map<std::string, std::string> extra_variables;  // 用户自定义模板变量（{{var}}）
     std::vector<ToolMeta> tools;   // 可用工具列表（ToolBus 导出）
     std::vector<Message> history;   // 对话历史（可选，用于多轮对话）
+    /** WP2.agents：注入系统区；由 PromptRenderer 追加 `## Outbound subtasks` */
+    std::optional<std::string> orchestrator_subtask_digest;
     std::optional<std::string> image_data;  // 图像 base64 编码（可选）
     std::optional<std::string> audio_data;  // 音频 base64 编码（可选）
 };
@@ -369,6 +371,10 @@ struct AgentConfig {
     bool enable_parallel_read_tools = false;
     /** WP2.1b：ReadOnly 组内最大并发；<=0 在 resolve 时视为 1 */
     int max_parallel_read_tools = 4;
+    /** WP2.agents：同轮连续 a2a_submit_task 并行（默认开启） */
+    bool enable_parallel_a2a_submits = true;
+    /** WP2.agents：submit 批内最大并发；<=0 在 resolve 时视为 1 */
+    int max_parallel_a2a_submits = 4;
     std::map<std::string, json> extra_config;  // 额外配置
 };
 

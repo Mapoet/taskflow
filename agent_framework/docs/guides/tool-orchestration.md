@@ -53,5 +53,17 @@ allowlist 在 **`call_tool`** 时生效；并行仅同时发起多个**已允许
 - `ToolSideEffect` / `tool_side_effect_from_string`：`types.hpp`
 - `ToolCallNode::create_parallel(..., const ToolOrchestrationOptions& orch_opts = {})`：默认关闭并行读，与旧版「无上限 async」相比更安全；需要并行时传入 `enable_parallel_reads = true` 的选项（并可配合 env 覆盖）。
 
-**文档版本**：0.1  
+## 附录：WP2.agents — `a2a_submit_task` 并行例外
+
+默认 **`AgentConfig::enable_parallel_a2a_submits == true`**。`execute_tool_calls_sequenced` 对 `CallSpec` 线性扫描时：
+
+- **连续** 的 **`a2a_submit_task`** 合并为一组，组内以 `std::async` 池并行调用 `ToolBus::call_tool`，并行度上限为 `max_parallel_a2a_submits`（默认 `4`，`<=0` 归一为 `1`；环境变量 `AGENT_A2A_MAX_PARALLEL_SUBMITS` 在 `resolve_tool_orchestration_options` 中可覆盖）。
+- 其它 **Write**（含 `a2a_wait_tasks`、`a2a_cancel_task`、`a2a_extend_task_timeout`、`a2a_send_message` 等）仍 **串行**，且与非 submit 的 Write 保持 LLM 给出的顺序。
+- **ReadOnly** 批仍按上文的 WP2.1b 规则并行（受 `enable_parallel_read_tools` / `AGENT_TOOL_PARALLEL_READS` 等约束）。
+
+权威规格与工具 JSON：[plan-detailed-multi-agents.md](./plan-detailed-multi-agents.md)；编排器说明：[a2a-orchestrator.md](./a2a-orchestrator.md)。
+
+---
+
+**文档版本**：0.2  
 **日期**：2026-04-05

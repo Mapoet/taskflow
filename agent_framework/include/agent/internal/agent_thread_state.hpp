@@ -10,11 +10,16 @@
 
 #include "agent/types.hpp"
 
+#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
 
 namespace agent_framework {
+namespace a2a {
+class OutboundTaskSupervisor;
+}
+
 namespace internal {
 
 struct AgentThreadState {
@@ -25,6 +30,8 @@ struct AgentThreadState {
     /** WP1.8：首轮 LLM 前解析；后续迭代复用，避免 tool 轮重选技能 */
     std::optional<std::string> skill_prompt_cache;
     std::optional<std::string> active_skill_id;
+    /** WP2.agents：可选；与 A2A 细粒度工具共用 */
+    std::shared_ptr<a2a::OutboundTaskSupervisor> outbound_supervisor;
 };
 
 } // namespace internal

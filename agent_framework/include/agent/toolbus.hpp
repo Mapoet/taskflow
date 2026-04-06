@@ -354,6 +354,9 @@ private:
 struct ToolOrchestrationOptions {
     bool enable_parallel_reads = false;
     int max_parallel_reads = 4;
+    /** WP2.agents */
+    bool enable_parallel_a2a_submits = true;
+    int max_parallel_a2a_submits = 4;
 };
 
 ToolOrchestrationOptions resolve_tool_orchestration_options(const AgentConfig& cfg);

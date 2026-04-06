@@ -13,7 +13,11 @@
 #include "agent/context_budget.hpp"
 #include "agent/task_state_machine.hpp"
 #include "agent/toolbus.hpp"
+#include <agent/a2a/outbound_task_supervisor.hpp>
+
+#include <algorithm>
 #include <any>
+#include <future>
 #include <functional>
 #include <unordered_map>
 #include <chrono>
@@ -214,6 +218,34 @@ AgentLoopNode::create(
         if (toolbus) {
             llm_in.tools = toolbus->export_as_llm_tools();
         }
+        if (shared->state && shared->state->outbound_supervisor) {
+            std::size_t max_ev = 8;
+            std::size_t max_b = 4096;
+            if (const char* e = std::getenv("AGENT_A2A_SUBTASK_CONTEXT_MAX_EVENTS")) {
+                if (e[0] != '\0') {
+                    try {
+                        const int v = std::stoi(std::string(e));
+                        if (v >= 0) {
+                            max_ev = static_cast<std::size_t>(v);
+                        }
+                    } catch (...) {
+                    }
+                }
+            }
+            if (const char* e = std::getenv("AGENT_A2A_SUBTASK_CONTEXT_BYTES")) {
+                if (e[0] != '\0') {
+                    try {
+                        const int v = std::stoi(std::string(e));
+                        if (v >= 0) {
+                            max_b = static_cast<std::size_t>(v);
+                        }
+                    } catch (...) {
+                    }
+                }
+            }
+            llm_in.orchestrator_subtask_digest =
+                shared->state->outbound_supervisor->format_digest_for_llm(max_ev, max_b);
+        }
 
         // invoke (LLMClient will render using its configured PromptRenderer)
         if (dbg) {
@@ -352,27 +384,7 @@ AgentLoopNode::create(
             const bool parallel_read_group =
                 orch_opts.enable_parallel_reads && se == ToolSideEffect::ReadOnly;
 
-            if (!parallel_read_group) {
-                const CallSpec& c = calls[i];
-                if (dbg) {
-                    std::cout << "[AgentLoop] calling tool " << c.name << " args=" << c.arguments.dump()
-                              << "\n";
-                    std::cout.flush();
-                }
-                const std::string call_key = c.name + "\n" + c.arguments.dump();
-                if (guard_repeat_on) {
-                    if (seen_calls.find(call_key) != seen_calls.end()) {
-                        trigger_repeat_guard(c, call_key);
-                        break;
-                    }
-                    seen_calls.insert(call_key);
-                }
-                json result = toolbus->call_tool(c.name, c.arguments).get();
-                append_tool_message(c, std::move(result));
-                ++i;
-                continue;
-            }
-
+            if (parallel_read_group) {
             std::size_t j = i + 1;
             while (j < calls.size() && classify_side(calls[j].name) == ToolSideEffect::ReadOnly) {
                 ++j;
@@ -410,6 +422,76 @@ AgentLoopNode::create(
                 append_tool_message(sub[t], std::move(part[t]));
             }
             i = j;
+                continue;
+            }
+
+            if (orch_opts.enable_parallel_a2a_submits &&
+                calls[i].name == a2a::kA2aToolSubmitTask) {
+                std::size_t j2 = i + 1;
+                while (j2 < calls.size() && calls[j2].name == a2a::kA2aToolSubmitTask) {
+                    ++j2;
+                }
+                bool group_abort2 = false;
+                for (std::size_t k = i; k < j2; ++k) {
+                    const CallSpec& c = calls[k];
+                    const std::string call_key = c.name + "\n" + c.arguments.dump();
+                    if (guard_repeat_on) {
+                        if (seen_calls.find(call_key) != seen_calls.end()) {
+                            trigger_repeat_guard(c, call_key);
+                            group_abort2 = true;
+                            break;
+                        }
+                        seen_calls.insert(call_key);
+                    }
+                }
+                if (group_abort2) {
+                    break;
+                }
+                const int max_a2a = std::max(1, orch_opts.max_parallel_a2a_submits);
+                const std::size_t glen2 = j2 - i;
+                const std::size_t chunk2 = static_cast<std::size_t>(max_a2a);
+                for (std::size_t chunk_start = 0; chunk_start < glen2 && !stop_tools;
+                     chunk_start += chunk2) {
+                    const std::size_t chunk_end = std::min(chunk_start + chunk2, glen2);
+                    std::vector<std::future<json>> futs;
+                    futs.reserve(chunk_end - chunk_start);
+                    for (std::size_t t = chunk_start; t < chunk_end; ++t) {
+                        const std::size_t gi = i + t;
+                        const CallSpec& c = calls[gi];
+                        if (dbg) {
+                            std::cout << "[AgentLoop] calling tool (a2a submit batch) " << c.name
+                                      << " args=" << c.arguments.dump() << "\n";
+                            std::cout.flush();
+                        }
+                        futs.push_back(toolbus->call_tool(c.name, c.arguments));
+                    }
+                    for (std::size_t u = 0; u < futs.size(); ++u) {
+                        append_tool_message(calls[i + chunk_start + u], futs[u].get());
+                    }
+                }
+                i = j2;
+                continue;
+            }
+
+            {
+                const CallSpec& c = calls[i];
+                if (dbg) {
+                    std::cout << "[AgentLoop] calling tool " << c.name << " args=" << c.arguments.dump()
+                              << "\n";
+                    std::cout.flush();
+                }
+                const std::string call_key = c.name + "\n" + c.arguments.dump();
+                if (guard_repeat_on) {
+                    if (seen_calls.find(call_key) != seen_calls.end()) {
+                        trigger_repeat_guard(c, call_key);
+                        break;
+                    }
+                    seen_calls.insert(call_key);
+                }
+                json result = toolbus->call_tool(c.name, c.arguments).get();
+                append_tool_message(c, std::move(result));
+                ++i;
+            }
         }
 
         shared->state->iteration += 1;

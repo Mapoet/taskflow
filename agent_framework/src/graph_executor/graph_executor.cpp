@@ -105,6 +105,7 @@ bool merge_react_session_state(
     session.iteration = next->iteration;
     session.skill_prompt_cache = next->skill_prompt_cache;
     session.active_skill_id = next->active_skill_id;
+    session.outbound_supervisor = next->outbound_supervisor;
     session.last_error.clear();
     session.initial_user_prompt.clear();
     return true;

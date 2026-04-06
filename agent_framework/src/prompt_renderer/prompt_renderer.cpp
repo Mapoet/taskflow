@@ -271,6 +271,10 @@ RenderedPrompt PromptRenderer::render(const LLMInput& input, const std::string& 
         system_block += "\n\n## Retrieved context\n";
         system_block += ctx_work;
     }
+    if (input.orchestrator_subtask_digest && !input.orchestrator_subtask_digest->empty()) {
+        system_block += "\n\n## Outbound subtasks (auto)\n";
+        system_block += *input.orchestrator_subtask_digest;
+    }
     if (!af_injection_meta.empty()) {
         system_block += af_injection_meta;
     }

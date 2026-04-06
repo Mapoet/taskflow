@@ -13,6 +13,7 @@
 
 #include <condition_variable>
 #include <functional>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -23,6 +24,8 @@ namespace agent_framework {
 class ToolBus;
 
 namespace a2a {
+
+class OutboundTaskSupervisor;
 
 /** @brief Registered tool name for LLM → remote SendMessage. */
 inline constexpr const char* kA2aOrchestratorToolSendMessage = "a2a_send_message";
@@ -77,6 +80,16 @@ void register_a2a_orchestrator_tools(
     ToolBus& bus,
     A2aPeerRegistry& registry,
     PeerSessionBook& session_book,
+    const A2aToolRegistrationOptions& opts = {});
+
+/**
+ * @brief Register send_message + WP2.agents fine-grained tools (requires non-null supervisor).
+ */
+void register_a2a_orchestrator_tools(
+    ToolBus& bus,
+    A2aPeerRegistry& registry,
+    PeerSessionBook& session_book,
+    const std::shared_ptr<OutboundTaskSupervisor>& supervisor,
     const A2aToolRegistrationOptions& opts = {});
 
 } // namespace a2a

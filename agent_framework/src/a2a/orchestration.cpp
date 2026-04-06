@@ -3,13 +3,15 @@
  * @brief WP2.agent2agent orchestration + ToolBus bridge
  */
 #include <agent/a2a/orchestration.hpp>
+#include <agent/a2a/a2a_task_monitor.hpp>
 #include <agent/a2a/jsonrpc_client.hpp>
+#include <agent/a2a/outbound_task_supervisor.hpp>
 #include <agent/toolbus.hpp>
 
 #include <chrono>
+#include <memory>
 #include <sstream>
 #include <stdexcept>
-#include <thread>
 
 namespace agent_framework {
 namespace a2a {
@@ -34,11 +36,6 @@ void PeerSessionBook::clear(const std::string& peer_id) {
 }
 
 namespace {
-
-bool is_terminal_status(AgentTaskStatus s) {
-    return s == AgentTaskStatus::COMPLETED || s == AgentTaskStatus::FAILED ||
-           s == AgentTaskStatus::CANCELLED || s == AgentTaskStatus::INPUT_REQUIRED;
-}
 
 const char* task_status_cstr(AgentTaskStatus s) {
     switch (s) {
@@ -141,67 +138,18 @@ json run_remote_task_and_wait(
         return err;
     }
 
-    const bool use_sse = opts.use_sse_if_capable && agent_card_has_streaming(card);
-    AgentTask latest = t0;
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(opts.timeout_ms);
+    A2aTaskMonitorOutcome mon = monitor_remote_task_until_deadline(
+        peer_id, rpc_client, card, t0, opts, deadline);
 
-    if (use_sse) {
-        std::mutex mu;
-        std::condition_variable cv;
-        bool terminal = is_terminal_status(latest.status);
-
-        auto on_status = [&](const AgentTask& t) {
-            {
-                std::lock_guard<std::mutex> lk(mu);
-                latest = t;
-            }
-            if (opts.on_remote_log) {
-                std::ostringstream line;
-                line << "task_id=" << t.task_id << " status=" << task_status_cstr(t.status);
-                opts.on_remote_log(peer_id, line.str());
-            }
-            if (is_terminal_status(t.status)) {
-                terminal = true;
-                cv.notify_all();
-            }
-        };
-        rpc_client.subscribe_task_updates("", t0.task_id, on_status, [](const AgentArtifact&) {});
-
-        std::unique_lock<std::mutex> ul(mu);
-        while (!terminal && std::chrono::steady_clock::now() < deadline) {
-            const auto left = deadline - std::chrono::steady_clock::now();
-            if (left <= std::chrono::steady_clock::duration::zero()) {
-                break;
-            }
-            cv.wait_for(ul, left, [&] { return terminal; });
-        }
-        ul.unlock();
-
-        if (!terminal) {
-            try {
-                latest = rpc_client.get_task("", t0.task_id).get();
-            } catch (...) {
-                // keep latest
-            }
-        }
-    } else {
-        while (!is_terminal_status(latest.status) && std::chrono::steady_clock::now() < deadline) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(25));
-            try {
-                latest = rpc_client.get_task("", t0.task_id).get();
-            } catch (const std::exception& e) {
-                json err = task_to_tool_json(peer_id, latest, false);
-                err["ok"] = false;
-                err["error"] = e.what();
-                return err;
-            }
-            if (opts.on_remote_log) {
-                std::ostringstream line;
-                line << "task_id=" << latest.task_id << " status=" << task_status_cstr(latest.status);
-                opts.on_remote_log(peer_id, line.str());
-            }
-        }
+    if (mon.poll_error.has_value()) {
+        json err = task_to_tool_json(peer_id, mon.latest, false);
+        err["ok"] = false;
+        err["error"] = *mon.poll_error;
+        return err;
     }
+
+    AgentTask& latest = mon.latest;
 
     if (session_book != nullptr && latest.session_id.has_value()) {
         session_book->set(peer_id, *latest.session_id);
@@ -314,6 +262,138 @@ void register_a2a_orchestrator_tools(
             },
             m2);
     }
+}
+
+void register_a2a_orchestrator_tools(
+    ToolBus& bus,
+    A2aPeerRegistry& registry,
+    PeerSessionBook& session_book,
+    const std::shared_ptr<OutboundTaskSupervisor>& supervisor,
+    const A2aToolRegistrationOptions& opts) {
+
+    register_a2a_orchestrator_tools(bus, registry, session_book, opts);
+    if (!supervisor) {
+        return;
+    }
+
+    ToolMeta m_submit;
+    m_submit.name = kA2aToolSubmitTask;
+    m_submit.description =
+        "Submit a remote A2A task (SendMessage) and return immediately with local_handle; "
+        "background monitor until terminal unless monitor=false.";
+    m_submit.side_effect = ToolSideEffect::Write;
+    m_submit.schema = json::parse(R"({
+        "type": "object",
+        "properties": {
+            "peer_id": { "type": "string" },
+            "user_text": { "type": "string" },
+            "continue_session": { "type": "boolean", "default": true },
+            "metadata": { "type": "object" },
+            "timeout_ms": { "type": "integer" },
+            "monitor": { "type": "boolean", "default": true }
+        },
+        "required": ["peer_id", "user_text"]
+    })");
+    bus.register_local_tool(
+        kA2aToolSubmitTask,
+        [supervisor, opts](const json& args) -> json { return supervisor->tool_submit(args, opts); },
+        m_submit);
+
+    ToolMeta m_gs;
+    m_gs.name = kA2aToolGetTaskStatus;
+    m_gs.description = "Read outbound subtask status by local_handle or peer_id+remote_task_id.";
+    m_gs.side_effect = ToolSideEffect::ReadOnly;
+    m_gs.schema = json::parse(R"({
+        "type": "object",
+        "properties": {
+            "local_handle": { "type": "string" },
+            "peer_id": { "type": "string" },
+            "remote_task_id": { "type": "string" }
+        }
+    })");
+    bus.register_local_tool(
+        kA2aToolGetTaskStatus,
+        [supervisor](const json& args) -> json { return supervisor->tool_get_status(args); },
+        m_gs);
+
+    ToolMeta m_wait;
+    m_wait.name = kA2aToolWaitTasks;
+    m_wait.description = "Wait for subtasks: handles[] or peer_task_pairs[], mode=all|any.";
+    m_wait.side_effect = ToolSideEffect::Write;
+    m_wait.schema = json::parse(R"({
+        "type": "object",
+        "properties": {
+            "handles": { "type": "array", "items": { "type": "string" } },
+            "peer_task_pairs": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "peer_id": { "type": "string" },
+                        "remote_task_id": { "type": "string" }
+                    },
+                    "required": ["peer_id", "remote_task_id"]
+                }
+            },
+            "timeout_ms": { "type": "integer" },
+            "mode": { "type": "string", "enum": ["all", "any"], "default": "all" }
+        }
+    })");
+    bus.register_local_tool(
+        kA2aToolWaitTasks,
+        [supervisor](const json& args) -> json { return supervisor->tool_wait_tasks(args); },
+        m_wait);
+
+    ToolMeta m_can;
+    m_can.name = kA2aToolCancelTask;
+    m_can.description = "Cancel outbound subtask locally and request CancelTask on peer.";
+    m_can.side_effect = ToolSideEffect::Write;
+    m_can.schema = json::parse(R"({
+        "type": "object",
+        "properties": {
+            "local_handle": { "type": "string" },
+            "peer_id": { "type": "string" },
+            "remote_task_id": { "type": "string" }
+        }
+    })");
+    bus.register_local_tool(
+        kA2aToolCancelTask,
+        [supervisor](const json& args) -> json { return supervisor->tool_cancel(args); },
+        m_can);
+
+    ToolMeta m_ext;
+    m_ext.name = kA2aToolExtendTimeout;
+    m_ext.description = "Extend local wait deadline for a non-terminal subtask by extra_ms.";
+    m_ext.side_effect = ToolSideEffect::Write;
+    m_ext.schema = json::parse(R"({
+        "type": "object",
+        "properties": {
+            "local_handle": { "type": "string" },
+            "extra_ms": { "type": "integer" }
+        },
+        "required": ["local_handle", "extra_ms"]
+    })");
+    bus.register_local_tool(
+        kA2aToolExtendTimeout,
+        [supervisor](const json& args) -> json { return supervisor->tool_extend(args); },
+        m_ext);
+
+    ToolMeta m_list;
+    m_list.name = kA2aToolListSubtasks;
+    m_list.description = "List recent subtask events since_seq (ring buffer).";
+    m_list.side_effect = ToolSideEffect::ReadOnly;
+    m_list.schema = json::parse(R"({
+        "type": "object",
+        "properties": {
+            "since_seq": { "type": "integer" },
+            "peer_id": { "type": "string" },
+            "limit": { "type": "integer" }
+        }
+    })");
+    bus.register_local_tool(
+        kA2aToolListSubtasks,
+        [supervisor](const json& args) -> json { return supervisor->tool_list_subtasks(args); },
+        m_list);
 }
 
 } // namespace a2a
