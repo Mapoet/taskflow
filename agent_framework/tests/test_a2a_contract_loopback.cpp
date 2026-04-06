@@ -7,6 +7,7 @@
 #include <agent/types.hpp>
 
 #include <chrono>
+#include <cstring>
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
@@ -38,6 +39,28 @@ namespace {
 void fail(const char* m) {
     std::cerr << "test_a2a_contract_loopback: " << m << "\n";
     std::exit(1);
+}
+
+bool looks_like_httplib_transport_fail(const std::exception& e) {
+    const char* w = e.what();
+    return w != nullptr && std::strstr(w, "HttplibClient:") != nullptr
+        && std::strstr(w, "failed, error code:") != nullptr;
+}
+
+/** cpp-httplib may return Error::Read / Connection right after listen; retry bounded (see test_agent_client_a2a). */
+template <typename Fn>
+void retry_httplib_transport_void(Fn&& fn, int max_attempts = 8) {
+    for (int i = 0; i < max_attempts; ++i) {
+        try {
+            fn();
+            return;
+        } catch (const std::exception& e) {
+            if (i + 1 == max_attempts || !looks_like_httplib_transport_fail(e)) {
+                throw;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(80 * (i + 1)));
+        }
+    }
 }
 
 /** Ensures listen thread is never destroyed joinable (avoids std::terminate on exception paths). */
@@ -104,7 +127,7 @@ void wait_health_ok(const std::string& host, int port, int timeout_ms) {
         c.set_write_timeout(1, 0);
         auto r = c.Get("/health");
         if (r && r->status == 200) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(200));
+            std::this_thread::sleep_for(std::chrono::milliseconds(350));
             return;
         }
         if (std::chrono::steady_clock::now() - t0 > std::chrono::milliseconds(timeout_ms)) {
@@ -213,12 +236,21 @@ void test_l2_bearer_optional() {
     opt.use_legacy_rest = false;
     opt.json_rpc_path = "/rpc";
 
-    try {
-        AgentClient cli_bad(base, opt);
-        cli_bad.send_task("/", make_fixture_user_message(), std::nullopt, json::object()).get();
-        fail("expected failure without bearer");
-    } catch (const std::exception&) {
-        // expected
+    for (int attempt = 0; attempt < 8; ++attempt) {
+        try {
+            AgentClient cli_bad(base, opt);
+            cli_bad.send_task("/", make_fixture_user_message(), std::nullopt, json::object()).get();
+            fail("expected failure without bearer");
+        } catch (const std::exception& e) {
+            if (looks_like_httplib_transport_fail(e) && attempt + 1 < 8) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(80 * (attempt + 1)));
+                continue;
+            }
+            if (looks_like_httplib_transport_fail(e)) {
+                throw;
+            }
+            break;
+        }
     }
 
     AgentClient cli_ok(base, opt);
@@ -227,7 +259,10 @@ void test_l2_bearer_optional() {
     auth_cfg["token"] = tok;
     cli_ok.set_authentication(auth_cfg);
 
-    AgentTask t = cli_ok.send_task("/", make_fixture_user_message(), std::nullopt, json::object()).get();
+    AgentTask t;
+    retry_httplib_transport_void([&] {
+        t = cli_ok.send_task("/", make_fixture_user_message(), std::nullopt, json::object()).get();
+    });
     if (t.task_id != "task-syn-1") {
         fail("L-2 task_id mismatch");
     }
