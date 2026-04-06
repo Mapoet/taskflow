@@ -227,6 +227,9 @@ private:
      * @return 连接键
      */
     static std::string make_sse_key(const std::string& agent_endpoint, const std::string& task_id);
+
+    /** @brief Append api_key_query param to GET url (caller holds auth_mutex_). */
+    std::string append_auth_query_to_get_url_unlocked(const std::string& url) const;
 };
 
 } // namespace agent_framework

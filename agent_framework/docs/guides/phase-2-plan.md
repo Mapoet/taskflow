@@ -283,7 +283,7 @@ flowchart TB
 
 **目标**：Bearer、API Key、（可选）OAuth 设备码按规范优先级。
 
-**详案**（`AuthGate`、`AuthRequirement`、env 与 Card `match_card`、Bearer/API Key header+query、`WWW-Authenticate`、Well-Known 是否公开、与自定义 `auth_validator_` 组合、客户端 JSON schema、可选 RFC 8628、测试与 PR 顺序）：**[phase-2-wp5.md](./phase-2-wp5.md)**。
+**详案**（`AuthGate`、`AuthRequirement`、env 与 Card `match_card`、Bearer/API Key header+query、`WWW-Authenticate`、Well-Known 是否公开、与自定义 `auth_validator_` 组合、客户端 JSON schema、可选 RFC 8628、测试与 PR 顺序）：**[phase-2-wp5.md](./phase-2-wp5.md)**。**用户指南**（env 表摘要、客户端 JSON）：**[a2a-authentication.md](./a2a-authentication.md)**。
 
 | ID | 任务 | 说明 |
 |----|------|------|

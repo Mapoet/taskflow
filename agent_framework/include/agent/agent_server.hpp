@@ -17,6 +17,7 @@
 #include <functional>
 #include <thread>
 #include <atomic>
+#include <agent/a2a/auth_gate.hpp>
 #include <agent/types.hpp>
 #include <agent/task_state_machine.hpp>
 #include <nlohmann/json.hpp>
@@ -96,11 +97,9 @@ public:
     );
 
     /**
-     * @brief 设置认证验证器
+     * @brief 设置附加认证验证器（在内置 AuthGate 通过后与关系 AND）
      */
-    void set_authentication_validator(
-        std::function<bool(const std::map<std::string, std::string>& headers)> validator
-    );
+    void set_authentication_validator(std::function<bool(const a2a::AuthContext& ctx)> validator);
 
     void push_task_status_update(const std::string& task_id, const AgentTask& task);
 
@@ -125,7 +124,8 @@ private:
         std::shared_ptr<workflow::GraphBuilder>,
         std::shared_ptr<TaskControl>)>
         task_handler_;
-    std::function<bool(const std::map<std::string, std::string>&)> auth_validator_;
+    std::function<bool(const a2a::AuthContext&)> auth_validator_;
+    a2a::AuthGateConfig auth_gate_config_;
 
     std::unique_ptr<internal::TaskDispatchQueue> task_queue_;
     std::vector<std::thread> dispatch_workers_;
@@ -145,7 +145,7 @@ private:
     void setup_routes();
     void register_jsonrpc_methods();
 
-    void handle_well_known_agent_card(httplib::Response& res);
+    void handle_well_known_agent_card(const httplib::Request& req, httplib::Response& res);
     void handle_health(httplib::Response& res);
 
     void handle_jsonrpc_post(const httplib::Request& req, httplib::Response& res);
@@ -159,7 +159,7 @@ private:
     void handle_push_notification_set(const httplib::Request& req, httplib::Response& res);
     void handle_push_notification_get(const httplib::Request& req, httplib::Response& res);
 
-    bool validate_authentication(const httplib::Request& req);
+    bool apply_auth_gate(const httplib::Request& req, httplib::Response& res);
 
     json jsonrpc_send_message(const json& params);
     json jsonrpc_get_task(const json& params);
@@ -171,8 +171,6 @@ private:
                                             const json& metadata);
 
     static std::string generate_task_id();
-    static std::map<std::string, std::string> lower_headers(const httplib::Request& req);
-
     void remove_sse_channel(const std::string& task_id,
                             const std::shared_ptr<internal::SseServerChannel>& ch);
 };

@@ -10,6 +10,7 @@
 #include <agent/httplib_http_client.hpp>
 #include <agent/types.hpp>
 
+#include <cctype>
 #include <cstdlib>
 #include <future>
 #include <mutex>
@@ -58,6 +59,22 @@ HttplibClient& require_httplib(HTTPClient* c) {
         throw std::runtime_error("AgentClient: HTTP backend must be HttplibClient");
     }
     return *h;
+}
+
+std::string encode_query_component(const std::string& s) {
+    static const char* hex = "0123456789ABCDEF";
+    std::string o;
+    o.reserve(s.size() + s.size() / 4);
+    for (unsigned char c : s) {
+        if (std::isalnum(c) || c == '-' || c == '_' || c == '.' || c == '~') {
+            o += static_cast<char>(c);
+        } else {
+            o += '%';
+            o += hex[(c >> 4) & 0xf];
+            o += hex[c & 0xf];
+        }
+    }
+    return o;
 }
 
 void throw_if_rest_error_body(const json& body) {
@@ -117,7 +134,11 @@ std::future<AgentCard> AgentClient::discover_agent(const std::string& agent_endp
     // are unsafe there for our usage. Run synchronously on the caller thread and return
     // an already-ready future (see header @note).
     std::packaged_task<AgentCard()> pt([this, agent_endpoint]() {
-        const std::string url = join_url(server_url_, agent_endpoint);
+        std::string url = join_url(server_url_, agent_endpoint);
+        {
+            std::lock_guard<std::mutex> lk(auth_mutex_);
+            url = append_auth_query_to_get_url_unlocked(url);
+        }
         auto headers = build_auth_headers();
         json body = http_client_->get(url, headers);
         throw_if_rest_error_body(body);
@@ -182,7 +203,11 @@ std::future<AgentTask> AgentClient::get_task(const std::string& agent_endpoint, 
         if (use_legacy_rest_) {
             std::ostringstream path;
             path << agent_endpoint << "/tasks/get?task_id=" << task_id;
-            const std::string url = join_url(server_url_, path.str());
+            std::string url = join_url(server_url_, path.str());
+            {
+                std::lock_guard<std::mutex> lk(auth_mutex_);
+                url = append_auth_query_to_get_url_unlocked(url);
+            }
             auto headers = build_auth_headers();
             json body = http_client_->get(url, headers);
             throw_if_rest_error_body(body);
@@ -317,7 +342,11 @@ std::future<json> AgentClient::get_push_notification_config(
     std::packaged_task<json()> pt([this, agent_endpoint, task_id]() {
         std::ostringstream path;
         path << agent_endpoint << "/tasks/pushNotification/get?task_id=" << task_id;
-        const std::string url = join_url(server_url_, path.str());
+        std::string url = join_url(server_url_, path.str());
+        {
+            std::lock_guard<std::mutex> lk(auth_mutex_);
+            url = append_auth_query_to_get_url_unlocked(url);
+        }
         auto headers = build_auth_headers();
         json body = http_client_->get(url, headers);
         throw_if_rest_error_body(body);
@@ -330,12 +359,39 @@ std::future<json> AgentClient::get_push_notification_config(
 
 void AgentClient::set_authentication(const json& auth_config) {
     std::lock_guard<std::mutex> lock(auth_mutex_);
+    if (!auth_config.is_object()) {
+        throw std::invalid_argument("AgentClient::set_authentication: JSON object required");
+    }
+    if (auth_config.empty() || !auth_config.contains("type")) {
+        auth_config_ = auth_config;
+        return;
+    }
+    const std::string auth_type = auth_config["type"].get<std::string>();
+    if (auth_type == "bearer") {
+        if (!auth_config.contains("token") || !auth_config["token"].is_string() ||
+            auth_config["token"].get<std::string>().empty()) {
+            throw std::invalid_argument("set_authentication: bearer requires non-empty token");
+        }
+    } else if (auth_type == "api_key") {
+        if (!auth_config.contains("key_value") || !auth_config["key_value"].is_string() ||
+            auth_config["key_value"].get<std::string>().empty()) {
+            throw std::invalid_argument("set_authentication: api_key requires key_value");
+        }
+    } else if (auth_type == "api_key_query") {
+        if (!auth_config.contains("key_value") || !auth_config["key_value"].is_string() ||
+            auth_config["key_value"].get<std::string>().empty()) {
+            throw std::invalid_argument("set_authentication: api_key_query requires key_value");
+        }
+    } else {
+        throw std::invalid_argument("set_authentication: unknown type (WP2.5: bearer|api_key|api_key_query)");
+    }
     auth_config_ = auth_config;
 }
 
 void AgentClient::refresh_authentication() {
     std::lock_guard<std::mutex> lock(auth_mutex_);
-    // TODO: OAuth token refresh (WP2.5)
+    // OAuth 2.0 device grant (RFC 8628) is optional future work; see docs/guides/a2a-authentication.md.
+    (void)auth_config_;
 }
 
 std::map<std::string, std::string> AgentClient::build_auth_headers() const {
@@ -353,10 +409,30 @@ std::map<std::string, std::string> AgentClient::build_auth_headers() const {
             const std::string key_name = auth_config_.value("key_name", "X-API-Key");
             const std::string key_value = auth_config_.value("key_value", "");
             headers[key_name] = key_value;
+        } else if (auth_type == "api_key_query") {
+            // Query appended in append_auth_query_to_get_url_unlocked for GET only.
         }
     }
 
     return headers;
+}
+
+std::string AgentClient::append_auth_query_to_get_url_unlocked(const std::string& url) const {
+    const std::string auth_type = auth_config_.value("type", "");
+    if (auth_type != "api_key_query") {
+        return url;
+    }
+    const std::string key = auth_config_.value("key_value", "");
+    if (key.empty()) {
+        return url;
+    }
+    const std::string param = auth_config_.value("param_name", "api_key");
+    const std::string frag =
+        encode_query_component(param) + "=" + encode_query_component(key);
+    if (url.find('?') != std::string::npos) {
+        return url + "&" + frag;
+    }
+    return url + "?" + frag;
 }
 
 std::string AgentClient::make_sse_key(const std::string& agent_endpoint, const std::string& task_id) {

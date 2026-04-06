@@ -420,6 +420,12 @@ endif()
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/a2a/orchestration.cpp)
     list(APPEND AGENT_SOURCES src/a2a/orchestration.cpp)
 endif()
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/a2a/auth_requirement.cpp)
+    list(APPEND AGENT_SOURCES src/a2a/auth_requirement.cpp)
+endif()
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/a2a/auth_gate.cpp)
+    list(APPEND AGENT_SOURCES src/a2a/auth_gate.cpp)
+endif()
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/a2a/a2a_task_monitor.cpp)
     list(APPEND AGENT_SOURCES src/a2a/a2a_task_monitor.cpp)
 endif()
@@ -453,6 +459,9 @@ set(AGENT_HEADERS
     include/agent/a2a/jsonrpc.hpp
     include/agent/a2a/client_config.hpp
     include/agent/a2a/jsonrpc_client.hpp
+    include/agent/a2a/types.hpp
+    include/agent/a2a/auth_requirement.hpp
+    include/agent/a2a/auth_gate.hpp
     include/agent/a2a/wire_card.hpp
     include/agent/a2a/sse_framing.hpp
     include/agent/a2a/wire_mapping.hpp
@@ -809,6 +818,34 @@ if(BUILD_TESTING)
             "AGENT_TEST_A2A_FIXTURE_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}\"")
         add_test(NAME a2a_wire_card COMMAND test_a2a_wire_card)
         set_tests_properties(a2a_wire_card PROPERTIES ENVIRONMENT "AGENT_TOOL_ALLOWLIST=")
+    endif()
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_auth_gate.cpp)
+        add_executable(test_auth_gate tests/test_auth_gate.cpp)
+        target_link_libraries(test_auth_gate PRIVATE agent_framework)
+        if(CMAKE_USE_PTHREADS_INIT)
+            target_link_libraries(test_auth_gate PRIVATE Threads::Threads)
+        endif()
+        add_test(NAME auth_gate COMMAND test_auth_gate)
+        set_tests_properties(auth_gate PROPERTIES ENVIRONMENT "AGENT_TOOL_ALLOWLIST=")
+    endif()
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_agent_server_auth_wp25.cpp)
+        add_executable(test_agent_server_auth_wp25 tests/test_agent_server_auth_wp25.cpp)
+        target_link_libraries(test_agent_server_auth_wp25 PRIVATE agent_framework)
+        if(CMAKE_USE_PTHREADS_INIT)
+            target_link_libraries(test_agent_server_auth_wp25 PRIVATE Threads::Threads)
+        endif()
+        add_test(NAME agent_server_auth_wp25 COMMAND test_agent_server_auth_wp25)
+        set_tests_properties(agent_server_auth_wp25 PROPERTIES
+            ENVIRONMENT "AGENT_TOOL_ALLOWLIST=;AGENT_A2A_STRICT=1")
+    endif()
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_agent_client_auth_query.cpp)
+        add_executable(test_agent_client_auth_query tests/test_agent_client_auth_query.cpp)
+        target_link_libraries(test_agent_client_auth_query PRIVATE agent_framework)
+        if(CMAKE_USE_PTHREADS_INIT)
+            target_link_libraries(test_agent_client_auth_query PRIVATE Threads::Threads)
+        endif()
+        add_test(NAME agent_client_auth_query COMMAND test_agent_client_auth_query)
+        set_tests_properties(agent_client_auth_query PROPERTIES ENVIRONMENT "AGENT_TOOL_ALLOWLIST=")
     endif()
     if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_a2a_tracker_present.cpp)
         add_executable(test_a2a_tracker_present tests/test_a2a_tracker_present.cpp)

@@ -3,6 +3,7 @@
  * @brief Tier E: light QPS + oversize POST + optional auth negative (in-process server)
  */
 #include <agent/agent_server.hpp>
+#include <agent/a2a/auth_gate.hpp>
 #include <agent/types.hpp>
 
 #include <chrono>
@@ -82,9 +83,9 @@ int main() {
     const char* auth_tok = std::getenv("AGENT_A2A_TIER_E_AUTH_TOKEN");
     if (auth_tok != nullptr && auth_tok[0]) {
         server.set_authentication_validator(
-            [auth_tok](const std::map<std::string, std::string>& headers) {
-                auto it = headers.find("authorization");
-                if (it == headers.end()) {
+            [auth_tok](const agent_framework::a2a::AuthContext& ctx) {
+                auto it = ctx.headers_lower.find("authorization");
+                if (it == ctx.headers_lower.end()) {
                     return false;
                 }
                 return it->second == (std::string("Bearer ") + auth_tok);

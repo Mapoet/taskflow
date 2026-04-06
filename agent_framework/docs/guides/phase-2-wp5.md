@@ -188,6 +188,7 @@ flowchart TD
 
 ## 11. 相关链接
 
+- [a2a-authentication.md](./a2a-authentication.md)（实现落地后的用户 / 运维指南）  
 - [phase-2-plan.md](./phase-2-plan.md)  
 - [phase-2-wp2.md](./phase-2-wp2.md) §6  
 - [phase-2-wp4.md](./phase-2-wp4.md)  

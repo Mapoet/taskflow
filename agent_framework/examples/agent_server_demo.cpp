@@ -3,6 +3,7 @@
  * @brief Minimal AgentServer binary for Tier C/D live tests (WP2.a2a-test)
  */
 #include <agent/agent_server.hpp>
+#include <agent/a2a/auth_gate.hpp>
 #include <agent/types.hpp>
 
 #include <chrono>
@@ -166,9 +167,9 @@ int main(int argc, char** argv) {
     const char* token = std::getenv("AGENT_SERVER_AUTH_TOKEN");
     if (token && token[0]) {
         server.set_authentication_validator(
-            [token](const std::map<std::string, std::string>& headers) {
-                auto it = headers.find("Authorization");
-                if (it == headers.end()) {
+            [token](const agent_framework::a2a::AuthContext& ctx) {
+                auto it = ctx.headers_lower.find("authorization");
+                if (it == ctx.headers_lower.end()) {
                     return false;
                 }
                 const std::string expect = std::string("Bearer ") + token;

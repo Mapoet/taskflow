@@ -6,6 +6,7 @@
  * @date 2026-04-05
  */
 #include <agent/agent_server.hpp>
+#include <agent/a2a/auth_gate.hpp>
 #include <agent/a2a/dispatch_table.hpp>
 #include <agent/a2a/jsonrpc.hpp>
 #include <agent/a2a/sse_framing.hpp>
@@ -117,6 +118,15 @@ bool strict_a2a() {
 bool legacy_rest() {
     const char* v = std::getenv("AGENT_SERVER_LEGACY_REST");
     return v && v[0] == '1';
+}
+
+/** @brief Default public: unset or non-zero first char means public discovery. */
+bool card_discovery_is_public() {
+    const char* v = std::getenv("AGENT_SERVER_CARD_PUBLIC");
+    if (!v || !v[0]) {
+        return true;
+    }
+    return v[0] != '0';
 }
 
 std::string sse_ping_interval_sec() {
@@ -463,28 +473,28 @@ void AgentServer::set_task_handler(
 }
 
 void AgentServer::set_authentication_validator(
-    std::function<bool(const std::map<std::string, std::string>& headers)> validator
+    std::function<bool(const a2a::AuthContext& ctx)> validator
 ) {
     auth_validator_ = std::move(validator);
 }
 
-std::map<std::string, std::string> AgentServer::lower_headers(const httplib::Request& req) {
-    std::map<std::string, std::string> out;
-    for (const auto& h : req.headers) {
-        std::string key = h.first;
-        std::transform(key.begin(), key.end(), key.begin(), [](unsigned char c) {
-            return static_cast<char>(std::tolower(c));
-        });
-        out[std::move(key)] = h.second;
+bool AgentServer::apply_auth_gate(const httplib::Request& req, httplib::Response& res) {
+    const a2a::AuthContext ctx = a2a::auth_context_from_request(req);
+    a2a::AuthFailure fail;
+    if (!a2a::auth_gate_check(ctx, auth_gate_config_, &fail)) {
+        res.status = fail.http_status;
+        if (!fail.www_authenticate.empty()) {
+            res.set_header("WWW-Authenticate", fail.www_authenticate);
+        }
+        res.set_content(fail.body_json, "application/json");
+        return false;
     }
-    return out;
-}
-
-bool AgentServer::validate_authentication(const httplib::Request& req) {
-    if (!auth_validator_) {
-        return true;
+    if (auth_validator_ && !auth_validator_(ctx)) {
+        res.status = 401;
+        res.set_content(R"({"error":"Unauthorized"})", "application/json");
+        return false;
     }
-    return auth_validator_(lower_headers(req));
+    return true;
 }
 
 void AgentServer::remove_sse_channel(const std::string& task_id,
@@ -560,8 +570,20 @@ void AgentServer::setup_routes() {
         return;
     }
 
-    srv->Get("/.well-known/agent-card.json", [this](const httplib::Request&, httplib::Response& res) {
-        handle_well_known_agent_card(res);
+    {
+        std::string auth_err;
+        if (!a2a::load_auth_gate_config_from_env(agent_card_, &auth_gate_config_, &auth_err)) {
+            throw std::runtime_error(std::string("AgentServer auth: ") + auth_err);
+        }
+    }
+
+    srv->Get("/.well-known/agent-card.json", [this](const httplib::Request& req, httplib::Response& res) {
+        if (!card_discovery_is_public()) {
+            if (!apply_auth_gate(req, res)) {
+                return;
+            }
+        }
+        handle_well_known_agent_card(req, res);
     });
 
     srv->Get("/health", [this](const httplib::Request&, httplib::Response& res) { handle_health(res); });
@@ -600,7 +622,7 @@ void AgentServer::setup_routes() {
     }
 }
 
-void AgentServer::handle_well_known_agent_card(httplib::Response& res) {
+void AgentServer::handle_well_known_agent_card(const httplib::Request& /*req*/, httplib::Response& res) {
     res.status = 200;
     res.set_content(a2a::agent_card_discovery_json_string(agent_card_), "application/json");
 }
@@ -612,9 +634,7 @@ void AgentServer::handle_health(httplib::Response& res) {
 
 void AgentServer::handle_jsonrpc_post(const httplib::Request& req, httplib::Response& res) {
     res.status = 200;
-    if (!validate_authentication(req)) {
-        res.status = 401;
-        res.set_content(R"({"error":"Unauthorized"})", "application/json");
+    if (!apply_auth_gate(req, res)) {
         return;
     }
 
@@ -759,9 +779,7 @@ json AgentServer::jsonrpc_list_tasks(const json& params) {
 }
 
 void AgentServer::handle_tasks_send(const httplib::Request& req, httplib::Response& res) {
-    if (!validate_authentication(req)) {
-        res.status = 401;
-        res.set_content(json{{"error", "Unauthorized"}}.dump(), "application/json");
+    if (!apply_auth_gate(req, res)) {
         return;
     }
 
@@ -816,9 +834,7 @@ void AgentServer::handle_tasks_send(const httplib::Request& req, httplib::Respon
 }
 
 void AgentServer::handle_tasks_get(const httplib::Request& req, httplib::Response& res) {
-    if (!validate_authentication(req)) {
-        res.status = 401;
-        res.set_content(json{{"error", "Unauthorized"}}.dump(), "application/json");
+    if (!apply_auth_gate(req, res)) {
         return;
     }
 
@@ -837,9 +853,7 @@ void AgentServer::handle_tasks_get(const httplib::Request& req, httplib::Respons
 }
 
 void AgentServer::handle_tasks_cancel(const httplib::Request& req, httplib::Response& res) {
-    if (!validate_authentication(req)) {
-        res.status = 401;
-        res.set_content(json{{"error", "Unauthorized"}}.dump(), "application/json");
+    if (!apply_auth_gate(req, res)) {
         return;
     }
 
@@ -884,9 +898,7 @@ void AgentServer::handle_tasks_cancel(const httplib::Request& req, httplib::Resp
 }
 
 void AgentServer::handle_tasks_update(const httplib::Request& req, httplib::Response& res) {
-    if (!validate_authentication(req)) {
-        res.status = 401;
-        res.set_content(json{{"error", "Unauthorized"}}.dump(), "application/json");
+    if (!apply_auth_gate(req, res)) {
         return;
     }
 
@@ -917,8 +929,7 @@ void AgentServer::handle_tasks_update(const httplib::Request& req, httplib::Resp
 }
 
 void AgentServer::handle_tasks_send_subscribe(const httplib::Request& req, httplib::Response& res) {
-    if (!validate_authentication(req)) {
-        res.status = 401;
+    if (!apply_auth_gate(req, res)) {
         return;
     }
 
@@ -982,8 +993,7 @@ void AgentServer::handle_tasks_send_subscribe(const httplib::Request& req, httpl
 }
 
 void AgentServer::handle_tasks_resubscribe(const httplib::Request& req, httplib::Response& res) {
-    if (!validate_authentication(req)) {
-        res.status = 401;
+    if (!apply_auth_gate(req, res)) {
         return;
     }
 
@@ -997,8 +1007,7 @@ void AgentServer::handle_tasks_resubscribe(const httplib::Request& req, httplib:
 }
 
 void AgentServer::handle_push_notification_set(const httplib::Request& req, httplib::Response& res) {
-    if (!validate_authentication(req)) {
-        res.status = 401;
+    if (!apply_auth_gate(req, res)) {
         return;
     }
 
@@ -1018,8 +1027,7 @@ void AgentServer::handle_push_notification_set(const httplib::Request& req, http
 }
 
 void AgentServer::handle_push_notification_get(const httplib::Request& req, httplib::Response& res) {
-    if (!validate_authentication(req)) {
-        res.status = 401;
+    if (!apply_auth_gate(req, res)) {
         return;
     }
 

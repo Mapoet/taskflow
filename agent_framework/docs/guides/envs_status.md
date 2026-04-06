@@ -84,6 +84,14 @@
 | `AGENT_SERVER_PORT` | 覆盖监听端口 | 构造参数 | [agent-server.md](./agent-server.md) | `agent_server.cpp` | Server | `server_init` | 同上 | 同上 |
 | `AGENT_SERVER_JSON_RPC_PATH` | 覆盖 JSON-RPC 路径 | 从 Card 推导 | [agent-server.md](./agent-server.md), [a2a-spec-tracker.md](./a2a-spec-tracker.md) | `agent_server.cpp` | A2AWire, Server | `server_init`（路由注册时） | 单 Server 实例 | 多 Server 进程各设各值 |
 | `AGENT_A2A_STRICT` | 严格 A2A：与 Legacy 组合策略 | `1` | [agent-server.md](./agent-server.md), [phase-2-wp2.md](./phase-2-wp2.md) | `agent_server.cpp` | A2AWire, Server | `server_init` | 进程级 | 设计为进程策略 |
+| `AGENT_SERVER_AUTH_MODE` | 内置 AuthGate：`off` / `bearer` / `api_key_header` / `api_key_query` / `match_card` | `off`（未设置） | [a2a-authentication.md](./a2a-authentication.md) | `src/a2a/auth_gate.cpp` `load_auth_gate_config_from_env` | Server | `server_init`（`setup_routes`） | 进程级 | 与 Card **同时**变更需重启 |
+| `AGENT_SERVER_BEARER_TOKEN` | 单个 Bearer 密钥 | — | [a2a-authentication.md](./a2a-authentication.md) | `auth_gate.cpp` | Server | `server_init` | **勿**写入仓库 | 实例化配置优先 |
+| `AGENT_SERVER_BEARER_TOKENS` | 逗号分隔多个 Bearer | — | 同上 | 同上 | Server | 同上 | 同上 | 同上 |
+| `AGENT_SERVER_API_KEYS` | 逗号分隔 API Key（header 或 query） | — | 同上 | 同上 | Server | 同上 | 同上 | 同上 |
+| `AGENT_SERVER_API_KEY_HEADER` | Header 名，默认 `X-API-Key` | `X-API-Key` | 同上 | 同上 | Server | 同上 | 同上 | 同上 |
+| `AGENT_SERVER_API_KEY_QUERY` | Query 参数名，默认 `api_key` | `api_key` | 同上 | 同上 | Server | 同上 | 同上 | 同上 |
+| `AGENT_SERVER_CARD_PUBLIC` | `1`：`/.well-known` 匿名；`0`：走 AuthGate | `1` | 同上 | `agent_server.cpp` | Server | `each_getenv`（每请求） | 见 [envs_status.md](./envs_status.md) §4 | — |
+| `AGENT_SERVER_STRICT_CARD_AUTH` | `1`：`securitySchemes` 解析失败拒绝启动 | `0` | 同上 | `auth_requirement.cpp` / `auth_gate.cpp` | Server | `server_init` | 同上 | — |
 | `AGENT_SERVER_LEGACY_REST` | 是否注册 Legacy `/tasks/*` | `0` | [agent-server.md](./agent-server.md) | `agent_server.cpp` | A2AWire, Server | `server_init` | 同上 | 同上 |
 | `AGENT_SERVER_MAX_QUEUED_TASKS` | 有界队列长度 | `64` | [agent-server.md](./agent-server.md) | `agent_server.cpp` | Server | `server_init` | 同上 | 同上 |
 | `AGENT_SERVER_WORKER_THREADS` | Worker 线程数 | `max(2,hw/2)`（文档） | [agent-server.md](./agent-server.md) | `agent_server.cpp` | Server | `server_init` | 同上 | 同上 |

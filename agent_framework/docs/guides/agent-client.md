@@ -45,6 +45,13 @@
 
 - 返回 `std::future` 的方法在 **被调用的成员函数内部**（调用线程）同步完成 HTTP，再返回 **已就绪** 的 future；`get()` / `wait()` 立即拿到结果。这样避免 libstdc++ 将 `deferred` 任务派发到线程池与 httplib/OpenSSL 产生交互问题。若需要与别的工作并行，请在调用方自行 `std::async` 包装。
 
+## 认证（WP2.5）
+
+- **`set_authentication`**：`bearer`、`api_key`、`api_key_query`；非法 `type` 或缺字段抛 `std::invalid_argument`。
+- **`api_key_query`**：仅在 **GET**（discover、Legacy `get_task`、`pushNotification/get`、SSE URL）上追加 query；**JSON-RPC POST 不** 附加 query。
+- 完整表与服务端 env 见 **[a2a-authentication.md](./a2a-authentication.md)**。
+
 ## 相关测试
 
 - `ctest -R agent_client_a2a`（`tests/test_agent_client_a2a.cpp`，场景 C-1–C-4）。
+- `ctest -R agent_client_auth_query`（`api_key_query` 与 discover GET）。
