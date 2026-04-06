@@ -13,6 +13,7 @@
 #include "agent/context_budget.hpp"
 #include "agent/task_state_machine.hpp"
 #include "agent/toolbus.hpp"
+#include "agent/user_input_preprocessor.hpp"
 #include <agent/a2a/outbound_task_supervisor.hpp>
 
 #include <algorithm>
@@ -172,8 +173,10 @@ AgentLoopNode::create(
         auto st = std::any_cast<std::shared_ptr<internal::AgentThreadState>>(
             inps.at(std::string(internal::kAgentState)));
         if (!shared->state) {
-            shared->state = st ? std::make_shared<internal::AgentThreadState>(*st)
-                               : std::make_shared<internal::AgentThreadState>();
+            // Use the graph's session shared_ptr (not a copy) so WP2.7 pending injection / violations
+            // and history stay on the object the caller holds; LoopInput re-emits the same ptr each
+            // iteration while shared->state accumulates iteration-local updates on it.
+            shared->state = st ? st : std::make_shared<internal::AgentThreadState>();
         }
         const int it = shared->state ? shared->state->iteration : 0;
         if (dbg) {
@@ -206,11 +209,42 @@ AgentLoopNode::create(
             }
         }
 
+        std::string wp27_context_suffix;
+        if (it == 0 && shared->state) {
+            if (!shared->state->pending_input_violations.empty()) {
+                shared->is_final = true;
+                std::string msg = "[input_policy] violations:\n";
+                for (const auto& v : shared->state->pending_input_violations) {
+                    msg += v;
+                    msg += '\n';
+                }
+                shared->final_answer = msg;
+                shared->last_llm.is_final = true;
+                shared->last_llm.final_answer = msg;
+                shared->last_llm.tool_calls.clear();
+                shared->state->pending_input_violations.clear();
+                return {};
+            }
+            dispatch_pending_control_actions(
+                shared->state->pending_control_actions,
+                shared->state->execution_context ? &*shared->state->execution_context : nullptr);
+            wp27_context_suffix = take_injected_blocks_as_llm_context(
+                shared->state->pending_injected_context);
+        }
+
         LLMInput llm_in;
         llm_in.system_prompt =
             std::any_cast<std::string>(inps.at(std::string(internal::kSystemPrompt)));
         llm_in.user_prompt = user_query;
         llm_in.history = shared->state->history;
+        if (it == 0 && !wp27_context_suffix.empty()) {
+            llm_in.context = std::move(wp27_context_suffix);
+        }
+        std::string policy_ver = "wp27-v1";
+        if (shared->state && shared->state->execution_context) {
+            policy_ver = shared->state->execution_context->input_policy_version;
+        }
+        llm_in.extra_variables["input_policy_version"] = policy_ver;
         if (shared->state->skill_prompt_cache && !shared->state->skill_prompt_cache->empty()) {
             llm_in.skill_block = shared->state->skill_prompt_cache;
             llm_in.active_skill_id = shared->state->active_skill_id;

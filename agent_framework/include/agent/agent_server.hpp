@@ -49,6 +49,8 @@ class DispatchTable;
 
 using json = nlohmann::json;
 
+class ToolBus;
+
 /**
  * @brief Agent 服务器（A2A 协议）
  * 用于对外提供 A2A 协议接口，使本框架的 Agent 能够被其他系统发现和调用
@@ -101,6 +103,11 @@ public:
      */
     void set_authentication_validator(std::function<bool(const a2a::AuthContext& ctx)> validator);
 
+    /**
+     * @brief WP2.7：@file/@url 物化所需 ToolBus；为 null 且用户输入触发注入时会产生 violation
+     */
+    void set_input_preprocess_toolbus(std::shared_ptr<ToolBus> toolbus);
+
     void push_task_status_update(const std::string& task_id, const AgentTask& task);
 
     void push_artifact_update(const std::string& task_id, const AgentArtifact& artifact);
@@ -126,6 +133,7 @@ private:
         task_handler_;
     std::function<bool(const a2a::AuthContext&)> auth_validator_;
     a2a::AuthGateConfig auth_gate_config_;
+    std::shared_ptr<ToolBus> preprocess_toolbus_;
 
     std::unique_ptr<internal::TaskDispatchQueue> task_queue_;
     std::vector<std::thread> dispatch_workers_;

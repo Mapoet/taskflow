@@ -9,6 +9,8 @@
 #define __AGENT_INTERNAL_AGENT_THREAD_STATE_HPP__
 
 #include "agent/types.hpp"
+#include "agent/execution_context.hpp"
+#include "agent/user_input_types.hpp"
 
 #include <memory>
 #include <optional>
@@ -32,6 +34,12 @@ struct AgentThreadState {
     std::optional<std::string> active_skill_id;
     /** WP2.agents：可选；与 A2A 细粒度工具共用 */
     std::shared_ptr<a2a::OutboundTaskSupervisor> outbound_supervisor;
+
+    /** WP2.7：首轮 LLM 前消费；由 UserInputPreprocessor / A2A metadata 填入 */
+    std::optional<ExecutionContext> execution_context;
+    std::vector<InjectedContextBlock> pending_injected_context;
+    std::vector<ControlAction> pending_control_actions;
+    std::vector<std::string> pending_input_violations;
 };
 
 } // namespace internal

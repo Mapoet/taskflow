@@ -17,8 +17,10 @@
 #include "cli_multiline_tty.hpp"
 
 #include <agent/graph_executor.hpp>
+#include <agent/execution_context.hpp>
 #include <agent/internal/agent_thread_state.hpp>
 #include <agent/llm_client.hpp>
+#include <agent/user_input_preprocessor.hpp>
 #include <agent/prompt_renderer.hpp>
 #include <agent/skill_services.hpp>
 #include <agent/toolbus.hpp>
@@ -363,7 +365,21 @@ int main(int argc, char** argv) {
         }
         state->skill_prompt_cache.reset();
         state->active_skill_id.reset();
-        state->initial_user_prompt = line;
+        state->pending_injected_context.clear();
+        state->pending_control_actions.clear();
+        state->pending_input_violations.clear();
+        ExecutionContext ectx = ExecutionContext::from_environment();
+        PreprocessOptions popts;
+        popts.toolbus = deps.toolbus;
+        UserInputPreprocessor prep(popts);
+        ProcessedUserInput proc = prep.process(line, ectx);
+        if (env_input_strict_enabled() && !proc.tier_a_violations.empty()) {
+            for (const auto& v : proc.tier_a_violations) {
+                std::cerr << v << '\n';
+            }
+            return 3;
+        }
+        apply_processed_to_agent_state(std::move(proc), ectx, *state);
         std::clog << "[cli_agent_skills_demo] running agent loop (streaming to stdout; "
                      "wait up to AGENT_HTTP_TIMEOUT_SEC)...\n"
                   << std::flush;

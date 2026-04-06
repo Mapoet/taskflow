@@ -435,6 +435,12 @@ endif()
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/agent/task_state_machine.cpp)
     list(APPEND AGENT_SOURCES src/agent/task_state_machine.cpp)
 endif()
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/agent/execution_context.cpp)
+    list(APPEND AGENT_SOURCES src/agent/execution_context.cpp)
+endif()
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/agent/user_input_preprocessor.cpp)
+    list(APPEND AGENT_SOURCES src/agent/user_input_preprocessor.cpp)
+endif()
 
 # 头文件
 set(AGENT_HEADERS
@@ -471,6 +477,9 @@ set(AGENT_HEADERS
     include/agent/a2a/a2a_task_monitor.hpp
     include/agent/a2a/outbound_task_supervisor.hpp
     include/agent/task_state_machine.hpp
+    include/agent/execution_context.hpp
+    include/agent/user_input_types.hpp
+    include/agent/user_input_preprocessor.hpp
     include/node/node_factory.hpp
     include/node/llm_node.hpp
     include/node/knowledge_base_node.hpp
@@ -1098,6 +1107,35 @@ if(BUILD_TESTING)
         add_test(NAME agent_loop_context_budget_i1_wp21c COMMAND test_agent_loop_context_budget_wp21c)
         set_tests_properties(agent_loop_context_budget_i1_wp21c PROPERTIES
             ENVIRONMENT "AGENT_TOOL_ALLOWLIST=;AGENT_BUDGET_MAX_TOOL_RESULT_JSON_BYTES=8192;AGENT_BUDGET_MAX_INJECTION_BYTES=;AGENT_BUDGET_MAX_COMBINED_PROMPT_ATTACH_BYTES=;AGENT_BUDGET_MAX_RENDERED_MESSAGES_BYTES=;AGENT_CONTEXT_BUDGET_SPILL_DIR=;AGENT_CONTEXT_BUDGET_STRICT=;AGENT_BUDGET_MAX_WIRE_MESSAGE_BYTES=")
+    endif()
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_user_input_preprocessor.cpp)
+        add_executable(test_user_input_preprocessor tests/test_user_input_preprocessor.cpp)
+        target_link_libraries(test_user_input_preprocessor PRIVATE agent_framework)
+        if(CMAKE_USE_PTHREADS_INIT)
+            target_link_libraries(test_user_input_preprocessor PRIVATE Threads::Threads)
+        endif()
+        add_test(NAME user_input_preprocessor_wp27 COMMAND test_user_input_preprocessor)
+        set_tests_properties(user_input_preprocessor_wp27 PROPERTIES ENVIRONMENT "AGENT_TOOL_ALLOWLIST=")
+    endif()
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_user_input_wp27_integration.cpp)
+        add_executable(test_user_input_wp27_integration tests/test_user_input_wp27_integration.cpp)
+        target_link_libraries(test_user_input_wp27_integration PRIVATE agent_framework)
+        if(CMAKE_USE_PTHREADS_INIT)
+            target_link_libraries(test_user_input_wp27_integration PRIVATE Threads::Threads)
+        endif()
+        add_test(NAME user_input_wp27_integration_i1 COMMAND test_user_input_wp27_integration)
+        set_tests_properties(user_input_wp27_integration_i1 PROPERTIES ENVIRONMENT "AGENT_TOOL_ALLOWLIST=")
+    endif()
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_agent_server_wp27_input.cpp)
+        add_executable(test_agent_server_wp27_input tests/test_agent_server_wp27_input.cpp)
+        target_link_libraries(test_agent_server_wp27_input PRIVATE agent_framework)
+        if(CMAKE_USE_PTHREADS_INIT)
+            target_link_libraries(test_agent_server_wp27_input PRIVATE Threads::Threads)
+        endif()
+        add_test(NAME agent_server_wp27_input_policy COMMAND test_agent_server_wp27_input)
+        # Strict input policy + empty tool allowlist (session-global cache); force strict for CTest runs.
+        set_tests_properties(agent_server_wp27_input_policy
+            PROPERTIES ENVIRONMENT "AGENT_TOOL_ALLOWLIST=;AGENT_INPUT_STRICT=1")
     endif()
     if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_skill_registry.cpp)
         add_executable(test_skill_registry tests/test_skill_registry.cpp)

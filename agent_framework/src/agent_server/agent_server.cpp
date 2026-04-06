@@ -16,7 +16,10 @@
 #include <agent/internal/sse_server_channel.hpp>
 #include <agent/internal/task_dispatch_queue.hpp>
 #include <agent/task_state_machine.hpp>
+#include <agent/toolbus.hpp>
 #include <agent/types.hpp>
+#include <agent/execution_context.hpp>
+#include <agent/user_input_preprocessor.hpp>
 #include <workflow/nodeflow.hpp>
 
 #include <taskflow/taskflow.hpp>
@@ -190,6 +193,33 @@ int compute_effective_task_timeout_sec(const json& metadata) {
     return base;
 }
 
+void replace_first_user_message_text(AgentMessage& msg, std::string text) {
+    msg.parts.clear();
+    AgentPart p;
+    p.type = AgentPart::Type::TEXT;
+    p.text = std::move(text);
+    msg.parts.push_back(std::move(p));
+}
+
+void wp27_preprocess_agent_message(AgentMessage& msg, json& metadata,
+                                   const std::optional<std::string>& session_id,
+                                   const std::shared_ptr<ToolBus>& toolbus) {
+    const std::string raw = concat_user_text_from_message(msg);
+    ExecutionContext ctx = ExecutionContext::from_environment();
+    ctx.session_id = session_id;
+    PreprocessOptions opt;
+    opt.toolbus = toolbus;
+    UserInputPreprocessor prep(opt);
+    ProcessedUserInput out = prep.process(raw, ctx);
+    if (env_input_strict_enabled() && !out.tier_a_violations.empty()) {
+        throw a2a::JsonRpcInvokeError(a2a::JsonRpcErrorCode::invalid_params,
+                                      std::string("input_policy_violation"),
+                                      json{{"violations", out.tier_a_violations}});
+    }
+    replace_first_user_message_text(msg, std::move(out.llm_user_text));
+    wp27_store_pending_in_task_metadata(out, ctx, metadata);
+}
+
 } // namespace
 
 AgentServer::AgentServer(int port) : port_(port) {}
@@ -220,10 +250,12 @@ void AgentServer::ensure_runtime() {
 }
 
 void AgentServer::register_jsonrpc_methods() {
-    rpc_dispatch_->register_method("SendMessage", [this](const json& p) { return jsonrpc_send_message(p); });
-    rpc_dispatch_->register_method("GetTask", [this](const json& p) { return jsonrpc_get_task(p); });
-    rpc_dispatch_->register_method("CancelTask", [this](const json& p) { return jsonrpc_cancel_task(p); });
-    rpc_dispatch_->register_method("ListTasks", [this](const json& p) { return jsonrpc_list_tasks(p); });
+    rpc_dispatch_->register_method("SendMessage",
+                                   [this](const json& p) { return this->jsonrpc_send_message(p); });
+    rpc_dispatch_->register_method("GetTask", [this](const json& p) { return this->jsonrpc_get_task(p); });
+    rpc_dispatch_->register_method("CancelTask",
+                                   [this](const json& p) { return this->jsonrpc_cancel_task(p); });
+    rpc_dispatch_->register_method("ListTasks", [this](const json& p) { return this->jsonrpc_list_tasks(p); });
     rpc_dispatch_->register_method("SendStreamingMessage", [](const json&) -> json {
         throw a2a::JsonRpcInvokeError(a2a::JsonRpcErrorCode::method_not_found, "SendStreamingMessage not implemented");
     });
@@ -478,6 +510,10 @@ void AgentServer::set_authentication_validator(
     auth_validator_ = std::move(validator);
 }
 
+void AgentServer::set_input_preprocess_toolbus(std::shared_ptr<ToolBus> toolbus) {
+    preprocess_toolbus_ = std::move(toolbus);
+}
+
 bool AgentServer::apply_auth_gate(const httplib::Request& req, httplib::Response& res) {
     const a2a::AuthContext ctx = a2a::auth_context_from_request(req);
     a2a::AuthFailure fail;
@@ -689,6 +725,8 @@ json AgentServer::jsonrpc_send_message(const json& params) {
         session_id = metadata["contextId"].get<std::string>();
     }
 
+    wp27_preprocess_agent_message(msg, metadata, session_id, preprocess_toolbus_);
+
     AgentTask task = create_task_from_message_wire(msg, session_id, metadata);
 
     auto control = std::make_shared<TaskControl>();
@@ -792,6 +830,8 @@ void AgentServer::handle_tasks_send(const httplib::Request& req, httplib::Respon
         }
         json metadata = request.value("metadata", json::object());
 
+        wp27_preprocess_agent_message(initial_message, metadata, session_id, preprocess_toolbus_);
+
         AgentTask task;
         task.task_id = generate_task_id();
         task.session_id = session_id;
@@ -827,6 +867,15 @@ void AgentServer::handle_tasks_send(const httplib::Request& req, httplib::Respon
         }
 
         res.set_content(json{{"task", task.to_json()}}.dump(), "application/json");
+    } catch (const a2a::JsonRpcInvokeError& e) {
+        res.status = (e.code == a2a::JsonRpcErrorCode::invalid_params) ? 400 : 400;
+        json body;
+        body["error"] = e.what();
+        body["code"] = e.code;
+        if (!e.data.is_null() && !e.data.empty()) {
+            body["data"] = e.data;
+        }
+        res.set_content(body.dump(), "application/json");
     } catch (const std::exception& e) {
         res.status = 400;
         res.set_content(json{{"error", e.what()}}.dump(), "application/json");
