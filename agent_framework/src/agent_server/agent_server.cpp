@@ -565,6 +565,29 @@ void AgentServer::push_task_status_update(const std::string& task_id, const Agen
     }
 }
 
+void AgentServer::push_verifier_sse(const std::string& task_id,
+                                    std::string_view sse_event_name,
+                                    const json& payload) {
+    json body = payload;
+    if (!body.contains("component") || !body["component"].is_string()) {
+        body["component"] = "verifier";
+    }
+    apply_wire_payload_cap(body, ContextBudgetLimits{}.max_wire_message_bytes, nullptr);
+    std::string framed;
+    a2a::append_sse_event(framed, sse_event_name, body.dump());
+
+    std::lock_guard<std::mutex> lk(sse_mutex_);
+    auto it = sse_subscribers_.find(task_id);
+    if (it == sse_subscribers_.end()) {
+        return;
+    }
+    for (auto& ch : it->second) {
+        if (ch) {
+            ch->push_framed(framed);
+        }
+    }
+}
+
 void AgentServer::push_artifact_update(const std::string& task_id, const AgentArtifact& artifact) {
     std::optional<std::string> ctx;
     {

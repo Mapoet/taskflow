@@ -108,6 +108,34 @@ void test_m4_empty_user_throws() {
     assert(threw);
 }
 
+void test_m5_delta_only_no_second_user() {
+    internal::AgentThreadState S;
+    Message u0;
+    u0.role = "user";
+    u0.content = "u0";
+    u0.timestamp = 1;
+    Message a0;
+    a0.role = "assistant";
+    a0.content = "A0";
+    a0.timestamp = 2;
+    S.history.push_back(u0);
+    S.history.push_back(a0);
+
+    auto next = std::make_shared<internal::AgentThreadState>();
+    next->history = S.history;
+    Message a1;
+    a1.role = "assistant";
+    a1.content = "A1";
+    a1.timestamp = 3;
+    next->history.push_back(a1);
+
+    assert(merge_react_session_state(S, "ignored_snapshot", next, MergeReactSessionMode::DeltaOnly));
+    assert(S.history.size() == 3U);
+    assert(S.history[0].role == "user");
+    assert(S.history[1].content == "A0");
+    assert(S.history[2].content == "A1");
+}
+
 } // namespace
 
 int main() {
@@ -115,6 +143,7 @@ int main() {
     test_m2_prefix_then_delta();
     test_m3_prefix_mismatch_no_touch();
     test_m4_empty_user_throws();
+    test_m5_delta_only_no_second_user();
     std::cout << "test_wp20_session_merge: all passed\n";
     return 0;
 }

@@ -441,6 +441,12 @@ endif()
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/agent/user_input_preprocessor.cpp)
     list(APPEND AGENT_SOURCES src/agent/user_input_preprocessor.cpp)
 endif()
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/agent/verifier_types.cpp)
+    list(APPEND AGENT_SOURCES src/agent/verifier_types.cpp)
+endif()
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/agent/verifier_runner.cpp)
+    list(APPEND AGENT_SOURCES src/agent/verifier_runner.cpp)
+endif()
 
 # 头文件
 set(AGENT_HEADERS
@@ -480,6 +486,8 @@ set(AGENT_HEADERS
     include/agent/execution_context.hpp
     include/agent/user_input_types.hpp
     include/agent/user_input_preprocessor.hpp
+    include/agent/verifier_types.hpp
+    include/agent/verifier_runner.hpp
     include/node/node_factory.hpp
     include/node/llm_node.hpp
     include/node/knowledge_base_node.hpp
@@ -808,6 +816,15 @@ if(BUILD_TESTING)
         add_test(NAME wp20_react_cli_integration COMMAND test_wp20_react_cli_integration)
         set_tests_properties(wp20_react_cli_integration PROPERTIES ENVIRONMENT "AGENT_TOOL_ALLOWLIST=")
     endif()
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_verifier_graph_hooks.cpp)
+        add_executable(test_verifier_graph_hooks tests/test_verifier_graph_hooks.cpp)
+        target_link_libraries(test_verifier_graph_hooks PRIVATE agent_framework)
+        if(CMAKE_USE_PTHREADS_INIT)
+            target_link_libraries(test_verifier_graph_hooks PRIVATE Threads::Threads)
+        endif()
+        add_test(NAME verifier_graph_hooks_i1 COMMAND test_verifier_graph_hooks)
+        set_tests_properties(verifier_graph_hooks_i1 PROPERTIES ENVIRONMENT "AGENT_TOOL_ALLOWLIST=")
+    endif()
     if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_a2a_jsonrpc.cpp)
         add_executable(test_a2a_jsonrpc tests/test_a2a_jsonrpc.cpp)
         target_link_libraries(test_a2a_jsonrpc PRIVATE agent_framework)
@@ -1127,6 +1144,18 @@ if(BUILD_TESTING)
         set_tests_properties(user_input_wp27_integration_i1 PROPERTIES ENVIRONMENT "AGENT_TOOL_ALLOWLIST=")
     endif()
     if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_agent_server_wp27_input.cpp)
+        add_executable(test_verifier_types tests/test_verifier_types.cpp)
+        target_link_libraries(test_verifier_types PRIVATE agent_framework)
+        if(CMAKE_THREAD_LIBS_INIT)
+            target_link_libraries(test_verifier_types PRIVATE Threads::Threads)
+        endif()
+        add_test(NAME verifier_types COMMAND test_verifier_types)
+        add_executable(test_verifier_runner tests/test_verifier_runner.cpp)
+        target_link_libraries(test_verifier_runner PRIVATE agent_framework)
+        if(CMAKE_THREAD_LIBS_INIT)
+            target_link_libraries(test_verifier_runner PRIVATE Threads::Threads)
+        endif()
+        add_test(NAME verifier_runner COMMAND test_verifier_runner)
         add_executable(test_agent_server_wp27_input tests/test_agent_server_wp27_input.cpp)
         target_link_libraries(test_agent_server_wp27_input PRIVATE agent_framework)
         if(CMAKE_USE_PTHREADS_INIT)

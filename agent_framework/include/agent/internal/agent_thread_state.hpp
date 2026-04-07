@@ -40,6 +40,9 @@ struct AgentThreadState {
     std::vector<InjectedContextBlock> pending_injected_context;
     std::vector<ControlAction> pending_control_actions;
     std::vector<std::string> pending_input_violations;
+
+    /** WP2.8：Verifier 触发的 MAIN 额外次数（FIX 回到 MAIN 前递增） */
+    int verifier_retry_count = 0;
 };
 
 } // namespace internal

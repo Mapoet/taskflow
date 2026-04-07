@@ -214,7 +214,7 @@ int run_graph_once(tf::Executor& executor,
         WorkflowResult wr = gx.run_react_cli_sync(executor, req);
         if (!wr.success) {
             cli.handle_error(wr.error_message.value_or("run_react_cli_sync failed"));
-            return 1;
+            return wr.exit_code != 0 ? wr.exit_code : 1;
         }
     } catch (const std::exception& e) {
         cli.handle_error(std::string("run_react_cli_sync: ") + e.what());

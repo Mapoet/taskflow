@@ -112,6 +112,14 @@ public:
 
     void push_artifact_update(const std::string& task_id, const AgentArtifact& artifact);
 
+    /**
+     * @brief WP2.8：向订阅方推送 Verifier 子事件（SSE event 名如 verifier_started / verifier_completed）
+     * @param payload 业务字段；实现中会填入 component=verifier 后再序列化
+     */
+    void push_verifier_sse(const std::string& task_id,
+                          std::string_view sse_event_name,
+                          const json& payload);
+
     void notify_task_update_via_webhook(const std::string& task_id, const AgentTask& task);
 
 private:

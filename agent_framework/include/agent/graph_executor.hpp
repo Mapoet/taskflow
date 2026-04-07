@@ -137,6 +137,15 @@ struct ReactCliRunOptions {
     CliAgentGraphOptions graph_options{};
     CliAgentTerminalSinkOptions sink{};
     bool require_final_json_callback = true;
+    /**
+     * WP2.8：若非空则用于 Verifier 调用，便于单测注入 mock；生产环境留空并由框架按 env 构造第二套 LLMClient。
+     */
+    std::shared_ptr<LLMClient> verifier_llm_override{};
+    /**
+     * WP2.8：Verifier SSE / 可观测性钩子（event_name 如 verifier_started / verifier_completed）。
+     * payload 含 task_id、ts、component=verifier 等；与 A2A 侧 AgentServer::push_verifier_sse 对齐时可转发。
+     */
+    std::function<void(std::string_view event_name, const json& payload)> on_verifier_event{};
 };
 
 /**
@@ -153,15 +162,23 @@ struct ReactCliRunRequest {
  * @brief WP2.0：将 Loop 出口 next_agent_state 合并回调用方 session（D11）
  *
  * 步骤摘要：校验 `next->history` 以 `session->history` 为前缀；取后缀为 delta；令
- * `session->history = old + user(user_turn_snapshot) + delta`；复制 iteration / skill 字段；
- * 清空 `last_error` 与 `initial_user_prompt`。前缀不一致时返回 false 且不修改 `session->history`
- *（详见 docs/guides/phase-2-wp0.md §4）。
- * @param user_turn_snapshot 本轮用户句（与运行前 session->initial_user_prompt 一致）
+ * **FullUserTurn**：`session->history = old + user(user_turn_snapshot) + delta`。
+ * **DeltaOnly**（WP2.8 MAIN 重试）：`session->history = old + delta`，不追加 user。
+ * 复制 iteration / skill 字段；清空 `last_error` 与 `initial_user_prompt`。
+ * 前缀不一致时返回 false 且不修改 `session->history`（详见 docs/guides/phase-2-wp0.md §4）。
+ * @param user_turn_snapshot 本轮用户句（与运行前 session->initial_user_prompt 一致；DeltaOnly 仍需非空以参与校验）
+ * @param mode FullUserTurn：old + user(snapshot) + delta；DeltaOnly：old + delta（Verifier retry 后第二趟 MAIN）
  */
+enum class MergeReactSessionMode {
+    FullUserTurn,
+    DeltaOnly
+};
+
 bool merge_react_session_state(
     internal::AgentThreadState& session,
     const std::string& user_turn_snapshot,
-    const std::shared_ptr<internal::AgentThreadState>& next);
+    const std::shared_ptr<internal::AgentThreadState>& next,
+    MergeReactSessionMode mode = MergeReactSessionMode::FullUserTurn);
 
 // ============================================================================
 // 工作流模板接口

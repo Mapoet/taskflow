@@ -111,6 +111,7 @@ private:
 };
 
 void test_i1_two_runs_history_carries() {
+    (void)::setenv("AGENT_VERIFIER", "off", 1);
     (void)::setenv("AGENT_TOOL_ALLOWLIST", "", 1);
 
     auto adapter = std::make_shared<TwoTurnHistoryAdapter>();
@@ -161,6 +162,7 @@ void test_i1_two_runs_history_carries() {
 }
 
 void test_i2_single_run_success() {
+    (void)::setenv("AGENT_VERIFIER", "off", 1);
     (void)::setenv("AGENT_TOOL_ALLOWLIST", "", 1);
 
     auto adapter = std::make_shared<TwoTurnHistoryAdapter>();

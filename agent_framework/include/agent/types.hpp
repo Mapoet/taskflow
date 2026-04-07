@@ -427,6 +427,8 @@ struct WorkflowResult {
     std::vector<Event> events;     // 事件日志
     PerformanceReport performance; // 性能报告
     std::optional<std::string> error_message;  // 错误信息（如果失败）
+    /** WP2.8：Verifier abort 时 CLI 进程退出码 4；否则为 0 */
+    int exit_code = 0;
 };
 
 // ============================================================================

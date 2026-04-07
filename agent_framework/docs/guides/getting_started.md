@@ -57,6 +57,8 @@ make -j$(nproc)
 # 多轮 REPL：同一进程内连续提交多行时，WP2.0 起每轮结束会将对话合并进会话 `history`，
 # 后续 `>` 对 LLM 可见上文（实现：`GraphExecutor::run_react_cli_sync` + `merge_react_session_state`）。
 
+# WP2.8：第二套 LLM Verifier（可选，`AGENT_VERIFIER=off` 为默认零成本路径）见 [verifier.md](./verifier.md)。
+
 # 覆盖 provider（会先设置 AGENT_LLM_PROVIDER 再初始化客户端）
 ./build/agent_framework/cli_agent_demo --provider openai -p "hello"
 
