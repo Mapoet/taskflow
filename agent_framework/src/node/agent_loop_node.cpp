@@ -121,6 +121,19 @@ bool log_at_least(LogLevel need) {
     return static_cast<int>(log_level_from_env()) >= static_cast<int>(need);
 }
 
+bool pending_is_control_only_cli_turn(const std::vector<ControlAction>& actions) {
+    if (actions.empty()) {
+        return false;
+    }
+    for (const auto& a : actions) {
+        if (a.command != "memory.clear" && a.command != "memory.compact" &&
+            a.command != "model.set") {
+            return false;
+        }
+    }
+    return true;
+}
+
 } // namespace
 
 std::pair<std::shared_ptr<workflow::LoopNode>, tf::Task>
@@ -188,6 +201,9 @@ AgentLoopNode::create(
 
         const std::string user_query =
             std::any_cast<std::string>(inps.at(std::string(internal::kUserQuery)));
+        const bool control_only_skip_llm =
+            (it == 0 && user_query.empty() && shared->state &&
+             pending_is_control_only_cli_turn(shared->state->pending_control_actions));
 
         if (skills && skills->registry && skills->loader && it == 0) {
             std::string user_for_match = user_query;
@@ -234,6 +250,24 @@ AgentLoopNode::create(
                 llm_client.get());
             wp27_context_suffix = take_injected_blocks_as_llm_context(
                 shared->state->pending_injected_context);
+        }
+
+        if (control_only_skip_llm) {
+            if (dbg) {
+                std::cout << "[AgentLoop] control_only turn: skip LLM (memory/model commands only)\n";
+                std::cout.flush();
+            }
+            shared->is_final = true;
+            shared->final_answer = "[memory] control command applied (no LLM turn).";
+            shared->last_llm.is_final = true;
+            shared->last_llm.final_answer = shared->final_answer;
+            shared->last_llm.tool_calls.clear();
+            shared->state->iteration += 1;
+            MemoryCompactOptions mcopt;
+            mcopt.agent_config = &agent_config;
+            mcopt.llm_client = llm_client.get();
+            maybe_auto_compact_memory(*shared->state, mcopt);
+            return {};
         }
 
         LLMInput llm_in;

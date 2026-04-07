@@ -96,16 +96,20 @@ void test_m3_prefix_mismatch_no_touch() {
     assert(S.history[0].content == "u0");
 }
 
-void test_m4_empty_user_throws() {
+void test_m4_empty_user_skips_user_bubble() {
     internal::AgentThreadState S;
     auto next = std::make_shared<internal::AgentThreadState>();
-    bool threw = false;
-    try {
-        (void)merge_react_session_state(S, "", next);
-    } catch (const std::invalid_argument&) {
-        threw = true;
-    }
-    assert(threw);
+    Message a;
+    a.role = "assistant";
+    a.content = "A";
+    a.timestamp = 1;
+    next->history.push_back(a);
+
+    assert(merge_react_session_state(S, "", next));
+    assert(S.history.size() == 1U);
+    assert(S.history[0].role == "assistant");
+    assert(S.history[0].content == "A");
+    assert(S.initial_user_prompt.empty());
 }
 
 void test_m5_delta_only_no_second_user() {
@@ -142,7 +146,7 @@ int main() {
     test_m1_empty_old_one_assistant();
     test_m2_prefix_then_delta();
     test_m3_prefix_mismatch_no_touch();
-    test_m4_empty_user_throws();
+    test_m4_empty_user_skips_user_bubble();
     test_m5_delta_only_no_second_user();
     std::cout << "test_wp20_session_merge: all passed\n";
     return 0;

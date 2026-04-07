@@ -166,7 +166,8 @@ struct ReactCliRunRequest {
  * **DeltaOnly**（WP2.8 MAIN 重试）：`session->history = old + delta`，不追加 user。
  * 复制 iteration / skill 字段；清空 `last_error` 与 `initial_user_prompt`。
  * 前缀不一致时返回 false 且不修改 `session->history`（详见 docs/guides/phase-2-wp0.md §4）。
- * @param user_turn_snapshot 本轮用户句（与运行前 session->initial_user_prompt 一致；DeltaOnly 仍需非空以参与校验）
+ * @param user_turn_snapshot 本轮用户句（与运行前 session->initial_user_prompt 一致）。**可为空**（WP2.9
+ * 仅 `/memory` 等控制行）：FullUserTurn 下 **不** 追加 user 气泡，只合并 delta。
  * @param mode FullUserTurn：old + user(snapshot) + delta；DeltaOnly：old + delta（Verifier retry 后第二趟 MAIN）
  */
 enum class MergeReactSessionMode {

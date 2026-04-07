@@ -27,6 +27,20 @@
 namespace agent_framework {
 namespace {
 
+/** WP2.9 / WP2.7：允许 initial_user_prompt 为空，仅当首轮 pending 仅为 memory / model 审计类命令 */
+bool react_cli_allow_empty_user_prompt(const internal::AgentThreadState& s) {
+    if (s.pending_control_actions.empty()) {
+        return false;
+    }
+    for (const auto& a : s.pending_control_actions) {
+        if (a.command != "memory.clear" && a.command != "memory.compact" &&
+            a.command != "model.set") {
+            return false;
+        }
+    }
+    return true;
+}
+
 bool agent_log_level_debug() {
     const char* e = std::getenv("AGENT_LOG_LEVEL");
     if (!e || !*e) {
@@ -155,7 +169,9 @@ void validate_react_cli_request(const ReactCliRunRequest& r) {
         throw std::invalid_argument("run_react_cli_sync: deps.toolbus is null");
     }
     if (r.session->initial_user_prompt.empty()) {
-        throw std::invalid_argument("run_react_cli_sync: session->initial_user_prompt is empty");
+        if (!react_cli_allow_empty_user_prompt(*r.session)) {
+            throw std::invalid_argument("run_react_cli_sync: session->initial_user_prompt is empty");
+        }
     }
     if (r.options.require_final_json_callback && !r.options.sink.on_final_json) {
         throw std::invalid_argument(
@@ -170,9 +186,6 @@ bool merge_react_session_state(
     const std::string& user_turn_snapshot,
     const std::shared_ptr<internal::AgentThreadState>& next,
     MergeReactSessionMode mode) {
-    if (user_turn_snapshot.empty()) {
-        throw std::invalid_argument("merge_react_session_state: empty user_turn_snapshot");
-    }
     if (!next) {
         return false;
     }
@@ -190,7 +203,7 @@ bool merge_react_session_state(
 
     std::vector<Message> delta(nh.begin() + static_cast<std::ptrdiff_t>(old_hist.size()), nh.end());
     std::vector<Message> new_hist = old_hist;
-    if (mode == MergeReactSessionMode::FullUserTurn) {
+    if (mode == MergeReactSessionMode::FullUserTurn && !user_turn_snapshot.empty()) {
         Message user_msg;
         user_msg.role = "user";
         user_msg.content = user_turn_snapshot;
