@@ -9,6 +9,7 @@
 #include <agent/fs_sandbox.hpp>
 #include <agent/internal/agent_thread_state.hpp>
 #include <agent/llm_client.hpp>
+#include <agent/memory_compaction.hpp>
 #include <agent/toolbus.hpp>
 
 #include <algorithm>
@@ -559,10 +560,27 @@ std::string take_injected_blocks_as_llm_context(std::vector<InjectedContextBlock
     return out;
 }
 
-void dispatch_pending_control_actions(std::vector<ControlAction>& actions, const ExecutionContext* ctx) {
+void dispatch_pending_control_actions(std::vector<ControlAction>& actions,
+                                      const ExecutionContext* ctx,
+                                      internal::AgentThreadState* agent_state,
+                                      const AgentConfig* agent_config,
+                                      LLMClient* llm_client) {
     for (const auto& a : actions) {
-        if (a.command == "memory.compact" || a.command == "memory.clear") {
-            std::clog << "[user_command] dispatch stub cmd=" << a.command << " (WP2.9)\n";
+        if (a.command == "memory.clear" && agent_state) {
+            apply_memory_clear(*agent_state);
+            std::clog << "[user_command] memory.clear applied\n";
+        }
+    }
+
+    MemoryCompactOptions mcopt;
+    mcopt.agent_config = agent_config;
+    mcopt.llm_client = llm_client;
+    for (const auto& a : actions) {
+        if (a.command == "memory.compact") {
+            if (agent_state) {
+                (void)run_memory_compaction(*agent_state, MemoryCompactTrigger::manual_compact, mcopt);
+            }
+            std::clog << "[user_command] memory.compact applied\n";
         } else if (a.command == "model.set") {
             std::clog << "[user_command] dispatch model.set args=" << a.args.dump() << " session="
                       << (ctx && ctx->session_id ? *ctx->session_id : std::string{})

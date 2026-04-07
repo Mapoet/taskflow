@@ -23,6 +23,7 @@ class ToolBus;
 class LLMClient;
 struct AgentMessage;
 struct AgentTask;
+struct AgentConfig;
 namespace internal {
 struct AgentThreadState;
 }
@@ -70,9 +71,14 @@ private:
 /** @brief §3.4：按顺序拼入 LLMInput.context 正文并清空 blocks */
 std::string take_injected_blocks_as_llm_context(std::vector<InjectedContextBlock>& blocks);
 
-/** @brief 首轮 LLM 前分发 control_actions stub（WP2.9 实现体） */
+/**
+ * @brief 首轮 LLM 前分发 control_actions（WP2.7 audit + WP2.9 memory.clear/compact）
+ */
 void dispatch_pending_control_actions(std::vector<ControlAction>& actions,
-                                      const ExecutionContext* ctx);
+                                      const ExecutionContext* ctx,
+                                      internal::AgentThreadState* agent_state = nullptr,
+                                      const AgentConfig* agent_config = nullptr,
+                                      LLMClient* llm_client = nullptr);
 
 /**
  * @brief CLI/集成：将 process 结果写入 state（移动的语义）

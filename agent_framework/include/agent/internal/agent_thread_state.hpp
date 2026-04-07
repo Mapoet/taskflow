@@ -12,6 +12,7 @@
 #include "agent/execution_context.hpp"
 #include "agent/user_input_types.hpp"
 
+#include <ctime>
 #include <memory>
 #include <optional>
 #include <string>
@@ -43,6 +44,10 @@ struct AgentThreadState {
 
     /** WP2.8：Verifier 触发的 MAIN 额外次数（FIX 回到 MAIN 前递增） */
     int verifier_retry_count = 0;
+
+    /** WP2.9：自动压缩节流；`-1` 表示尚未压缩 */
+    int last_memory_auto_compact_iteration = -1;
+    std::optional<std::time_t> last_memory_compaction_ts;
 };
 
 } // namespace internal

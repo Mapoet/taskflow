@@ -14,6 +14,7 @@
 #include "agent/task_state_machine.hpp"
 #include "agent/toolbus.hpp"
 #include "agent/user_input_preprocessor.hpp"
+#include "agent/memory_compaction.hpp"
 #include <agent/a2a/outbound_task_supervisor.hpp>
 
 #include <algorithm>
@@ -227,7 +228,10 @@ AgentLoopNode::create(
             }
             dispatch_pending_control_actions(
                 shared->state->pending_control_actions,
-                shared->state->execution_context ? &*shared->state->execution_context : nullptr);
+                shared->state->execution_context ? &*shared->state->execution_context : nullptr,
+                shared->state.get(),
+                &agent_config,
+                llm_client.get());
             wp27_context_suffix = take_injected_blocks_as_llm_context(
                 shared->state->pending_injected_context);
         }
@@ -535,6 +539,13 @@ AgentLoopNode::create(
             shared->final_answer = llm_out.final_answer;
         }
 
+        if (shared->state) {
+            MemoryCompactOptions mcopt;
+            mcopt.agent_config = &agent_config;
+            mcopt.llm_client = llm_client.get();
+            maybe_auto_compact_memory(*shared->state, mcopt);
+        }
+
         return {};
     };
 
@@ -666,7 +677,7 @@ void AgentLoopNode::build_loop_body(
     (void)tool_task;
 
     // StateMerge: update history + iteration
-    auto state_merge = [](
+    auto state_merge = [agent_config, llm_client](
                           const std::unordered_map<std::string, std::any>& inps)
         -> std::unordered_map<std::string, std::any> {
         auto st = std::any_cast<std::shared_ptr<internal::AgentThreadState>>(
@@ -706,6 +717,11 @@ void AgentLoopNode::build_loop_body(
             next->history.push_back(tm);
         }
         next->iteration += 1;
+
+        MemoryCompactOptions mcopt;
+        mcopt.agent_config = &agent_config;
+        mcopt.llm_client = llm_client.get();
+        maybe_auto_compact_memory(*next, mcopt);
 
         const bool is_final = llm_out.tool_calls.empty() && (llm_out.is_final || !llm_out.final_answer.empty());
         const std::string final_answer = llm_out.final_answer;
