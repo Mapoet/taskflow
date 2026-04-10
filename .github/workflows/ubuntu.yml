@@ -112,3 +112,19 @@ jobs:
     - name: test
       run: cd build ; ctest --output-on-failure
 
+  # WP2.U U-0：无显示环境仅编译 ImGui 目标（FetchContent GLFW + ImGui）
+  wpu-imgui-compile:
+    runs-on: ubuntu-latest
+    env:
+      AGENT_RICH_UI_CI: compile_only
+    steps:
+    - uses: actions/checkout@v3
+    - name: Install GLFW/X11 build deps
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libgl1-mesa-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev
+    - name: configure
+      run: cmake -S . -B build-wpu -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_STANDARD=20 -DAGENT_BUILD_IMGUI=ON
+    - name: build imgui_agent_demo
+      run: cmake --build build-wpu --parallel 10 --target imgui_agent_demo
+

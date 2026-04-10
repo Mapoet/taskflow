@@ -9,19 +9,19 @@
 #define __AGENT_UI_MANAGER_H__
 
 #include "types.hpp"
+#include "thread_safe_queue.hpp"
+
 #include <string>
+#include <string_view>
 #include <vector>
 #include <map>
 #include <memory>
 #include <functional>
 #include <mutex>
+#include <deque>
 #include <iostream>
 #include <ostream>
 #include <queue>
-
-// 前向声明（避免暴露具体实现细节）
-template<typename T>
-class ThreadSafeQueue;
 
 namespace agent_framework {
 
@@ -66,6 +66,11 @@ public:
      * @return true 如果处理器活跃
      */
     virtual bool is_active() const = 0;
+
+    /**
+     * @brief WP2.U：辅助事件（tool_start / tool_end 等）；默认忽略
+     */
+    virtual void handle_aux_event(std::string_view /*type*/, const json& /*payload*/) {}
 };
 
 /**
@@ -104,26 +109,30 @@ private:
 class ImGuiHandler : public UIHandler {
 public:
     /**
-     * @brief 构造函数
      * @param queue 线程安全的消息队列
+     * @param session_id 会话 id（单用户 demo 默认 default）
      */
-    explicit ImGuiHandler(std::shared_ptr<ThreadSafeQueue<StreamMessage>> queue);
-    
+    explicit ImGuiHandler(std::shared_ptr<ThreadSafeQueue<StreamMessage>> queue,
+                         std::string session_id = "default");
+
     void handle_stream_token(std::string_view token) override;
     void handle_final_result(const json& result) override;
     void handle_error(const std::string& error_message) override;
+    void handle_aux_event(std::string_view type, const json& payload) override;
     std::string get_handler_type() const override;
     bool is_active() const override;
-    
+
+    /**
+     * @brief 渲染线程每帧最多 drain max_n 条（WP2.U；默认 env AGENT_IMGUI_QUEUE_DRAIN_MAX=256）
+     * @return 实际弹出条数
+     */
+    std::size_t drain_messages(std::vector<StreamMessage>& out, std::size_t max_n);
+
 private:
     std::shared_ptr<ThreadSafeQueue<StreamMessage>> queue_;
+    std::string session_id_;
     bool active_ = true;
-    
-    /**
-     * @brief 推送消息到队列
-     * @param type 消息类型
-     * @param content 消息内容
-     */
+
     void push_message(const std::string& type, const std::string& content);
 };
 
@@ -143,9 +152,15 @@ public:
     void handle_stream_token(std::string_view token) override;
     void handle_final_result(const json& result) override;
     void handle_error(const std::string& error_message) override;
+    void handle_aux_event(std::string_view type, const json& payload) override;
     std::string get_handler_type() const override;
     bool is_active() const override;
-    
+
+    /**
+     * @brief WP2.U Web demo：取一条已格式化的 SSE 块（含 "data: ...\\n\\n"），无则 false
+     */
+    bool try_pop_sse_chunk(std::string& out);
+
     /**
      * @brief 发送 SSE 事件
      * @param event_type 事件类型
@@ -164,6 +179,8 @@ private:
     std::shared_ptr<WebConnectionInfo> connection_;
     bool active_ = true;
     std::mutex connection_mutex_;
+    std::mutex sse_mutex_;
+    std::deque<std::string> sse_chunks_;
     
     /**
      * @brief 检查连接状态
@@ -181,6 +198,11 @@ private:
  */
 class UIManager {
 public:
+    /**
+     * @brief 注册任意 UIHandler（测试 / TUI 等；与 register_cli_handler 等价入队）
+     */
+    void register_handler(std::unique_ptr<UIHandler> handler);
+
     /**
      * @brief 注册 CLI 输出处理器
      * @param handler CLI 处理器
@@ -207,7 +229,17 @@ public:
      * @param data 数据（JSON 格式）
      */
     void dispatch_message(const std::string& type, const json& data);
-    
+
+    /**
+     * @brief WP2.U：终稿 JSON 分发到全部 handler（与 Sink 回调对齐）
+     */
+    void dispatch_final_result(const json& result);
+
+    /**
+     * @brief WP2.U：错误分发到全部 handler
+     */
+    void dispatch_error(const std::string& error_message);
+
     /**
      * @brief 流式输出（分发到所有处理器）
      * @param session_id 会话 ID

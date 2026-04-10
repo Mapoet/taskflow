@@ -140,6 +140,11 @@ else()
            "Build Agent Framework examples (cli_agent_demo, simple_agent, multimodal_agent, ...)" ON)
 endif()
 
+# WP2.U 富界面（默认 OFF，避免拖垮无依赖 CI）
+option(AGENT_BUILD_IMGUI "Build imgui_agent_demo (GLFW + OpenGL3 + Dear ImGui via FetchContent)" OFF)
+option(AGENT_BUILD_TUI "Build tui_agent_demo (ncurses)" OFF)
+option(AGENT_BUILD_WEB_UI "Build web_ui_demo (httplib + static assets + SSE)" OFF)
+
 # 包含目录
 include_directories(
     ${CMAKE_CURRENT_SOURCE_DIR}/include
@@ -350,6 +355,9 @@ endif()
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/ui/web_handler.cpp)
     list(APPEND AGENT_SOURCES src/ui/web_handler.cpp)
 endif()
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/ui/tui_handler.cpp)
+    list(APPEND AGENT_SOURCES src/ui/tui_handler.cpp)
+endif()
 
 # Node 模块
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/node/node_factory.cpp)
@@ -469,6 +477,8 @@ set(AGENT_HEADERS
     include/agent/encoder.hpp
     include/agent/graph_executor.hpp
     include/agent/ui_manager.hpp
+    include/agent/tui/tui_handler.hpp
+    include/agent/thread_safe_queue.hpp
     include/agent/agent_transport.hpp
     include/agent/sse_connection.hpp
     include/agent/agent_client.hpp
@@ -722,6 +732,128 @@ if(AGENT_BUILD_EXAMPLES)
     endif()
 else()
     message(STATUS "Agent Framework: examples disabled (AGENT_BUILD_EXAMPLES=OFF); cli demos not built")
+endif()
+
+# ---------------------------------------------------------------------------
+# WP2.U 可选富界面目标（独立于 AGENT_BUILD_EXAMPLES；默认 OFF）
+# ---------------------------------------------------------------------------
+if(AGENT_BUILD_IMGUI)
+    include(FetchContent)
+    FetchContent_Declare(
+        glfw_wpu
+        GIT_REPOSITORY https://github.com/glfw/glfw.git
+        GIT_TAG 3.4)
+    set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
+    set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+    set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+    FetchContent_MakeAvailable(glfw_wpu)
+
+    FetchContent_Declare(
+        imgui_wpu_fc
+        GIT_REPOSITORY https://github.com/ocornut/imgui.git
+        GIT_TAG v1.91.0)
+    FetchContent_MakeAvailable(imgui_wpu_fc)
+    set(IMGUI_WPU_ROOT ${imgui_wpu_fc_SOURCE_DIR})
+
+    add_library(imgui_wpu STATIC
+        ${IMGUI_WPU_ROOT}/imgui.cpp
+        ${IMGUI_WPU_ROOT}/imgui_draw.cpp
+        ${IMGUI_WPU_ROOT}/imgui_tables.cpp
+        ${IMGUI_WPU_ROOT}/imgui_widgets.cpp
+        ${IMGUI_WPU_ROOT}/backends/imgui_impl_glfw.cpp
+        ${IMGUI_WPU_ROOT}/backends/imgui_impl_opengl3.cpp)
+    target_include_directories(imgui_wpu PUBLIC ${IMGUI_WPU_ROOT} ${IMGUI_WPU_ROOT}/backends)
+    target_link_libraries(imgui_wpu PUBLIC glfw)
+    find_package(OpenGL REQUIRED)
+    target_link_libraries(imgui_wpu PUBLIC OpenGL::GL)
+
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/examples/imgui_agent_demo.cpp)
+        add_executable(imgui_agent_demo examples/imgui_agent_demo.cpp)
+        target_include_directories(imgui_agent_demo PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/../3rd-party/CLI11)
+        target_link_libraries(imgui_agent_demo PRIVATE agent_framework imgui_wpu glfw OpenGL::GL)
+        if(CMAKE_USE_PTHREADS_INIT)
+            target_link_libraries(imgui_agent_demo PRIVATE Threads::Threads)
+        endif()
+        if(UNIX AND NOT APPLE)
+            target_link_libraries(imgui_agent_demo PRIVATE dl)
+        endif()
+        if(MSVC AND CMAKE_CXX_STANDARD GREATER_EQUAL 20)
+            target_compile_options(imgui_agent_demo PRIVATE /std:c++20)
+        endif()
+        message(STATUS "WP2.U: imgui_agent_demo target enabled (AGENT_BUILD_IMGUI=ON)")
+    else()
+        message(WARNING "AGENT_BUILD_IMGUI=ON but examples/imgui_agent_demo.cpp missing")
+    endif()
+endif()
+
+if(AGENT_BUILD_TUI)
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/examples/tui_agent_demo.cpp)
+        if(NOT EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/../3rd-party/CLI11/CLI11.hpp)
+            message(WARNING "tui_agent_demo: missing CLI11 (same as cli_agent_demo)")
+        else()
+            # 宽字符 API 必须链 libncursesw。仅用 FindCurses 时，若工程曾缓存过窄库，
+            # CURSES_LIBRARIES 可能一直是 -lcurses，导致 waddnwstr/wget_wch 链接失败。
+            if(WIN32 AND NOT MINGW)
+                set(CURSES_NEED_WIDE TRUE)
+                find_package(Curses REQUIRED)
+                set(_tui_curses_includes ${CURSES_INCLUDE_DIR})
+                set(_tui_curses_libs ${CURSES_LIBRARIES})
+            else()
+                find_library(AGENT_TUI_NCURSESW_LIBRARY
+                    NAMES ncursesw ncursesw6 ncursesw.dylib
+                    REQUIRED)
+                find_path(AGENT_TUI_NCURSES_INCLUDE
+                    NAMES ncursesw/ncurses.h ncurses/ncurses.h curses.h
+                    PATHS /opt/homebrew/opt/ncurses/include /usr/local/opt/ncurses/include)
+                if(NOT AGENT_TUI_NCURSES_INCLUDE)
+                    message(FATAL_ERROR "tui_agent_demo: ncursesw headers not found (install libncursesw5-dev / ncurses-devel)")
+                endif()
+                set(_tui_curses_includes ${AGENT_TUI_NCURSES_INCLUDE})
+                set(_tui_curses_libs ${AGENT_TUI_NCURSESW_LIBRARY})
+                message(STATUS "WP2.U: tui_agent_demo ncursesw lib=${AGENT_TUI_NCURSESW_LIBRARY}")
+            endif()
+
+            add_executable(tui_agent_demo examples/tui_agent_demo.cpp)
+            target_include_directories(tui_agent_demo PRIVATE
+                ${CMAKE_CURRENT_SOURCE_DIR}/../3rd-party/CLI11
+                ${_tui_curses_includes})
+            target_link_libraries(tui_agent_demo PRIVATE agent_framework ${_tui_curses_libs})
+            if(CMAKE_USE_PTHREADS_INIT)
+                target_link_libraries(tui_agent_demo PRIVATE Threads::Threads)
+            endif()
+            if(MSVC AND CMAKE_CXX_STANDARD GREATER_EQUAL 20)
+                target_compile_options(tui_agent_demo PRIVATE /std:c++20)
+            endif()
+            message(STATUS "WP2.U: tui_agent_demo target enabled (AGENT_BUILD_TUI=ON)")
+        endif()
+    else()
+        message(WARNING "AGENT_BUILD_TUI=ON but examples/tui_agent_demo.cpp missing")
+    endif()
+endif()
+
+if(AGENT_BUILD_WEB_UI)
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/examples/web_ui_demo.cpp)
+        if(NOT EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/../3rd-party/CLI11/CLI11.hpp)
+            message(WARNING "web_ui_demo: missing CLI11 (same as cli_agent_demo)")
+        else()
+            add_executable(web_ui_demo examples/web_ui_demo.cpp)
+            target_include_directories(web_ui_demo PRIVATE
+                ${CMAKE_CURRENT_SOURCE_DIR}/../3rd-party/CLI11)
+            target_link_libraries(web_ui_demo PRIVATE agent_framework)
+            if(CMAKE_USE_PTHREADS_INIT)
+                target_link_libraries(web_ui_demo PRIVATE Threads::Threads)
+            endif()
+            if(MSVC AND CMAKE_CXX_STANDARD GREATER_EQUAL 20)
+                target_compile_options(web_ui_demo PRIVATE /std:c++20)
+            endif()
+            target_compile_definitions(web_ui_demo PRIVATE
+                "AGENT_WEB_UI_STATIC_ROOT=\"${CMAKE_CURRENT_SOURCE_DIR}/examples/web_ui_static\"")
+            message(STATUS "WP2.U: web_ui_demo target enabled (AGENT_BUILD_WEB_UI=ON)")
+        endif()
+    else()
+        message(WARNING "AGENT_BUILD_WEB_UI=ON but examples/web_ui_demo.cpp missing")
+    endif()
 endif()
 
 # 测试（WP1.1 LLM 轻量单测，无第三方框架）
@@ -1141,6 +1273,24 @@ if(BUILD_TESTING)
         endif()
         add_test(NAME user_input_preprocessor_wp27 COMMAND test_user_input_preprocessor)
         set_tests_properties(user_input_preprocessor_wp27 PROPERTIES ENVIRONMENT "AGENT_TOOL_ALLOWLIST=")
+    endif()
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_ui_dispatch_message.cpp)
+        add_executable(test_ui_dispatch_message tests/test_ui_dispatch_message.cpp)
+        target_link_libraries(test_ui_dispatch_message PRIVATE agent_framework)
+        if(CMAKE_USE_PTHREADS_INIT)
+            target_link_libraries(test_ui_dispatch_message PRIVATE Threads::Threads)
+        endif()
+        add_test(NAME ui_dispatch_message_wpu_u1 COMMAND test_ui_dispatch_message)
+        set_tests_properties(ui_dispatch_message_wpu_u1 PROPERTIES ENVIRONMENT "AGENT_TOOL_ALLOWLIST=")
+    endif()
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_imgui_handler_queue.cpp)
+        add_executable(test_imgui_handler_queue tests/test_imgui_handler_queue.cpp)
+        target_link_libraries(test_imgui_handler_queue PRIVATE agent_framework)
+        if(CMAKE_USE_PTHREADS_INIT)
+            target_link_libraries(test_imgui_handler_queue PRIVATE Threads::Threads)
+        endif()
+        add_test(NAME imgui_handler_queue_wpu_u2 COMMAND test_imgui_handler_queue)
+        set_tests_properties(imgui_handler_queue_wpu_u2 PROPERTIES ENVIRONMENT "AGENT_TOOL_ALLOWLIST=")
     endif()
     if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_working_memory_metrics.cpp)
         add_executable(test_working_memory_metrics tests/test_working_memory_metrics.cpp)

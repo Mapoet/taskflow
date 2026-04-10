@@ -26,6 +26,10 @@ cmake -DCMAKE_BUILD_TYPE=Release ..
 make -j$(nproc)
 ```
 
+## WP2.U：可选富界面（ImGui / TUI / Web）
+
+里程碑 **M8** 与构建开关、系统依赖、SSE 协议与 DoD 见 **[rich-ui.md](./rich-ui.md)**（默认 CMake **不** 启用；需 `-DAGENT_BUILD_IMGUI` / `AGENT_BUILD_TUI` / `AGENT_BUILD_WEB_UI`）。
+
 ## WP2.1c：上下文预算（可选阅读）
 
 工具结果与注入文本的字节上限、`_af_truncation` 形态与 CTest 说明见 **[context-budget.md](./context-budget.md)**。

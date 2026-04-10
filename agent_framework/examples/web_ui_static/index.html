@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>web_ui_demo (WP2.U)</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 1rem; max-width: 56rem; }
+    #out { white-space: pre-wrap; border: 1px solid #ccc; padding: 0.75rem; min-height: 12rem; background: #fafafa; }
+    #aux { white-space: pre-wrap; font-size: 0.85rem; color: #444; margin-top: 0.5rem; }
+    #prompt { width: 100%; box-sizing: border-box; padding: 0.5rem; }
+    button { margin-top: 0.5rem; padding: 0.35rem 0.75rem; }
+    .status { font-size: 0.85rem; color: #666; margin-top: 0.35rem; }
+  </style>
+</head>
+<body>
+  <h1>Agent Framework — Web UI demo</h1>
+  <p>SSE: <code>/ui/sse?session=default</code> (single tab recommended). Submit runs the same ReAct graph as <code>cli_agent_demo</code>.</p>
+  <div id="out"></div>
+  <div id="aux"></div>
+  <textarea id="prompt" rows="3" placeholder="Ask something (e.g. What is 2+3? Use add.)"></textarea>
+  <div>
+    <button type="button" id="send">Send</button>
+  </div>
+  <div class="status" id="status">Disconnected</div>
+  <script src="app.js"></script>
+</body>
+</html>

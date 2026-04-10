@@ -9,6 +9,14 @@
 
 namespace agent_framework {
 
+void UIManager::register_handler(std::unique_ptr<UIHandler> handler) {
+    if (!handler) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(handlers_mutex_);
+    handlers_.push_back(std::move(handler));
+}
+
 void UIManager::register_cli_handler(std::unique_ptr<CLIHandler> handler) {
     if (!handler) {
         return;
@@ -34,8 +42,46 @@ void UIManager::register_web_connection(const std::string& session_id,
     session_handlers_[session_id] = std::unique_ptr<UIHandler>(handler.release());
 }
 
-void UIManager::dispatch_message(const std::string& /*type*/, const json& /*data*/) {
-    // Stage 1: optional; extend when multi-sink dispatch is needed
+void UIManager::dispatch_message(const std::string& type, const json& data) {
+    std::lock_guard<std::mutex> lock(handlers_mutex_);
+    for (auto& h : handlers_) {
+        if (h && h->is_active()) {
+            h->handle_aux_event(type, data);
+        }
+    }
+    for (auto& kv : session_handlers_) {
+        if (kv.second && kv.second->is_active()) {
+            kv.second->handle_aux_event(type, data);
+        }
+    }
+}
+
+void UIManager::dispatch_final_result(const json& result) {
+    std::lock_guard<std::mutex> lock(handlers_mutex_);
+    for (auto& h : handlers_) {
+        if (h && h->is_active()) {
+            h->handle_final_result(result);
+        }
+    }
+    for (auto& kv : session_handlers_) {
+        if (kv.second && kv.second->is_active()) {
+            kv.second->handle_final_result(result);
+        }
+    }
+}
+
+void UIManager::dispatch_error(const std::string& error_message) {
+    std::lock_guard<std::mutex> lock(handlers_mutex_);
+    for (auto& h : handlers_) {
+        if (h && h->is_active()) {
+            h->handle_error(error_message);
+        }
+    }
+    for (auto& kv : session_handlers_) {
+        if (kv.second && kv.second->is_active()) {
+            kv.second->handle_error(error_message);
+        }
+    }
 }
 
 void UIManager::stream_token(const std::string& /*session_id*/, std::string_view token) {

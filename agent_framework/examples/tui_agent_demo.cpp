@@ -1,0 +1,540 @@
+/**
+ * @file tui_agent_demo.cpp
+ * @brief WP2.U Track T：ncurses 全屏 + TuiHandler + 同 cli 图路径
+ *
+ * 构建：-DAGENT_BUILD_TUI=ON（需系统 ncurses / ncursesw 开发包）
+ */
+
+#include "CLI11.hpp"
+
+#include <agent/execution_context.hpp>
+#include <agent/graph_executor.hpp>
+#include <agent/internal/agent_thread_state.hpp>
+#include <agent/llm_client.hpp>
+#include <agent/prompt_renderer.hpp>
+#include <agent/skill_services.hpp>
+#include <agent/toolbus.hpp>
+#include <agent/tui/tui_handler.hpp>
+#include <agent/types.hpp>
+#include <agent/ui_manager.hpp>
+#include <agent/user_input_preprocessor.hpp>
+
+#include <clocale>
+#include <cwchar>
+#include <cwctype>
+
+#if defined(__has_include)
+#if __has_include(<ncursesw/ncurses.h>)
+#include <ncursesw/ncurses.h>
+#else
+#include <curses.h>
+#endif
+#else
+#include <curses.h>
+#endif
+
+#include <atomic>
+#include <cstdlib>
+#include <cstring>
+#include <iostream>
+#include <memory>
+#include <mutex>
+#include <string>
+#include <thread>
+#include <vector>
+
+namespace {
+
+using json = nlohmann::json;
+using namespace agent_framework;
+
+std::atomic<bool> g_shutdown{false};
+
+/** 串行化 ReAct 运行，避免多线程同时 stream到同一 TuiHandler 导致输出交错 */
+std::mutex g_tui_agent_run_mutex;
+
+ToolMeta make_add_meta() {
+    ToolMeta m;
+    m.name = "add";
+    m.description = "sum two integers";
+    m.schema = json::parse(R"({
+        "type": "object",
+        "properties": {
+            "a": { "type": "integer" },
+            "b": { "type": "integer" }
+        },
+        "required": ["a", "b"]
+    })");
+    return m;
+}
+
+void register_demo_tools(ToolBus& bus) {
+    bus.register_local_tool(
+        "add",
+        [](const json& j) {
+            return json{{"result", j.at("a").get<int>() + j.at("b").get<int>()}};
+        },
+        make_add_meta());
+}
+
+bool env_truthy(const char* key) {
+    const char* v = std::getenv(key);
+    if (!v || !*v) {
+        return false;
+    }
+    return v[0] == '1' || v[0] == 'y' || v[0] == 'Y' || v[0] == 't' || v[0] == 'T';
+}
+
+std::string resolve_cursor_mcp_config_path(const std::string& cli_path) {
+    if (!cli_path.empty()) {
+        return cli_path;
+    }
+    const char* test_env = std::getenv("AGENT_TEST_CURSOR_MCP_JSON");
+    if (test_env && *test_env) {
+        return std::string(test_env);
+    }
+    return "";
+}
+
+void import_cursor_mcp_tools(ToolBus& bus, const std::string& config_path_arg, bool dbg,
+                            std::size_t* out_mcp_services) {
+    *out_mcp_services = 0;
+    const std::string path_for_display = config_path_arg.empty()
+                                              ? std::string("<ToolBus default: AGENT_MCP_CONFIG_PATH or ~/.cursor/mcp.json>")
+                                              : config_path_arg;
+    ToolBus::CursorMcpImportResult r = bus.register_mcp_from_cursor_config(config_path_arg, true);
+    *out_mcp_services = r.registered_services.size();
+    auto tools = bus.export_as_llm_tools();
+
+    if (dbg) {
+        std::clog << "cursor_mcp config_path=\"" << path_for_display << "\"\n";
+        std::clog << "  registered_services=" << r.registered_services.size()
+                  << " failures=" << r.failures.size() << "\n";
+        for (const auto& name : r.registered_services) {
+            std::clog << "    ok: " << name << '\n';
+        }
+        for (const auto& f : r.failures) {
+            std::clog << "    fail: " << f.service_name << " - " << f.reason << '\n';
+        }
+        std::clog << "toolbus export_as_llm_tools count=" << tools.size() << '\n';
+    } else if (!r.failures.empty() && *out_mcp_services == 0) {
+        std::clog << "[tui_agent_demo] cursor_mcp: no services registered (" << r.failures.size()
+                  << " failure(s); use -v or AGENT_TEST_AGENT_LOOP_DEBUG=1 for details)\n";
+    }
+}
+
+std::shared_ptr<SkillServices> resolve_skills_services(bool dbg) {
+    const char* override_dir = std::getenv("AGENT_SKILLS_DIR");
+    std::shared_ptr<SkillServices> svc;
+    if (override_dir && *override_dir) {
+        svc = SkillServices::from_env();
+        if (dbg) {
+            std::clog << "[tui_agent_demo] skills: AGENT_SKILLS_DIR=\"" << override_dir << "\"\n";
+        }
+    } else {
+        svc = SkillServices::from_cursor_default_skill_roots();
+        if (dbg && svc && svc->registry) {
+            std::clog << "[tui_agent_demo] skills: Cursor roots (merge scan):\n";
+            for (const auto& r : svc->registry->roots()) {
+                std::clog << "  - " << r.string() << '\n';
+            }
+            std::clog << "  indexed_skills=" << svc->registry->entries().size() << '\n';
+        } else if (dbg && !svc) {
+            std::clog << "[tui_agent_demo] skills: no AGENT_SKILLS_DIR and "
+ "~/.cursor/skills / ~/.cursor/skills-cursor missing — skills disabled\n";
+        }
+    }
+    return svc;
+}
+
+void set_env_if_absent(const char* key, const char* val) {
+    if (std::getenv(key) != nullptr) {
+        return;
+    }
+#if defined(_WIN32)
+    (void)_putenv_s(key, val);
+#else
+    (void)::setenv(key, val, 0);
+#endif
+}
+
+void apply_live_llm_env_defaults() {
+    if (std::getenv("OPENAI_API_KEY") == nullptr) {
+        const char* dk = std::getenv("DEEPSEEK_API_KEY");
+        if (dk && *dk) {
+#if defined(_WIN32)
+            (void)_putenv_s("OPENAI_API_KEY", dk);
+#else
+            (void)::setenv("OPENAI_API_KEY", dk, 0);
+#endif
+        }
+    }
+    set_env_if_absent("AGENT_OPENAI_BASE_URL", "https://api.deepseek.com/v1");
+    set_env_if_absent("AGENT_LLM_PROVIDER", "openai");
+    set_env_if_absent("AGENT_HTTP_TIMEOUT_SEC", "120");
+    set_env_if_absent("AGENT_LLM_MAX_RETRIES", "1");
+    if (std::getenv("AGENT_LLM_MODEL") == nullptr) {
+        const char* m = std::getenv("DEEPSEEK_MODEL");
+        const std::string model = (m && *m) ? std::string(m) : "deepseek-chat";
+#if defined(_WIN32)
+        (void)_putenv_s("AGENT_LLM_MODEL", model.c_str());
+#else
+        (void)::setenv("AGENT_LLM_MODEL", model.c_str(), 0);
+#endif
+    }
+    set_env_if_absent("AGENT_MCP_REQUEST_TIMEOUT_MS", "1500");
+}
+
+int run_graph_ui(tf::Executor& executor,
+                 const AgentConfig& cfg,
+                 const AgentWorkflowDeps& deps,
+                 const std::shared_ptr<internal::AgentThreadState>& state,
+                 UIManager& ui) {
+    GraphExecutor gx;
+    ReactCliRunRequest req;
+    req.config = cfg;
+    req.deps = deps;
+    req.session = state;
+    req.options.sink.sink_node_name = "CliSink";
+    req.options.sink.on_final_json = [&ui](const json& j) { ui.dispatch_final_result(j); };
+    req.options.graph_options.stream_callback = [&ui](std::string_view tok) {
+        if (!g_shutdown.load()) {
+            ui.stream_token("default", tok);
+        }
+    };
+    try {
+        WorkflowResult wr = gx.run_react_cli_sync(executor, req);
+        if (!wr.success) {
+            ui.dispatch_error(wr.error_message.value_or("run_react_cli_sync failed"));
+            return wr.exit_code != 0 ? wr.exit_code : 1;
+        }
+    } catch (const std::exception& e) {
+        ui.dispatch_error(std::string("run_react_cli_sync: ") + e.what());
+        return 1;
+    }
+    return 0;
+}
+
+/**
+ * @brief UTF-8 → 显示行（wcwidth 计宽），供 CJK 与 ncursesw 使用
+ */
+void utf8_wrap_to_wlines(const std::string& text, int max_cols, std::vector<std::wstring>* out_lines) {
+    out_lines->clear();
+    if (max_cols < 1) {
+        max_cols = 1;
+    }
+    std::wstring cur;
+    int col = 0;
+    std::mbstate_t st{};
+    std::memset(&st, 0, sizeof(st));
+    for (std::size_t i = 0; i < text.size();) {
+        wchar_t wc = 0;
+        const std::size_t n = std::mbrtowc(&wc, text.data() + i, text.size() - i, &st);
+        if (n == static_cast<std::size_t>(-2)) {
+            break;
+        }
+        if (n == static_cast<std::size_t>(-1) || n == 0) {
+            ++i;
+            std::memset(&st, 0, sizeof(st));
+            continue;
+        }
+        if (wc == L'\n') {
+            out_lines->push_back(std::move(cur));
+            cur.clear();
+            col = 0;
+            i += n;
+            continue;
+        }
+        int w = wcwidth(wc);
+        if (w < 0) {
+            w = 0;
+        }
+        if (col + w > max_cols && !cur.empty()) {
+            out_lines->push_back(std::move(cur));
+            cur.clear();
+            col = 0;
+        }
+        cur.push_back(wc);
+        col += w;
+        i += n;
+    }
+    if (!cur.empty()) {
+        out_lines->push_back(std::move(cur));
+    }
+}
+
+std::string wstring_to_utf8(const std::wstring& w) {
+    std::string line;
+    std::mbstate_t st{};
+    std::memset(&st, 0, sizeof(st));
+    char buf[16];
+    for (wchar_t wc : w) {
+        const std::size_t n = std::wcrtomb(buf, wc, &st);
+        if (n != static_cast<std::size_t>(-1) && n > 0) {
+            line.append(buf, n);
+        }
+    }
+    return line;
+}
+
+void draw_wrapped_w(WINDOW* w, int max_rows, int max_cols, const std::string& text) {
+    werase(w);
+    if (max_rows <= 0 || max_cols <= 0) {
+        wrefresh(w);
+        return;
+    }
+    std::vector<std::wstring> lines;
+    utf8_wrap_to_wlines(text, max_cols, &lines);
+    int skip = 0;
+    if (static_cast<int>(lines.size()) > max_rows) {
+        skip = static_cast<int>(lines.size()) - max_rows;
+    }
+    for (int r = 0; r < max_rows && skip + r < static_cast<int>(lines.size()); ++r) {
+        const std::wstring& ln = lines[static_cast<std::size_t>(skip + r)];
+        // n = -1：整行宽字符（勿用 byte 长度，避免与 ncursesw 语义混淆）
+        mvwaddnwstr(w, r, 0, ln.c_str(), -1);
+    }
+    wrefresh(w);
+}
+
+} // namespace
+
+int main(int argc, char** argv) {
+    CLI::App app("tui_agent_demo — WP2.U ncursesw + TuiHandler + MCP/Skills");
+    std::string prompt_arg;
+    std::string provider_arg;
+    std::string cursor_mcp_json_arg;
+    int max_iterations = -1;
+    bool verbose = false;
+    bool no_cursor_mcp = false;
+    app.add_option("-p,--prompt", prompt_arg, "Optional single-turn then interactive");
+    app.add_option("--provider", provider_arg, "Override AGENT_LLM_PROVIDER");
+    app.add_option("--max-iterations", max_iterations, "Override max_iterations");
+    app.add_option("--cursor-mcp-json", cursor_mcp_json_arg,
+                   "Cursor mcp.json (else AGENT_TEST_CURSOR_MCP_JSON, else ToolBus default)");
+    app.add_flag("--no-cursor-mcp", no_cursor_mcp,
+                 "Skip MCP (or AGENT_TEST_SKIP_CURSOR_MCP / AGENT_CLI_SKIP_CURSOR_MCP)");
+    app.add_flag("-v,--verbose", verbose, "AGENT_LOG_LEVEL=debug");
+    CLI11_PARSE(app, argc, argv);
+
+    std::setlocale(LC_ALL, "");
+
+    if (verbose) {
+#if defined(_WIN32)
+        (void)_putenv_s("AGENT_LOG_LEVEL", "debug");
+#else
+        (void)::setenv("AGENT_LOG_LEVEL", "debug", 1);
+#endif
+    }
+    if (!provider_arg.empty()) {
+#if defined(_WIN32)
+        (void)_putenv_s("AGENT_LLM_PROVIDER", provider_arg.c_str());
+#else
+        (void)::setenv("AGENT_LLM_PROVIDER", provider_arg.c_str(), 1);
+#endif
+    }
+
+    apply_live_llm_env_defaults();
+
+    std::shared_ptr<LLMClient> llm;
+    try {
+        llm = std::make_shared<LLMClient>(LLMClient::from_env());
+    } catch (const std::exception& e) {
+        std::cerr << "[tui_agent_demo] LLM init: " << e.what() << "\n";
+        return 1;
+    }
+    llm->set_prompt_renderer(std::make_shared<PromptRenderer>());
+
+    const bool skip_cursor_mcp = no_cursor_mcp || env_truthy("AGENT_TEST_SKIP_CURSOR_MCP") ||
+                                 env_truthy("AGENT_CLI_SKIP_CURSOR_MCP");
+    const bool mcp_dbg = verbose || env_truthy("AGENT_TEST_AGENT_LOOP_DEBUG");
+
+    auto bus = std::make_shared<ToolBus>();
+    register_demo_tools(*bus);
+
+    std::size_t mcp_services = 0;
+    if (!skip_cursor_mcp) {
+        std::clog << "[tui_agent_demo] loading Cursor MCP config (--no-cursor-mcp to skip)...\n"
+ "  (AGENT_MCP_REQUEST_TIMEOUT_MS per service; default 1500 ms if unset)\n"
+                  << std::flush;
+        const std::string mcp_cfg = resolve_cursor_mcp_config_path(cursor_mcp_json_arg);
+        import_cursor_mcp_tools(*bus, mcp_cfg, mcp_dbg, &mcp_services);
+        if (!mcp_dbg && mcp_services > 0) {
+            std::clog << "[tui_agent_demo] cursor_mcp: " << mcp_services << " service(s) registered\n";
+        }
+    } else if (mcp_dbg) {
+        std::clog << "cursor_mcp: skipped (--no-cursor-mcp or skip env)\n";
+    }
+
+    AgentWorkflowDeps deps;
+    deps.llm = llm;
+    deps.toolbus = bus;
+    deps.skills = resolve_skills_services(mcp_dbg);
+
+    AgentConfig cfg;
+    cfg.name = "tui_agent_demo";
+    if (!skip_cursor_mcp && mcp_services > 0) {
+        cfg.system_prompt =
+            "你是一个能够调用外部工具的助手。\n"
+            "若有与问题直接相关的工具，优先调用工具获取可核对的信息；若无完全对口工具，可结合现有工具输出与常识推理补全结论。\n"
+            "不要编造无法核对的细节；若信息不足，请明确假设并给出合理区间。\n"
+            "若系统提示中带有 Active skill，请优先遵循该技能说明；run_skill_script 的 skill_id 须为已索引技能的 canonical 名（勿编造；与 Cursor SKILL 的 name/目录名一致）。需配置 AGENT_SKILL_SCRIPT_ALLOWLIST。\n"
+            "回答使用简体中文，结构清晰。\n";
+    } else {
+        cfg.system_prompt =
+            "你是一个助手。当前未加载 MCP 工具；请基于常识与公开典型情况回答，并明确标注为估算。\n"
+            "不要编造无法核对的细节；信息不足时请说明假设并给出合理区间。\n"
+            "若带有 Active skill 段，请优先遵循；run_skill_script 的 skill_id 须为已索引 canonical；需 allowlist。\n"
+            "回答使用简体中文，结构清晰。\n";
+    }
+    if (env_truthy("AGENT_SKILL_INJECT_CATALOG") && deps.skills && deps.skills->registry) {
+        std::size_t cap = 2048;
+        if (const char* c = std::getenv("AGENT_SKILL_CATALOG_MAX_CHARS")) {
+            const int v = std::atoi(c);
+            if (v > 0) {
+                cap = static_cast<std::size_t>(v);
+            }
+        }
+        cfg.system_prompt += format_skill_catalog_l1(*deps.skills->registry, cap);
+    }
+    if (const char* m = std::getenv("AGENT_LLM_MODEL")) {
+        cfg.model_config.model_name = m;
+    }
+    if (max_iterations > 0) {
+        cfg.max_iterations = max_iterations;
+    }
+
+    std::clog << "[tui_agent_demo] starting fullscreen TUI (UTF-8 / wide ncurses)...\n" << std::flush;
+
+    initscr();
+    cbreak();
+    noecho();
+    keypad(stdscr, TRUE);
+    curs_set(1);
+
+    int rows = 0;
+    int cols = 0;
+    getmaxyx(stdscr, rows, cols);
+    if (rows < 8 || cols < 40) {
+        endwin();
+        std::cerr << "[tui_agent_demo] terminal too small\n";
+        return 1;
+    }
+
+    const int input_h = 3;
+    WINDOW* out_win = newwin(rows - input_h, cols, 0, 0);
+    WINDOW* in_win = newwin(input_h, cols, rows - input_h, 0);
+    scrollok(out_win, TRUE);
+    wtimeout(in_win, 50);
+
+    auto tui_handler = std::make_unique<TuiHandler>();
+    TuiHandler* tui_h = tui_handler.get();
+
+    UIManager ui;
+    ui.register_handler(std::move(tui_handler));
+
+    auto state = std::make_shared<internal::AgentThreadState>();
+    tf::Executor executor;
+
+    std::atomic<bool> agent_busy{false};
+
+    auto run_line = [&](const std::string& line) {
+        std::lock_guard<std::mutex> run_lk(g_tui_agent_run_mutex);
+        state->skill_prompt_cache.reset();
+        state->active_skill_id.reset();
+        state->pending_injected_context.clear();
+        state->pending_control_actions.clear();
+        state->pending_input_violations.clear();
+        ExecutionContext ectx = ExecutionContext::from_environment();
+        PreprocessOptions popts;
+        popts.toolbus = deps.toolbus;
+        UserInputPreprocessor prep(popts);
+        ProcessedUserInput proc = prep.process(line, ectx);
+        if (env_input_strict_enabled() && !proc.tier_a_violations.empty()) {
+            for (const auto& v : proc.tier_a_violations) {
+                ui.dispatch_error(v);
+            }
+            return;
+        }
+        apply_processed_to_agent_state(std::move(proc), ectx, *state);
+        (void)run_graph_ui(executor, cfg, deps, state, ui);
+    };
+
+    if (!prompt_arg.empty()) {
+        agent_busy = true;
+        std::thread([&, prompt_arg]() {
+            run_line(prompt_arg);
+            agent_busy = false;
+        }).detach();
+    }
+
+    std::wstring input_wline;
+    bool running = true;
+    while (running && !g_shutdown.load()) {
+        TuiHandler::DisplaySnapshot snap = tui_h->snapshot();
+        const std::string merged = snap.stream + (snap.aux.empty() ? std::string() : std::string("\n--- aux ---\n") + snap.aux);
+        int o_rows = 0;
+        int o_cols = 0;
+        getmaxyx(out_win, o_rows, o_cols);
+        draw_wrapped_w(out_win, o_rows, o_cols, merged);
+
+        werase(in_win);
+        mvwaddwstr(in_win, 0, 0, L"> ");
+        mvwaddnwstr(in_win, 0, 2, input_wline.c_str(), -1);
+        mvwprintw(in_win, 1, 0, "Enter=send Ctrl+C=quit  busy=%s",
+                  agent_busy.load() ? "yes" : "no ");
+        wrefresh(in_win);
+
+        wint_t ch = 0;
+        const int ret = wget_wch(in_win, &ch);
+        if (ret == ERR) {
+            continue;
+        }
+        if (ret == KEY_CODE_YES) {
+            if (ch == 3) { // Ctrl+C
+                running = false;
+                break;
+            }
+            if (ch == KEY_BACKSPACE || ch == KEY_DC || ch == 127) {
+                if (!input_wline.empty()) {
+                    input_wline.pop_back();
+                }
+                continue;
+            }
+            if (ch == KEY_ENTER || ch == L'\n' || ch == L'\r' || ch == 10 || ch == 13) {
+                if (!input_wline.empty() && !agent_busy.load()) {
+                    std::string line = wstring_to_utf8(input_wline);
+                    input_wline.clear();
+                    agent_busy = true;
+                    std::thread([&, line]() {
+                        run_line(line);
+                        agent_busy = false;
+                    }).detach();
+                }
+                continue;
+            }
+            continue;
+        }
+        if (ch == L'\n' || ch == L'\r' || ch == 10 || ch == 13) {
+            if (!input_wline.empty() && !agent_busy.load()) {
+                std::string line = wstring_to_utf8(input_wline);
+                input_wline.clear();
+                agent_busy = true;
+                std::thread([&, line]() {
+                    run_line(line);
+                    agent_busy = false;
+                }).detach();
+            }
+            continue;
+        }
+        if (ch >= 32) {
+            input_wline.push_back(static_cast<wchar_t>(ch));
+        }
+    }
+
+    g_shutdown = true;
+    delwin(out_win);
+    delwin(in_win);
+    endwin();
+    return 0;
+}

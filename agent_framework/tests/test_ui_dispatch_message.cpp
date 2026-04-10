@@ -1,0 +1,61 @@
+/**
+ * @file test_ui_dispatch_message.cpp
+ * @brief WP2.U U-1：UIManager::dispatch_message → handle_aux_event
+ */
+
+#include <agent/ui_manager.hpp>
+
+#include <cassert>
+#include <string>
+#include <utility>
+
+namespace {
+
+using namespace agent_framework;
+
+class RecordingHandler final : public UIHandler {
+public:
+    int aux_count = 0;
+    std::string last_type;
+    json last_payload;
+
+    void handle_stream_token(std::string_view) override {}
+    void handle_final_result(const json&) override {}
+    void handle_error(const std::string&) override {}
+    std::string get_handler_type() const override {
+        return "recording";
+    }
+    bool is_active() const override {
+        return true;
+    }
+    void handle_aux_event(std::string_view type, const json& payload) override {
+        ++aux_count;
+        last_type = std::string(type);
+        last_payload = payload;
+    }
+};
+
+void test_u1_dispatch_hits_all_handlers() {
+    UIManager ui;
+    auto a = std::make_unique<RecordingHandler>();
+    RecordingHandler* pa = a.get();
+    auto b = std::make_unique<RecordingHandler>();
+    RecordingHandler* pb = b.get();
+    ui.register_handler(std::move(a));
+    ui.register_handler(std::move(b));
+
+    json data = json{{"name", "fs_read"}, {"ok", true}};
+    ui.dispatch_message("tool_end", data);
+
+    assert(pa->aux_count == 1);
+    assert(pb->aux_count == 1);
+    assert(pa->last_type == "tool_end");
+    assert(pa->last_payload == data);
+}
+
+} // namespace
+
+int main() {
+    test_u1_dispatch_hits_all_handlers();
+    return 0;
+}
