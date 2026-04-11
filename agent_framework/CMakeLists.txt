@@ -141,7 +141,9 @@ else()
 endif()
 
 # WP2.U 富界面（默认 OFF，避免拖垮无依赖 CI）
-option(AGENT_BUILD_IMGUI "Build imgui_agent_demo (GLFW + OpenGL3 + Dear ImGui via FetchContent)" OFF)
+option(AGENT_BUILD_IMGUI
+       "Build imgui_agent_demo (GLFW + OpenGL3 + Dear ImGui; ImPlot/ImPlot3D from 3rd-party submodules if present)"
+       OFF)
 option(AGENT_BUILD_TUI "Build tui_agent_demo (ncurses)" OFF)
 option(AGENT_BUILD_WEB_UI "Build web_ui_demo (httplib + static assets + SSE)" OFF)
 
@@ -739,6 +741,8 @@ endif()
 # ---------------------------------------------------------------------------
 if(AGENT_BUILD_IMGUI)
     include(FetchContent)
+    set(AGENT_WPU_3RD "${CMAKE_CURRENT_SOURCE_DIR}/../3rd-party")
+
     FetchContent_Declare(
         glfw_wpu
         GIT_REPOSITORY https://github.com/glfw/glfw.git
@@ -748,12 +752,18 @@ if(AGENT_BUILD_IMGUI)
     set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
     FetchContent_MakeAvailable(glfw_wpu)
 
-    FetchContent_Declare(
-        imgui_wpu_fc
-        GIT_REPOSITORY https://github.com/ocornut/imgui.git
-        GIT_TAG v1.91.0)
-    FetchContent_MakeAvailable(imgui_wpu_fc)
-    set(IMGUI_WPU_ROOT ${imgui_wpu_fc_SOURCE_DIR})
+    if(EXISTS "${AGENT_WPU_3RD}/imgui/imgui.cpp")
+        set(IMGUI_WPU_ROOT "${AGENT_WPU_3RD}/imgui")
+        message(STATUS "WP2.U: Dear ImGui from ${IMGUI_WPU_ROOT} (git submodule)")
+    else()
+        FetchContent_Declare(
+            imgui_wpu_fc
+            GIT_REPOSITORY https://github.com/ocornut/imgui.git
+            GIT_TAG v1.91.0)
+        FetchContent_MakeAvailable(imgui_wpu_fc)
+        set(IMGUI_WPU_ROOT ${imgui_wpu_fc_SOURCE_DIR})
+        message(STATUS "WP2.U: Dear ImGui from FetchContent v1.91.0 (init 3rd-party/imgui to vendor offline)")
+    endif()
 
     add_library(imgui_wpu STATIC
         ${IMGUI_WPU_ROOT}/imgui.cpp
@@ -767,11 +777,42 @@ if(AGENT_BUILD_IMGUI)
     find_package(OpenGL REQUIRED)
     target_link_libraries(imgui_wpu PUBLIC OpenGL::GL)
 
+    if(EXISTS "${AGENT_WPU_3RD}/implot/implot.cpp")
+        add_library(implot_wpu STATIC
+            ${AGENT_WPU_3RD}/implot/implot.cpp
+            ${AGENT_WPU_3RD}/implot/implot_items.cpp)
+        target_include_directories(implot_wpu PUBLIC ${AGENT_WPU_3RD}/implot)
+        target_link_libraries(implot_wpu PUBLIC imgui_wpu)
+        message(STATUS "WP2.U: ImPlot from ${AGENT_WPU_3RD}/implot (git submodule)")
+    else()
+        message(STATUS "WP2.U: ImPlot not built (missing 3rd-party/implot; git submodule update --init)")
+    endif()
+
+    if(EXISTS "${AGENT_WPU_3RD}/implot3d/implot3d.cpp")
+        add_library(implot3d_wpu STATIC
+            ${AGENT_WPU_3RD}/implot3d/implot3d.cpp
+            ${AGENT_WPU_3RD}/implot3d/implot3d_items.cpp
+            ${AGENT_WPU_3RD}/implot3d/implot3d_meshes.cpp)
+        target_include_directories(implot3d_wpu PUBLIC ${AGENT_WPU_3RD}/implot3d)
+        target_link_libraries(implot3d_wpu PUBLIC imgui_wpu)
+        message(STATUS "WP2.U: ImPlot3D from ${AGENT_WPU_3RD}/implot3d (git submodule)")
+    else()
+        message(STATUS "WP2.U: ImPlot3D not built (missing 3rd-party/implot3d; git submodule update --init)")
+    endif()
+
     if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/examples/imgui_agent_demo.cpp)
         add_executable(imgui_agent_demo examples/imgui_agent_demo.cpp)
         target_include_directories(imgui_agent_demo PRIVATE
             ${CMAKE_CURRENT_SOURCE_DIR}/../3rd-party/CLI11)
         target_link_libraries(imgui_agent_demo PRIVATE agent_framework imgui_wpu glfw OpenGL::GL)
+        if(TARGET implot_wpu)
+            target_link_libraries(imgui_agent_demo PRIVATE implot_wpu)
+            target_compile_definitions(imgui_agent_demo PRIVATE AGENT_HAS_IMPLOT=1)
+        endif()
+        if(TARGET implot3d_wpu)
+            target_link_libraries(imgui_agent_demo PRIVATE implot3d_wpu)
+            target_compile_definitions(imgui_agent_demo PRIVATE AGENT_HAS_IMPLOT3D=1)
+        endif()
         if(CMAKE_USE_PTHREADS_INIT)
             target_link_libraries(imgui_agent_demo PRIVATE Threads::Threads)
         endif()

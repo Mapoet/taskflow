@@ -135,6 +135,11 @@ taskflow/                       # 项目根目录
 - **httplib**：轻量级 HTTP 服务器库（Header-Only）
 - **websocketpp**：WebSocket 库（Header-Only）
 - **faiss**：高性能向量检索库（可选，需要编译）
+- **imgui**（`3rd-party/imgui`）：Dear ImGui；`AGENT_BUILD_IMGUI=ON` 时优先使用子模块，否则 CMake FetchContent
+- **implot**（`3rd-party/implot`）：2D 图表（epezent/implot）；子模块存在时 `imgui_agent_demo` 自动链接
+- **implot3d**（`3rd-party/implot3d`）：3D 图表（brenocq/implot3d）；仅依赖 ImGui
+
+上述三项已登记在仓库根目录 `.gitmodules` 中；拉取含子模块指针的提交后，在根目录执行 `git submodule update --init --recursive`（或对各路径单独 `init`/`update`）。若本地仓库尚无子模块 gitlink，请在可访问 GitHub 的环境下于根目录执行 `git submodule add <url> 3rd-party/<name>` 各一次并提交，再按上式更新。
 
 ### 管理子模块
 

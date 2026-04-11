@@ -3,7 +3,8 @@
  * @brief WP2.U Track I：GLFW + OpenGL3 + Dear ImGui + 同 cli图路径（UIManager 队列）
  *
  * 主线程：GLFW/ImGui + drain StreamMessage；工作线程：run_react_cli_sync。
- * 构建：-DAGENT_BUILD_IMGUI=ON（FetchContent GLFW+ImGui）
+ * 构建：-DAGENT_BUILD_IMGUI=ON。Dear ImGui：优先 `3rd-party/imgui` 子模块，否则 FetchContent。
+ * ImPlot / ImPlot3D：可选 `3rd-party/implot`、`3rd-party/implot3d` 子模块（见仓库 .gitmodules）。
  */
 
 #include "CLI11.hpp"
@@ -24,9 +25,17 @@
 #include <imgui_impl_glfw.h>
 #include <imgui_impl_opengl3.h>
 
+#if defined(AGENT_HAS_IMPLOT)
+#include <implot.h>
+#endif
+#if defined(AGENT_HAS_IMPLOT3D)
+#include <implot3d.h>
+#endif
+
 #include <GLFW/glfw3.h>
 
 #include <atomic>
+#include <cmath>
 #include <cstdlib>
 #include <memory>
 #include <string>
@@ -243,6 +252,12 @@ int main(int argc, char** argv) {
 
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
+#if defined(AGENT_HAS_IMPLOT)
+    ImPlot::CreateContext();
+#endif
+#if defined(AGENT_HAS_IMPLOT3D)
+    ImPlot3D::CreateContext();
+#endif
     ImGuiIO& io = ImGui::GetIO();
     (void)io;
     ImGui::StyleColorsDark();
@@ -342,6 +357,46 @@ int main(int argc, char** argv) {
         ImGui::Text("agent_busy=%s", agent_busy.load() ? "yes" : "no");
         ImGui::End();
 
+#if defined(AGENT_HAS_IMPLOT) || defined(AGENT_HAS_IMPLOT3D)
+        ImGui::Begin("Plots (submodule demo)");
+#if defined(AGENT_HAS_IMPLOT)
+        if (ImPlot::BeginPlot("2D")) {
+            static float xs[64];
+            static float ys[64];
+            static bool inited_2d = false;
+            if (!inited_2d) {
+                for (int i = 0; i < 64; ++i) {
+                    xs[i] = static_cast<float>(i) * 0.1f;
+                    ys[i] = std::sin(xs[i]);
+                }
+                inited_2d = true;
+            }
+            ImPlot::PlotLine("sin", xs, ys, 64);
+            ImPlot::EndPlot();
+        }
+#endif
+#if defined(AGENT_HAS_IMPLOT3D)
+        if (ImPlot3D::BeginPlot("3D")) {
+            static float xa[64];
+            static float ya[64];
+            static float za[64];
+            static bool inited_3d = false;
+            if (!inited_3d) {
+                for (int i = 0; i < 64; ++i) {
+                    const float t = static_cast<float>(i) / 63.0F * 6.2831855F * 2.0F;
+                    xa[i] = std::cos(t);
+                    ya[i] = std::sin(t);
+                    za[i] = t * 0.08F;
+                }
+                inited_3d = true;
+            }
+            ImPlot3D::PlotLine("helix", xa, ya, za, 64);
+            ImPlot3D::EndPlot();
+        }
+#endif
+        ImGui::End();
+#endif
+
         ImGui::Render();
         int display_w = 0;
         int display_h = 0;
@@ -355,6 +410,12 @@ int main(int argc, char** argv) {
 
     ImGui_ImplOpenGL3_Shutdown();
     ImGui_ImplGlfw_Shutdown();
+#if defined(AGENT_HAS_IMPLOT3D)
+    ImPlot3D::DestroyContext();
+#endif
+#if defined(AGENT_HAS_IMPLOT)
+    ImPlot::DestroyContext();
+#endif
     ImGui::DestroyContext();
     glfwDestroyWindow(window);
     glfwTerminate();

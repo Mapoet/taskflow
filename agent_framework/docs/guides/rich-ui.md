@@ -11,7 +11,7 @@
 
 | 选项 | 说明 |
 |------|------|
-| `AGENT_BUILD_IMGUI` | `imgui_agent_demo`；GLFW + OpenGL3 + Dear ImGui（**FetchContent**，固定 tag，需网络首次配置） |
+| `AGENT_BUILD_IMGUI` | `imgui_agent_demo`；GLFW（FetchContent）+ Dear ImGui（**优先** `3rd-party/imgui` 子模块，否则 FetchContent）。可选 **ImPlot** / **ImPlot3D**：`3rd-party/implot`、`3rd-party/implot3d`（见根目录 `.gitmodules`） |
 | `AGENT_BUILD_TUI` | `tui_agent_demo`；**`find_package(Curses REQUIRED)`**，优先 wide ncurses |
 | `AGENT_BUILD_WEB_UI` | `web_ui_demo`；复用仓库 `3rd-party/httplib` |
 
