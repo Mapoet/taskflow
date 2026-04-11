@@ -28,3 +28,15 @@
 [submodule "3rd-party/stb"]
 	path = 3rd-party/stb
 	url = https://github.com/nothings/stb.git
+
+[submodule "3rd-party/imgui"]
+	path = 3rd-party/imgui
+	url = https://github.com/ocornut/imgui.git
+
+[submodule "3rd-party/implot"]
+	path = 3rd-party/implot
+	url = https://github.com/ocornut/imgui.git
+
+[submodule "3rd-party/implot3d"]
+	path = 3rd-party/implot3d
+	url = https://github.com/brenocq/implot3d.git
