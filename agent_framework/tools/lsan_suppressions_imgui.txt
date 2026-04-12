@@ -1,0 +1,9 @@
+# LeakSanitizer suppressions for imgui_agent_demo (GLFW + X11 + Dear ImGui).
+# These are third-party / platform allocations that are not reliably freed on exit.
+#
+# libX11 XIM: opened during X connection / input method setup; no stable public teardown
+# in the GLFW + default Xlib path used by the demo.
+leak:_XimOpenIM
+
+# Fused ASan+LSan builds may attribute tiny allocations to libasan at exit (benign).
+leak:libasan.so

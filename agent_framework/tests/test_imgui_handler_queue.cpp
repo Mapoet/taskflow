@@ -8,6 +8,7 @@
 
 #include <cassert>
 #include <memory>
+#include <string>
 #include <vector>
 
 namespace {
@@ -38,10 +39,41 @@ void test_aux_event_message_type() {
     assert(out[0].content == p.dump());
 }
 
+void test_final_pushes_body_when_no_stream() {
+    auto q = std::make_shared<ThreadSafeQueue<StreamMessage>>();
+    ImGuiHandler h(q, "default");
+    json r;
+    r["final_answer"] = std::string("hello_no_stream_body");
+    r["iteration"] = 0;
+    h.handle_final_result(r);
+    std::vector<StreamMessage> out;
+    assert(h.drain_messages(out, 5) == 1);
+    assert(out[0].message_type == "final");
+    assert(out[0].content == "hello_no_stream_body");
+}
+
+void test_final_meta_only_when_streamed() {
+    auto q = std::make_shared<ThreadSafeQueue<StreamMessage>>();
+    ImGuiHandler h(q, "default");
+    h.handle_stream_token("x");
+    json r;
+    r["final_answer"] = std::string("full");
+    r["iteration"] = 1;
+    h.handle_final_result(r);
+    std::vector<StreamMessage> out;
+    assert(h.drain_messages(out, 5) == 2);
+    assert(out[0].message_type == "token");
+    assert(out[0].content == "x");
+    assert(out[1].message_type == "final");
+    assert(out[1].content.find("final_answer_chars") != std::string::npos);
+}
+
 } // namespace
 
 int main() {
     test_push_drain_order();
     test_aux_event_message_type();
+    test_final_pushes_body_when_no_stream();
+    test_final_meta_only_when_streamed();
     return 0;
 }

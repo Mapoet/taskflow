@@ -44,6 +44,7 @@ void ImGuiHandler::handle_stream_token(std::string_view token) {
     if (!active_) {
         return;
     }
+    streamed_utf8_bytes_.fetch_add(static_cast<std::size_t>(token.size()), std::memory_order_relaxed);
     push_message("token", std::string(token));
 }
 
@@ -51,9 +52,15 @@ void ImGuiHandler::handle_final_result(const json& result) {
     if (!active_) {
         return;
     }
-    // WP1.6 / phase-1-wp6 §4.3：与 CLI 一致，终稿不重复 dump已流式展示的全文
+    const std::size_t streamed = streamed_utf8_bytes_.exchange(0, std::memory_order_acq_rel);
+    // WP1.6 / phase-1-wp6 §4.3：若本轮已有流式正文，终稿只推元数据，避免与 token 重复。
+    // 若本轮无流式（例如模型一次出终稿），必须把 final_answer 推入队列，否则 GUI 无正文可显示。
     if (result.contains("final_answer") && result["final_answer"].is_string()) {
         const auto& fa = result["final_answer"].get_ref<const std::string&>();
+        if (!fa.empty() && streamed == 0) {
+            push_message("final", fa);
+            return;
+        }
         std::ostringstream oss;
         oss << "[result] iteration=";
         if (result.contains("iteration")) {

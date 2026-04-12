@@ -802,6 +802,9 @@ if(AGENT_BUILD_IMGUI)
 
     if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/examples/imgui_agent_demo.cpp)
         add_executable(imgui_agent_demo examples/imgui_agent_demo.cpp)
+        # ASan+LSan: X11/libX11 XIM leaks under GLFW are known; point LSan at suppressions (see tools/).
+        target_compile_definitions(imgui_agent_demo PRIVATE
+            "AGENT_IMG_LSAN_SUPP_PATH=\"${CMAKE_CURRENT_SOURCE_DIR}/tools/lsan_suppressions_imgui.txt\"")
         target_include_directories(imgui_agent_demo PRIVATE
             ${CMAKE_CURRENT_SOURCE_DIR}/../3rd-party/CLI11)
         target_link_libraries(imgui_agent_demo PRIVATE agent_framework imgui_wpu glfw OpenGL::GL)

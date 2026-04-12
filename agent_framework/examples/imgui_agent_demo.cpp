@@ -34,9 +34,17 @@
 
 #include <GLFW/glfw3.h>
 
+#if defined(_WIN32)
+#include <io.h>
+#else
+#include <unistd.h>
+#endif
+
 #include <atomic>
 #include <cmath>
+#include <cstring>
 #include <cstdlib>
+#include <iostream>
 #include <memory>
 #include <string>
 #include <thread>
@@ -45,6 +53,73 @@
 #if defined(__APPLE__)
 #define GL_SILENCE_DEPRECATION
 #endif
+
+#ifndef AGENT_IMG_LSAN_SUPP_PATH
+#define AGENT_IMG_LSAN_SUPP_PATH ""
+#endif
+
+/** Before GLFW/X11 init: merge LSan suppressions for known libX11 XIM leaks (ASan+Linux). */
+static void agent_imgui_merge_lsan_suppressions() {
+#if defined(__SANITIZE_ADDRESS__) && !defined(_WIN32)
+    const char* path = AGENT_IMG_LSAN_SUPP_PATH;
+    if (path == nullptr || path[0] == '\0') {
+        return;
+    }
+    const char* cur = std::getenv("LSAN_OPTIONS");
+    if (cur != nullptr && std::strstr(cur, "suppressions=") != nullptr) {
+        return;
+    }
+    std::string s = std::string("suppressions=") + path;
+    if (cur != nullptr && cur[0] != '\0') {
+        s += ':';
+        s += cur;
+    }
+    (void)::setenv("LSAN_OPTIONS", s.c_str(), 1);
+#endif
+}
+
+/** System CJK font for ImGui; set AGENT_IMGUI_FONT_PATH to override. */
+static bool try_load_imgui_cjk_font(ImGuiIO& io) {
+    const char* env_path = std::getenv("AGENT_IMGUI_FONT_PATH");
+    const char* candidates[] = {
+        env_path,
+#if defined(_WIN32)
+        R"(C:\Windows\Fonts\msyh.ttc)",
+        R"(C:\Windows\Fonts\simsun.ttc)",
+#else
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/truetype/noto/NotoSansCJK-Bold.ttc",
+        "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
+        "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
+#endif
+        nullptr,
+    };
+    for (const char* p : candidates) {
+        if (!p || !*p) {
+            continue;
+        }
+#if defined(_WIN32)
+        if (_access(p, 0) != 0) {
+            continue;
+        }
+#else
+        if (access(p, R_OK) != 0) {
+            continue;
+        }
+#endif
+        ImFontConfig fc;
+        fc.OversampleH = 2;
+        fc.OversampleV = 2;
+        ImFont* f = io.Fonts->AddFontFromFileTTF(
+            p, 20.0f, &fc, io.Fonts->GetGlyphRangesChineseSimplifiedCommon());
+        if (f) {
+            io.FontDefault = f;
+            return true;
+        }
+    }
+    return false;
+}
 
 namespace {
 
@@ -87,6 +162,68 @@ bool env_truthy(const char* key) {
         return false;
     }
     return v[0] == '1' || v[0] == 'y' || v[0] == 'Y' || v[0] == 't' || v[0] == 'T';
+}
+
+std::string resolve_cursor_mcp_config_path(const std::string& cli_path) {
+    if (!cli_path.empty()) {
+        return cli_path;
+    }
+    const char* test_env = std::getenv("AGENT_TEST_CURSOR_MCP_JSON");
+    if (test_env && *test_env) {
+        return std::string(test_env);
+    }
+    return "";
+}
+
+void import_cursor_mcp_tools(ToolBus& bus, const std::string& config_path_arg, bool dbg,
+                            std::size_t* out_mcp_services) {
+    *out_mcp_services = 0;
+    const std::string path_for_display = config_path_arg.empty()
+                                              ? std::string("<ToolBus default: AGENT_MCP_CONFIG_PATH or ~/.cursor/mcp.json>")
+                                              : config_path_arg;
+    ToolBus::CursorMcpImportResult r = bus.register_mcp_from_cursor_config(config_path_arg, true);
+    *out_mcp_services = r.registered_services.size();
+    auto tools = bus.export_as_llm_tools();
+
+    if (dbg) {
+        std::clog << "cursor_mcp config_path=\"" << path_for_display << "\"\n";
+        std::clog << "  registered_services=" << r.registered_services.size()
+                  << " failures=" << r.failures.size() << "\n";
+        for (const auto& name : r.registered_services) {
+            std::clog << "    ok: " << name << '\n';
+        }
+        for (const auto& f : r.failures) {
+            std::clog << "    fail: " << f.service_name << " - " << f.reason << '\n';
+        }
+        std::clog << "toolbus export_as_llm_tools count=" << tools.size() << '\n';
+    } else if (!r.failures.empty() && *out_mcp_services == 0) {
+        std::clog << "[imgui_agent_demo] cursor_mcp: no services registered (" << r.failures.size()
+                  << " failure(s); use -v or AGENT_TEST_AGENT_LOOP_DEBUG=1 for details)\n";
+    }
+}
+
+std::shared_ptr<SkillServices> resolve_skills_services(bool dbg) {
+    const char* override_dir = std::getenv("AGENT_SKILLS_DIR");
+    std::shared_ptr<SkillServices> svc;
+    if (override_dir && *override_dir) {
+        svc = SkillServices::from_env();
+        if (dbg) {
+            std::clog << "[imgui_agent_demo] skills: AGENT_SKILLS_DIR=\"" << override_dir << "\"\n";
+        }
+    } else {
+        svc = SkillServices::from_cursor_default_skill_roots();
+        if (dbg && svc && svc->registry) {
+            std::clog << "[imgui_agent_demo] skills: Cursor roots (merge scan):\n";
+            for (const auto& r : svc->registry->roots()) {
+                std::clog << "  - " << r.string() << '\n';
+            }
+            std::clog << "  indexed_skills=" << svc->registry->entries().size() << '\n';
+        } else if (dbg && !svc) {
+            std::clog << "[imgui_agent_demo] skills: no AGENT_SKILLS_DIR and "
+ "~/.cursor/skills / ~/.cursor/skills-cursor missing — skills disabled\n";
+        }
+    }
+    return svc;
 }
 
 void set_env_if_absent(const char* key, const char* val) {
@@ -159,15 +296,28 @@ int run_graph_ui(tf::Executor& executor,
 
 } // namespace
 
+// Some third-party stacks (e.g. SDL-style wrappers) may `#define main`; keep the real entry symbol.
+#if defined(main)
+#undef main
+#endif
+
 int main(int argc, char** argv) {
+    agent_imgui_merge_lsan_suppressions();
+
     CLI::App app("imgui_agent_demo — WP2.U ImGui + same ReAct graph as cli_agent_demo");
     std::string prompt_arg;
     std::string provider_arg;
+    std::string cursor_mcp_json_arg;
     int max_iterations = -1;
     bool verbose = false;
+    bool no_cursor_mcp = false;
     app.add_option("-p,--prompt", prompt_arg, "Optional single-turn: run then keep window open");
     app.add_option("--provider", provider_arg, "Override AGENT_LLM_PROVIDER");
     app.add_option("--max-iterations", max_iterations, "Override max_iterations");
+    app.add_option("--cursor-mcp-json", cursor_mcp_json_arg,
+                   "Cursor mcp.json (else AGENT_TEST_CURSOR_MCP_JSON, else ToolBus default)");
+    app.add_flag("--no-cursor-mcp", no_cursor_mcp,
+                 "Skip MCP (or AGENT_TEST_SKIP_CURSOR_MCP / AGENT_CLI_SKIP_CURSOR_MCP)");
     app.add_flag("-v,--verbose", verbose, "AGENT_LOG_LEVEL=debug");
     CLI11_PARSE(app, argc, argv);
 
@@ -197,13 +347,31 @@ int main(int argc, char** argv) {
     }
     llm->set_prompt_renderer(std::make_shared<PromptRenderer>());
 
+    const bool skip_cursor_mcp = no_cursor_mcp || env_truthy("AGENT_TEST_SKIP_CURSOR_MCP") ||
+                                 env_truthy("AGENT_CLI_SKIP_CURSOR_MCP");
+    const bool mcp_dbg = verbose || env_truthy("AGENT_TEST_AGENT_LOOP_DEBUG");
+
     auto bus = std::make_shared<ToolBus>();
     register_demo_tools(*bus);
+
+    std::size_t mcp_services = 0;
+    if (!skip_cursor_mcp) {
+        std::clog << "[imgui_agent_demo] loading Cursor MCP config (--no-cursor-mcp to skip)...\n"
+                      "  (AGENT_MCP_REQUEST_TIMEOUT_MS per service; default 1500 ms if unset)\n"
+                  << std::flush;
+        const std::string mcp_cfg = resolve_cursor_mcp_config_path(cursor_mcp_json_arg);
+        import_cursor_mcp_tools(*bus, mcp_cfg, mcp_dbg, &mcp_services);
+        if (!mcp_dbg && mcp_services > 0) {
+            std::clog << "[imgui_agent_demo] cursor_mcp: " << mcp_services << " service(s) registered\n";
+        }
+    } else if (mcp_dbg) {
+        std::clog << "cursor_mcp: skipped (--no-cursor-mcp or skip env)\n";
+    }
 
     AgentWorkflowDeps deps;
     deps.llm = llm;
     deps.toolbus = bus;
-    deps.skills = SkillServices::from_env();
+    deps.skills = resolve_skills_services(mcp_dbg);
 
     AgentConfig cfg;
     cfg.name = "imgui_agent_demo";
@@ -221,12 +389,29 @@ int main(int argc, char** argv) {
             "若带有 Active skill 段，请优先遵循；run_skill_script 的 skill_id 须为已索引 canonical；需 allowlist。\n"
             "回答使用简体中文，结构清晰。\n";
     }
+    if (env_truthy("AGENT_SKILL_INJECT_CATALOG") && deps.skills && deps.skills->registry) {
+        std::size_t cap = 2048;
+        if (const char* c = std::getenv("AGENT_SKILL_CATALOG_MAX_CHARS")) {
+            const int v = std::atoi(c);
+            if (v > 0) {
+                cap = static_cast<std::size_t>(v);
+            }
+        }
+        cfg.system_prompt += format_skill_catalog_l1(*deps.skills->registry, cap);
+    }
     if (const char* m = std::getenv("AGENT_LLM_MODEL")) {
         cfg.model_config.model_name = m;
     }
     if (max_iterations > 0) {
         cfg.max_iterations = max_iterations;
     }
+
+    // Same rationale as web_ui_demo: avoid AgentLoop/OpenAIAdapter std::cout spam in GUI apps.
+#if defined(_WIN32)
+    (void)_putenv_s("AGENT_TEST_AGENT_LOOP_DEBUG", "0");
+#else
+    (void)unsetenv("AGENT_TEST_AGENT_LOOP_DEBUG");
+#endif
 
     glfwSetErrorCallback(glfw_error_callback);
     if (!glfwInit()) {
@@ -259,8 +444,11 @@ int main(int argc, char** argv) {
     ImPlot3D::CreateContext();
 #endif
     ImGuiIO& io = ImGui::GetIO();
-    (void)io;
     ImGui::StyleColorsDark();
+    if (!try_load_imgui_cjk_font(io)) {
+        std::clog << "[imgui_agent_demo] CJK font not loaded (Chinese may show as ?). Set "
+                     "AGENT_IMGUI_FONT_PATH to a .ttf/.ttc with CJK, or install fonts-noto-cjk / wqy.\n";
+    }
     ImGui_ImplGlfw_InitForOpenGL(window, true);
     ImGui_ImplOpenGL3_Init(glsl_version);
 
@@ -328,6 +516,8 @@ int main(int argc, char** argv) {
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
 
+        ImGui::SetNextWindowPos(ImVec2(24.0f, 24.0f), ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowSize(ImVec2(720.0f, 400.0f), ImGuiCond_FirstUseEver);
         ImGui::Begin("Output");
         ImGui::BeginChild("scroll", ImVec2(0, -120), true, ImGuiWindowFlags_HorizontalScrollbar);
         ImGui::TextUnformatted(stream_text.c_str());
@@ -338,6 +528,8 @@ int main(int argc, char** argv) {
         }
         ImGui::End();
 
+        ImGui::SetNextWindowPos(ImVec2(24.0f, 440.0f), ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowSize(ImVec2(720.0f, 220.0f), ImGuiCond_FirstUseEver);
         ImGui::Begin("Input");
         ImGui::InputTextMultiline("##user", input_buf, sizeof(input_buf), ImVec2(-1, 80));
         if (ImGui::Button("Send") && !agent_busy.load()) {
@@ -358,6 +550,8 @@ int main(int argc, char** argv) {
         ImGui::End();
 
 #if defined(AGENT_HAS_IMPLOT) || defined(AGENT_HAS_IMPLOT3D)
+        ImGui::SetNextWindowPos(ImVec2(760.0f, 24.0f), ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowSize(ImVec2(500.0f, 520.0f), ImGuiCond_FirstUseEver);
         ImGui::Begin("Plots (submodule demo)");
 #if defined(AGENT_HAS_IMPLOT)
         if (ImPlot::BeginPlot("2D")) {

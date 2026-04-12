@@ -11,6 +11,7 @@
 #include "types.hpp"
 #include "thread_safe_queue.hpp"
 
+#include <atomic>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -132,6 +133,8 @@ private:
     std::shared_ptr<ThreadSafeQueue<StreamMessage>> queue_;
     std::string session_id_;
     bool active_ = true;
+    /** UTF-8 bytes pushed via handle_stream_token this turn (reset in handle_final_result). */
+    std::atomic<std::size_t> streamed_utf8_bytes_{0};
 
     void push_message(const std::string& type, const std::string& content);
 };
