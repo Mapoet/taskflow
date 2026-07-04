@@ -16,7 +16,6 @@
 #include "error.hpp"
 #include "declarations.hpp"
 #include "semaphore.hpp"
-#include "environment.hpp"
 #include "topology.hpp"
 #include "wsq.hpp"
 

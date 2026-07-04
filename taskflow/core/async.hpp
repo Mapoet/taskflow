@@ -105,14 +105,14 @@ auto Executor::async(F&& f) {
 }
 
 // Function: async
-template <typename P, typename F>
+template <TaskParamsLike P, typename F>
 auto Executor::async(P&& params, F&& f) {
   _increment_topology();
   return _async(std::forward<P>(params), std::forward<F>(f), nullptr, nullptr);
 }
 
 // Function: _async
-template <typename P, typename F>
+template <TaskParamsLike P, typename F>
 auto Executor::_async(P&& params, F&& f, Topology* tpg, NodeBase* parent) {
   
   // async task with runtime: [] (tf::Runtime&) -> void {}
@@ -169,14 +169,14 @@ void Executor::silent_async(F&& f) {
 }
 
 // Function: silent_async
-template <typename P, typename F>
+template <TaskParamsLike P, typename F>
 void Executor::silent_async(P&& params, F&& f) {
   _increment_topology();
   _silent_async(std::forward<P>(params), std::forward<F>(f), nullptr, nullptr);
 }
 
 // Function: _silent_async
-template <typename P, typename F>
+template <TaskParamsLike P, typename F>
 void Executor::_silent_async(P&& params, F&& f, Topology* tpg, NodeBase* parent) {
   // silent task 
   if constexpr (is_runtime_task_v<F> || is_static_task_v<F>) {

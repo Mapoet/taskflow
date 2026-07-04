@@ -642,7 +642,7 @@ class Executor {
 
   This member function is thread-safe.
   */
-  template <typename P, typename F>
+  template <TaskParamsLike P, typename F>
   auto async(P&& params, F&& func);
 
   /**
@@ -674,6 +674,7 @@ class Executor {
   /**
   @brief similar to tf::Executor::async but does not return a future object
 
+  @tparam P task parameter type satisfying tf::TaskParamsLike
   @tparam F callable type
 
   @param params task parameters
@@ -694,7 +695,7 @@ class Executor {
 
   This member function is thread-safe.
   */
-  template <typename P, typename F>
+  template <TaskParamsLike P, typename F>
   void silent_async(P&& params, F&& func);
   
   /**
@@ -761,6 +762,7 @@ class Executor {
   @brief runs the given function asynchronously 
          when the given predecessors finish
   
+  @tparam P task parameter type satisfying tf::TaskParamsLike
   @tparam F callable type
   @tparam Tasks task types convertible to tf::AsyncTask
 
@@ -831,6 +833,7 @@ class Executor {
   @brief runs the given function asynchronously 
          when the given range of predecessors finish
   
+  @tparam P task parameter type satisfying tf::TaskParamsLike
   @tparam F callable type
   @tparam I iterator type 
 
@@ -1172,10 +1175,10 @@ class Executor {
   template <size_t N>
   void _bulk_update_cache(Worker&, Node*&, Node*, std::array<Node*, N>&, size_t&);
 
-  template <typename P, typename F>
+  template <TaskParamsLike P, typename F>
   auto _async(P&&, F&&, Topology*, NodeBase*);
 
-  template <typename P, typename F>
+  template <TaskParamsLike P, typename F>
   void _silent_async(P&&, F&&, Topology*, NodeBase*);
 
   template <TaskParamsLike P, typename F, std::input_iterator I>

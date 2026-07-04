@@ -159,8 +159,8 @@ class Runtime {
   /**
   @brief runs the given callable asynchronously
 
-  @tparam F callable type
   @tparam P task parameters type satisfying tf::TaskParamsLike
+  @tparam F callable type
 
   @param params task parameters
   @param f callable
@@ -176,7 +176,7 @@ class Runtime {
   @endcode
 
   */
-  template <typename P, typename F>
+  template <TaskParamsLike P, typename F>
   auto async(P&& params, F&& f);
   
   // ----------------------------------------------------------------------------------------------
@@ -209,7 +209,9 @@ class Runtime {
   /**
   @brief runs the given function asynchronously without returning any future object
 
+  @tparam P task parameters type satisfying tf::TaskParamsLike
   @tparam F callable type
+
   @param params task parameters
   @param f callable
 
@@ -222,7 +224,7 @@ class Runtime {
   });
   @endcode
   */
-  template <typename P, typename F>
+  template <TaskParamsLike P, typename F>
   void silent_async(P&& params, F&& f);
   
   // ----------------------------------------------------------------------------------------------
@@ -432,6 +434,7 @@ class Runtime {
   @brief runs the given function asynchronously 
          when the given predecessors finish
   
+  @tparam P task parameters type satisfying tf::TaskParamsLike
   @tparam F callable type
   @tparam Tasks tasks of type tf::AsyncTask
 
@@ -502,6 +505,7 @@ class Runtime {
   @brief runs the given function asynchronously 
          when the given range of predecessors finish
   
+  @tparam P task parameters type satisfying tf::TaskParamsLike
   @tparam F callable type
   @tparam I iterator type 
 
@@ -669,7 +673,7 @@ void Runtime::silent_async(F&& f) {
 }
 
 // Function: silent_async
-template <typename P, typename F>
+template <TaskParamsLike P, typename F>
 void Runtime::silent_async(P&& params, F&& f) {
   _node->_join_counter.fetch_add(1, std::memory_order_relaxed);
   _executor._silent_async(
@@ -688,7 +692,7 @@ auto Runtime::async(F&& f) {
 }
 
 // Function: async
-template <typename P, typename F>
+template <TaskParamsLike P, typename F>
 auto Runtime::async(P&& params, F&& f) {
   _node->_join_counter.fetch_add(1, std::memory_order_relaxed);
   return _executor._async(
