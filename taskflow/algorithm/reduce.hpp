@@ -269,7 +269,11 @@ auto make_transform_reduce_task(B b, E e, T& init, BOP bop, UOP uop, P part = P(
 // Function: make_transform_reduce_task with two binary operation
 template <InputIteratorLike B1, InputIteratorLike E1, InputIteratorLike B2, typename T,
           typename BOP_R, typename BOP_T, PartitionerLike P = DefaultPartitioner>
-requires (!PartitionerLike<std::decay_t<BOP_T>>)
+requires BinaryOperationLike<
+  BOP_T,
+  std::decay_t<std::unwrap_ref_decay_t<B1>>,
+  std::decay_t<std::unwrap_ref_decay_t<B2>>
+>
 auto make_transform_reduce_task(
   B1 b1, E1 e1, B2 b2, T& init, BOP_R bop_r, BOP_T bop_t, P part = P()
 ) {
@@ -524,7 +528,11 @@ Task FlowBuilder::transform_reduce(
 // Function: transform_reduce
 template <InputIteratorLike B1, InputIteratorLike E1, InputIteratorLike B2, typename T,
           typename BOP_R, typename BOP_T, PartitionerLike P>
-requires (!PartitionerLike<std::decay_t<BOP_T>>)
+requires BinaryOperationLike<
+  BOP_T,
+  std::decay_t<std::unwrap_ref_decay_t<B1>>,
+  std::decay_t<std::unwrap_ref_decay_t<B2>>
+>
 Task FlowBuilder::transform_reduce(
   B1 beg1, E1 end1, B2 beg2, T& init, BOP_R bop_r, BOP_T bop_t, P part
 ) {

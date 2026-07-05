@@ -294,7 +294,7 @@ inline bool AsyncTask::is_done() const {
 }
 
 // ----------------------------------------------------------------------------
-// AsyncTaskLike 
+// AsyncTaskHandleLike 
 // ----------------------------------------------------------------------------
 
 
@@ -305,13 +305,13 @@ Satisfied by `tf::AsyncTask` and any cv- or reference-qualified form of
 `tf::AsyncTask`. 
 
 @code
-static_assert(AsyncTaskLike<AsyncTask>);
-static_assert(AsyncTaskLike<const AsyncTask&>);
-static_assert(!AsyncTaskLike<int>);
+static_assert(AsyncTaskHandleLike<AsyncTask>);
+static_assert(AsyncTaskHandleLike<const AsyncTask&>);
+static_assert(!AsyncTaskHandleLike<int>);
 @endcode
  */
 template <typename T>
-concept AsyncTaskLike = std::is_same_v<std::decay_t<T>, AsyncTask>;
+concept AsyncTaskHandleLike = std::is_same_v<std::decay_t<T>, AsyncTask>;
 
 
 }  // end of namespace tf ----------------------------------------------------

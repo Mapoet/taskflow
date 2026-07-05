@@ -754,7 +754,7 @@ class Executor {
 
   This member function is thread-safe.
   */
-  template <typename F, AsyncTaskLike... Tasks>
+  template <typename F, AsyncTaskHandleLike... Tasks>
   tf::AsyncTask silent_dependent_async(F&& func, Tasks&&... tasks);
   
   /**
@@ -789,7 +789,7 @@ class Executor {
 
   This member function is thread-safe.
   */
-  template <TaskParamsLike P, typename F, AsyncTaskLike... Tasks>
+  template <TaskParamsLike P, typename F, AsyncTaskHandleLike... Tasks>
   tf::AsyncTask silent_dependent_async(P&& params, F&& func, Tasks&&... tasks);
   
   /**
@@ -906,7 +906,7 @@ class Executor {
 
   This member function is thread-safe.
   */
-  template <typename F, AsyncTaskLike... Tasks>
+  template <typename F, AsyncTaskHandleLike... Tasks>
   auto dependent_async(F&& func, Tasks&&... tasks);
   
   /**
@@ -950,7 +950,7 @@ class Executor {
 
   This member function is thread-safe.
   */
-  template <TaskParamsLike P, typename F, AsyncTaskLike... Tasks>
+  template <TaskParamsLike P, typename F, AsyncTaskHandleLike... Tasks>
   auto dependent_async(P&& params, F&& func, Tasks&&... tasks);
   
   /**

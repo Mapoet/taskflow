@@ -10,6 +10,98 @@
 
 namespace tf {
 
+// ------------------------------------------------------------------------------------------------
+// Concept
+// ------------------------------------------------------------------------------------------------
+
+/**
+@brief concept to check if a unary operation is valid
+
+@tparam C Callable type.
+@tparam B Input iterator-like type.
+
+Satisfied by a callable that can be invoked with the value obtained from
+dereferencing an input-like iterator.
+Specifically, the following expression must be valid:
+
+@code{.cpp}
+c(*b);
+@endcode
+*/
+template <typename C, typename B>
+concept UnaryOperationLike =
+requires(C c, B b) {
+  c(*b);
+};
+
+/**
+@brief concept to check if a binary operation is valid
+
+@tparam C Callable type.
+@tparam B1 First input iterator-like type.
+@tparam B2 Second input iterator-like type.
+
+Satisfied by a callable that can be invoked with values obtained from
+dereferencing two input-like iterators.
+Specifically, the following expression must be valid:
+
+@code{.cpp}
+c(*b1, *b2);
+@endcode
+*/
+template <typename C, typename B1, typename B2>
+concept BinaryOperationLike =
+requires(C c, B1 b1, B2 b2) {
+  c(*b1, *b2);
+};
+
+/**
+@brief concept to check if a unary transformation operation is valid
+
+@tparam C Callable type.
+@tparam B Input iterator type.
+@tparam O Output iterator type.
+
+Satisfied by a callable that accepts the value referenced by an input
+iterator and produces a result assignable through an output iterator.
+Specifically, the following expression must be valid:
+
+@code{.cpp}
+*o = c(*b);
+@endcode
+*/
+template <typename C, typename B, typename O>
+concept UnaryTransformLike =
+requires(C c, B b, O o) {
+  *o = c(*b);
+};
+
+/**
+@brief concept to check if a binary transformation operation is valid
+
+@tparam C Callable type.
+@tparam B1 First input iterator type.
+@tparam B2 Second input iterator type.
+@tparam O Output iterator type.
+
+Satisfied by a callable that accepts the values referenced by two input
+iterators and produces a result assignable through an output iterator.
+Specifically, the following expression must be valid:
+
+@code
+*o = c(*b1, *b2);
+@endcode
+*/
+template <typename C, typename B1, typename B2, typename O>
+concept BinaryTransformLike =
+requires(C c, B1 b1, B2 b2, O o) {
+  *o = c(*b1, *b2);
+};
+
+// ------------------------------------------------------------------------------------------------
+// FlowBuilder
+// ------------------------------------------------------------------------------------------------
+
 /**
 @class FlowBuilder
 
@@ -461,6 +553,7 @@ class FlowBuilder {
   Please refer to @ref ParallelIterations for details.
   */
   template <InputIteratorLike B, InputIteratorLike E, typename C, PartitionerLike P = DefaultPartitioner>
+  requires UnaryOperationLike<C, std::decay_t<std::unwrap_ref_decay_t<B>>> 
   Task for_each(B first, E last, C callable, P part = P());
   
   /**
@@ -664,6 +757,11 @@ class FlowBuilder {
   */
   template <InputIteratorLike B, InputIteratorLike E, typename O, typename C,
             PartitionerLike P = DefaultPartitioner>
+  requires UnaryTransformLike<
+    C, 
+    std::decay_t<std::unwrap_ref_decay_t<B>>,
+    std::decay_t<std::unwrap_ref_decay_t<O>>
+  >
   Task transform(B first1, E last1, O d_first, C c, P part = P());
   
   /**
@@ -704,7 +802,12 @@ class FlowBuilder {
   */
   template <InputIteratorLike B1, InputIteratorLike E1, InputIteratorLike B2, typename O, typename C,
             PartitionerLike P = DefaultPartitioner>
-  requires (!PartitionerLike<std::decay_t<C>>)
+  requires BinaryTransformLike<
+    C, 
+    std::decay_t<std::unwrap_ref_decay_t<B1>>,
+    std::decay_t<std::unwrap_ref_decay_t<B2>>,
+    std::decay_t<std::unwrap_ref_decay_t<O>>
+  >
   Task transform(B1 first1, E1 last1, B2 first2, O d_first, C c, P part = P());
   
   // ------------------------------------------------------------------------
@@ -886,7 +989,11 @@ class FlowBuilder {
   
   template <InputIteratorLike B1, InputIteratorLike E1, InputIteratorLike B2, typename T,
             typename BOP_R, typename BOP_T, PartitionerLike P = DefaultPartitioner>
-  requires (!PartitionerLike<std::decay_t<BOP_T>>)
+  requires BinaryOperationLike<
+    BOP_T,
+    std::decay_t<std::unwrap_ref_decay_t<B1>>,
+    std::decay_t<std::unwrap_ref_decay_t<B2>>
+  >
   Task transform_reduce(
     B1 first1, E1 last1, B2 first2, T& init, BOP_R bop_r, BOP_T bop_t, P part = P()
   );

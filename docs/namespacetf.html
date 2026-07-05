@@ -291,7 +291,7 @@ Concepts</h2></td></tr>
 <tr class="memdesc:"><td class="mdescLeft">&#160;</td><td class="mdescRight">concept to check if a type is a tf::IndexRanges&lt;T, N&gt; with rank &gt; 1 <br /></td></tr>
 <tr class="separator:"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:"><td class="memItemLeft" align="right" valign="top">concept &#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="concepttf_1_1InputIteratorLike.html">InputIteratorLike</a></td></tr>
-<tr class="memdesc:"><td class="mdescLeft">&#160;</td><td class="mdescRight">Concept for a type representing an input iterator. <br /></td></tr>
+<tr class="memdesc:"><td class="mdescLeft">&#160;</td><td class="mdescRight">concept to check if a type is a stateful input iterator <br /></td></tr>
 <tr class="separator:"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:"><td class="memItemLeft" align="right" valign="top">concept &#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="concepttf_1_1StringLike.html">StringLike</a></td></tr>
 <tr class="memdesc:"><td class="mdescLeft">&#160;</td><td class="mdescRight">concept that determines if a type is string-like <br /></td></tr>
@@ -301,6 +301,18 @@ Concepts</h2></td></tr>
 <tr class="separator:"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:"><td class="memItemLeft" align="right" valign="top">concept &#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="concepttf_1_1GraphLike.html">GraphLike</a></td></tr>
 <tr class="memdesc:"><td class="mdescLeft">&#160;</td><td class="mdescRight">concept that determines if a type owns or provides access to a <a class="el" href="classtf_1_1Graph.html" title="class to create a graph object">tf::Graph</a> <br /></td></tr>
+<tr class="separator:"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:"><td class="memItemLeft" align="right" valign="top">concept &#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="concepttf_1_1UnaryOperationLike.html">UnaryOperationLike</a></td></tr>
+<tr class="memdesc:"><td class="mdescLeft">&#160;</td><td class="mdescRight">concept to check if a unary operation is valid <br /></td></tr>
+<tr class="separator:"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:"><td class="memItemLeft" align="right" valign="top">concept &#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="concepttf_1_1BinaryOperationLike.html">BinaryOperationLike</a></td></tr>
+<tr class="memdesc:"><td class="mdescLeft">&#160;</td><td class="mdescRight">concept to check if a binary operation is valid <br /></td></tr>
+<tr class="separator:"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:"><td class="memItemLeft" align="right" valign="top">concept &#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="concepttf_1_1UnaryTransformLike.html">UnaryTransformLike</a></td></tr>
+<tr class="memdesc:"><td class="mdescLeft">&#160;</td><td class="mdescRight">concept to check if a unary transformation operation is valid <br /></td></tr>
+<tr class="separator:"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:"><td class="memItemLeft" align="right" valign="top">concept &#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="concepttf_1_1BinaryTransformLike.html">BinaryTransformLike</a></td></tr>
+<tr class="memdesc:"><td class="mdescLeft">&#160;</td><td class="mdescRight">concept to check if a binary transformation operation is valid <br /></td></tr>
 <tr class="separator:"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:"><td class="memItemLeft" align="right" valign="top">concept &#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="concepttf_1_1StaticTaskLike.html">StaticTaskLike</a></td></tr>
 <tr class="memdesc:"><td class="mdescLeft">&#160;</td><td class="mdescRight">determines if a callable is a static task <br /></td></tr>
@@ -316,6 +328,9 @@ Concepts</h2></td></tr>
 <tr class="separator:"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:"><td class="memItemLeft" align="right" valign="top">concept &#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="concepttf_1_1MultiConditionTaskLike.html">MultiConditionTaskLike</a></td></tr>
 <tr class="memdesc:"><td class="mdescLeft">&#160;</td><td class="mdescRight">determines if a callable is a multi-condition task <br /></td></tr>
+<tr class="separator:"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:"><td class="memItemLeft" align="right" valign="top">concept &#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="concepttf_1_1AsyncTaskHandleLike.html">AsyncTaskHandleLike</a></td></tr>
+<tr class="memdesc:"><td class="mdescLeft">&#160;</td><td class="mdescRight">concept to check if a type is a <a class="el" href="classtf_1_1AsyncTask.html" title="class to hold a dependent asynchronous task with shared ownership">tf::AsyncTask</a> <br /></td></tr>
 <tr class="separator:"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:"><td class="memItemLeft" align="right" valign="top">concept &#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="concepttf_1_1PartitionerLike.html">PartitionerLike</a></td></tr>
 <tr class="memdesc:"><td class="mdescLeft">&#160;</td><td class="mdescRight">determines if a type is a partitioner <br /></td></tr>
@@ -1832,7 +1847,7 @@ template&lt;GraphLike T&gt; </div>
 <div class="ttc" id="aclasstf_1_1Executor_html"><div class="ttname"><a href="classtf_1_1Executor.html">tf::Executor</a></div><div class="ttdoc">class to create an executor</div><div class="ttdef"><b>Definition</b> executor.hpp:62</div></div>
 <div class="ttc" id="aclasstf_1_1Executor_html_ab9aa252f70e9a40020a1e5a89d485b85"><div class="ttname"><a href="classtf_1_1Executor.html#ab9aa252f70e9a40020a1e5a89d485b85">tf::Executor::wait_for_all</a></div><div class="ttdeci">void wait_for_all()</div><div class="ttdoc">waits for all tasks to complete</div></div>
 <div class="ttc" id="aclasstf_1_1Executor_html_af960048056f7c6b5bc71f4f526f05df7"><div class="ttname"><a href="classtf_1_1Executor.html#af960048056f7c6b5bc71f4f526f05df7">tf::Executor::async</a></div><div class="ttdeci">auto async(P &amp;&amp;params, F &amp;&amp;func)</div><div class="ttdoc">creates a parameterized asynchronous task to run the given function</div></div>
-<div class="ttc" id="aclasstf_1_1FlowBuilder_html_a4d52a7fe2814b264846a2085e931652c"><div class="ttname"><a href="classtf_1_1FlowBuilder.html#a4d52a7fe2814b264846a2085e931652c">tf::FlowBuilder::emplace</a></div><div class="ttdeci">Task emplace(C &amp;&amp;callable)</div><div class="ttdoc">creates a static task</div><div class="ttdef"><b>Definition</b> flow_builder.hpp:1631</div></div>
+<div class="ttc" id="aclasstf_1_1FlowBuilder_html_a4d52a7fe2814b264846a2085e931652c"><div class="ttname"><a href="classtf_1_1FlowBuilder.html#a4d52a7fe2814b264846a2085e931652c">tf::FlowBuilder::emplace</a></div><div class="ttdeci">Task emplace(C &amp;&amp;callable)</div><div class="ttdoc">creates a static task</div><div class="ttdef"><b>Definition</b> flow_builder.hpp:1738</div></div>
 <div class="ttc" id="aclasstf_1_1Taskflow_html"><div class="ttname"><a href="classtf_1_1Taskflow.html">tf::Taskflow</a></div><div class="ttdoc">class to create a taskflow object</div><div class="ttdef"><b>Definition</b> taskflow.hpp:64</div></div>
 <div class="ttc" id="anamespacetf_html_a07b2225aa9794364b4c704ce0f449974"><div class="ttname"><a href="#a07b2225aa9794364b4c704ce0f449974">tf::make_module_task</a></div><div class="ttdeci">auto make_module_task(T &amp;target)</div><div class="ttdoc">creates a module task using the given graph</div><div class="ttdef"><b>Definition</b> module.hpp:74</div></div>
 </div><!-- fragment --><p>The module task maker, <a class="el" href="#a07b2225aa9794364b4c704ce0f449974" title="creates a module task using the given graph">tf::make_module_task</a>, is basically the same as <a class="el" href="classtf_1_1FlowBuilder.html#ac6f22228d4c2ea2e643c4b0d42c0e92a" title="creates a module task for the target object">tf::Taskflow::composed_of</a> but provides a more generic interface that can be used beyond Taskflow. For instance, the following two approaches achieve the same functionality.</p>

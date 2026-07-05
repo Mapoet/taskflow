@@ -167,6 +167,15 @@ Taskflow Core</h2>
 <li><a class="el" href="classtf_1_1FlowBuilder.html#aa79a84aac17e17f9d52d574f88158841" title="creates a module task from a graph by taking over its ownership (convenience overload of tf::FlowBuil...">tf::Taskflow::emplace(tf::Graph&amp;&amp;)</a> equivalent to <a class="el" href="classtf_1_1FlowBuilder.html#a35f6503341d7066ef642e6b1a9d81c2c" title="creates a module task from a graph by taking over its ownership">tf::Taskflow::adopt</a></li>
 </ul>
 </li>
+<li>refactored the core with several new concepts to enhance type safety and readability<ul>
+<li><a class="el" href="concepttf_1_1InputIteratorLike.html" title="concept to check if a type is a stateful input iterator">tf::InputIteratorLike</a> to check if a type is a stateful iterator</li>
+<li>tf::AsyncTaskLike to check if a type is <a class="el" href="classtf_1_1AsyncTask.html" title="class to hold a dependent asynchronous task with shared ownership">tf::AsyncTask</a></li>
+<li><a class="el" href="concepttf_1_1UnaryOperationLike.html" title="concept to check if a unary operation is valid">tf::UnaryOperationLike</a> to check if a unary operation is valid</li>
+<li><a class="el" href="concepttf_1_1BinaryOperationLike.html" title="concept to check if a binary operation is valid">tf::BinaryOperationLike</a> to check if a binary operation is valid</li>
+<li><a class="el" href="concepttf_1_1UnaryTransformLike.html" title="concept to check if a unary transformation operation is valid">tf::UnaryTransformLike</a> to check if a unary transform is valid</li>
+<li><a class="el" href="concepttf_1_1BinaryTransformLike.html" title="concept to check if a binary transformation operation is valid">tf::BinaryTransformLike</a> to check if a binary transform is valid</li>
+</ul>
+</li>
 <li>fixed missing <a class="el" href="concepttf_1_1TaskParamsLike.html" title="concept that determines if a type is a task parameter type">tf::TaskParamsLike</a> concept usage in async tasking</li>
 <li>replaced generic template type in dependent async tasks with std::input_iterator</li>
 </ul>

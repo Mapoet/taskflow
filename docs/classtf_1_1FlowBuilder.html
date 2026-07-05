@@ -175,10 +175,11 @@ requires (sizeof...(C) &gt; 1)</td></tr>
 <tr class="memitem:a4ec89b554d15ad5fb96f4fdb10dbbb16" id="r_a4ec89b554d15ad5fb96f4fdb10dbbb16"><td class="memItemLeft" align="right" valign="top">void&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="#a4ec89b554d15ad5fb96f4fdb10dbbb16">linearize</a> (std::initializer_list&lt; <a class="el" href="classtf_1_1Task.html">Task</a> &gt; tasks)</td></tr>
 <tr class="memdesc:a4ec89b554d15ad5fb96f4fdb10dbbb16"><td class="mdescLeft">&#160;</td><td class="mdescRight">adds adjacent dependency links to a linear list of tasks  <br /></td></tr>
 <tr class="separator:a4ec89b554d15ad5fb96f4fdb10dbbb16"><td class="memSeparator" colspan="2">&#160;</td></tr>
-<tr class="memitem:aae3edfa278baa75b08414e083c14c836" id="r_aae3edfa278baa75b08414e083c14c836"><td class="memTemplParams" colspan="2">template&lt;InputIteratorLike B, InputIteratorLike E, typename C , PartitionerLike P = DefaultPartitioner&gt; </td></tr>
-<tr class="memitem:aae3edfa278baa75b08414e083c14c836"><td class="memTemplItemLeft" align="right" valign="top"><a class="el" href="classtf_1_1Task.html">Task</a>&#160;</td><td class="memTemplItemRight" valign="bottom"><a class="el" href="#aae3edfa278baa75b08414e083c14c836">for_each</a> (B first, E last, C callable, P part=P())</td></tr>
-<tr class="memdesc:aae3edfa278baa75b08414e083c14c836"><td class="mdescLeft">&#160;</td><td class="mdescRight">constructs an STL-styled parallel-for task  <br /></td></tr>
-<tr class="separator:aae3edfa278baa75b08414e083c14c836"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:a597d2cceaf2a2598a3c4b9f742b0aacc" id="r_a597d2cceaf2a2598a3c4b9f742b0aacc"><td class="memTemplParams" colspan="2">template&lt;InputIteratorLike B, InputIteratorLike E, typename C , PartitionerLike P = DefaultPartitioner&gt; <br />
+requires UnaryOperationLike&lt;C, std::decay_t&lt;std::unwrap_ref_decay_t&lt;B&gt;&gt;&gt;</td></tr>
+<tr class="memitem:a597d2cceaf2a2598a3c4b9f742b0aacc"><td class="memTemplItemLeft" align="right" valign="top"><a class="el" href="classtf_1_1Task.html">Task</a>&#160;</td><td class="memTemplItemRight" valign="bottom"><a class="el" href="#a597d2cceaf2a2598a3c4b9f742b0aacc">for_each</a> (B first, E last, C callable, P part=P())</td></tr>
+<tr class="memdesc:a597d2cceaf2a2598a3c4b9f742b0aacc"><td class="mdescLeft">&#160;</td><td class="mdescRight">constructs an STL-styled parallel-for task  <br /></td></tr>
+<tr class="separator:a597d2cceaf2a2598a3c4b9f742b0aacc"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:a3b132bd902331a11b04b4ad66cf8bf77" id="r_a3b132bd902331a11b04b4ad66cf8bf77"><td class="memTemplParams" colspan="2">template&lt;typename B , typename E , typename S , typename C , PartitionerLike P = DefaultPartitioner&gt; </td></tr>
 <tr class="memitem:a3b132bd902331a11b04b4ad66cf8bf77"><td class="memTemplItemLeft" align="right" valign="top"><a class="el" href="classtf_1_1Task.html">Task</a>&#160;</td><td class="memTemplItemRight" valign="bottom"><a class="el" href="#a3b132bd902331a11b04b4ad66cf8bf77">for_each_index</a> (B first, E last, S step, C callable, P part=P())</td></tr>
 <tr class="memdesc:a3b132bd902331a11b04b4ad66cf8bf77"><td class="mdescLeft">&#160;</td><td class="mdescRight">constructs an index-based parallel-for task  <br /></td></tr>
@@ -187,15 +188,16 @@ requires (sizeof...(C) &gt; 1)</td></tr>
 <tr class="memitem:a2582a216d54dacca2b7022ea7e89452a"><td class="memTemplItemLeft" align="right" valign="top"><a class="el" href="classtf_1_1Task.html">Task</a>&#160;</td><td class="memTemplItemRight" valign="bottom"><a class="el" href="#a2582a216d54dacca2b7022ea7e89452a">for_each_by_index</a> (R range, C callable, P part=P())</td></tr>
 <tr class="memdesc:a2582a216d54dacca2b7022ea7e89452a"><td class="mdescLeft">&#160;</td><td class="mdescRight">constructs a parallel-for task over a one- or multi-dimensional index range  <br /></td></tr>
 <tr class="separator:a2582a216d54dacca2b7022ea7e89452a"><td class="memSeparator" colspan="2">&#160;</td></tr>
-<tr class="memitem:a058c250de62b9d1e4305b8ddf03906ee" id="r_a058c250de62b9d1e4305b8ddf03906ee"><td class="memTemplParams" colspan="2">template&lt;InputIteratorLike B, InputIteratorLike E, typename O , typename C , PartitionerLike P = DefaultPartitioner&gt; </td></tr>
-<tr class="memitem:a058c250de62b9d1e4305b8ddf03906ee"><td class="memTemplItemLeft" align="right" valign="top"><a class="el" href="classtf_1_1Task.html">Task</a>&#160;</td><td class="memTemplItemRight" valign="bottom"><a class="el" href="#a058c250de62b9d1e4305b8ddf03906ee">transform</a> (B first1, E last1, O d_first, C c, P part=P())</td></tr>
-<tr class="memdesc:a058c250de62b9d1e4305b8ddf03906ee"><td class="mdescLeft">&#160;</td><td class="mdescRight">constructs a parallel-transform task  <br /></td></tr>
-<tr class="separator:a058c250de62b9d1e4305b8ddf03906ee"><td class="memSeparator" colspan="2">&#160;</td></tr>
-<tr class="memitem:a18d263a5c043a216380441c9d0c72a60" id="r_a18d263a5c043a216380441c9d0c72a60"><td class="memTemplParams" colspan="2">template&lt;InputIteratorLike B1, InputIteratorLike E1, InputIteratorLike B2, typename O , typename C , PartitionerLike P = DefaultPartitioner&gt; <br />
-requires (!PartitionerLike&lt;std::decay_t&lt;C&gt;&gt;)</td></tr>
-<tr class="memitem:a18d263a5c043a216380441c9d0c72a60"><td class="memTemplItemLeft" align="right" valign="top"><a class="el" href="classtf_1_1Task.html">Task</a>&#160;</td><td class="memTemplItemRight" valign="bottom"><a class="el" href="#a18d263a5c043a216380441c9d0c72a60">transform</a> (B1 first1, E1 last1, B2 first2, O d_first, C c, P part=P())</td></tr>
-<tr class="memdesc:a18d263a5c043a216380441c9d0c72a60"><td class="mdescLeft">&#160;</td><td class="mdescRight">constructs a parallel-transform task  <br /></td></tr>
-<tr class="separator:a18d263a5c043a216380441c9d0c72a60"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:ac551dc6adba635ee3083aa11317bafcd" id="r_ac551dc6adba635ee3083aa11317bafcd"><td class="memTemplParams" colspan="2">template&lt;InputIteratorLike B, InputIteratorLike E, typename O , typename C , PartitionerLike P = DefaultPartitioner&gt; <br />
+requires UnaryTransformLike&lt; C, std::decay_t&lt;std::unwrap_ref_decay_t&lt;B&gt;&gt;, std::decay_t&lt;std::unwrap_ref_decay_t&lt;O&gt;&gt; &gt;</td></tr>
+<tr class="memitem:ac551dc6adba635ee3083aa11317bafcd"><td class="memTemplItemLeft" align="right" valign="top"><a class="el" href="classtf_1_1Task.html">Task</a>&#160;</td><td class="memTemplItemRight" valign="bottom"><a class="el" href="#ac551dc6adba635ee3083aa11317bafcd">transform</a> (B first1, E last1, O d_first, C c, P part=P())</td></tr>
+<tr class="memdesc:ac551dc6adba635ee3083aa11317bafcd"><td class="mdescLeft">&#160;</td><td class="mdescRight">constructs a parallel-transform task  <br /></td></tr>
+<tr class="separator:ac551dc6adba635ee3083aa11317bafcd"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:a1c70fab36c9982088677a2cb4bca7edb" id="r_a1c70fab36c9982088677a2cb4bca7edb"><td class="memTemplParams" colspan="2">template&lt;InputIteratorLike B1, InputIteratorLike E1, InputIteratorLike B2, typename O , typename C , PartitionerLike P = DefaultPartitioner&gt; <br />
+requires BinaryTransformLike&lt; C, std::decay_t&lt;std::unwrap_ref_decay_t&lt;B1&gt;&gt;, std::decay_t&lt;std::unwrap_ref_decay_t&lt;B2&gt;&gt;, std::decay_t&lt;std::unwrap_ref_decay_t&lt;O&gt;&gt; &gt;</td></tr>
+<tr class="memitem:a1c70fab36c9982088677a2cb4bca7edb"><td class="memTemplItemLeft" align="right" valign="top"><a class="el" href="classtf_1_1Task.html">Task</a>&#160;</td><td class="memTemplItemRight" valign="bottom"><a class="el" href="#a1c70fab36c9982088677a2cb4bca7edb">transform</a> (B1 first1, E1 last1, B2 first2, O d_first, C c, P part=P())</td></tr>
+<tr class="memdesc:a1c70fab36c9982088677a2cb4bca7edb"><td class="mdescLeft">&#160;</td><td class="mdescRight">constructs a parallel-transform task  <br /></td></tr>
+<tr class="separator:a1c70fab36c9982088677a2cb4bca7edb"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:afb24798ebf46e253a40b01bffb1da6a7" id="r_afb24798ebf46e253a40b01bffb1da6a7"><td class="memTemplParams" colspan="2">template&lt;InputIteratorLike B, InputIteratorLike E, typename T , typename O , PartitionerLike P = DefaultPartitioner&gt; </td></tr>
 <tr class="memitem:afb24798ebf46e253a40b01bffb1da6a7"><td class="memTemplItemLeft" align="right" valign="top"><a class="el" href="classtf_1_1Task.html">Task</a>&#160;</td><td class="memTemplItemRight" valign="bottom"><a class="el" href="#afb24798ebf46e253a40b01bffb1da6a7">reduce</a> (B first, E last, T &amp;init, O bop, P part=P())</td></tr>
 <tr class="memdesc:afb24798ebf46e253a40b01bffb1da6a7"><td class="mdescLeft">&#160;</td><td class="mdescRight">constructs an STL-styled parallel-reduction task  <br /></td></tr>
@@ -208,11 +210,11 @@ requires (!PartitionerLike&lt;std::decay_t&lt;C&gt;&gt;)</td></tr>
 <tr class="memitem:a5283a732a77ea75446f8ed5d3377f02c"><td class="memTemplItemLeft" align="right" valign="top"><a class="el" href="classtf_1_1Task.html">Task</a>&#160;</td><td class="memTemplItemRight" valign="bottom"><a class="el" href="#a5283a732a77ea75446f8ed5d3377f02c">transform_reduce</a> (B first, E last, T &amp;init, BOP bop, UOP uop, P part=P())</td></tr>
 <tr class="memdesc:a5283a732a77ea75446f8ed5d3377f02c"><td class="mdescLeft">&#160;</td><td class="mdescRight">constructs an STL-styled parallel transform-reduce task  <br /></td></tr>
 <tr class="separator:a5283a732a77ea75446f8ed5d3377f02c"><td class="memSeparator" colspan="2">&#160;</td></tr>
-<tr class="memitem:ae787dfa29fd54d1ca655a15fea3b98a5" id="r_ae787dfa29fd54d1ca655a15fea3b98a5"><td class="memTemplParams" colspan="2">template&lt;InputIteratorLike B1, InputIteratorLike E1, InputIteratorLike B2, typename T , typename BOP_R , typename BOP_T , PartitionerLike P = DefaultPartitioner&gt; <br />
-requires (!PartitionerLike&lt;std::decay_t&lt;BOP_T&gt;&gt;)</td></tr>
-<tr class="memitem:ae787dfa29fd54d1ca655a15fea3b98a5"><td class="memTemplItemLeft" align="right" valign="top"><a class="el" href="classtf_1_1Task.html">Task</a>&#160;</td><td class="memTemplItemRight" valign="bottom"><a class="el" href="#ae787dfa29fd54d1ca655a15fea3b98a5">transform_reduce</a> (B1 first1, E1 last1, B2 first2, T &amp;init, BOP_R bop_r, BOP_T bop_t, P part=P())</td></tr>
-<tr class="memdesc:ae787dfa29fd54d1ca655a15fea3b98a5"><td class="mdescLeft">&#160;</td><td class="mdescRight">constructs an STL-styled parallel transform-reduce task  <br /></td></tr>
-<tr class="separator:ae787dfa29fd54d1ca655a15fea3b98a5"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:a43afba1d3c943ddac2a8c05bd706c10a" id="r_a43afba1d3c943ddac2a8c05bd706c10a"><td class="memTemplParams" colspan="2">template&lt;InputIteratorLike B1, InputIteratorLike E1, InputIteratorLike B2, typename T , typename BOP_R , typename BOP_T , PartitionerLike P = DefaultPartitioner&gt; <br />
+requires BinaryOperationLike&lt; BOP_T, std::decay_t&lt;std::unwrap_ref_decay_t&lt;B1&gt;&gt;, std::decay_t&lt;std::unwrap_ref_decay_t&lt;B2&gt;&gt; &gt;</td></tr>
+<tr class="memitem:a43afba1d3c943ddac2a8c05bd706c10a"><td class="memTemplItemLeft" align="right" valign="top"><a class="el" href="classtf_1_1Task.html">Task</a>&#160;</td><td class="memTemplItemRight" valign="bottom"><a class="el" href="#a43afba1d3c943ddac2a8c05bd706c10a">transform_reduce</a> (B1 first1, E1 last1, B2 first2, T &amp;init, BOP_R bop_r, BOP_T bop_t, P part=P())</td></tr>
+<tr class="memdesc:a43afba1d3c943ddac2a8c05bd706c10a"><td class="mdescLeft">&#160;</td><td class="mdescRight">constructs an STL-styled parallel transform-reduce task  <br /></td></tr>
+<tr class="separator:a43afba1d3c943ddac2a8c05bd706c10a"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:a1c2ace9290d83c2a006614a4d66ad588" id="r_a1c2ace9290d83c2a006614a4d66ad588"><td class="memTemplParams" colspan="2">template&lt;InputIteratorLike B, InputIteratorLike E, typename D , typename BOP &gt; </td></tr>
 <tr class="memitem:a1c2ace9290d83c2a006614a4d66ad588"><td class="memTemplItemLeft" align="right" valign="top"><a class="el" href="classtf_1_1Task.html">Task</a>&#160;</td><td class="memTemplItemRight" valign="bottom"><a class="el" href="#a1c2ace9290d83c2a006614a4d66ad588">inclusive_scan</a> (B first, E last, D d_first, BOP bop)</td></tr>
 <tr class="memdesc:a1c2ace9290d83c2a006614a4d66ad588"><td class="mdescLeft">&#160;</td><td class="mdescRight">creates an STL-styled parallel inclusive-scan task  <br /></td></tr>
@@ -332,9 +334,9 @@ class&#160;</td><td class="memItemRight" valign="bottom"><b>Executor</b></td></t
 <div class="line"><a class="code hl_class" href="classtf_1_1Graph.html">tf::Graph</a> g;</div>
 <div class="line"><a class="code hl_class" href="classtf_1_1FlowBuilder.html">tf::FlowBuilder</a>{g}.<a class="code hl_function" href="#a4d52a7fe2814b264846a2085e931652c">emplace</a>([]{ std::cout &lt;&lt; <span class="stringliteral">&quot;task in adopted graph\n&quot;</span>; });</div>
 <div class="line">taskflow.<a class="code hl_function" href="#a35f6503341d7066ef642e6b1a9d81c2c">adopt</a>(std::move(g)).<a class="code hl_function" href="classtf_1_1Task.html#a08ada0425b490997b6ff7f310107e5e3">name</a>(<span class="stringliteral">&quot;adopted&quot;</span>);</div>
-<div class="ttc" id="aclasstf_1_1FlowBuilder_html"><div class="ttname"><a href="classtf_1_1FlowBuilder.html">tf::FlowBuilder</a></div><div class="ttdoc">class to build a task dependency graph</div><div class="ttdef"><b>Definition</b> flow_builder.hpp:22</div></div>
-<div class="ttc" id="aclasstf_1_1FlowBuilder_html_a35f6503341d7066ef642e6b1a9d81c2c"><div class="ttname"><a href="#a35f6503341d7066ef642e6b1a9d81c2c">tf::FlowBuilder::adopt</a></div><div class="ttdeci">Task adopt(Graph &amp;&amp;graph)</div><div class="ttdoc">creates a module task from a graph by taking over its ownership</div><div class="ttdef"><b>Definition</b> flow_builder.hpp:1688</div></div>
-<div class="ttc" id="aclasstf_1_1FlowBuilder_html_a4d52a7fe2814b264846a2085e931652c"><div class="ttname"><a href="#a4d52a7fe2814b264846a2085e931652c">tf::FlowBuilder::emplace</a></div><div class="ttdeci">Task emplace(C &amp;&amp;callable)</div><div class="ttdoc">creates a static task</div><div class="ttdef"><b>Definition</b> flow_builder.hpp:1631</div></div>
+<div class="ttc" id="aclasstf_1_1FlowBuilder_html"><div class="ttname"><a href="classtf_1_1FlowBuilder.html">tf::FlowBuilder</a></div><div class="ttdoc">class to build a task dependency graph</div><div class="ttdef"><b>Definition</b> flow_builder.hpp:114</div></div>
+<div class="ttc" id="aclasstf_1_1FlowBuilder_html_a35f6503341d7066ef642e6b1a9d81c2c"><div class="ttname"><a href="#a35f6503341d7066ef642e6b1a9d81c2c">tf::FlowBuilder::adopt</a></div><div class="ttdeci">Task adopt(Graph &amp;&amp;graph)</div><div class="ttdoc">creates a module task from a graph by taking over its ownership</div><div class="ttdef"><b>Definition</b> flow_builder.hpp:1795</div></div>
+<div class="ttc" id="aclasstf_1_1FlowBuilder_html_a4d52a7fe2814b264846a2085e931652c"><div class="ttname"><a href="#a4d52a7fe2814b264846a2085e931652c">tf::FlowBuilder::emplace</a></div><div class="ttdeci">Task emplace(C &amp;&amp;callable)</div><div class="ttdoc">creates a static task</div><div class="ttdef"><b>Definition</b> flow_builder.hpp:1738</div></div>
 <div class="ttc" id="aclasstf_1_1Graph_html"><div class="ttname"><a href="classtf_1_1Graph.html">tf::Graph</a></div><div class="ttdoc">class to create a graph object</div><div class="ttdef"><b>Definition</b> graph.hpp:47</div></div>
 <div class="ttc" id="aclasstf_1_1Task_html_a08ada0425b490997b6ff7f310107e5e3"><div class="ttname"><a href="classtf_1_1Task.html#a08ada0425b490997b6ff7f310107e5e3">tf::Task::name</a></div><div class="ttdeci">const std::string &amp; name() const</div><div class="ttdoc">queries the name of the task</div><div class="ttdef"><b>Definition</b> task.hpp:1388</div></div>
 <div class="ttc" id="aclasstf_1_1Taskflow_html"><div class="ttname"><a href="classtf_1_1Taskflow.html">tf::Taskflow</a></div><div class="ttdoc">class to create a taskflow object</div><div class="ttdef"><b>Definition</b> taskflow.hpp:64</div></div>
@@ -381,7 +383,7 @@ template&lt;GraphLike T&gt; </div>
 <div class="line"><a class="code hl_class" href="classtf_1_1Task.html">tf::Task</a> comp = t2.<a class="code hl_function" href="#ac6f22228d4c2ea2e643c4b0d42c0e92a">composed_of</a>(t1);</div>
 <div class="line"><a class="code hl_class" href="classtf_1_1Task.html">tf::Task</a> init = t2.<a class="code hl_function" href="#a4d52a7fe2814b264846a2085e931652c">emplace</a>([](){ std::cout &lt;&lt; <span class="stringliteral">&quot;t2&quot;</span>; });</div>
 <div class="line">init.<a class="code hl_function" href="classtf_1_1Task.html#a8c78c453295a553c1c016e4062da8588">precede</a>(comp);</div>
-<div class="ttc" id="aclasstf_1_1FlowBuilder_html_ac6f22228d4c2ea2e643c4b0d42c0e92a"><div class="ttname"><a href="#ac6f22228d4c2ea2e643c4b0d42c0e92a">tf::FlowBuilder::composed_of</a></div><div class="ttdeci">Task composed_of(T &amp;object)</div><div class="ttdoc">creates a module task for the target object</div><div class="ttdef"><b>Definition</b> flow_builder.hpp:1681</div></div>
+<div class="ttc" id="aclasstf_1_1FlowBuilder_html_ac6f22228d4c2ea2e643c4b0d42c0e92a"><div class="ttname"><a href="#ac6f22228d4c2ea2e643c4b0d42c0e92a">tf::FlowBuilder::composed_of</a></div><div class="ttdeci">Task composed_of(T &amp;object)</div><div class="ttdoc">creates a module task for the target object</div><div class="ttdef"><b>Definition</b> flow_builder.hpp:1788</div></div>
 <div class="ttc" id="aclasstf_1_1Task_html"><div class="ttname"><a href="classtf_1_1Task.html">tf::Task</a></div><div class="ttdoc">class to create a task handle over a taskflow node</div><div class="ttdef"><b>Definition</b> task.hpp:569</div></div>
 <div class="ttc" id="aclasstf_1_1Task_html_a8c78c453295a553c1c016e4062da8588"><div class="ttname"><a href="classtf_1_1Task.html#a8c78c453295a553c1c016e4062da8588">tf::Task::precede</a></div><div class="ttdeci">Task &amp; precede(Ts &amp;&amp;... tasks)</div><div class="ttdoc">adds precedence links from this to other tasks</div><div class="ttdef"><b>Definition</b> task.hpp:1258</div></div>
 </div><!-- fragment --><p>The taskflow object <code>t2</code> is composed of another taskflow object <code>t1</code>, preceded by another static task <code>init</code>. When taskflow <code>t2</code> is submitted to an executor, <code>init</code> will run first and then <code>comp</code> which spawns its definition in taskflow <code>t1</code>.</p>
@@ -565,7 +567,7 @@ template&lt;SubflowTaskLike C&gt; </div>
 <div class="line">  <a class="code hl_class" href="classtf_1_1Task.html">tf::Task</a> static_task1 = sf.<a class="code hl_function" href="#a4d52a7fe2814b264846a2085e931652c">emplace</a>([](){});</div>
 <div class="line">  <a class="code hl_class" href="classtf_1_1Task.html">tf::Task</a> static_task2 = sf.<a class="code hl_function" href="#a4d52a7fe2814b264846a2085e931652c">emplace</a>([](){});</div>
 <div class="line">});</div>
-<div class="ttc" id="aclasstf_1_1Subflow_html"><div class="ttname"><a href="classtf_1_1Subflow.html">tf::Subflow</a></div><div class="ttdoc">class to construct a subflow graph from the execution of a dynamic task</div><div class="ttdef"><b>Definition</b> flow_builder.hpp:1806</div></div>
+<div class="ttc" id="aclasstf_1_1Subflow_html"><div class="ttname"><a href="classtf_1_1Subflow.html">tf::Subflow</a></div><div class="ttdoc">class to construct a subflow graph from the execution of a dynamic task</div><div class="ttdef"><b>Definition</b> flow_builder.hpp:1913</div></div>
 </div><!-- fragment --><dl class="section note"><dt>Note</dt><dd>Please refer to <a class="el" href="SubflowTasking.html">Subflow Tasking</a> for details. </dd></dl>
 
 </div>
@@ -833,8 +835,8 @@ template&lt;InputIteratorLike B, InputIteratorLike E, typename D , typename T , 
 <p>creates an STL-styled parallel exclusive-scan task </p>
 <dl class="tparams"><dt>Template Parameters</dt><dd>
   <table class="tparams">
-    <tr><td class="paramname">B</td><td>beginning iterator type (satisfying <a class="el" href="concepttf_1_1InputIteratorLike.html" title="Concept for a type representing an input iterator.">tf::InputIteratorLike</a>) </td></tr>
-    <tr><td class="paramname">E</td><td>ending iterator type (satisfying <a class="el" href="concepttf_1_1InputIteratorLike.html" title="Concept for a type representing an input iterator.">tf::InputIteratorLike</a>) </td></tr>
+    <tr><td class="paramname">B</td><td>beginning iterator type (satisfying <a class="el" href="concepttf_1_1InputIteratorLike.html" title="concept to check if a type is a stateful input iterator">tf::InputIteratorLike</a>) </td></tr>
+    <tr><td class="paramname">E</td><td>ending iterator type (satisfying <a class="el" href="concepttf_1_1InputIteratorLike.html" title="concept to check if a type is a stateful input iterator">tf::InputIteratorLike</a>) </td></tr>
     <tr><td class="paramname">D</td><td>destination iterator type </td></tr>
     <tr><td class="paramname">T</td><td>initial value type </td></tr>
     <tr><td class="paramname">BOP</td><td>summation operator type</td></tr>
@@ -899,8 +901,8 @@ template&lt;InputIteratorLike B, InputIteratorLike E, typename V , PartitionerLi
 <p>fills a range with a given value in parallel </p>
 <dl class="tparams"><dt>Template Parameters</dt><dd>
   <table class="tparams">
-    <tr><td class="paramname">B</td><td>iterator type (satisfying <a class="el" href="concepttf_1_1InputIteratorLike.html" title="Concept for a type representing an input iterator.">tf::InputIteratorLike</a>) </td></tr>
-    <tr><td class="paramname">E</td><td>iterator type (satisfying <a class="el" href="concepttf_1_1InputIteratorLike.html" title="Concept for a type representing an input iterator.">tf::InputIteratorLike</a>) </td></tr>
+    <tr><td class="paramname">B</td><td>iterator type (satisfying <a class="el" href="concepttf_1_1InputIteratorLike.html" title="concept to check if a type is a stateful input iterator">tf::InputIteratorLike</a>) </td></tr>
+    <tr><td class="paramname">E</td><td>iterator type (satisfying <a class="el" href="concepttf_1_1InputIteratorLike.html" title="concept to check if a type is a stateful input iterator">tf::InputIteratorLike</a>) </td></tr>
     <tr><td class="paramname">V</td><td>value type </td></tr>
     <tr><td class="paramname">P</td><td>type satisfying <a class="el" href="concepttf_1_1PartitionerLike.html" title="determines if a type is a partitioner">tf::PartitionerLike</a></td></tr>
   </table>
@@ -956,7 +958,7 @@ template&lt;InputIteratorLike B, std::integral C, typename V , PartitionerLike P
 <p>fills N elements with a given value in parallel </p>
 <dl class="tparams"><dt>Template Parameters</dt><dd>
   <table class="tparams">
-    <tr><td class="paramname">B</td><td>iterator type (satisfying <a class="el" href="concepttf_1_1InputIteratorLike.html" title="Concept for a type representing an input iterator.">tf::InputIteratorLike</a>) </td></tr>
+    <tr><td class="paramname">B</td><td>iterator type (satisfying <a class="el" href="concepttf_1_1InputIteratorLike.html" title="concept to check if a type is a stateful input iterator">tf::InputIteratorLike</a>) </td></tr>
     <tr><td class="paramname">C</td><td>count type (integral) </td></tr>
     <tr><td class="paramname">V</td><td>value type </td></tr>
     <tr><td class="paramname">P</td><td>type satisfying <a class="el" href="concepttf_1_1PartitionerLike.html" title="determines if a type is a partitioner">tf::PartitionerLike</a></td></tr>
@@ -1018,8 +1020,8 @@ template&lt;InputIteratorLike B, InputIteratorLike E, typename T , typename UOP 
 <p>constructs a task to perform STL-styled find-if algorithm </p>
 <dl class="tparams"><dt>Template Parameters</dt><dd>
   <table class="tparams">
-    <tr><td class="paramname">B</td><td>beginning iterator type (satisfying <a class="el" href="concepttf_1_1InputIteratorLike.html" title="Concept for a type representing an input iterator.">tf::InputIteratorLike</a>) </td></tr>
-    <tr><td class="paramname">E</td><td>ending iterator type (satisfying <a class="el" href="concepttf_1_1InputIteratorLike.html" title="Concept for a type representing an input iterator.">tf::InputIteratorLike</a>) </td></tr>
+    <tr><td class="paramname">B</td><td>beginning iterator type (satisfying <a class="el" href="concepttf_1_1InputIteratorLike.html" title="concept to check if a type is a stateful input iterator">tf::InputIteratorLike</a>) </td></tr>
+    <tr><td class="paramname">E</td><td>ending iterator type (satisfying <a class="el" href="concepttf_1_1InputIteratorLike.html" title="concept to check if a type is a stateful input iterator">tf::InputIteratorLike</a>) </td></tr>
     <tr><td class="paramname">T</td><td>resulting iterator type </td></tr>
     <tr><td class="paramname">UOP</td><td>unary predicate type </td></tr>
     <tr><td class="paramname">P</td><td>partitioner type</td></tr>
@@ -1097,8 +1099,8 @@ template&lt;InputIteratorLike B, InputIteratorLike E, typename T , typename UOP 
 <p>constructs a task to perform STL-styled find-if-not algorithm </p>
 <dl class="tparams"><dt>Template Parameters</dt><dd>
   <table class="tparams">
-    <tr><td class="paramname">B</td><td>beginning iterator type (satisfying <a class="el" href="concepttf_1_1InputIteratorLike.html" title="Concept for a type representing an input iterator.">tf::InputIteratorLike</a>) </td></tr>
-    <tr><td class="paramname">E</td><td>ending iterator type (satisfying <a class="el" href="concepttf_1_1InputIteratorLike.html" title="Concept for a type representing an input iterator.">tf::InputIteratorLike</a>) </td></tr>
+    <tr><td class="paramname">B</td><td>beginning iterator type (satisfying <a class="el" href="concepttf_1_1InputIteratorLike.html" title="concept to check if a type is a stateful input iterator">tf::InputIteratorLike</a>) </td></tr>
+    <tr><td class="paramname">E</td><td>ending iterator type (satisfying <a class="el" href="concepttf_1_1InputIteratorLike.html" title="concept to check if a type is a stateful input iterator">tf::InputIteratorLike</a>) </td></tr>
     <tr><td class="paramname">T</td><td>resulting iterator type </td></tr>
     <tr><td class="paramname">UOP</td><td>unary predicate type </td></tr>
     <tr><td class="paramname">P</td><td>partitioner type</td></tr>
@@ -1136,13 +1138,14 @@ template&lt;InputIteratorLike B, InputIteratorLike E, typename T , typename UOP 
 
 </div>
 </div>
-<a id="aae3edfa278baa75b08414e083c14c836" name="aae3edfa278baa75b08414e083c14c836"></a>
-<h2 class="memtitle"><span class="permalink"><a href="#aae3edfa278baa75b08414e083c14c836">&#9670;&#160;</a></span>for_each()</h2>
+<a id="a597d2cceaf2a2598a3c4b9f742b0aacc" name="a597d2cceaf2a2598a3c4b9f742b0aacc"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#a597d2cceaf2a2598a3c4b9f742b0aacc">&#9670;&#160;</a></span>for_each()</h2>
 
 <div class="memitem">
 <div class="memproto">
 <div class="memtemplate">
-template&lt;InputIteratorLike B, InputIteratorLike E, typename C , PartitionerLike P = DefaultPartitioner&gt; </div>
+template&lt;InputIteratorLike B, InputIteratorLike E, typename C , PartitionerLike P = DefaultPartitioner&gt; <br />
+requires UnaryOperationLike&lt;C, std::decay_t&lt;std::unwrap_ref_decay_t&lt;B&gt;&gt;&gt;</div>
       <table class="memname">
         <tr>
           <td class="memname"><a class="el" href="classtf_1_1Task.html">Task</a> tf::FlowBuilder::for_each </td>
@@ -1170,8 +1173,8 @@ template&lt;InputIteratorLike B, InputIteratorLike E, typename C , PartitionerLi
 <p>constructs an STL-styled parallel-for task </p>
 <dl class="tparams"><dt>Template Parameters</dt><dd>
   <table class="tparams">
-    <tr><td class="paramname">B</td><td>beginning iterator type satisfying <a class="el" href="concepttf_1_1InputIteratorLike.html" title="Concept for a type representing an input iterator.">tf::InputIteratorLike</a> </td></tr>
-    <tr><td class="paramname">E</td><td>ending iterator type satisfying <a class="el" href="concepttf_1_1InputIteratorLike.html" title="Concept for a type representing an input iterator.">tf::InputIteratorLike</a> </td></tr>
+    <tr><td class="paramname">B</td><td>beginning iterator type satisfying <a class="el" href="concepttf_1_1InputIteratorLike.html" title="concept to check if a type is a stateful input iterator">tf::InputIteratorLike</a> </td></tr>
+    <tr><td class="paramname">E</td><td>ending iterator type satisfying <a class="el" href="concepttf_1_1InputIteratorLike.html" title="concept to check if a type is a stateful input iterator">tf::InputIteratorLike</a> </td></tr>
     <tr><td class="paramname">C</td><td>callable type </td></tr>
     <tr><td class="paramname">P</td><td>type satisfying <a class="el" href="concepttf_1_1PartitionerLike.html" title="determines if a type is a partitioner">tf::PartitionerLike</a></td></tr>
   </table>
@@ -1414,8 +1417,8 @@ template&lt;InputIteratorLike B, InputIteratorLike E, typename G , PartitionerLi
 <p>generates values into a range in parallel using a callable </p>
 <dl class="tparams"><dt>Template Parameters</dt><dd>
   <table class="tparams">
-    <tr><td class="paramname">B</td><td>iterator type (satisfying <a class="el" href="concepttf_1_1InputIteratorLike.html" title="Concept for a type representing an input iterator.">tf::InputIteratorLike</a>) </td></tr>
-    <tr><td class="paramname">E</td><td>iterator type (satisfying <a class="el" href="concepttf_1_1InputIteratorLike.html" title="Concept for a type representing an input iterator.">tf::InputIteratorLike</a>) </td></tr>
+    <tr><td class="paramname">B</td><td>iterator type (satisfying <a class="el" href="concepttf_1_1InputIteratorLike.html" title="concept to check if a type is a stateful input iterator">tf::InputIteratorLike</a>) </td></tr>
+    <tr><td class="paramname">E</td><td>iterator type (satisfying <a class="el" href="concepttf_1_1InputIteratorLike.html" title="concept to check if a type is a stateful input iterator">tf::InputIteratorLike</a>) </td></tr>
     <tr><td class="paramname">G</td><td>generator callable type </td></tr>
     <tr><td class="paramname">P</td><td>type satisfying <a class="el" href="concepttf_1_1PartitionerLike.html" title="determines if a type is a partitioner">tf::PartitionerLike</a></td></tr>
   </table>
@@ -1472,7 +1475,7 @@ template&lt;InputIteratorLike B, std::integral C, typename G , PartitionerLike P
 <p>generates N values into a range in parallel using a callable </p>
 <dl class="tparams"><dt>Template Parameters</dt><dd>
   <table class="tparams">
-    <tr><td class="paramname">B</td><td>iterator type (satisfying <a class="el" href="concepttf_1_1InputIteratorLike.html" title="Concept for a type representing an input iterator.">tf::InputIteratorLike</a>) </td></tr>
+    <tr><td class="paramname">B</td><td>iterator type (satisfying <a class="el" href="concepttf_1_1InputIteratorLike.html" title="concept to check if a type is a stateful input iterator">tf::InputIteratorLike</a>) </td></tr>
     <tr><td class="paramname">C</td><td>count type (integral) </td></tr>
     <tr><td class="paramname">G</td><td>generator callable type </td></tr>
     <tr><td class="paramname">P</td><td>type satisfying <a class="el" href="concepttf_1_1PartitionerLike.html" title="determines if a type is a partitioner">tf::PartitionerLike</a></td></tr>
@@ -1530,8 +1533,8 @@ template&lt;InputIteratorLike B, InputIteratorLike E, typename D , typename BOP 
 <p>creates an STL-styled parallel inclusive-scan task </p>
 <dl class="tparams"><dt>Template Parameters</dt><dd>
   <table class="tparams">
-    <tr><td class="paramname">B</td><td>beginning iterator type (satisfying <a class="el" href="concepttf_1_1InputIteratorLike.html" title="Concept for a type representing an input iterator.">tf::InputIteratorLike</a>) </td></tr>
-    <tr><td class="paramname">E</td><td>ending iterator type (satisfying <a class="el" href="concepttf_1_1InputIteratorLike.html" title="Concept for a type representing an input iterator.">tf::InputIteratorLike</a>) </td></tr>
+    <tr><td class="paramname">B</td><td>beginning iterator type (satisfying <a class="el" href="concepttf_1_1InputIteratorLike.html" title="concept to check if a type is a stateful input iterator">tf::InputIteratorLike</a>) </td></tr>
+    <tr><td class="paramname">E</td><td>ending iterator type (satisfying <a class="el" href="concepttf_1_1InputIteratorLike.html" title="concept to check if a type is a stateful input iterator">tf::InputIteratorLike</a>) </td></tr>
     <tr><td class="paramname">D</td><td>destination iterator type </td></tr>
     <tr><td class="paramname">BOP</td><td>summation operator type</td></tr>
   </table>
@@ -1599,8 +1602,8 @@ template&lt;InputIteratorLike B, InputIteratorLike E, typename D , typename BOP 
 <p>creates an STL-styled parallel inclusive-scan task with an initial value </p>
 <dl class="tparams"><dt>Template Parameters</dt><dd>
   <table class="tparams">
-    <tr><td class="paramname">B</td><td>beginning iterator type (satisfying <a class="el" href="concepttf_1_1InputIteratorLike.html" title="Concept for a type representing an input iterator.">tf::InputIteratorLike</a>) </td></tr>
-    <tr><td class="paramname">E</td><td>ending iterator type (satisfying <a class="el" href="concepttf_1_1InputIteratorLike.html" title="Concept for a type representing an input iterator.">tf::InputIteratorLike</a>) </td></tr>
+    <tr><td class="paramname">B</td><td>beginning iterator type (satisfying <a class="el" href="concepttf_1_1InputIteratorLike.html" title="concept to check if a type is a stateful input iterator">tf::InputIteratorLike</a>) </td></tr>
+    <tr><td class="paramname">E</td><td>ending iterator type (satisfying <a class="el" href="concepttf_1_1InputIteratorLike.html" title="concept to check if a type is a stateful input iterator">tf::InputIteratorLike</a>) </td></tr>
     <tr><td class="paramname">D</td><td>destination iterator type </td></tr>
     <tr><td class="paramname">BOP</td><td>summation operator type </td></tr>
     <tr><td class="paramname">T</td><td>initial value type</td></tr>
@@ -1749,8 +1752,8 @@ template&lt;InputIteratorLike B, InputIteratorLike E, typename T , typename C , 
 <p>constructs a task to perform STL-styled max-element algorithm </p>
 <dl class="tparams"><dt>Template Parameters</dt><dd>
   <table class="tparams">
-    <tr><td class="paramname">B</td><td>beginning iterator type (satisfying <a class="el" href="concepttf_1_1InputIteratorLike.html" title="Concept for a type representing an input iterator.">tf::InputIteratorLike</a>) </td></tr>
-    <tr><td class="paramname">E</td><td>ending iterator type (satisfying <a class="el" href="concepttf_1_1InputIteratorLike.html" title="Concept for a type representing an input iterator.">tf::InputIteratorLike</a>) </td></tr>
+    <tr><td class="paramname">B</td><td>beginning iterator type (satisfying <a class="el" href="concepttf_1_1InputIteratorLike.html" title="concept to check if a type is a stateful input iterator">tf::InputIteratorLike</a>) </td></tr>
+    <tr><td class="paramname">E</td><td>ending iterator type (satisfying <a class="el" href="concepttf_1_1InputIteratorLike.html" title="concept to check if a type is a stateful input iterator">tf::InputIteratorLike</a>) </td></tr>
     <tr><td class="paramname">T</td><td>resulting iterator type </td></tr>
     <tr><td class="paramname">C</td><td>comparator type </td></tr>
     <tr><td class="paramname">P</td><td>partitioner type</td></tr>
@@ -1830,10 +1833,10 @@ template&lt;InputIteratorLike B1, InputIteratorLike E1, InputIteratorLike B2, In
 <p>merges two sorted ranges into a single sorted output using the <code>std::less</code> comparator </p>
 <dl class="tparams"><dt>Template Parameters</dt><dd>
   <table class="tparams">
-    <tr><td class="paramname">B1</td><td>beginning iterator type of the first range (satisfying <a class="el" href="concepttf_1_1InputIteratorLike.html" title="Concept for a type representing an input iterator.">tf::InputIteratorLike</a>) </td></tr>
-    <tr><td class="paramname">E1</td><td>ending iterator type of the first range (satisfying <a class="el" href="concepttf_1_1InputIteratorLike.html" title="Concept for a type representing an input iterator.">tf::InputIteratorLike</a>) </td></tr>
-    <tr><td class="paramname">B2</td><td>beginning iterator type of the second range (satisfying <a class="el" href="concepttf_1_1InputIteratorLike.html" title="Concept for a type representing an input iterator.">tf::InputIteratorLike</a>) </td></tr>
-    <tr><td class="paramname">E2</td><td>ending iterator type of the second range (satisfying <a class="el" href="concepttf_1_1InputIteratorLike.html" title="Concept for a type representing an input iterator.">tf::InputIteratorLike</a>) </td></tr>
+    <tr><td class="paramname">B1</td><td>beginning iterator type of the first range (satisfying <a class="el" href="concepttf_1_1InputIteratorLike.html" title="concept to check if a type is a stateful input iterator">tf::InputIteratorLike</a>) </td></tr>
+    <tr><td class="paramname">E1</td><td>ending iterator type of the first range (satisfying <a class="el" href="concepttf_1_1InputIteratorLike.html" title="concept to check if a type is a stateful input iterator">tf::InputIteratorLike</a>) </td></tr>
+    <tr><td class="paramname">B2</td><td>beginning iterator type of the second range (satisfying <a class="el" href="concepttf_1_1InputIteratorLike.html" title="concept to check if a type is a stateful input iterator">tf::InputIteratorLike</a>) </td></tr>
+    <tr><td class="paramname">E2</td><td>ending iterator type of the second range (satisfying <a class="el" href="concepttf_1_1InputIteratorLike.html" title="concept to check if a type is a stateful input iterator">tf::InputIteratorLike</a>) </td></tr>
     <tr><td class="paramname">O</td><td>destination iterator type</td></tr>
   </table>
   </dd>
@@ -1899,10 +1902,10 @@ template&lt;InputIteratorLike B1, InputIteratorLike E1, InputIteratorLike B2, In
 <p>merges two sorted ranges into a single sorted output using a custom comparator </p>
 <dl class="tparams"><dt>Template Parameters</dt><dd>
   <table class="tparams">
-    <tr><td class="paramname">B1</td><td>beginning iterator type of the first range (satisfying <a class="el" href="concepttf_1_1InputIteratorLike.html" title="Concept for a type representing an input iterator.">tf::InputIteratorLike</a>) </td></tr>
-    <tr><td class="paramname">E1</td><td>ending iterator type of the first range (satisfying <a class="el" href="concepttf_1_1InputIteratorLike.html" title="Concept for a type representing an input iterator.">tf::InputIteratorLike</a>) </td></tr>
-    <tr><td class="paramname">B2</td><td>beginning iterator type of the second range (satisfying <a class="el" href="concepttf_1_1InputIteratorLike.html" title="Concept for a type representing an input iterator.">tf::InputIteratorLike</a>) </td></tr>
-    <tr><td class="paramname">E2</td><td>ending iterator type of the second range (satisfying <a class="el" href="concepttf_1_1InputIteratorLike.html" title="Concept for a type representing an input iterator.">tf::InputIteratorLike</a>) </td></tr>
+    <tr><td class="paramname">B1</td><td>beginning iterator type of the first range (satisfying <a class="el" href="concepttf_1_1InputIteratorLike.html" title="concept to check if a type is a stateful input iterator">tf::InputIteratorLike</a>) </td></tr>
+    <tr><td class="paramname">E1</td><td>ending iterator type of the first range (satisfying <a class="el" href="concepttf_1_1InputIteratorLike.html" title="concept to check if a type is a stateful input iterator">tf::InputIteratorLike</a>) </td></tr>
+    <tr><td class="paramname">B2</td><td>beginning iterator type of the second range (satisfying <a class="el" href="concepttf_1_1InputIteratorLike.html" title="concept to check if a type is a stateful input iterator">tf::InputIteratorLike</a>) </td></tr>
+    <tr><td class="paramname">E2</td><td>ending iterator type of the second range (satisfying <a class="el" href="concepttf_1_1InputIteratorLike.html" title="concept to check if a type is a stateful input iterator">tf::InputIteratorLike</a>) </td></tr>
     <tr><td class="paramname">O</td><td>destination iterator type </td></tr>
     <tr><td class="paramname">C</td><td>comparator type</td></tr>
   </table>
@@ -1965,8 +1968,8 @@ template&lt;InputIteratorLike B, InputIteratorLike E, typename T , typename C , 
 <p>constructs a task to perform STL-styled min-element algorithm </p>
 <dl class="tparams"><dt>Template Parameters</dt><dd>
   <table class="tparams">
-    <tr><td class="paramname">B</td><td>beginning iterator type (satisfying <a class="el" href="concepttf_1_1InputIteratorLike.html" title="Concept for a type representing an input iterator.">tf::InputIteratorLike</a>) </td></tr>
-    <tr><td class="paramname">E</td><td>ending iterator type (satisfying <a class="el" href="concepttf_1_1InputIteratorLike.html" title="Concept for a type representing an input iterator.">tf::InputIteratorLike</a>) </td></tr>
+    <tr><td class="paramname">B</td><td>beginning iterator type (satisfying <a class="el" href="concepttf_1_1InputIteratorLike.html" title="concept to check if a type is a stateful input iterator">tf::InputIteratorLike</a>) </td></tr>
+    <tr><td class="paramname">E</td><td>ending iterator type (satisfying <a class="el" href="concepttf_1_1InputIteratorLike.html" title="concept to check if a type is a stateful input iterator">tf::InputIteratorLike</a>) </td></tr>
     <tr><td class="paramname">T</td><td>resulting iterator type </td></tr>
     <tr><td class="paramname">C</td><td>comparator type </td></tr>
     <tr><td class="paramname">P</td><td>partitioner type</td></tr>
@@ -2044,7 +2047,7 @@ template&lt;InputIteratorLike B, InputIteratorLike E, typename T , typename C , 
 <div class="line"><span class="comment">// assign the task handle to the placeholder task</span></div>
 <div class="line">task = <a class="code hl_function" href="#acab0b4ac82260f47fdb36a3244ee3aaf">placeholder</a>;</div>
 <div class="line">assert(task.<a class="code hl_function" href="classtf_1_1Task.html#a8149edcf9ec2bfac18dd171f7a55ce06">empty</a>() == <span class="keyword">false</span> &amp;&amp; task.<a class="code hl_function" href="classtf_1_1Task.html#afc4ecb89dd4e4645b3ec3fb7c1bb0ec5">has_work</a>() == <span class="keyword">false</span>);</div>
-<div class="ttc" id="aclasstf_1_1FlowBuilder_html_acab0b4ac82260f47fdb36a3244ee3aaf"><div class="ttname"><a href="#acab0b4ac82260f47fdb36a3244ee3aaf">tf::FlowBuilder::placeholder</a></div><div class="ttdeci">Task placeholder()</div><div class="ttdoc">creates a placeholder task</div><div class="ttdef"><b>Definition</b> flow_builder.hpp:1706</div></div>
+<div class="ttc" id="aclasstf_1_1FlowBuilder_html_acab0b4ac82260f47fdb36a3244ee3aaf"><div class="ttname"><a href="#acab0b4ac82260f47fdb36a3244ee3aaf">tf::FlowBuilder::placeholder</a></div><div class="ttdeci">Task placeholder()</div><div class="ttdoc">creates a placeholder task</div><div class="ttdef"><b>Definition</b> flow_builder.hpp:1813</div></div>
 <div class="ttc" id="aclasstf_1_1Task_html_a8149edcf9ec2bfac18dd171f7a55ce06"><div class="ttname"><a href="classtf_1_1Task.html#a8149edcf9ec2bfac18dd171f7a55ce06">tf::Task::empty</a></div><div class="ttdeci">bool empty() const</div><div class="ttdoc">queries if the task handle is associated with a taskflow node</div><div class="ttdef"><b>Definition</b> task.hpp:1413</div></div>
 <div class="ttc" id="aclasstf_1_1Task_html_afc4ecb89dd4e4645b3ec3fb7c1bb0ec5"><div class="ttname"><a href="classtf_1_1Task.html#afc4ecb89dd4e4645b3ec3fb7c1bb0ec5">tf::Task::has_work</a></div><div class="ttdeci">bool has_work() const</div><div class="ttdoc">queries if the task has a work assigned</div><div class="ttdef"><b>Definition</b> task.hpp:1418</div></div>
 </div><!-- fragment --> 
@@ -2089,8 +2092,8 @@ template&lt;InputIteratorLike B, InputIteratorLike E, typename T , typename O , 
 <p>constructs an STL-styled parallel-reduction task </p>
 <dl class="tparams"><dt>Template Parameters</dt><dd>
   <table class="tparams">
-    <tr><td class="paramname">B</td><td>beginning iterator type (satisfying <a class="el" href="concepttf_1_1InputIteratorLike.html" title="Concept for a type representing an input iterator.">tf::InputIteratorLike</a>) </td></tr>
-    <tr><td class="paramname">E</td><td>ending iterator type (satisfying <a class="el" href="concepttf_1_1InputIteratorLike.html" title="Concept for a type representing an input iterator.">tf::InputIteratorLike</a>) </td></tr>
+    <tr><td class="paramname">B</td><td>beginning iterator type (satisfying <a class="el" href="concepttf_1_1InputIteratorLike.html" title="concept to check if a type is a stateful input iterator">tf::InputIteratorLike</a>) </td></tr>
+    <tr><td class="paramname">E</td><td>ending iterator type (satisfying <a class="el" href="concepttf_1_1InputIteratorLike.html" title="concept to check if a type is a stateful input iterator">tf::InputIteratorLike</a>) </td></tr>
     <tr><td class="paramname">T</td><td>result type </td></tr>
     <tr><td class="paramname">O</td><td>binary reducer type </td></tr>
     <tr><td class="paramname">P</td><td>type satisfying <a class="el" href="concepttf_1_1PartitionerLike.html" title="determines if a type is a partitioner">tf::PartitionerLike</a></td></tr>
@@ -2228,8 +2231,8 @@ template&lt;InputIteratorLike B, InputIteratorLike E&gt; </div>
 <p>constructs a dynamic task to perform STL-styled parallel sort using the <code>std::less&lt;T&gt;</code> comparator, where <code>T</code> is the element type </p>
 <dl class="tparams"><dt>Template Parameters</dt><dd>
   <table class="tparams">
-    <tr><td class="paramname">B</td><td>beginning iterator type (random-accessible and satisfying <a class="el" href="concepttf_1_1InputIteratorLike.html" title="Concept for a type representing an input iterator.">tf::InputIteratorLike</a>) </td></tr>
-    <tr><td class="paramname">E</td><td>ending iterator type (random-accessible and satisfying <a class="el" href="concepttf_1_1InputIteratorLike.html" title="Concept for a type representing an input iterator.">tf::InputIteratorLike</a>)</td></tr>
+    <tr><td class="paramname">B</td><td>beginning iterator type (random-accessible and satisfying <a class="el" href="concepttf_1_1InputIteratorLike.html" title="concept to check if a type is a stateful input iterator">tf::InputIteratorLike</a>) </td></tr>
+    <tr><td class="paramname">E</td><td>ending iterator type (random-accessible and satisfying <a class="el" href="concepttf_1_1InputIteratorLike.html" title="concept to check if a type is a stateful input iterator">tf::InputIteratorLike</a>)</td></tr>
   </table>
   </dd>
 </dl>
@@ -2275,8 +2278,8 @@ template&lt;InputIteratorLike B, InputIteratorLike E, typename C &gt; </div>
 <p>constructs a dynamic task to perform STL-styled parallel sort </p>
 <dl class="tparams"><dt>Template Parameters</dt><dd>
   <table class="tparams">
-    <tr><td class="paramname">B</td><td>beginning iterator type (random-accessible and satisfying <a class="el" href="concepttf_1_1InputIteratorLike.html" title="Concept for a type representing an input iterator.">tf::InputIteratorLike</a>) </td></tr>
-    <tr><td class="paramname">E</td><td>ending iterator type (random-accessible and satisfying <a class="el" href="concepttf_1_1InputIteratorLike.html" title="Concept for a type representing an input iterator.">tf::InputIteratorLike</a>) </td></tr>
+    <tr><td class="paramname">B</td><td>beginning iterator type (random-accessible and satisfying <a class="el" href="concepttf_1_1InputIteratorLike.html" title="concept to check if a type is a stateful input iterator">tf::InputIteratorLike</a>) </td></tr>
+    <tr><td class="paramname">E</td><td>ending iterator type (random-accessible and satisfying <a class="el" href="concepttf_1_1InputIteratorLike.html" title="concept to check if a type is a stateful input iterator">tf::InputIteratorLike</a>) </td></tr>
     <tr><td class="paramname">C</td><td>comparator type</td></tr>
   </table>
   </dd>
@@ -2295,13 +2298,14 @@ template&lt;InputIteratorLike B, InputIteratorLike E, typename C &gt; </div>
 
 </div>
 </div>
-<a id="a058c250de62b9d1e4305b8ddf03906ee" name="a058c250de62b9d1e4305b8ddf03906ee"></a>
-<h2 class="memtitle"><span class="permalink"><a href="#a058c250de62b9d1e4305b8ddf03906ee">&#9670;&#160;</a></span>transform() <span class="overload">[1/2]</span></h2>
+<a id="ac551dc6adba635ee3083aa11317bafcd" name="ac551dc6adba635ee3083aa11317bafcd"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#ac551dc6adba635ee3083aa11317bafcd">&#9670;&#160;</a></span>transform() <span class="overload">[1/2]</span></h2>
 
 <div class="memitem">
 <div class="memproto">
 <div class="memtemplate">
-template&lt;InputIteratorLike B, InputIteratorLike E, typename O , typename C , PartitionerLike P = DefaultPartitioner&gt; </div>
+template&lt;InputIteratorLike B, InputIteratorLike E, typename O , typename C , PartitionerLike P = DefaultPartitioner&gt; <br />
+requires UnaryTransformLike&lt; C, std::decay_t&lt;std::unwrap_ref_decay_t&lt;B&gt;&gt;, std::decay_t&lt;std::unwrap_ref_decay_t&lt;O&gt;&gt; &gt;</div>
       <table class="memname">
         <tr>
           <td class="memname"><a class="el" href="classtf_1_1Task.html">Task</a> tf::FlowBuilder::transform </td>
@@ -2334,8 +2338,8 @@ template&lt;InputIteratorLike B, InputIteratorLike E, typename O , typename C , 
 <p>constructs a parallel-transform task </p>
 <dl class="tparams"><dt>Template Parameters</dt><dd>
   <table class="tparams">
-    <tr><td class="paramname">B</td><td>beginning input iterator type (satisfying <a class="el" href="concepttf_1_1InputIteratorLike.html" title="Concept for a type representing an input iterator.">tf::InputIteratorLike</a>) </td></tr>
-    <tr><td class="paramname">E</td><td>ending input iterator type (satisfying <a class="el" href="concepttf_1_1InputIteratorLike.html" title="Concept for a type representing an input iterator.">tf::InputIteratorLike</a>)) </td></tr>
+    <tr><td class="paramname">B</td><td>beginning input iterator type (satisfying <a class="el" href="concepttf_1_1InputIteratorLike.html" title="concept to check if a type is a stateful input iterator">tf::InputIteratorLike</a>) </td></tr>
+    <tr><td class="paramname">E</td><td>ending input iterator type (satisfying <a class="el" href="concepttf_1_1InputIteratorLike.html" title="concept to check if a type is a stateful input iterator">tf::InputIteratorLike</a>)) </td></tr>
     <tr><td class="paramname">O</td><td>output iterator type </td></tr>
     <tr><td class="paramname">C</td><td>callable type </td></tr>
     <tr><td class="paramname">P</td><td>type satisfying <a class="el" href="concepttf_1_1PartitionerLike.html" title="determines if a type is a partitioner">tf::PartitionerLike</a></td></tr>
@@ -2362,14 +2366,14 @@ template&lt;InputIteratorLike B, InputIteratorLike E, typename O , typename C , 
 
 </div>
 </div>
-<a id="a18d263a5c043a216380441c9d0c72a60" name="a18d263a5c043a216380441c9d0c72a60"></a>
-<h2 class="memtitle"><span class="permalink"><a href="#a18d263a5c043a216380441c9d0c72a60">&#9670;&#160;</a></span>transform() <span class="overload">[2/2]</span></h2>
+<a id="a1c70fab36c9982088677a2cb4bca7edb" name="a1c70fab36c9982088677a2cb4bca7edb"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#a1c70fab36c9982088677a2cb4bca7edb">&#9670;&#160;</a></span>transform() <span class="overload">[2/2]</span></h2>
 
 <div class="memitem">
 <div class="memproto">
 <div class="memtemplate">
 template&lt;InputIteratorLike B1, InputIteratorLike E1, InputIteratorLike B2, typename O , typename C , PartitionerLike P = DefaultPartitioner&gt; <br />
-requires (!PartitionerLike&lt;std::decay_t&lt;C&gt;&gt;)</div>
+requires BinaryTransformLike&lt; C, std::decay_t&lt;std::unwrap_ref_decay_t&lt;B1&gt;&gt;, std::decay_t&lt;std::unwrap_ref_decay_t&lt;B2&gt;&gt;, std::decay_t&lt;std::unwrap_ref_decay_t&lt;O&gt;&gt; &gt;</div>
       <table class="memname">
         <tr>
           <td class="memname"><a class="el" href="classtf_1_1Task.html">Task</a> tf::FlowBuilder::transform </td>
@@ -2407,9 +2411,9 @@ requires (!PartitionerLike&lt;std::decay_t&lt;C&gt;&gt;)</div>
 <p>constructs a parallel-transform task </p>
 <dl class="tparams"><dt>Template Parameters</dt><dd>
   <table class="tparams">
-    <tr><td class="paramname">B1</td><td>beginning input iterator type for the first input range (satisfying <a class="el" href="concepttf_1_1InputIteratorLike.html" title="Concept for a type representing an input iterator.">tf::InputIteratorLike</a>) </td></tr>
-    <tr><td class="paramname">E1</td><td>ending input iterator type for the first input range (satisfying <a class="el" href="concepttf_1_1InputIteratorLike.html" title="Concept for a type representing an input iterator.">tf::InputIteratorLike</a>) </td></tr>
-    <tr><td class="paramname">B2</td><td>beginning input iterator type for the first second range (satisfying <a class="el" href="concepttf_1_1InputIteratorLike.html" title="Concept for a type representing an input iterator.">tf::InputIteratorLike</a>) </td></tr>
+    <tr><td class="paramname">B1</td><td>beginning input iterator type for the first input range (satisfying <a class="el" href="concepttf_1_1InputIteratorLike.html" title="concept to check if a type is a stateful input iterator">tf::InputIteratorLike</a>) </td></tr>
+    <tr><td class="paramname">E1</td><td>ending input iterator type for the first input range (satisfying <a class="el" href="concepttf_1_1InputIteratorLike.html" title="concept to check if a type is a stateful input iterator">tf::InputIteratorLike</a>) </td></tr>
+    <tr><td class="paramname">B2</td><td>beginning input iterator type for the first second range (satisfying <a class="el" href="concepttf_1_1InputIteratorLike.html" title="concept to check if a type is a stateful input iterator">tf::InputIteratorLike</a>) </td></tr>
     <tr><td class="paramname">O</td><td>output iterator type </td></tr>
     <tr><td class="paramname">C</td><td>callable type </td></tr>
     <tr><td class="paramname">P</td><td>type satisfying <a class="el" href="concepttf_1_1PartitionerLike.html" title="determines if a type is a partitioner">tf::PartitionerLike</a></td></tr>
@@ -2481,8 +2485,8 @@ template&lt;InputIteratorLike B, InputIteratorLike E, typename D , typename T , 
 <p>creates an STL-styled parallel transform-exclusive scan task </p>
 <dl class="tparams"><dt>Template Parameters</dt><dd>
   <table class="tparams">
-    <tr><td class="paramname">B</td><td>beginning iterator type (satisfying <a class="el" href="concepttf_1_1InputIteratorLike.html" title="Concept for a type representing an input iterator.">tf::InputIteratorLike</a>) </td></tr>
-    <tr><td class="paramname">E</td><td>ending iterator type (satisfying <a class="el" href="concepttf_1_1InputIteratorLike.html" title="Concept for a type representing an input iterator.">tf::InputIteratorLike</a>) </td></tr>
+    <tr><td class="paramname">B</td><td>beginning iterator type (satisfying <a class="el" href="concepttf_1_1InputIteratorLike.html" title="concept to check if a type is a stateful input iterator">tf::InputIteratorLike</a>) </td></tr>
+    <tr><td class="paramname">E</td><td>ending iterator type (satisfying <a class="el" href="concepttf_1_1InputIteratorLike.html" title="concept to check if a type is a stateful input iterator">tf::InputIteratorLike</a>) </td></tr>
     <tr><td class="paramname">D</td><td>destination iterator type </td></tr>
     <tr><td class="paramname">BOP</td><td>summation operator type </td></tr>
     <tr><td class="paramname">UOP</td><td>transform operator type </td></tr>
@@ -2555,8 +2559,8 @@ template&lt;InputIteratorLike B, InputIteratorLike E, typename D , typename BOP 
 <p>creates an STL-styled parallel transform-inclusive scan task </p>
 <dl class="tparams"><dt>Template Parameters</dt><dd>
   <table class="tparams">
-    <tr><td class="paramname">B</td><td>beginning iterator type (satisfying <a class="el" href="concepttf_1_1InputIteratorLike.html" title="Concept for a type representing an input iterator.">tf::InputIteratorLike</a>) </td></tr>
-    <tr><td class="paramname">E</td><td>ending iterator type (satisfying <a class="el" href="concepttf_1_1InputIteratorLike.html" title="Concept for a type representing an input iterator.">tf::InputIteratorLike</a>) </td></tr>
+    <tr><td class="paramname">B</td><td>beginning iterator type (satisfying <a class="el" href="concepttf_1_1InputIteratorLike.html" title="concept to check if a type is a stateful input iterator">tf::InputIteratorLike</a>) </td></tr>
+    <tr><td class="paramname">E</td><td>ending iterator type (satisfying <a class="el" href="concepttf_1_1InputIteratorLike.html" title="concept to check if a type is a stateful input iterator">tf::InputIteratorLike</a>) </td></tr>
     <tr><td class="paramname">D</td><td>destination iterator type </td></tr>
     <tr><td class="paramname">BOP</td><td>summation operator type </td></tr>
     <tr><td class="paramname">UOP</td><td>transform operator type</td></tr>
@@ -2632,8 +2636,8 @@ template&lt;InputIteratorLike B, InputIteratorLike E, typename D , typename BOP 
 <p>creates an STL-styled parallel transform-inclusive scan task </p>
 <dl class="tparams"><dt>Template Parameters</dt><dd>
   <table class="tparams">
-    <tr><td class="paramname">B</td><td>beginning iterator type (satisfying <a class="el" href="concepttf_1_1InputIteratorLike.html" title="Concept for a type representing an input iterator.">tf::InputIteratorLike</a>) </td></tr>
-    <tr><td class="paramname">E</td><td>ending iterator type (satisfying <a class="el" href="concepttf_1_1InputIteratorLike.html" title="Concept for a type representing an input iterator.">tf::InputIteratorLike</a>) </td></tr>
+    <tr><td class="paramname">B</td><td>beginning iterator type (satisfying <a class="el" href="concepttf_1_1InputIteratorLike.html" title="concept to check if a type is a stateful input iterator">tf::InputIteratorLike</a>) </td></tr>
+    <tr><td class="paramname">E</td><td>ending iterator type (satisfying <a class="el" href="concepttf_1_1InputIteratorLike.html" title="concept to check if a type is a stateful input iterator">tf::InputIteratorLike</a>) </td></tr>
     <tr><td class="paramname">D</td><td>destination iterator type </td></tr>
     <tr><td class="paramname">BOP</td><td>summation operator type </td></tr>
     <tr><td class="paramname">UOP</td><td>transform operator type </td></tr>
@@ -2712,8 +2716,8 @@ template&lt;InputIteratorLike B, InputIteratorLike E, typename T , typename BOP 
 <p>constructs an STL-styled parallel transform-reduce task </p>
 <dl class="tparams"><dt>Template Parameters</dt><dd>
   <table class="tparams">
-    <tr><td class="paramname">B</td><td>beginning iterator type (satisfying <a class="el" href="concepttf_1_1InputIteratorLike.html" title="Concept for a type representing an input iterator.">tf::InputIteratorLike</a>) </td></tr>
-    <tr><td class="paramname">E</td><td>ending iterator type (satisfying <a class="el" href="concepttf_1_1InputIteratorLike.html" title="Concept for a type representing an input iterator.">tf::InputIteratorLike</a>) </td></tr>
+    <tr><td class="paramname">B</td><td>beginning iterator type (satisfying <a class="el" href="concepttf_1_1InputIteratorLike.html" title="concept to check if a type is a stateful input iterator">tf::InputIteratorLike</a>) </td></tr>
+    <tr><td class="paramname">E</td><td>ending iterator type (satisfying <a class="el" href="concepttf_1_1InputIteratorLike.html" title="concept to check if a type is a stateful input iterator">tf::InputIteratorLike</a>) </td></tr>
     <tr><td class="paramname">T</td><td>result type </td></tr>
     <tr><td class="paramname">BOP</td><td>binary reducer type </td></tr>
     <tr><td class="paramname">UOP</td><td>unary transformation type </td></tr>
@@ -2742,14 +2746,14 @@ template&lt;InputIteratorLike B, InputIteratorLike E, typename T , typename BOP 
 
 </div>
 </div>
-<a id="ae787dfa29fd54d1ca655a15fea3b98a5" name="ae787dfa29fd54d1ca655a15fea3b98a5"></a>
-<h2 class="memtitle"><span class="permalink"><a href="#ae787dfa29fd54d1ca655a15fea3b98a5">&#9670;&#160;</a></span>transform_reduce() <span class="overload">[2/2]</span></h2>
+<a id="a43afba1d3c943ddac2a8c05bd706c10a" name="a43afba1d3c943ddac2a8c05bd706c10a"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#a43afba1d3c943ddac2a8c05bd706c10a">&#9670;&#160;</a></span>transform_reduce() <span class="overload">[2/2]</span></h2>
 
 <div class="memitem">
 <div class="memproto">
 <div class="memtemplate">
 template&lt;InputIteratorLike B1, InputIteratorLike E1, InputIteratorLike B2, typename T , typename BOP_R , typename BOP_T , PartitionerLike P = DefaultPartitioner&gt; <br />
-requires (!PartitionerLike&lt;std::decay_t&lt;BOP_T&gt;&gt;)</div>
+requires BinaryOperationLike&lt; BOP_T, std::decay_t&lt;std::unwrap_ref_decay_t&lt;B1&gt;&gt;, std::decay_t&lt;std::unwrap_ref_decay_t&lt;B2&gt;&gt; &gt;</div>
       <table class="memname">
         <tr>
           <td class="memname"><a class="el" href="classtf_1_1Task.html">Task</a> tf::FlowBuilder::transform_reduce </td>
@@ -2792,9 +2796,9 @@ requires (!PartitionerLike&lt;std::decay_t&lt;BOP_T&gt;&gt;)</div>
 <p>constructs an STL-styled parallel transform-reduce task </p>
 <dl class="tparams"><dt>Template Parameters</dt><dd>
   <table class="tparams">
-    <tr><td class="paramname">B1</td><td>first beginning iterator type (satisfying <a class="el" href="concepttf_1_1InputIteratorLike.html" title="Concept for a type representing an input iterator.">tf::InputIteratorLike</a>) </td></tr>
-    <tr><td class="paramname">E1</td><td>first ending iterator type (satisfying <a class="el" href="concepttf_1_1InputIteratorLike.html" title="Concept for a type representing an input iterator.">tf::InputIteratorLike</a>) </td></tr>
-    <tr><td class="paramname">B2</td><td>second beginning iterator type (satisfying <a class="el" href="concepttf_1_1InputIteratorLike.html" title="Concept for a type representing an input iterator.">tf::InputIteratorLike</a>) </td></tr>
+    <tr><td class="paramname">B1</td><td>first beginning iterator type (satisfying <a class="el" href="concepttf_1_1InputIteratorLike.html" title="concept to check if a type is a stateful input iterator">tf::InputIteratorLike</a>) </td></tr>
+    <tr><td class="paramname">E1</td><td>first ending iterator type (satisfying <a class="el" href="concepttf_1_1InputIteratorLike.html" title="concept to check if a type is a stateful input iterator">tf::InputIteratorLike</a>) </td></tr>
+    <tr><td class="paramname">B2</td><td>second beginning iterator type (satisfying <a class="el" href="concepttf_1_1InputIteratorLike.html" title="concept to check if a type is a stateful input iterator">tf::InputIteratorLike</a>) </td></tr>
     <tr><td class="paramname">T</td><td>result type </td></tr>
     <tr><td class="paramname">BOP_R</td><td>binary reducer type </td></tr>
     <tr><td class="paramname">BOP_T</td><td>binary transformation type </td></tr>

@@ -13,20 +13,20 @@
 // Concept
 // ----------------------------------------------------------------------------
 
-TEST_CASE("Concept.AsyncTaskLike" * doctest::timeout(300)) {
+TEST_CASE("Concept.AsyncTaskHandleLike" * doctest::timeout(300)) {
 
   // AsyncTask.
-  static_assert(tf::AsyncTaskLike<tf::AsyncTask>);
-  static_assert(tf::AsyncTaskLike<tf::AsyncTask&>);
-  static_assert(tf::AsyncTaskLike<const tf::AsyncTask>);
-  static_assert(tf::AsyncTaskLike<const tf::AsyncTask&>);
-  static_assert(tf::AsyncTaskLike<tf::AsyncTask&&>);
+  static_assert(tf::AsyncTaskHandleLike<tf::AsyncTask>);
+  static_assert(tf::AsyncTaskHandleLike<tf::AsyncTask&>);
+  static_assert(tf::AsyncTaskHandleLike<const tf::AsyncTask>);
+  static_assert(tf::AsyncTaskHandleLike<const tf::AsyncTask&>);
+  static_assert(tf::AsyncTaskHandleLike<tf::AsyncTask&&>);
 
   // Non-AsyncTask.
-  static_assert(!tf::AsyncTaskLike<int>);
-  static_assert(!tf::AsyncTaskLike<double>);
-  static_assert(!tf::AsyncTaskLike<void>);
-  static_assert(!tf::AsyncTaskLike<std::nullptr_t>);
+  static_assert(!tf::AsyncTaskHandleLike<int>);
+  static_assert(!tf::AsyncTaskHandleLike<double>);
+  static_assert(!tf::AsyncTaskHandleLike<void>);
+  static_assert(!tf::AsyncTaskHandleLike<std::nullptr_t>);
 }
 
 // ----------------------------------------------------------------------------

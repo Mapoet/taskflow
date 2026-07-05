@@ -178,8 +178,8 @@ class tf::PartitionerBase&lt; C &gt;</div><p>class to derive a partitioner for s
   </table>
   </dd>
 </dl>
-<p>The class provides base methods to derive a partitioner that can be used to schedule parallel iterations (e.g., <a class="el" href="classtf_1_1FlowBuilder.html#aae3edfa278baa75b08414e083c14c836" title="constructs an STL-styled parallel-for task">tf::Taskflow::for_each</a>).</p>
-<p>An partitioner defines the scheduling method for running parallel algorithms, such <a class="el" href="classtf_1_1FlowBuilder.html#aae3edfa278baa75b08414e083c14c836" title="constructs an STL-styled parallel-for task">tf::Taskflow::for_each</a>, <a class="el" href="classtf_1_1FlowBuilder.html#afb24798ebf46e253a40b01bffb1da6a7" title="constructs an STL-styled parallel-reduction task">tf::Taskflow::reduce</a>, and so on. By default, we provide the following partitioners:</p>
+<p>The class provides base methods to derive a partitioner that can be used to schedule parallel iterations (e.g., <a class="el" href="classtf_1_1FlowBuilder.html#a597d2cceaf2a2598a3c4b9f742b0aacc" title="constructs an STL-styled parallel-for task">tf::Taskflow::for_each</a>).</p>
+<p>An partitioner defines the scheduling method for running parallel algorithms, such <a class="el" href="classtf_1_1FlowBuilder.html#a597d2cceaf2a2598a3c4b9f742b0aacc" title="constructs an STL-styled parallel-for task">tf::Taskflow::for_each</a>, <a class="el" href="classtf_1_1FlowBuilder.html#afb24798ebf46e253a40b01bffb1da6a7" title="constructs an STL-styled parallel-reduction task">tf::Taskflow::reduce</a>, and so on. By default, we provide the following partitioners:</p>
 <ul>
 <li><a class="el" href="classtf_1_1GuidedPartitioner.html" title="class to create a guided partitioner for scheduling parallel algorithms">tf::GuidedPartitioner</a> to enable guided scheduling algorithm of adaptive chunk size</li>
 <li><a class="el" href="classtf_1_1DynamicPartitioner.html" title="class to create a dynamic partitioner for scheduling parallel algorithms">tf::DynamicPartitioner</a> to enable dynamic scheduling algorithm of equal chunk size</li>

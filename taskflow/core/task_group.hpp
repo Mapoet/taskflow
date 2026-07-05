@@ -256,7 +256,7 @@ class TaskGroup {
   });
   @endcode
   */
-  template <typename F, AsyncTaskLike... Tasks>
+  template <typename F, AsyncTaskHandleLike... Tasks>
   auto dependent_async(F&& func, Tasks&&... tasks);
   
   /**
@@ -298,7 +298,7 @@ class TaskGroup {
   });
   @endcode
   */
-  template <TaskParamsLike P, typename F, AsyncTaskLike... Tasks>
+  template <TaskParamsLike P, typename F, AsyncTaskHandleLike... Tasks>
   auto dependent_async(P&& params, F&& func, Tasks&&... tasks);
   
   /**
@@ -420,7 +420,7 @@ class TaskGroup {
   });
   @endcode
   */
-  template <typename F, AsyncTaskLike... Tasks>
+  template <typename F, AsyncTaskHandleLike... Tasks>
   tf::AsyncTask silent_dependent_async(F&& func, Tasks&&... tasks);
   
   /**
@@ -456,7 +456,7 @@ class TaskGroup {
   }); 
   @endcode
   */
-  template <TaskParamsLike P, typename F, AsyncTaskLike... Tasks>
+  template <TaskParamsLike P, typename F, AsyncTaskHandleLike... Tasks>
   tf::AsyncTask silent_dependent_async(P&& params, F&& func, Tasks&&... tasks);
   
   /**
@@ -786,7 +786,7 @@ auto TaskGroup::async(P&& params, F&& f) {
 // ------------------------------------------------------------------------------------------------
 
 // Function: silent_dependent_async
-template <typename F, AsyncTaskLike... Tasks>
+template <typename F, AsyncTaskHandleLike... Tasks>
 tf::AsyncTask TaskGroup::silent_dependent_async(F&& func, Tasks&&... tasks) {
   return silent_dependent_async(
     DefaultTaskParams{}, std::forward<F>(func), std::forward<Tasks>(tasks)...
@@ -794,7 +794,7 @@ tf::AsyncTask TaskGroup::silent_dependent_async(F&& func, Tasks&&... tasks) {
 }
 
 // Function: silent_dependent_async
-template <TaskParamsLike P, typename F, AsyncTaskLike... Tasks>
+template <TaskParamsLike P, typename F, AsyncTaskHandleLike... Tasks>
 tf::AsyncTask TaskGroup::silent_dependent_async(
   P&& params, F&& func, Tasks&&... tasks 
 ){
@@ -826,13 +826,13 @@ tf::AsyncTask TaskGroup::silent_dependent_async(
 // ------------------------------------------------------------------------------------------------
 
 // Function: dependent_async
-template <typename F, AsyncTaskLike... Tasks>
+template <typename F, AsyncTaskHandleLike... Tasks>
 auto TaskGroup::dependent_async(F&& func, Tasks&&... tasks) {
   return dependent_async(DefaultTaskParams{}, std::forward<F>(func), std::forward<Tasks>(tasks)...);
 }
 
 // Function: dependent_async
-template <TaskParamsLike P, typename F, AsyncTaskLike... Tasks>
+template <TaskParamsLike P, typename F, AsyncTaskHandleLike... Tasks>
 auto TaskGroup::dependent_async(P&& params, F&& func, Tasks&&... tasks) {
   std::array<AsyncTask*, sizeof...(Tasks)> array = { (&tasks)... };
   return dependent_async(

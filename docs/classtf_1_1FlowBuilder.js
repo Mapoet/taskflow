@@ -17,7 +17,7 @@ var classtf_1_1FlowBuilder =
     [ "fill_n", "classtf_1_1FlowBuilder.html#a6a46a8984f93399522936e3ae7b0b9e3", null ],
     [ "find_if", "classtf_1_1FlowBuilder.html#a46a96f5889e6ac87b1ff8d6313b5f471", null ],
     [ "find_if_not", "classtf_1_1FlowBuilder.html#a95fa2719fa7bbe7d171cf474ddb06726", null ],
-    [ "for_each", "classtf_1_1FlowBuilder.html#aae3edfa278baa75b08414e083c14c836", null ],
+    [ "for_each", "classtf_1_1FlowBuilder.html#a597d2cceaf2a2598a3c4b9f742b0aacc", null ],
     [ "for_each_by_index", "classtf_1_1FlowBuilder.html#a2582a216d54dacca2b7022ea7e89452a", null ],
     [ "for_each_index", "classtf_1_1FlowBuilder.html#a3b132bd902331a11b04b4ad66cf8bf77", null ],
     [ "generate", "classtf_1_1FlowBuilder.html#a6c041f68d00d086b8da5cfb53e2a46e0", null ],
@@ -35,11 +35,11 @@ var classtf_1_1FlowBuilder =
     [ "reduce_by_index", "classtf_1_1FlowBuilder.html#a3ea810696c4b29824d1aaef15342c825", null ],
     [ "sort", "classtf_1_1FlowBuilder.html#a7d844e9856c7c65b26ccdb83ffdab1d6", null ],
     [ "sort", "classtf_1_1FlowBuilder.html#a35e180eb63de6c9f28e43185e837a4fa", null ],
-    [ "transform", "classtf_1_1FlowBuilder.html#a058c250de62b9d1e4305b8ddf03906ee", null ],
-    [ "transform", "classtf_1_1FlowBuilder.html#a18d263a5c043a216380441c9d0c72a60", null ],
+    [ "transform", "classtf_1_1FlowBuilder.html#ac551dc6adba635ee3083aa11317bafcd", null ],
+    [ "transform", "classtf_1_1FlowBuilder.html#a1c70fab36c9982088677a2cb4bca7edb", null ],
     [ "transform_exclusive_scan", "classtf_1_1FlowBuilder.html#a8549478ef819699b30f8daf88f04d577", null ],
     [ "transform_inclusive_scan", "classtf_1_1FlowBuilder.html#a82f3c3f49a2d52cd52f6eac07a659e9c", null ],
     [ "transform_inclusive_scan", "classtf_1_1FlowBuilder.html#a49f7e17d02c708035b9134d8c6c89f90", null ],
     [ "transform_reduce", "classtf_1_1FlowBuilder.html#a5283a732a77ea75446f8ed5d3377f02c", null ],
-    [ "transform_reduce", "classtf_1_1FlowBuilder.html#ae787dfa29fd54d1ca655a15fea3b98a5", null ]
+    [ "transform_reduce", "classtf_1_1FlowBuilder.html#a43afba1d3c943ddac2a8c05bd706c10a", null ]
 ];

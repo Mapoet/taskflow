@@ -388,11 +388,11 @@ Capture Range by Reference</h2>
 </div><!-- fragment --><p>When <code>init</code> finishes, <code>pf</code> reads the updated range and partitions the <code>rows x cols</code> space among workers.</p>
 <h1><a class="anchor" id="ParallelIterationsIteratorBased"></a>
 Create an Iterator-based Parallel-Iteration Task</h1>
-<p>Iterator-based parallel-for performs parallel iterations over a range specified by two <a href="https://en.cppreference.com/w/cpp/iterator/iterator">STL-styled iterators</a>, <code>first</code> and <code>last</code>. The task created by <a class="el" href="classtf_1_1FlowBuilder.html#aae3edfa278baa75b08414e083c14c836" title="constructs an STL-styled parallel-for task">tf::Taskflow::for_each(B first, E last, C callable, P part)</a> represents parallel execution of the following loop:</p>
+<p>Iterator-based parallel-for performs parallel iterations over a range specified by two <a href="https://en.cppreference.com/w/cpp/iterator/iterator">STL-styled iterators</a>, <code>first</code> and <code>last</code>. The task created by <a class="el" href="classtf_1_1FlowBuilder.html#a597d2cceaf2a2598a3c4b9f742b0aacc" title="constructs an STL-styled parallel-for task">tf::Taskflow::for_each(B first, E last, C callable, P part)</a> represents parallel execution of the following loop:</p>
 <div class="fragment"><div class="line"><span class="keywordflow">for</span>(<span class="keyword">auto</span> i = first; i != last; i++) {</div>
 <div class="line">  callable(*i);</div>
 <div class="line">}</div>
-</div><!-- fragment --><p><a class="el" href="classtf_1_1FlowBuilder.html#aae3edfa278baa75b08414e083c14c836" title="constructs an STL-styled parallel-for task">tf::Taskflow::for_each</a> simultaneously applies the callable to the object obtained by dereferencing every iterator in the range <code>[first, last)</code>. It is the user's responsibility to ensure the range is valid within the execution of the parallel-for task. Iterators must have the post-increment operator <code>++</code> defined.</p>
+</div><!-- fragment --><p><a class="el" href="classtf_1_1FlowBuilder.html#a597d2cceaf2a2598a3c4b9f742b0aacc" title="constructs an STL-styled parallel-for task">tf::Taskflow::for_each</a> simultaneously applies the callable to the object obtained by dereferencing every iterator in the range <code>[first, last)</code>. It is the user's responsibility to ensure the range is valid within the execution of the parallel-for task. Iterators must have the post-increment operator <code>++</code> defined.</p>
 <div class="fragment"><div class="line">std::vector&lt;int&gt; vec = {1, 2, 3, 4, 5};</div>
 <div class="line"> </div>
 <div class="line">taskflow.for_each(vec.begin(), vec.end(), [](<span class="keywordtype">int</span> i) {</div>

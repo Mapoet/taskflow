@@ -200,7 +200,7 @@ void Executor::_silent_async(P&& params, F&& f, Topology* tpg, NodeBase* parent)
 // ----------------------------------------------------------------------------
 
 // Function: silent_dependent_async
-template <typename F, AsyncTaskLike... Tasks>
+template <typename F, AsyncTaskHandleLike... Tasks>
 tf::AsyncTask Executor::silent_dependent_async(F&& func, Tasks&&... tasks) {
   return silent_dependent_async(
     DefaultTaskParams{}, std::forward<F>(func), std::forward<Tasks>(tasks)...
@@ -208,7 +208,7 @@ tf::AsyncTask Executor::silent_dependent_async(F&& func, Tasks&&... tasks) {
 }
 
 // Function: silent_dependent_async
-template <TaskParamsLike P, typename F, AsyncTaskLike... Tasks>
+template <TaskParamsLike P, typename F, AsyncTaskHandleLike... Tasks>
 tf::AsyncTask Executor::silent_dependent_async(
   P&& params, F&& func, Tasks&&... tasks 
 ){
@@ -252,13 +252,13 @@ auto Executor::_silent_dependent_async(
 // ----------------------------------------------------------------------------
 
 // Function: dependent_async
-template <typename F, AsyncTaskLike... Tasks>
+template <typename F, AsyncTaskHandleLike... Tasks>
 auto Executor::dependent_async(F&& func, Tasks&&... tasks) {
   return dependent_async(DefaultTaskParams{}, std::forward<F>(func), std::forward<Tasks>(tasks)...);
 }
 
 // Function: dependent_async
-template <TaskParamsLike P, typename F, AsyncTaskLike... Tasks>
+template <TaskParamsLike P, typename F, AsyncTaskHandleLike... Tasks>
 auto Executor::dependent_async(P&& params, F&& func, Tasks&&... tasks) {
   std::array<AsyncTask*, sizeof...(Tasks)> array{ (&tasks)... };
   return dependent_async(

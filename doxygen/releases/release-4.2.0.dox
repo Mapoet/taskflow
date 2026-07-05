@@ -40,8 +40,13 @@ If your project does not support C++20, please use %Taskflow v3.11.0, which can 
 + added two tf::Taskflow::emplace overloads for module tasks
   + tf::Taskflow::emplace(tf::GraphLike) equivalent to tf::Taskflow::composed_of
   + tf::Taskflow::emplace(tf::Graph&&) equivalent to tf::Taskflow::adopt
-+ added a new concept tf::InputIteratorLike and refactored algorithms with it
-+ added a new concept tf::AsyncTaskLike and refactored dependent-async tasks with it
++ refactored the core with several new concepts to enhance type safety and readability
+  + tf::InputIteratorLike to check if a type is a stateful iterator
+  + tf::AsyncTaskLike to check if a type is tf::AsyncTask
+  + tf::UnaryOperationLike to check if a unary operation is valid
+  + tf::BinaryOperationLike to check if a binary operation is valid
+  + tf::UnaryTransformLike to check if a unary transform is valid
+  + tf::BinaryTransformLike to check if a binary transform is valid
 + fixed missing tf::TaskParamsLike concept usage in async tasking
 + replaced generic template type in dependent async tasks with std::input_iterator
 
