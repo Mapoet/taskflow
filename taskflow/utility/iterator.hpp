@@ -1032,4 +1032,39 @@ template <typename R>
 concept IndexRangesMDLike = IndexRangesLike<R> &&
   (std::decay_t<std::unwrap_ref_decay_t<R>>::rank > 1);
 
+// ------------------------------------------------------------------------------------------------
+// Input Iterator Concept
+// ------------------------------------------------------------------------------------------------
+
+/**
+@brief concept to check if a type is a stateful input iterator
+
+Satisfied by any type that, after unwrapping a possible
+`std::reference_wrapper` and applying `std::decay_t`, models
+`std::input_iterator`.
+
+This allows APIs to accept:
+- an input iterator,
+- a reference to an input iterator, or
+- a `std::reference_wrapper` of an input iterator (e.g., from `std::ref`),
+
+enabling the iterator value to be supplied either directly or indirectly.
+
+@code
+using Iter = std::vector<int>::iterator;
+
+static_assert(tf::InputIteratorLike<Iter>);
+static_assert(tf::InputIteratorLike<Iter&>);
+static_assert(tf::InputIteratorLike<std::reference_wrapper<Iter>>);
+
+static_assert(!tf::InputIteratorLike<int>);
+static_assert(!tf::InputIteratorLike<std::reference_wrapper<int>>);
+@endcode
+*/
+template<typename T>
+concept InputIteratorLike = std::input_iterator<std::decay_t<std::unwrap_ref_decay_t<T>>>;
+
+
 }  // end of namespace tf -----------------------------------------------------
+
+

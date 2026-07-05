@@ -5,7 +5,7 @@
 namespace tf {
 
 // Function: make_for_each_task
-template <typename B, typename E, typename C, PartitionerLike P = DefaultPartitioner>
+template <InputIteratorLike B, InputIteratorLike E, typename C, PartitionerLike P = DefaultPartitioner>
 auto make_for_each_task(B b, E e, C c, P part = P()) {
   
   using B_t = std::decay_t<std::unwrap_ref_decay_t<B>>;
@@ -221,7 +221,7 @@ auto make_for_each_by_index_task(R range, C c, P part = P()){
 // ------------------------------------------------------------------------------------------------
 
 // Function: for_each
-template <typename B, typename E, typename C, PartitionerLike P>
+template <InputIteratorLike B, InputIteratorLike E, typename C, PartitionerLike P>
 Task FlowBuilder::for_each(B beg, E end, C c, P part) {
   return emplace(
     make_for_each_task(beg, end, c, part)

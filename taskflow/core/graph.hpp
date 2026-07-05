@@ -15,6 +15,7 @@
 #include "../utility/lazy_string.hpp"
 #include "error.hpp"
 #include "declarations.hpp"
+#include "environment.hpp"
 #include "semaphore.hpp"
 #include "topology.hpp"
 #include "wsq.hpp"

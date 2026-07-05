@@ -4,9 +4,31 @@
   width: auto;
 }
 
+/* breathing room between the title area and the menu bar */
+#titlearea {
+  padding-bottom: 4px;
+  padding-left: 4px;
+}
+
+/* hide the panel-sync button (the ↔ icon next to the nav tree) */
+#nav-sync {
+  display: none;
+}
+
 /* constrain standalone @image html outside of tables */
 div.contents > div.image img,
 div.textblock > div.image img {
+  max-width: 100%;
+  height: auto;
+}
+
+/* constrain @dot / @dotfile figures */
+div.dotgraph {
+  max-width: 100%;
+  overflow-x: auto;
+}
+div.dotgraph img,
+div.dotgraph svg {
   max-width: 100%;
   height: auto;
 }
@@ -31,9 +53,34 @@ table.sponsor-table .image img {
 }
 
 body, div, p, td, th, li {
-  font-size: 14px;  /* default is ~12px, adjust to taste */
+  font-size: 15px;  /* default is ~12px, adjust to taste */
 }
 
 code, pre, .fragment {
-  font-size: 13px;  /* code blocks separately */
+  font-size: 14px;  /* code blocks separately */
+}
+
+/* Auto-adapt images to dark mode: invert flips white backgrounds to dark;
+   hue-rotate(180deg) cancels the colour distortion inversion introduces,
+   so diagrams and screenshots look approximately natural in dark mode.
+   dot/dotfile graphs use DOT_IMAGE_FORMAT=svg and are embedded as <object>
+   tags (not <img>), so the filter targets div.dotgraph directly. */
+html.dark-mode img {
+  filter: invert(1) hue-rotate(180deg);
+}
+
+html.dark-mode div.dotgraph {
+  filter: invert(1) hue-rotate(180deg);
+}
+
+/* Dark/light mode toggle hover effect */
+dark-mode-toggle {
+  border-radius: 4px;
+  padding: 2px 4px;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+dark-mode-toggle:hover {
+  background-color: rgba(128, 128, 128, 0.18);
 }

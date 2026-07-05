@@ -2497,3 +2497,37 @@ TEST_CASE("NegativeStep.upper_slice.step_size_preserved") {
     REQUIRE(std::get<2>(box.dim(2)) == -3);
   }
 }
+
+// ----------------------------------------------------------------------------
+// InputIteratorLike concept test
+// ----------------------------------------------------------------------------
+
+TEST_CASE("Concept.InputIteratorLike" * doctest::timeout(300)) {
+
+  using Iter  = std::vector<int>::iterator;
+  using CIter = std::vector<int>::const_iterator;
+
+  // Plain input iterators.
+  static_assert(tf::InputIteratorLike<Iter>);
+  static_assert(tf::InputIteratorLike<CIter>);
+  static_assert(tf::InputIteratorLike<int*>);
+  static_assert(tf::InputIteratorLike<const int*>);
+
+  // std::reference_wrapper of input iterators.
+  static_assert(tf::InputIteratorLike<std::reference_wrapper<Iter>>);
+  static_assert(tf::InputIteratorLike<std::reference_wrapper<CIter>>);
+  static_assert(tf::InputIteratorLike<std::reference_wrapper<int*>>);
+
+  // Non-input-iterators.
+  static_assert(!tf::InputIteratorLike<int>);
+  static_assert(!tf::InputIteratorLike<double>);
+  static_assert(!tf::InputIteratorLike<std::vector<int>>);
+  static_assert(!tf::InputIteratorLike<std::reference_wrapper<int>>);
+  static_assert(!tf::InputIteratorLike<std::nullptr_t>);
+}
+
+
+
+
+
+

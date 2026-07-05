@@ -96,7 +96,6 @@ class Worker {
   Xorshift<uint32_t> _rdgen; 
   std::thread _thread;
   wsq_type _wsq;
-  //std::vector<Node*> _pool;
 };
 
 // ----------------------------------------------------------------------------
@@ -145,7 +144,6 @@ class WorkerView {
   WorkerView(const WorkerView&) = default;
 
   const Worker& _worker;
-
 };
 
 // Constructor

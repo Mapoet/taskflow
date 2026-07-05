@@ -99,10 +99,10 @@ var NAVTREEINDEX =
 "Algorithms.html",
 "ParallelIterations.html#ParallelIterationsIndexRangeBased",
 "classtf_1_1FlowBuilder.html#a5b9899d132ac8712d7f3c26ce2e7a7c8",
-"classtf_1_1TaskGroup.html#a9d366485715a997dfba3635274e0201c",
-"guidelines.html#HowCanILeadAProject",
-"release-3-9-0.html#release-3-9-0_summary"
+"classtf_1_1TaskGroup.html#a7a57b0519f4d236ba8adc4de07e71c89",
+"guidelines.html#HowCanIEditTheDocumentation",
+"release-3-9-0.html#release-3-9-0_download"
 ];
 
-var SYNCONMSG = 'click to disable panel synchronization';
-var SYNCOFFMSG = 'click to enable panel synchronization';
+var SYNCONMSG = 'click to disable panel synchronisation';
+var SYNCOFFMSG = 'click to enable panel synchronisation';

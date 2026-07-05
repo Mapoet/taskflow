@@ -589,7 +589,7 @@ void parallel_3wqsort(Runtime& rt, RandItr first, RandItr last, C compare) {
 namespace tf { 
 
 // Function: make_sort_task
-template <typename B, typename E, typename C>
+template <InputIteratorLike B, InputIteratorLike E, typename C>
 auto make_sort_task(B b, E e, C cmp) {
   
   return [b, e, cmp] (Runtime& rt) mutable {
@@ -624,7 +624,7 @@ auto make_sort_task(B b, E e, C cmp) {
   };
 }
   
-template <typename B, typename E>
+template <InputIteratorLike B, InputIteratorLike E>
 auto make_sort_task(B beg, E end) {
   using value_type = std::decay_t<decltype(*std::declval<B>())>;
   return make_sort_task(beg, end, std::less<value_type>{});
@@ -635,13 +635,13 @@ auto make_sort_task(B beg, E end) {
 // ----------------------------------------------------------------------------
 
 // Function: sort
-template <typename B, typename E, typename C>
+template <InputIteratorLike B, InputIteratorLike E, typename C>
 Task FlowBuilder::sort(B beg, E end, C cmp) {
   return emplace(make_sort_task(beg, end, cmp));
 }
 
 // Function: sort
-template <typename B, typename E>
+template <InputIteratorLike B, InputIteratorLike E>
 Task FlowBuilder::sort(B beg, E end) {
   return emplace(make_sort_task(beg, end));
 }

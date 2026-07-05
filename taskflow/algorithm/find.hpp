@@ -5,7 +5,7 @@
 namespace tf {
 
 // Function: make_find_if_task
-template <typename B, typename E, typename T, typename UOP, PartitionerLike P = DefaultPartitioner>
+template <InputIteratorLike B, InputIteratorLike E, typename T, typename UOP, PartitionerLike P = DefaultPartitioner>
 auto make_find_if_task(B first, E last, T& result, UOP predicate, P part = P()) {
   
   using namespace std::string_literals;
@@ -96,7 +96,7 @@ auto make_find_if_task(B first, E last, T& result, UOP predicate, P part = P()) 
 }
 
 // Function: make_find_if_not_task
-template <typename B, typename E, typename T, typename UOP, PartitionerLike P = DefaultPartitioner>
+template <InputIteratorLike B, InputIteratorLike E, typename T, typename UOP, PartitionerLike P = DefaultPartitioner>
 auto make_find_if_not_task(B first, E last, T& result, UOP predicate, P part = P()) {
   
   using namespace std::string_literals;
@@ -186,7 +186,7 @@ auto make_find_if_not_task(B first, E last, T& result, UOP predicate, P part = P
 }
 
 // Function: make_min_element_task
-template <typename B, typename E, typename T, typename C, PartitionerLike P = DefaultPartitioner>
+template <InputIteratorLike B, InputIteratorLike E, typename T, typename C, PartitionerLike P = DefaultPartitioner>
 auto make_min_element_task(B first, E last, T& result, C comp, P part = P()) {
   
   using namespace std::string_literals;
@@ -333,7 +333,7 @@ auto make_min_element_task(B first, E last, T& result, C comp, P part = P()) {
 }
 
 // Function: make_max_element_task
-template <typename B, typename E, typename T, typename C, PartitionerLike P = DefaultPartitioner>
+template <InputIteratorLike B, InputIteratorLike E, typename T, typename C, PartitionerLike P = DefaultPartitioner>
 auto make_max_element_task(B first, E last, T& result, C comp, P part = P()) {
   
   using namespace std::string_literals;
@@ -481,13 +481,13 @@ auto make_max_element_task(B first, E last, T& result, C comp, P part = P()) {
 
 
 // Function: find_if
-template <typename B, typename E, typename T, typename UOP, PartitionerLike P>
+template <InputIteratorLike B, InputIteratorLike E, typename T, typename UOP, PartitionerLike P>
 Task tf::FlowBuilder::find_if(B first, E last, T& result, UOP predicate, P part) {
   return emplace(make_find_if_task(first, last, result, predicate, part));
 }
 
 // Function: find_if_not
-template <typename B, typename E, typename T, typename UOP, PartitionerLike P>
+template <InputIteratorLike B, InputIteratorLike E, typename T, typename UOP, PartitionerLike P>
 Task tf::FlowBuilder::find_if_not(B first, E last, T& result, UOP predicate, P part) {
   return emplace(make_find_if_not_task(first, last, result, predicate, part));
 }
@@ -497,7 +497,7 @@ Task tf::FlowBuilder::find_if_not(B first, E last, T& result, UOP predicate, P p
 // ----------------------------------------------------------------------------
 
 // Function: min_element
-template <typename B, typename E, typename T, typename C, PartitionerLike P>
+template <InputIteratorLike B, InputIteratorLike E, typename T, typename C, PartitionerLike P>
 Task FlowBuilder::min_element(B first, E last, T& result, C comp, P part) {
   return emplace(make_min_element_task(first, last, result, comp, part));
 }
@@ -507,7 +507,7 @@ Task FlowBuilder::min_element(B first, E last, T& result, C comp, P part) {
 // ----------------------------------------------------------------------------
 
 // Function: max_element
-template <typename B, typename E, typename T, typename C, PartitionerLike P>
+template <InputIteratorLike B, InputIteratorLike E, typename T, typename C, PartitionerLike P>
 Task FlowBuilder::max_element(B first, E last, T& result, C comp, P part) {
   return emplace(make_max_element_task(first, last, result, comp, part));
 }

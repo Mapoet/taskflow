@@ -9,6 +9,8 @@ var classtf_1_1FlowBuilder =
     [ "emplace", "classtf_1_1FlowBuilder.html#a4d52a7fe2814b264846a2085e931652c", null ],
     [ "emplace", "classtf_1_1FlowBuilder.html#a4d52a7fe2814b264846a2085e931652c", null ],
     [ "emplace", "classtf_1_1FlowBuilder.html#a4d52a7fe2814b264846a2085e931652c", null ],
+    [ "emplace", "classtf_1_1FlowBuilder.html#aa79a84aac17e17f9d52d574f88158841", null ],
+    [ "emplace", "classtf_1_1FlowBuilder.html#a7954beb50450198ac18f647216941f1f", null ],
     [ "erase", "classtf_1_1FlowBuilder.html#a5627f7962099ac7c4986993cffa7b909", null ],
     [ "exclusive_scan", "classtf_1_1FlowBuilder.html#a4e0d618d8eb0b3b2e5e00443a10bf512", null ],
     [ "fill", "classtf_1_1FlowBuilder.html#a5b9899d132ac8712d7f3c26ce2e7a7c8", null ],

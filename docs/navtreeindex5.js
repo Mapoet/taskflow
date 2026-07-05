@@ -1,5 +1,8 @@
 var NAVTREEINDEX5 =
 {
+"release-3-9-0.html#release-3-9-0_download":[1,6,1],
+"release-3-9-0.html#release-3-9-0_miscellaneous_items":[1,6,7],
+"release-3-9-0.html#release-3-9-0_new_features":[1,6,3],
 "release-3-9-0.html#release-3-9-0_summary":[1,6,0],
 "release-3-9-0.html#release-3-9-0_system_requirements":[1,6,2],
 "release-3-9-0.html#release-3-9-0_taskflow_core":[1,6,3,0],

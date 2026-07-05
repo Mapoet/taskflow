@@ -138,7 +138,7 @@ auto task_returns_int = []() { return 42; };
 */
 template <typename C>
 concept StaticTaskLike = std::invocable<C> &&
-                     std::same_as<std::invoke_result_t<C>, void>;
+                         std::same_as<std::invoke_result_t<C>, void>;
 
 /**
 @brief determines if a callable is a static task (variable template)
@@ -218,7 +218,7 @@ auto not_subflow3 = [](tf::Subflow& sf) { return 42; };
 */
 template <typename C>
 concept SubflowTaskLike = std::invocable<C, tf::Subflow&> &&
-                      std::same_as<std::invoke_result_t<C, tf::Subflow&>, void>;
+                          std::same_as<std::invoke_result_t<C, tf::Subflow&>, void>;
 
 /**
 @brief determines if a callable is a subflow task (variable template)
@@ -395,7 +395,7 @@ auto not_condition3 = []() { std::cout << "task\n"; };
 */
 template <typename C>
 concept ConditionTaskLike = std::invocable<C> &&
-                        std::convertible_to<std::invoke_result_t<C>, int>;
+                            std::convertible_to<std::invoke_result_t<C>, int>;
 
 /**
 @brief determines if a callable is a condition task (variable template)
@@ -492,7 +492,7 @@ auto not_multi4 = []() { std::cout << "task\n"; };
 */
 template <typename C>
 concept MultiConditionTaskLike = std::invocable<C> &&
-                             std::same_as<std::invoke_result_t<C>, SmallVector<int>>;
+                                 std::same_as<std::invoke_result_t<C>, SmallVector<int>>;
 
 /**
 @brief determines if a callable is a multi-condition task (variable template)

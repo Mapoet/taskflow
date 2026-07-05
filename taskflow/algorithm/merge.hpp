@@ -11,10 +11,10 @@ namespace tf {
 /**
 @brief creates a parallel merge task over two sorted ranges
 
-@tparam B1 iterator type for the beginning of the first range
-@tparam E1 iterator type for the end of the first range
-@tparam B2 iterator type for the beginning of the second range
-@tparam E2 iterator type for the end of the second range
+@tparam B1 iterator type for the beginning of the first range  (satisfying tf::InputIteratorLike)  
+@tparam E1 iterator type for the end of the first range        (satisfying tf::InputIteratorLike)  
+@tparam B2 iterator type for the beginning of the second range (satisfying tf::InputIteratorLike) 
+@tparam E2 iterator type for the end of the second range       (satisfying tf::InputIteratorLike) 
 @tparam O  output iterator type
 @tparam C  comparator type
 
@@ -89,7 +89,7 @@ for typical W << N.
       The output range must not overlap either input range.
       Both input iterators must be random-access iterators.
 */
-template <typename B1, typename E1, typename B2, typename E2, typename O, typename C>
+template <InputIteratorLike B1, InputIteratorLike E1, InputIteratorLike B2, InputIteratorLike E2, typename O, typename C>
 auto make_merge_task(B1 first1, E1 last1, B2 first2, E2 last2, C cmp, O d_first) {
 
   using B1_t = std::decay_t<std::unwrap_ref_decay_t<B1>>;
@@ -193,7 +193,7 @@ auto make_merge_task(B1 first1, E1 last1, B2 first2, E2 last2, C cmp, O d_first)
 /**
 @private
 */
-template <typename B1, typename E1, typename B2, typename E2, typename O>
+template <InputIteratorLike B1, InputIteratorLike E1, InputIteratorLike B2, InputIteratorLike E2, typename O>
 Task FlowBuilder::merge(B1 first1, E1 last1, B2 first2, E2 last2, O d_first) {
   return emplace(make_merge_task(
     first1, last1, first2, last2, std::less<>{}, d_first
@@ -203,7 +203,7 @@ Task FlowBuilder::merge(B1 first1, E1 last1, B2 first2, E2 last2, O d_first) {
 /**
 @private
 */
-template <typename B1, typename E1, typename B2, typename E2,
+template <InputIteratorLike B1, InputIteratorLike E1, InputIteratorLike B2, InputIteratorLike E2,
           typename O, typename C>
 Task FlowBuilder::merge(B1 first1, E1 last1, B2 first2, E2 last2, O d_first, C cmp) {
   return emplace(make_merge_task(

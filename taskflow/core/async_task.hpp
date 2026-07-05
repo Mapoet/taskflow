@@ -293,5 +293,25 @@ inline bool AsyncTask::is_done() const {
   return _node == nullptr ? true: (_node->_estate.load(std::memory_order_acquire) & ESTATE::FINISHED);
 }
 
+// ----------------------------------------------------------------------------
+// AsyncTaskLike 
+// ----------------------------------------------------------------------------
+
+
+/**
+@brief concept to check if a type is a tf::AsyncTask
+
+Satisfied by `tf::AsyncTask` and any cv- or reference-qualified form of
+`tf::AsyncTask`. 
+
+@code
+static_assert(AsyncTaskLike<AsyncTask>);
+static_assert(AsyncTaskLike<const AsyncTask&>);
+static_assert(!AsyncTaskLike<int>);
+@endcode
+ */
+template <typename T>
+concept AsyncTaskLike = std::is_same_v<std::decay_t<T>, AsyncTask>;
+
 
 }  // end of namespace tf ----------------------------------------------------

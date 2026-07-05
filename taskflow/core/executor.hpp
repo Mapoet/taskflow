@@ -754,8 +754,7 @@ class Executor {
 
   This member function is thread-safe.
   */
-  template <typename F, typename... Tasks>
-  requires (std::same_as<std::decay_t<Tasks>, AsyncTask> && ...)
+  template <typename F, AsyncTaskLike... Tasks>
   tf::AsyncTask silent_dependent_async(F&& func, Tasks&&... tasks);
   
   /**
@@ -790,8 +789,7 @@ class Executor {
 
   This member function is thread-safe.
   */
-  template <TaskParamsLike P, typename F, typename... Tasks>
-  requires (std::same_as<std::decay_t<Tasks>, AsyncTask> && ...)
+  template <TaskParamsLike P, typename F, AsyncTaskLike... Tasks>
   tf::AsyncTask silent_dependent_async(P&& params, F&& func, Tasks&&... tasks);
   
   /**
@@ -908,8 +906,7 @@ class Executor {
 
   This member function is thread-safe.
   */
-  template <typename F, typename... Tasks>
-  requires (std::same_as<std::decay_t<Tasks>, AsyncTask> && ...)
+  template <typename F, AsyncTaskLike... Tasks>
   auto dependent_async(F&& func, Tasks&&... tasks);
   
   /**
@@ -953,8 +950,7 @@ class Executor {
 
   This member function is thread-safe.
   */
-  template <TaskParamsLike P, typename F, typename... Tasks>
-  requires (std::same_as<std::decay_t<Tasks>, AsyncTask> && ...)
+  template <TaskParamsLike P, typename F, AsyncTaskLike... Tasks>
   auto dependent_async(P&& params, F&& func, Tasks&&... tasks);
   
   /**

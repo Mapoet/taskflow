@@ -4,6 +4,7 @@ var concepts =
       [ "IndexRangesLike", "concepttf_1_1IndexRangesLike.html", null ],
       [ "IndexRanges1DLike", "concepttf_1_1IndexRanges1DLike.html", null ],
       [ "IndexRangesMDLike", "concepttf_1_1IndexRangesMDLike.html", null ],
+      [ "InputIteratorLike", "concepttf_1_1InputIteratorLike.html", null ],
       [ "StringLike", "concepttf_1_1StringLike.html", null ],
       [ "TaskParamsLike", "concepttf_1_1TaskParamsLike.html", null ],
       [ "GraphLike", "concepttf_1_1GraphLike.html", null ],
