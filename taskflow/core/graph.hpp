@@ -872,7 +872,7 @@ class ExplicitAnchorGuard {
 /**
 @private
 */
-using NodePool = std::conditional_t
+using NodePool = std::conditional_t<
   std::atomic<tf::TaggedHead128>::is_always_lock_free,
   ObjectPool<Node, tf::TaggedHead128>,
   ObjectPool<Node, tf::TaggedHead64<>>
