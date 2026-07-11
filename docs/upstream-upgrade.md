@@ -39,4 +39,48 @@ The final section of this document will record exact test totals and any skips.
 
 ## Verification Results
 
-Pending execution on `upgrade/taskflow-4x`.
+Verified on branch `upgrade/taskflow-4x` at commit `c69777ba8` (merge commit).
+
+### Environment
+
+- OS: Linux (kernel 5.10)
+- Compiler: GCC 11.4.0
+- CMake: 3.29.0
+- C++ standard: 20
+- CUDA: disabled for offline matrix
+
+### Configure commands
+
+```bash
+cmake -S . -B build-upgrade-core -DCMAKE_BUILD_TYPE=Debug \
+  -DTF_BUILD_TESTS=ON -DTF_BUILD_EXAMPLES=OFF \
+  -DTF_BUILD_WORKFLOW=OFF -DTF_BUILD_AGENT_FRAMEWORK=OFF -DTF_BUILD_CUDA=OFF
+
+cmake -S . -B build-upgrade-workflow -DCMAKE_BUILD_TYPE=Debug \
+  -DTF_BUILD_TESTS=ON -DTF_BUILD_EXAMPLES=OFF \
+  -DTF_BUILD_WORKFLOW=ON -DTF_BUILD_AGENT_FRAMEWORK=OFF -DTF_BUILD_CUDA=OFF
+
+cmake -S . -B build-upgrade-full -DCMAKE_BUILD_TYPE=Debug \
+  -DTF_BUILD_TESTS=ON -DTF_BUILD_EXAMPLES=OFF \
+  -DTF_BUILD_WORKFLOW=ON -DTF_BUILD_AGENT_FRAMEWORK=ON -DTF_BUILD_CUDA=OFF
+```
+
+### CTest totals
+
+| Build directory | Tests | Passed | Failed | Skipped | Wall time |
+| --- | ---: | ---: | ---: | ---: | --- |
+| `build-upgrade-core` | 2919 | 2919 | 0 | 0 | ~260 s |
+| `build-upgrade-workflow` | 2919 | 2919 | 0 | 0 | ~265 s |
+| `build-upgrade-full` | 2984 | 2984 | 0 | 0 | ~270 s |
+
+### Adaptation notes
+
+- **Taskflow core / Workflow**: no source changes required; existing code compiled against Taskflow 4.1 headers without API edits.
+- **Agent Framework**: one test fix in `test_prompt_renderer_wp4.cpp` — `Message` aggregate initialization was updated to match the current six-field layout (`tool_call_id`, `tool_name`, `tool_result`, `timestamp`).
+- **Merge conflicts resolved** in `CMakeLists.txt`, `README.md`, `examples/simple.cpp`, and `.github/workflows/ubuntu.yml` (fork Workflow/Agent options and C++20 CI retained alongside upstream modules support).
+
+### Known limitations
+
+- Upstream ancestry check `git merge-base --is-ancestor upstream/master HEAD` may report false on shallow/partial upstream fetches; the merge commit records upstream parent `0ebd18849` (grafted from `46a9c1ab`).
+- CUDA builds, live LLM credentials, and GUI demos (`imgui_agent_demo`) were not exercised in this offline pass.
+- `AGENT_BUILD_EXAMPLES=OFF` during full configure; CLI/GUI examples were not rebuilt in `build-upgrade-full`.
