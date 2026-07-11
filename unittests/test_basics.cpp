@@ -2,6 +2,7 @@
 
 #include <doctest.h>
 #include <taskflow/taskflow.hpp>
+#include <taskflow/observer/chrome.hpp>
 #include <taskflow/algorithm/for_each.hpp>
 #include <taskflow/algorithm/reduce.hpp>
 
@@ -47,6 +48,22 @@ TEST_CASE("Type" * doctest::timeout(300)) {
   static_assert(tf::is_runtime_task_v<decltype(task6)> == false, "");
   static_assert(tf::is_runtime_task_v<decltype(task7)> == true, "");
   static_assert(tf::is_runtime_task_v<decltype(task8)> == false, "");
+}
+
+// --------------------------------------------------------
+// Testcase: tf::Future
+// --------------------------------------------------------
+TEST_CASE("Future" * doctest::timeout(300)) {
+  std::promise<void> promise1;
+  promise1.set_value();
+  tf::Future<void> fu1(promise1.get_future());
+  REQUIRE(fu1.valid());
+
+  std::promise<int> promise2;
+  promise2.set_value(1);
+  tf::Future<int> fu2(promise2.get_future());
+  REQUIRE(fu2.valid());
+  REQUIRE(fu2.get() == 1);
 }
 
 // --------------------------------------------------------
@@ -771,7 +788,7 @@ void worker_id(unsigned w) {
       REQUIRE(id>=0);
       REQUIRE(id< w);
       REQUIRE(executor.this_worker() != nullptr);
-      REQUIRE(executor.this_worker()->executor() == &executor);
+      //REQUIRE(executor.this_worker()->executor() == &executor);
     });
 
     auto B = taskflow.emplace([&](tf::Subflow& sf){

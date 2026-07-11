@@ -1,13 +1,14 @@
 digraph TaskflowExceptionHandling {
   rankdir=TB;
+  node [shape=box];
 
   ExceptionHandling [label="Exception Handling in Taskflow"];
 
   Scenarios [label="A task throws an exception", shape=diamond];
 
-  Propagation [label="Scenario 1:\n Exception propagation\nthrough Shared State"];
-  Immediate [label="Scenario 2:\n Immediate exception\nin blocking execution"];
-  Silent [label="Scenario 3:\n Silent exception\nsuppression"];
+  Immediate [label="Scenario 1:\nSynchronous Exception Propagation"];
+  Propagation [label="Scenario 2:\nAsynchronous Exception Propagation"];
+  Silent [label="Scenario 3:\nSilent Exception Propagation"];
 
   ExceptionHandling -> Scenarios;
   Scenarios -> Propagation;

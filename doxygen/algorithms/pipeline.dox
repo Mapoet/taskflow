@@ -23,14 +23,11 @@ for implementing task-parallel pipeline algorithms.
 
 @section UnderstandPipelineScheduling Understand the Pipeline Scheduling Framework
 
-A tf::Pipeline object is a @em composable graph to create a 
-<i>pipeline scheduling framework</i> through a module task in a taskflow
-(see @ref ComposableTasking).
-Unlike the conventional pipeline programming frameworks (e.g., Intel TBB Parallel %Pipeline), 
-%Taskflow's pipeline algorithm does not provide any data abstraction, 
-which often restricts users from optimizing data layouts in their applications, 
-but a flexible framework for users to customize their application data atop 
-an efficient pipeline scheduling framework.
+A tf::Pipeline is a composable graph object that allows users to parallelize an application
+using pipeline parallelism.
+Unlike conventional pipeline programming frameworks (e.g., Intel TBB),
+tf::Pipeline does not provide any data abstraction but a task-parallel framework
+for users to customize their data layout when leveraging pipeline parallelism.
 
 @dotfile images/pipeline_our_structure.dot
 
@@ -50,7 +47,7 @@ a <i>parallel</i> type,
 where a serial pipe processes data tokens sequentially and
 a parallel pipe processes different data tokens simultaneously.
 
-@attention
+@note
 Due to the nature of pipeline, %Taskflow requires the first pipe to be a serial type.
 The pipeline scheduling algorithm operates in a circular fashion with a factor of line count.
 
@@ -151,7 +148,7 @@ The following figure shows the data layout of @c buffer.
 
 @dotfile images/pipeline_memory_layout.dot
 
-@attention
+@note
 In practice, you may need to add padding to the data type of the buffer or 
 align it with the cacheline size to avoid false sharing.
 If the data type varies at different pipes, you can use @std_variant to store the
@@ -169,7 +166,7 @@ after the callable.
 As we can see from this example, tf::Pipeline gives you the full control to customize
 your application data on top of a pipeline scheduling framework.
 
-@attention
+@note
 1. Calling tf::Pipeflow::stop() not at the first pipe has no effect on the pipeline scheduling.
 2. In most cases, std::thread::hardware_concurrency is a good number for line count.
 
@@ -775,16 +772,6 @@ stop
 The output can be different from run to run, since the second pipe is a parallel type.
 At the second iteration from the condition task,
 we reset the pipeline so the token identifier starts from @c 0 rather than @c 5.
-
-@section TaskParallelPipelineLearnMore Learn More about Taskflow Pipeline
-
-Visit the following pages to learn more about pipeline:
-
-+ @ref TaskParallelScalablePipeline
-+ @ref DataParallelPipeline
-+ @ref TextProcessingPipeline
-+ @ref GraphProcessingPipeline
-+ @ref TaskflowProcessingPipeline
 
 
 */

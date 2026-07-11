@@ -452,131 +452,48 @@ TEST_CASE("ObjectPool.16threads" * doctest::timeout(300)) {
 TEST_CASE("RefWrapper" * doctest::timeout(300)) {
 
   static_assert(std::is_same<
-    tf::unwrap_reference_t<int>, int
+    std::unwrap_reference_t<int>, int
   >::value, "");
 
   static_assert(std::is_same<
-    tf::unwrap_reference_t<int&>, int&
+    std::unwrap_reference_t<int&>, int&
   >::value, "");
 
   static_assert(std::is_same<
-    tf::unwrap_reference_t<int&&>, int&&
+    std::unwrap_reference_t<int&&>, int&&
   >::value, "");
 
   static_assert(std::is_same<
-    tf::unwrap_reference_t<std::reference_wrapper<int>>, int&
+    std::unwrap_reference_t<std::reference_wrapper<int>>, int&
   >::value, "");
 
   static_assert(std::is_same<
-    tf::unwrap_reference_t<std::reference_wrapper<std::reference_wrapper<int>>>,
+    std::unwrap_reference_t<std::reference_wrapper<std::reference_wrapper<int>>>,
     std::reference_wrapper<int>&
   >::value, "");
 
   static_assert(std::is_same<
-    tf::unwrap_ref_decay_t<int>, int
+    std::unwrap_ref_decay_t<int>, int
   >::value, "");
 
   static_assert(std::is_same<
-    tf::unwrap_ref_decay_t<int&>, int
+    std::unwrap_ref_decay_t<int&>, int
   >::value, "");
 
   static_assert(std::is_same<
-    tf::unwrap_ref_decay_t<int&&>, int
+    std::unwrap_ref_decay_t<int&&>, int
   >::value, "");
 
   static_assert(std::is_same<
-    tf::unwrap_ref_decay_t<std::reference_wrapper<int>>, int&
+    std::unwrap_ref_decay_t<std::reference_wrapper<int>>, int&
   >::value, "");
 
   static_assert(std::is_same<
-    tf::unwrap_ref_decay_t<std::reference_wrapper<std::reference_wrapper<int>>>,
+    std::unwrap_ref_decay_t<std::reference_wrapper<std::reference_wrapper<int>>>,
     std::reference_wrapper<int>&
   >::value, "");
 
 }
-
-//// --------------------------------------------------------
-//// Testcase: FunctionTraits
-//// --------------------------------------------------------
-//void func1() {
-//}
-//
-//int func2(int, double, float, char) {
-//  return 0;
-//}
-//
-//TEST_CASE("FunctionTraits" * doctest::timeout(300)) {
-//
-//  SUBCASE("func1") {
-//    using func1_traits = tf::function_traits<decltype(func1)>;
-//    static_assert(std::is_same<func1_traits::return_type, void>::value, "");
-//    static_assert(func1_traits::arity == 0, "");
-//  }
-//
-//  SUBCASE("func2") {
-//    using func2_traits = tf::function_traits<decltype(func2)>;
-//    static_assert(std::is_same<func2_traits::return_type, int>::value, "");
-//    static_assert(func2_traits::arity == 4, "");
-//    static_assert(std::is_same<func2_traits::argument_t<0>, int>::value,   "");
-//    static_assert(std::is_same<func2_traits::argument_t<1>, double>::value,"");
-//    static_assert(std::is_same<func2_traits::argument_t<2>, float>::value, "");
-//    static_assert(std::is_same<func2_traits::argument_t<3>, char>::value,  "");
-//  }
-//
-//  SUBCASE("lambda1") {
-//    auto lambda1 = [] () mutable {
-//      return 1;
-//    };
-//    using lambda1_traits = tf::function_traits<decltype(lambda1)>;
-//    static_assert(std::is_same<lambda1_traits::return_type, int>::value, "");
-//    static_assert(lambda1_traits::arity == 0, "");
-//  }
-//
-//  SUBCASE("lambda2") {
-//    auto lambda2 = [] (int, double, char&) {
-//    };
-//    using lambda2_traits = tf::function_traits<decltype(lambda2)>;
-//    static_assert(std::is_same<lambda2_traits::return_type, void>::value, "");
-//    static_assert(lambda2_traits::arity == 3, "");
-//    static_assert(std::is_same<lambda2_traits::argument_t<0>, int>::value, "");
-//    static_assert(std::is_same<lambda2_traits::argument_t<1>, double>::value, "");
-//    static_assert(std::is_same<lambda2_traits::argument_t<2>, char&>::value, "");
-//  }
-//
-//  SUBCASE("class") {
-//    struct foo {
-//      int operator ()(int, float) const;
-//    };
-//    using foo_traits = tf::function_traits<foo>;
-//    static_assert(std::is_same<foo_traits::return_type, int>::value, "");
-//    static_assert(foo_traits::arity == 2, "");
-//    static_assert(std::is_same<foo_traits::argument_t<0>, int>::value, "");
-//    static_assert(std::is_same<foo_traits::argument_t<1>, float>::value, "");
-//  }
-//
-//  SUBCASE("std-function") {
-//    using ft1 = tf::function_traits<std::function<void()>>;
-//    static_assert(std::is_same<ft1::return_type, void>::value, "");
-//    static_assert(ft1::arity == 0, "");
-//
-//    using ft2 = tf::function_traits<std::function<int(int&, double&&)>&>;
-//    static_assert(std::is_same<ft2::return_type, int>::value, "");
-//    static_assert(ft2::arity == 2, "");
-//    static_assert(std::is_same<ft2::argument_t<0>, int&>::value, "");
-//    static_assert(std::is_same<ft2::argument_t<1>, double&&>::value, "");
-//
-//    using ft3 = tf::function_traits<std::function<int(int&, double&&)>&&>;
-//    static_assert(std::is_same<ft3::return_type, int>::value, "");
-//    static_assert(ft3::arity == 2, "");
-//    static_assert(std::is_same<ft3::argument_t<0>, int&>::value, "");
-//    static_assert(std::is_same<ft3::argument_t<1>, double&&>::value, "");
-//
-//    using ft4 = tf::function_traits<const std::function<void(int)>&>;
-//    static_assert(std::is_same<ft4::return_type, void>::value, "");
-//    static_assert(ft4::arity == 1, "");
-//    static_assert(std::is_same<ft4::argument_t<0>, int>::value, "");
-//  }
-//}
 
 // --------------------------------------------------------
 // Math utilities
@@ -620,32 +537,6 @@ TEST_CASE("NextPow2") {
   REQUIRE(tf::is_pow2(64u) == true);
 }
 
-// ----------------------------------------------------------------------------
-// count the number of trailing zeros
-// ----------------------------------------------------------------------------
-
-TEST_CASE("CTZ") {
-  REQUIRE(tf::ctz<uint32_t>(0b00000001) == 0);
-  REQUIRE(tf::ctz<uint32_t>(0b00000010) == 1);
-  REQUIRE(tf::ctz<uint32_t>(0b00000100) == 2);
-  REQUIRE(tf::ctz<uint32_t>(0b10000000) == 7);
-
-  REQUIRE(tf::ctz<uint64_t>(0b00000001ULL) == 0);
-  REQUIRE(tf::ctz<uint64_t>(0b00000010ULL) == 1);
-  REQUIRE(tf::ctz<uint64_t>(0b00000100ULL) == 2);
-  REQUIRE(tf::ctz<uint64_t>(0x8000000000000000ULL) == 63);
-
-  //REQUIRE(tf::ctz<uint32_t>(0) == 32); // Undefined behavior, doesn't work for Windows
-  REQUIRE(tf::ctz<uint32_t>(0xFFFFFFFF) == 0);
-  REQUIRE(tf::ctz<uint32_t>(0x00010000) == 16);
-  REQUIRE(tf::ctz<uint32_t>(0x80000000) == 31);
-
-  //REQUIRE(tf::ctz<uint64_t>(0) == 64); // Undefined behavior, doesn't work for Windows
-  REQUIRE(tf::ctz<uint64_t>(0xFFFFFFFFFFFFFFFFULL) == 0);
-  REQUIRE(tf::ctz<uint64_t>(0x0000000100000000ULL) == 32);
-  REQUIRE(tf::ctz<uint64_t>(0x0000000000008000ULL) == 15);
-  REQUIRE(tf::ctz<uint64_t>(0x4000000000000000ULL) == 62);
-}
 
 // ----------------------------------------------------------------------------
 // test coprimes
@@ -713,40 +604,550 @@ TEST_CASE("Coprimes") {
 }
 
 // ----------------------------------------------------------------------------
-// Log2
+// xorshift
 // ----------------------------------------------------------------------------
 
-TEST_CASE("FloorLog2") {
+TEST_CASE("Xorshift.Zero") {
+  {
+    tf::Xorshift<uint32_t> rng(0);
+    for(int i = 0; i < 10; ++i) {
+      assert(rng() == 0);
+    }
+  }
 
-  REQUIRE(tf::floor_log2(1u) == 0);
-  REQUIRE(tf::floor_log2(2u) == 1);
-  REQUIRE(tf::floor_log2(4u) == 2);
-  REQUIRE(tf::floor_log2(8u) == 3);
-  REQUIRE(tf::floor_log2(16u) == 4);
-  REQUIRE(tf::floor_log2(32u) == 5);
-  REQUIRE(tf::floor_log2(64u) == 6);
-  REQUIRE(tf::floor_log2(128u) == 7);
-  REQUIRE(tf::floor_log2(256u) == 8);
-
-  // Test non-powers of 2 (floor log2)
-  REQUIRE(tf::floor_log2(3u) == 1);
-  REQUIRE(tf::floor_log2(5u) == 2);
-  REQUIRE(tf::floor_log2(6u) == 2);
-  REQUIRE(tf::floor_log2(7u) == 2);
-  REQUIRE(tf::floor_log2(9u) == 3);
-  REQUIRE(tf::floor_log2(10u) == 3);
-  REQUIRE(tf::floor_log2(15u) == 3);
-  REQUIRE(tf::floor_log2(17u) == 4);
-  REQUIRE(tf::floor_log2(31u) == 4);
-  REQUIRE(tf::floor_log2(33u) == 5);
-  
-  // Test large values
-  REQUIRE(tf::floor_log2(1023u) == 9);
-  REQUIRE(tf::floor_log2(1024u) == 10);
-  REQUIRE(tf::floor_log2(1025u) == 10);
-  REQUIRE(tf::floor_log2(std::numeric_limits<uint32_t>::max()) == 31);
-  REQUIRE(tf::floor_log2(std::numeric_limits<uint64_t>::max()) == 63);
+  { 
+    tf::Xorshift<uint64_t> rng(0);
+    for(int i = 0; i < 10; ++i) {
+      assert(rng() == 0);
+    }
+  }
 }
+
+TEST_CASE("Xorshift.Determinism") {
+  {
+    tf::Xorshift<uint32_t> rng1(42);
+    tf::Xorshift<uint32_t> rng2(42);
+    for(int i = 0; i < 10; ++i) {
+      REQUIRE(rng1() == rng2());
+    }
+  }
+  {
+    tf::Xorshift<uint64_t> rng1(42);
+    tf::Xorshift<uint64_t> rng2(42);
+    for(int i = 0; i < 10; ++i) {
+      REQUIRE(rng1() == rng2());
+    }
+  }
+}
+
+template <typename T>
+void xorshift_uniformity(size_t bits) {
+
+  const size_t MASK = (1<<bits) - 1;
+  const size_t N = 1000000;
+
+  tf::Xorshift<T> rng(0xC0FFEE4U);
+  uint64_t sum = 0;
+  
+  for(size_t i = 0; i < N; ++i) {
+    sum += (rng() & MASK); 
+  }
+  double avg = static_cast<double>(sum) / N;
+  double expected = ((1<<bits) - 1) / 2.0; 
+
+  //std::cout << expected << " vs " << avg << " : delta = " 
+  //          << std::abs(expected - avg)/expected*100 << "%\n";
+  
+  // Allow 1% tolerance
+  REQUIRE((avg > expected * 0.99));
+  REQUIRE((avg < expected * 1.01));
+}
+
+TEST_CASE("Xorshift.uint32.Uniformity.16bits") {
+  xorshift_uniformity<uint32_t>(16);
+}
+
+TEST_CASE("Xorshift.uint32.Uniformity.15bits") {
+  xorshift_uniformity<uint32_t>(15);
+}
+
+TEST_CASE("Xorshift.uint32.Uniformity.14bits") {
+  xorshift_uniformity<uint32_t>(14);
+}
+
+TEST_CASE("Xorshift.uint32.Uniformity.13bits") {
+  xorshift_uniformity<uint32_t>(13);
+}
+
+TEST_CASE("Xorshift.uint32.Uniformity.12bits") {
+  xorshift_uniformity<uint32_t>(12);
+}
+
+TEST_CASE("Xorshift.uint32.Uniformity.11bits") {
+  xorshift_uniformity<uint32_t>(11);
+}
+
+TEST_CASE("Xorshift.uint32.Uniformity.10bits") {
+  xorshift_uniformity<uint32_t>(10);
+}
+
+TEST_CASE("Xorshift.uint32.Uniformity.9bits") {
+  xorshift_uniformity<uint32_t>(9);
+}
+
+TEST_CASE("Xorshift.uint32.Uniformity.8bits") {
+  xorshift_uniformity<uint32_t>(8);
+}
+
+TEST_CASE("Xorshift.uint32.Uniformity.7bits") {
+  xorshift_uniformity<uint32_t>(7);
+}
+
+TEST_CASE("Xorshift.uint32.Uniformity.6bits") {
+  xorshift_uniformity<uint32_t>(6);
+}
+
+TEST_CASE("Xorshift.uint32.Uniformity.5bits") {
+  xorshift_uniformity<uint32_t>(5);
+}
+
+TEST_CASE("Xorshift.uint32.Uniformity.4bits") {
+  xorshift_uniformity<uint32_t>(4);
+}
+
+TEST_CASE("Xorshift.uint32.Uniformity.3bits") {
+  xorshift_uniformity<uint32_t>(3);
+}
+
+TEST_CASE("Xorshift.uint32.Uniformity.2bits") {
+  xorshift_uniformity<uint32_t>(2);
+}
+
+TEST_CASE("Xorshift.uint32.Uniformity.1bits") {
+  xorshift_uniformity<uint32_t>(1);
+}
+
+TEST_CASE("Xorshift.uint64.Uniformity.16bits") {
+  xorshift_uniformity<uint64_t>(16);
+}
+
+TEST_CASE("Xorshift.uint64.Uniformity.15bits") {
+  xorshift_uniformity<uint64_t>(15);
+}
+
+TEST_CASE("Xorshift.uint64.Uniformity.14bits") {
+  xorshift_uniformity<uint64_t>(14);
+}
+
+TEST_CASE("Xorshift.uint64.Uniformity.13bits") {
+  xorshift_uniformity<uint64_t>(13);
+}
+
+TEST_CASE("Xorshift.uint64.Uniformity.12bits") {
+  xorshift_uniformity<uint64_t>(12);
+}
+
+TEST_CASE("Xorshift.uint64.Uniformity.11bits") {
+  xorshift_uniformity<uint64_t>(11);
+}
+
+TEST_CASE("Xorshift.uint64.Uniformity.10bits") {
+  xorshift_uniformity<uint64_t>(10);
+}
+
+TEST_CASE("Xorshift.uint64.Uniformity.9bits") {
+  xorshift_uniformity<uint64_t>(9);
+}
+
+TEST_CASE("Xorshift.uint64.Uniformity.8bits") {
+  xorshift_uniformity<uint64_t>(8);
+}
+
+TEST_CASE("Xorshift.uint64.Uniformity.7bits") {
+  xorshift_uniformity<uint64_t>(7);
+}
+
+TEST_CASE("Xorshift.uint64.Uniformity.6bits") {
+  xorshift_uniformity<uint64_t>(6);
+}
+
+TEST_CASE("Xorshift.uint64.Uniformity.5bits") {
+  xorshift_uniformity<uint64_t>(5);
+}
+
+TEST_CASE("Xorshift.uint64.Uniformity.4bits") {
+  xorshift_uniformity<uint64_t>(4);
+}
+
+TEST_CASE("Xorshift.uint64.Uniformity.3bits") {
+  xorshift_uniformity<uint64_t>(3);
+}
+
+TEST_CASE("Xorshift.uint64.Uniformity.2bits") {
+  xorshift_uniformity<uint64_t>(2);
+}
+
+TEST_CASE("Xorshift.uint64.Uniformity.1bits") {
+  xorshift_uniformity<uint64_t>(1);
+}
+
+
+// ------------------------------------------------------------------------------------------------
+// unroll
+// ------------------------------------------------------------------------------------------------
+
+TEST_CASE("Unroll" * doctest::timeout(300)) {
+
+  // ── empty range ───────────────────────────────────────────────────
+  {
+    int count = 0;
+    tf::unroll<0,  0, 1>([&](int){ count++; });
+    tf::unroll<5,  5, 1>([&](int){ count++; });
+    tf::unroll<5,  5, 3>([&](int){ count++; });
+    tf::unroll<100,100,7>([&](int){ count++; });
+    REQUIRE(count == 0);
+  }
+
+  // ── single iteration ──────────────────────────────────────────────
+  {
+    int seen = -1;
+    tf::unroll<7, 8, 1>([&](int i){ seen = i; });
+    REQUIRE(seen == 7);
+
+    // step larger than the range → exactly one call at beg
+    seen = -1;
+    tf::unroll<3, 5, 99>([&](int i){ seen = i; });
+    REQUIRE(seen == 3);
+  }
+
+  // ── exact indices, step = 1 ───────────────────────────────────────
+  {
+    std::vector<int> got;
+    tf::unroll<0, 5, 1>([&](int i){ got.push_back(i); });
+    REQUIRE(got == std::vector<int>{0,1,2,3,4});
+
+    got.clear();
+    tf::unroll<10, 20, 1>([&](int i){ got.push_back(i); });
+    REQUIRE(got == std::vector<int>{10,11,12,13,14,15,16,17,18,19});
+  }
+
+  // ── step > 1, evenly divisible ────────────────────────────────────
+  {
+    std::vector<int> got;
+    tf::unroll<0, 10, 2>([&](int i){ got.push_back(i); });
+    REQUIRE(got == std::vector<int>{0,2,4,6,8});
+
+    got.clear();
+    tf::unroll<0, 9, 3>([&](int i){ got.push_back(i); });
+    REQUIRE(got == std::vector<int>{0,3,6});
+  }
+
+  // ── step > 1, NOT divisible (ceil semantics) ──────────────────────
+  // count = ceil((end - beg) / step); last visited index can be < end - 1
+  {
+    std::vector<int> got;
+    tf::unroll<0, 10, 3>([&](int i){ got.push_back(i); });
+    REQUIRE(got == std::vector<int>{0,3,6,9});         // 9 < 10
+
+    got.clear();
+    tf::unroll<0, 11, 3>([&](int i){ got.push_back(i); });
+    REQUIRE(got == std::vector<int>{0,3,6,9});         // 12 would overshoot
+
+    got.clear();
+    tf::unroll<0, 13, 3>([&](int i){ got.push_back(i); });
+    REQUIRE(got == std::vector<int>{0,3,6,9,12});
+
+    got.clear();
+    tf::unroll<10, 20, 3>([&](int i){ got.push_back(i); });
+    REQUIRE(got == std::vector<int>{10,13,16,19});
+
+    got.clear();
+    tf::unroll<10, 20, 2>([&](int i){ got.push_back(i); });
+    REQUIRE(got == std::vector<int>{10,12,14,16,18});
+  }
+
+  // ── step >= range ─────────────────────────────────────────────────
+  {
+    std::vector<int> got;
+    tf::unroll<0, 5, 5>  ([&](int i){ got.push_back(i); });
+    REQUIRE(got == std::vector<int>{0});
+
+    got.clear();
+    tf::unroll<0, 5, 100>([&](int i){ got.push_back(i); });
+    REQUIRE(got == std::vector<int>{0});
+  }
+
+  // ── left-to-right execution order ─────────────────────────────────
+  {
+    std::vector<int> order;
+    tf::unroll<0, 8, 1>([&](int i){ order.push_back(i); });
+    for (int k = 0; k < (int)order.size(); ++k) REQUIRE(order[k] == k);
+
+    order.clear();
+    tf::unroll<3, 9, 2>([&](int i){ order.push_back(i * 10); });
+    REQUIRE(order == std::vector<int>{30, 50, 70});
+  }
+
+  // ── value-category of the index passed to f ───────────────────────
+  // f receives a prvalue, so both by-value and by-const-ref must work.
+  {
+    int s1 = 0, s2 = 0;
+    tf::unroll<0, 5, 1>([&](int i)         { s1 += i; });
+    tf::unroll<0, 5, 1>([&](const int& i)  { s2 += i; });
+    REQUIRE(s1 == 10);
+    REQUIRE(s2 == 10);
+  }
+
+  // ── return value of f is discarded ────────────────────────────────
+  {
+    int hits = 0;
+    tf::unroll<0, 4, 1>([&](int i) -> int { ++hits; return i + 1; });
+    REQUIRE(hits == 4);
+  }
+
+  // ── different index types ─────────────────────────────────────────
+  {
+    std::vector<std::size_t> got;
+    tf::unroll<std::size_t{0}, std::size_t{4}, std::size_t{1}>(
+      [&](std::size_t i){ got.push_back(i); }
+    );
+    REQUIRE(got == std::vector<std::size_t>{0,1,2,3});
+  }
+
+  // ── nesting (the common HPC register-tile pattern) ────────────────
+  {
+    std::vector<std::pair<int,int>> got;
+    tf::unroll<0, 3, 1>([&](int i){
+      tf::unroll<0, 2, 1>([&](int j){
+        got.emplace_back(i, j);
+      });
+    });
+    REQUIRE(got == std::vector<std::pair<int,int>>{
+      {0,0},{0,1},{1,0},{1,1},{2,0},{2,1}
+    });
+  }
+
+  // ── constexpr / compile-time evaluation ───────────────────────────
+  {
+    constexpr auto sum_0_to_9 = []{
+      int s = 0;
+      tf::unroll<0, 10, 1>([&](int i){ s += i; });
+      return s;
+    }();
+    static_assert(sum_0_to_9 == 45);
+    REQUIRE(sum_0_to_9 == 45);
+
+    constexpr auto count_step3 = []{
+      int n = 0;
+      tf::unroll<0, 13, 3>([&](int){ ++n; });
+      return n;
+    }();
+    static_assert(count_step3 == 5);  // 0,3,6,9,12
+  }
+
+  // ── original cumulative baseline (preserved verbatim) ─────────────
+  {
+    int count = 0;
+    tf::unroll<0,  0, 1>([&](int){ count++; }); REQUIRE(count == 0);
+    tf::unroll<0,  1, 1>([&](int){ count++; }); REQUIRE(count == 1);
+    tf::unroll<0,  3, 1>([&](int){ count++; }); REQUIRE(count == 4);
+    tf::unroll<10,20, 1>([&](int){ count++; }); REQUIRE(count == 14);
+    tf::unroll<10,20, 2>([&](int){ count++; }); REQUIRE(count == 19);
+  }
+}
+
+TEST_CASE("UnrollUntil" * doctest::timeout(300)) {
+
+  // ---- empty range: f never called, fold-over-empty-|| == false
+  {
+    int count = 0;
+    bool r1 = tf::unroll_until<0, 0, 1>([&](int){ count++; return true;  });
+    bool r2 = tf::unroll_until<5, 5, 1>([&](int){ count++; return true;  });
+    bool r3 = tf::unroll_until<5, 5, 3>([&](int){ count++; return false; });
+    bool r4 = tf::unroll_until<7, 7, 9>([&](int){ count++; return true;  });
+    REQUIRE(count == 0);
+    REQUIRE(r1 == false);
+    REQUIRE(r2 == false);
+    REQUIRE(r3 == false);
+    REQUIRE(r4 == false);
+  }
+
+  // ---- single iteration, predicate false → visited once, returns false
+  {
+    int count = 0, seen = -1;
+    bool r = tf::unroll_until<7, 8, 1>(
+      [&](int i){ count++; seen = i; return false; }
+    );
+    REQUIRE(count == 1);
+    REQUIRE(seen  == 7);
+    REQUIRE(r == false);
+  }
+
+  // ---- single iteration, predicate true → visited once, returns true
+  {
+    int count = 0, seen = -1;
+    bool r = tf::unroll_until<7, 8, 1>(
+      [&](int i){ count++; seen = i; return true; }
+    );
+    REQUIRE(count == 1);
+    REQUIRE(seen  == 7);
+    REQUIRE(r == true);
+  }
+
+  // ---- predicate always false → all visited, returns false
+  {
+    std::vector<int> got;
+    bool r = tf::unroll_until<0, 5, 1>(
+      [&](int i){ got.push_back(i); return false; }
+    );
+    REQUIRE(got == std::vector<int>{0,1,2,3,4});
+    REQUIRE(r == false);
+  }
+
+  // ---- short-circuit on the first iteration → only beg visited
+  {
+    std::vector<int> got;
+    bool r = tf::unroll_until<0, 5, 1>(
+      [&](int i){ got.push_back(i); return i == 0; }
+    );
+    REQUIRE(got == std::vector<int>{0});
+    REQUIRE(r == true);
+  }
+
+  // ---- short-circuit in the middle → indices up to and including trigger
+  {
+    std::vector<int> got;
+    bool r = tf::unroll_until<0, 6, 1>(
+      [&](int i){ got.push_back(i); return i == 3; }
+    );
+    REQUIRE(got == std::vector<int>{0,1,2,3});
+    REQUIRE(r == true);
+  }
+
+  // ---- short-circuit on the last iteration → all visited, returns true
+  {
+    std::vector<int> got;
+    bool r = tf::unroll_until<0, 4, 1>(
+      [&](int i){ got.push_back(i); return i == 3; }
+    );
+    REQUIRE(got == std::vector<int>{0,1,2,3});
+    REQUIRE(r == true);
+  }
+
+  // ---- step > 1, short-circuit honors step
+  {
+    std::vector<int> got;
+    bool r = tf::unroll_until<0, 10, 2>(
+      [&](int i){ got.push_back(i); return i == 4; }
+    );
+    REQUIRE(got == std::vector<int>{0, 2, 4});
+    REQUIRE(r == true);
+  }
+
+  // ---- step > 1, predicate never true → ceil-many visits, returns false
+  {
+    std::vector<int> got;
+    bool r = tf::unroll_until<0, 10, 3>(
+      [&](int i){ got.push_back(i); return false; }
+    );
+    REQUIRE(got == std::vector<int>{0, 3, 6, 9});
+    REQUIRE(r == false);
+  }
+
+  // ---- nonzero start + step, short-circuit
+  {
+    std::vector<int> got;
+    bool r = tf::unroll_until<10, 20, 2>(
+      [&](int i){ got.push_back(i); return i == 16; }
+    );
+    REQUIRE(got == std::vector<int>{10, 12, 14, 16});
+    REQUIRE(r == true);
+  }
+
+  // ---- sanity: nothing past the trigger is ever touched
+  {
+    int after_trigger = 0;
+    bool r = tf::unroll_until<0, 8, 1>([&](int i){
+      if (i > 2) ++after_trigger;
+      return i == 2;
+    });
+    REQUIRE(after_trigger == 0);
+    REQUIRE(r == true);
+  }
+
+  // ---- f can take i by value or by const-ref
+  {
+    int last_v = -1, last_r = -1;
+    bool rv = tf::unroll_until<0, 5, 1>([&](int i)        { last_v = i; return false; });
+    bool rr = tf::unroll_until<0, 5, 1>([&](const int& i) { last_r = i; return false; });
+    REQUIRE(last_v == 4);
+    REQUIRE(last_r == 4);
+    REQUIRE(rv == false);
+    REQUIRE(rr == false);
+  }
+
+  // ---- non-bool but bool-convertible return (contextual conversion via ||)
+  // int return: 0 → false-y, nonzero → true-y, so triggers on i == 1
+  {
+    int hits = 0;
+    bool r = tf::unroll_until<0, 5, 1>([&](int i){ ++hits; return i; });
+    REQUIRE(hits == 2);   // visited 0, then 1 (stopped)
+    REQUIRE(r == true);
+  }
+
+  // ---- size_t bounds
+  {
+    std::vector<std::size_t> got;
+    bool r = tf::unroll_until<std::size_t{0}, std::size_t{5}, std::size_t{1}>(
+      [&](std::size_t i){ got.push_back(i); return i == 2; }
+    );
+    REQUIRE(got == std::vector<std::size_t>{0, 1, 2});
+    REQUIRE(r == true);
+  }
+
+  // ---- nesting: outer stops as soon as inner finds a match
+  {
+    std::vector<std::pair<int,int>> got;
+    bool r = tf::unroll_until<0, 4, 1>([&](int i){
+      return tf::unroll_until<0, 3, 1>([&](int j){
+        got.emplace_back(i, j);
+        return (i == 1 && j == 2);
+      });
+    });
+    REQUIRE(r == true);
+    REQUIRE(got == std::vector<std::pair<int,int>>{
+      {0,0},{0,1},{0,2},   // i=0: inner runs to completion, returns false
+      {1,0},{1,1},{1,2}    // i=1: inner matches at j=2; outer stops here
+    });
+  }
+
+  // ---- constexpr / compile-time evaluation
+  {
+    constexpr bool found_3 = tf::unroll_until<0, 5, 1>(
+      [](int i){ return i == 3; }
+    );
+    static_assert(found_3 == true);
+
+    constexpr bool found_99 = tf::unroll_until<0, 5, 1>(
+      [](int i){ return i == 99; }
+    );
+    static_assert(found_99 == false);
+
+    // confirm short-circuit fires at compile time
+    constexpr int visits_until_2 = []{
+      int n = 0;
+      tf::unroll_until<0, 5, 1>([&](int i){ ++n; return i == 2; });
+      return n;
+    }();
+    static_assert(visits_until_2 == 3);   // visits 0, 1, 2
+    REQUIRE(visits_until_2 == 3);
+  }
+}
+
+
+
+
+
 
 
 

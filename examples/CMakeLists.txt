@@ -17,6 +17,7 @@ list(APPEND TF_EXAMPLES
   switch_case
   do_while_loop
   while_loop
+  for_loop
   if_else
   nested_if_else
   visualization 
@@ -41,6 +42,7 @@ list(APPEND TF_EXAMPLES
   subflow_exception
   worker_interface
   task_visitor
+  tsp
 )
 
 foreach(example IN LISTS TF_EXAMPLES)
@@ -67,6 +69,13 @@ endif()
 # -----------------------------------------------------------------------------
 if(TF_BUILD_SYCL)
   add_subdirectory(sycl)
+endif()
+
+# -----------------------------------------------------------------------------
+# modules examples
+# -----------------------------------------------------------------------------
+if(TF_BUILD_MODULE)
+  add_subdirectory(modules)
 endif()
 
 

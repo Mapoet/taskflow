@@ -1,5 +1,3 @@
-#if __cplusplus >= TF_CPP20
-
 #pragma once
 
 #include <atomic>
@@ -75,7 +73,7 @@ class AtomicNotifier {
   public:
   
   struct Waiter {
-    alignas (2*std::hardware_destructive_interference_size) uint32_t epoch;
+    alignas (2*TF_CACHELINE_SIZE) uint32_t epoch;
   };
 
   AtomicNotifier(size_t N) noexcept : _state(0), _waiters(N) {}
@@ -83,10 +81,10 @@ class AtomicNotifier {
 
   void notify_one() noexcept;
   void notify_all() noexcept;
-  void notify_n(size_t n) noexcept;
-  void prepare_wait(Waiter*) noexcept;
-  void cancel_wait(Waiter*) noexcept;
-  void commit_wait(Waiter*) noexcept;
+  void notify_n(size_t) noexcept;
+  void prepare_wait(size_t) noexcept;
+  void cancel_wait(size_t) noexcept;
+  void commit_wait(size_t) noexcept;
 
   size_t size() const noexcept;
   size_t num_waiters() const noexcept;
@@ -154,19 +152,19 @@ inline void AtomicNotifier::notify_n(size_t n) noexcept {
   }
 }
 
-inline void AtomicNotifier::prepare_wait(Waiter* waiter) noexcept {
+inline void AtomicNotifier::prepare_wait(size_t w) noexcept {
   auto prev = _state.fetch_add(WAITER_INC, std::memory_order_relaxed);
-  waiter->epoch = (prev >> EPOCH_SHIFT);
+  _waiters[w].epoch = (prev >> EPOCH_SHIFT);
   std::atomic_thread_fence(std::memory_order_seq_cst);
 }
 
-inline void AtomicNotifier::cancel_wait(Waiter*) noexcept {
+inline void AtomicNotifier::cancel_wait(size_t) noexcept {
   _state.fetch_sub(WAITER_INC, std::memory_order_relaxed);
 }
 
-inline void AtomicNotifier::commit_wait(Waiter* waiter) noexcept {
+inline void AtomicNotifier::commit_wait(size_t w) noexcept {
   uint64_t prev = _state.load(std::memory_order_relaxed);
-  while((prev >> EPOCH_SHIFT) == waiter->epoch) {
+  while((prev >> EPOCH_SHIFT) == _waiters[w].epoch) {
     _state.wait(prev, std::memory_order_relaxed); 
     prev = _state.load(std::memory_order_relaxed);
   }
@@ -174,7 +172,5 @@ inline void AtomicNotifier::commit_wait(Waiter* waiter) noexcept {
 }
 
 
-
 } // namespace taskflow -------------------------------------------------------
 
-#endif

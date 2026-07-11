@@ -11,7 +11,7 @@ namespace tf {
 /**
 @class Runtime
 
-@brief class to include a runtime object in a task
+@brief class to create a runtime task
 
 A runtime object provides an interface for interacting with the scheduling system from within a task 
 (i.e., the parent task of this runtime). 
@@ -33,14 +33,12 @@ tf::Task A = taskflow.emplace([&](tf::Runtime& rt){
   // implicit synchronization at the end of the runtime scope
 });
 tf::Task B = taskflow.emplace([&](){
-  REQUIRE(counter.load(std::memory_order_relaxed) == 1000);
+  assert(counter.load(std::memory_order_relaxed) == 1000);
 });
 A.precede(B);
 
 executor.run(taskflow).wait();
 @endcode
-
-A runtime object is associated with the worker and the executor that runs its parent task.
 
 @note
 To understand how %Taskflow schedules a runtime task, please refer to @ref RuntimeTasking.
@@ -130,7 +128,7 @@ class Runtime {
   @param f callable object
     
   This method creates an asynchronous task that executes the given function with the specified arguments.
-  Unlike tf::Executor::async, the task created here is bound to the runtime object and 
+  Unlike tf::Executor::async, the task created here is parented to the runtime object and 
   is implicitly synchronized at the end of the runtime's scope.
   Applications may also call tf::Runtime::corun explicitly to wait for all 
   asynchronous tasks spawned from the runtime to complete.
@@ -148,7 +146,7 @@ class Runtime {
     for(int i=0; i<100; i++) {
       rt.silent_async([&](){ counter++; });
     }
-    // explicitly wait for the 100 asynchronous tasks to finish
+    // corun until the 100 asynchronous tasks have completed
     rt.corun();
     assert(counter == 102);
     // do something else afterwards ...
@@ -161,24 +159,24 @@ class Runtime {
   /**
   @brief runs the given callable asynchronously
 
+  @tparam P task parameters type satisfying tf::TaskParamsLike
   @tparam F callable type
-  @tparam P task parameters type
 
   @param params task parameters
   @param f callable
 
   Similar to tf::Runtime::async, but takes a parameter of type tf::TaskParams to initialize
-  the created asynchronous task.
+  the asynchronous task.
 
   @code{.cpp}
   taskflow.emplace([&](tf::Runtime& rt){
-    auto future = rt.async("my task", [](){});
-    future.get();
+    auto future = rt.async("my task", [](){ return 10; });
+    assert(future.get() == 10);
   });
   @endcode
 
   */
-  template <typename P, typename F>
+  template <TaskParamsLike P, typename F>
   auto async(P&& params, F&& f);
   
   // ----------------------------------------------------------------------------------------------
@@ -204,8 +202,6 @@ class Runtime {
     assert(counter == 100);
   });
   @endcode
-
-  This member function is thread-safe.
   */
   template <typename F>
   void silent_async(F&& f);
@@ -213,7 +209,9 @@ class Runtime {
   /**
   @brief runs the given function asynchronously without returning any future object
 
+  @tparam P task parameters type satisfying tf::TaskParamsLike
   @tparam F callable type
+
   @param params task parameters
   @param f callable
 
@@ -226,159 +224,9 @@ class Runtime {
   });
   @endcode
   */
-  template <typename P, typename F>
+  template <TaskParamsLike P, typename F>
   void silent_async(P&& params, F&& f);
   
-  // ----------------------------------------------------------------------------------------------
-  // silent dependent async methods
-  // ----------------------------------------------------------------------------------------------
-
-  /**
-  @brief runs the given function asynchronously 
-         when the given predecessors finish
-
-  @tparam F callable type
-  @tparam Tasks task types convertible to tf::AsyncTask
-
-  @param func callable object
-  @param tasks asynchronous tasks on which this execution depends
-  
-  @return a tf::AsyncTask handle 
-  
-  This member function is more efficient than tf::Runtime::dependent_async
-  and is encouraged to use when you do not want a @std_future to
-  acquire the result or synchronize the execution.
-  The example below creates three asynchronous tasks, @c A, @c B, and @c C,
-  in which task @c C runs after task @c A and task @c B.
-
-  @code{.cpp}
-  taskflow.emplace([](tf::Runtime& rt){
-    tf::AsyncTask A = rt.silent_dependent_async([](){ printf("A\n"); });
-    tf::AsyncTask B = rt.silent_dependent_async([](){ printf("B\n"); });
-    rt.silent_dependent_async([](){ printf("C runs after A and B\n"); }, A, B);
-  });  // implicit synchronization of all tasks at the end of runtime's scope
-  executor.wait_for_all();
-  @endcode
-  */
-  template <typename F, typename... Tasks,
-    std::enable_if_t<all_same_v<AsyncTask, std::decay_t<Tasks>...>, void>* = nullptr
-  >
-  tf::AsyncTask silent_dependent_async(F&& func, Tasks&&... tasks);
-  
-  /**
-  @brief runs the given function asynchronously 
-         when the given predecessors finish
-  
-  @tparam F callable type
-  @tparam Tasks task types convertible to tf::AsyncTask
-
-  @param params task parameters
-  @param func callable object
-  @param tasks asynchronous tasks on which this execution depends
-  
-  @return a tf::AsyncTask handle 
-  
-  This member function is more efficient than tf::Runtime::dependent_async
-  and is encouraged to use when you do not want a @std_future to
-  acquire the result or synchronize the execution.
-  The example below creates three asynchronous tasks, @c A, @c B, and @c C,
-  in which task @c C runs after task @c A and task @c B.
-  Assigned task names will appear in the observers of the executor.
-
-  @code{.cpp}
-  taskflow.emplace([](tf::Runtime& rt){
-    tf::AsyncTask A = rt.silent_dependent_async("A", [](){ printf("A\n"); });
-    tf::AsyncTask B = rt.silent_dependent_async("B", [](){ printf("B\n"); });
-    rt.silent_dependent_async(
-      "C", [](){ printf("C runs after A and B\n"); }, A, B
-    );
-  });  // implicit synchronization of all tasks at the end of runtime's scope
-  executor.wait_for_all();
-  @endcode
-
-  This member function is thread-safe.
-  */
-  template <typename P, typename F, typename... Tasks,
-    std::enable_if_t<is_task_params_v<P> && all_same_v<AsyncTask, std::decay_t<Tasks>...>, void>* = nullptr
-  >
-  tf::AsyncTask silent_dependent_async(P&& params, F&& func, Tasks&&... tasks);
-  
-  /**
-  @brief runs the given function asynchronously 
-         when the given range of predecessors finish
-  
-  @tparam F callable type
-  @tparam I iterator type 
-
-  @param func callable object
-  @param first iterator to the beginning (inclusive)
-  @param last iterator to the end (exclusive)
-  
-  @return a tf::AsyncTask handle 
-  
-  This member function is more efficient than tf::Runtime::dependent_async
-  and is encouraged to use when you do not want a @std_future to
-  acquire the result or synchronize the execution.
-  The example below creates three asynchronous tasks, @c A, @c B, and @c C,
-  in which task @c C runs after task @c A and task @c B.
-
-  @code{.cpp}
-  Taskflow.emplace([&](tf::Runtime& rt){
-    std::array<tf::AsyncTask, 2> array {
-      rt.silent_dependent_async([](){ printf("A\n"); }),
-      rt.silent_dependent_async([](){ printf("B\n"); })
-    };
-    rt.silent_dependent_async(
-      [](){ printf("C runs after A and B\n"); }, array.begin(), array.end()
-    );
-  });  // implicit synchronization of all tasks at the end of runtime's scope
-  executor.wait_for_all();
-  @endcode
-  */
-  template <typename F, typename I, 
-    std::enable_if_t<!std::is_same_v<std::decay_t<I>, AsyncTask>, void>* = nullptr
-  >
-  tf::AsyncTask silent_dependent_async(F&& func, I first, I last);
-  
-  /**
-  @brief runs the given function asynchronously 
-         when the given range of predecessors finish
-  
-  @tparam F callable type
-  @tparam I iterator type 
-
-  @param params tasks parameters
-  @param func callable object
-  @param first iterator to the beginning (inclusive)
-  @param last iterator to the end (exclusive)
-
-  @return a tf::AsyncTask handle 
-  
-  This member function is more efficient than tf::Runtime::dependent_async
-  and is encouraged to use when you do not want a @std_future to
-  acquire the result or synchronize the execution.
-  The example below creates three asynchronous tasks, @c A, @c B, and @c C,
-  in which task @c C runs after task @c A and task @c B.
-  Assigned task names will appear in the observers of the executor.
-
-  @code{.cpp}
-  taskflow.emplace([](tf::Runtime& rt){
-    std::array<tf::AsyncTask, 2> array {
-      rt.silent_dependent_async("A", [](){ printf("A\n"); }),
-      rt.silent_dependent_async("B", [](){ printf("B\n"); })
-    };
-    rt.silent_dependent_async(
-      "C", [](){ printf("C runs after A and B\n"); }, array.begin(), array.end()
-    );
-  });  // implicit synchronization of all tasks at the end of runtime's scope
-  executor.run(taskflow).wait();
-  @endcode
-  */
-  template <typename P, typename F, typename I, 
-    std::enable_if_t<is_task_params_v<P> && !std::is_same_v<std::decay_t<I>, AsyncTask>, void>* = nullptr
-  >
-  tf::AsyncTask silent_dependent_async(P&& params, F&& func, I first, I last);
-
   // ----------------------------------------------------------------------------------------------
   // dependent async methods
   // ----------------------------------------------------------------------------------------------
@@ -388,7 +236,7 @@ class Runtime {
          when the given predecessors finish
   
   @tparam F callable type
-  @tparam Tasks task types convertible to tf::AsyncTask
+  @tparam Tasks tasks of type tf::AsyncTask
 
   @param func callable object
   @param tasks asynchronous tasks on which this execution depends
@@ -416,23 +264,17 @@ class Runtime {
   });  // implicit synchronization of all tasks at the end of runtime's scope
   executor.run(taskflow).wait();
   @endcode
-
-  You can mix the use of tf::AsyncTask handles 
-  returned by tf::Runtime::dependent_async and tf::Runtime::silent_dependent_async
-  when specifying task dependencies.
   */
-  template <typename F, typename... Tasks,
-    std::enable_if_t<all_same_v<AsyncTask, std::decay_t<Tasks>...>, void>* = nullptr
-  >
+  template <typename F, AsyncTaskHandleLike... Tasks>
   auto dependent_async(F&& func, Tasks&&... tasks);
   
   /**
   @brief runs the given function asynchronously
          when the given predecessors finish
   
-  @tparam P task parameters type
+  @tparam P task parameters type satisfying tf::TaskParamsLike
   @tparam F callable type
-  @tparam Tasks task types convertible to tf::AsyncTask
+  @tparam Tasks tasks of type tf::AsyncTask
   
   @param params task parameters
   @param func callable object
@@ -463,14 +305,8 @@ class Runtime {
   });  // implicit synchronization of all tasks at the end of runtime's scope
   executor.run(taskflow).wait();
   @endcode
-
-  You can mix the use of tf::AsyncTask handles 
-  returned by tf::Runtime::dependent_async and tf::Runtime::silent_dependent_async
-  when specifying task dependencies.
   */
-  template <typename P, typename F, typename... Tasks,
-    std::enable_if_t<is_task_params_v<P> && all_same_v<AsyncTask, std::decay_t<Tasks>...>, void>* = nullptr
-  >
+  template <TaskParamsLike P, typename F, AsyncTaskHandleLike... Tasks>
   auto dependent_async(P&& params, F&& func, Tasks&&... tasks);
   
   /**
@@ -509,21 +345,15 @@ class Runtime {
   });  // implicit synchronization of all tasks at the end of runtime's scope
   executor.run(taskflow).wait();
   @endcode
-
-  You can mix the use of tf::AsyncTask handles 
-  returned by tf::Runtime::dependent_async and rt::Runtime::silent_dependent_async
-  when specifying task dependencies.
   */
-  template <typename F, typename I,
-    std::enable_if_t<!std::is_same_v<std::decay_t<I>, AsyncTask>, void>* = nullptr
-  >
+  template <typename F, std::input_iterator I>
   auto dependent_async(F&& func, I first, I last);
   
   /**
   @brief runs the given function asynchronously 
          when the given range of predecessors finish
   
-  @tparam P task parameters type
+  @tparam P task parameters type satisfying tf::TaskParamsLike
   @tparam F callable type
   @tparam I iterator type 
   
@@ -559,15 +389,153 @@ class Runtime {
   });  // implicit synchronization of all tasks at the end of runtime's scope
   executor.run(taskflow).wait();
   @endcode
-
-  You can mix the use of tf::AsyncTask handles 
-  returned by tf::Runtime::dependent_async and tf::Runtime::silent_dependent_async
-  when specifying task dependencies.
   */
-  template <typename P, typename F, typename I,
-    std::enable_if_t<is_task_params_v<P> && !std::is_same_v<std::decay_t<I>, AsyncTask>, void>* = nullptr
-  >
+  template <TaskParamsLike P, typename F, std::input_iterator I>
   auto dependent_async(P&& params, F&& func, I first, I last);
+  
+  // ----------------------------------------------------------------------------------------------
+  // silent dependent async methods
+  // ----------------------------------------------------------------------------------------------
+
+  /**
+  @brief runs the given function asynchronously 
+         when the given predecessors finish
+
+  @tparam F callable type
+  @tparam Tasks tasks of type tf::AsyncTask
+
+  @param func callable object
+  @param tasks asynchronous tasks on which this execution depends
+  
+  @return a tf::AsyncTask handle 
+  
+  This member function is more efficient than tf::Runtime::dependent_async
+  and is encouraged to use when you do not want a @std_future to
+  acquire the result or synchronize the execution.
+  The example below creates three asynchronous tasks, @c A, @c B, and @c C,
+  in which task @c C runs after task @c A and task @c B.
+
+  @code{.cpp}
+  taskflow.emplace([](tf::Runtime& rt){
+    tf::AsyncTask A = rt.silent_dependent_async([](){ printf("A\n"); });
+    tf::AsyncTask B = rt.silent_dependent_async([](){ printf("B\n"); });
+    rt.silent_dependent_async([](){ printf("C runs after A and B\n"); }, A, B);
+  });  // implicit synchronization of all tasks at the end of runtime's scope
+  executor.wait_for_all();
+  @endcode
+  */
+  template <typename F, AsyncTaskHandleLike... Tasks>
+  tf::AsyncTask silent_dependent_async(F&& func, Tasks&&... tasks);
+  
+  /**
+  @brief runs the given function asynchronously 
+         when the given predecessors finish
+  
+  @tparam P task parameters type satisfying tf::TaskParamsLike
+  @tparam F callable type
+  @tparam Tasks tasks of type tf::AsyncTask
+
+  @param params task parameters
+  @param func callable object
+  @param tasks asynchronous tasks on which this execution depends
+  
+  @return a tf::AsyncTask handle 
+  
+  This member function is more efficient than tf::Runtime::dependent_async
+  and is encouraged to use when you do not want a @std_future to
+  acquire the result or synchronize the execution.
+  The example below creates three asynchronous tasks, @c A, @c B, and @c C,
+  in which task @c C runs after task @c A and task @c B.
+  Assigned task names will appear in the observers of the executor.
+
+  @code{.cpp}
+  taskflow.emplace([](tf::Runtime& rt){
+    tf::AsyncTask A = rt.silent_dependent_async("A", [](){ printf("A\n"); });
+    tf::AsyncTask B = rt.silent_dependent_async("B", [](){ printf("B\n"); });
+    rt.silent_dependent_async(
+      "C", [](){ printf("C runs after A and B\n"); }, A, B
+    );
+  });  // implicit synchronization of all tasks at the end of runtime's scope
+  executor.wait_for_all();
+  @endcode
+  */
+  template <TaskParamsLike P, typename F, AsyncTaskHandleLike... Tasks>
+  tf::AsyncTask silent_dependent_async(P&& params, F&& func, Tasks&&... tasks);
+  
+  /**
+  @brief runs the given function asynchronously 
+         when the given range of predecessors finish
+  
+  @tparam F callable type
+  @tparam I iterator type 
+
+  @param func callable object
+  @param first iterator to the beginning (inclusive)
+  @param last iterator to the end (exclusive)
+  
+  @return a tf::AsyncTask handle 
+  
+  This member function is more efficient than tf::Runtime::dependent_async
+  and is encouraged to use when you do not want a @std_future to
+  acquire the result or synchronize the execution.
+  The example below creates three asynchronous tasks, @c A, @c B, and @c C,
+  in which task @c C runs after task @c A and task @c B.
+
+  @code{.cpp}
+  Taskflow.emplace([&](tf::Runtime& rt){
+    std::array<tf::AsyncTask, 2> array {
+      rt.silent_dependent_async([](){ printf("A\n"); }),
+      rt.silent_dependent_async([](){ printf("B\n"); })
+    };
+    rt.silent_dependent_async(
+      [](){ printf("C runs after A and B\n"); }, array.begin(), array.end()
+    );
+  });  // implicit synchronization of all tasks at the end of runtime's scope
+  executor.wait_for_all();
+  @endcode
+  */
+  template <typename F, std::input_iterator I>
+  tf::AsyncTask silent_dependent_async(F&& func, I first, I last);
+  
+  /**
+  @brief runs the given function asynchronously 
+         when the given range of predecessors finish
+  
+  @tparam P task parameters type satisfying tf::TaskParamsLike
+  @tparam F callable type
+  @tparam I iterator type 
+
+  @param params tasks parameters
+  @param func callable object
+  @param first iterator to the beginning (inclusive)
+  @param last iterator to the end (exclusive)
+
+  @return a tf::AsyncTask handle 
+  
+  This member function is more efficient than tf::Runtime::dependent_async
+  and is encouraged to use when you do not want a @std_future to
+  acquire the result or synchronize the execution.
+  The example below creates three asynchronous tasks, @c A, @c B, and @c C,
+  in which task @c C runs after task @c A and task @c B.
+  Assigned task names will appear in the observers of the executor.
+
+  @code{.cpp}
+  taskflow.emplace([](tf::Runtime& rt){
+    std::array<tf::AsyncTask, 2> array {
+      rt.silent_dependent_async("A", [](){ printf("A\n"); }),
+      rt.silent_dependent_async("B", [](){ printf("B\n"); })
+    };
+    rt.silent_dependent_async(
+      "C", [](){ printf("C runs after A and B\n"); }, array.begin(), array.end()
+    );
+  });  // implicit synchronization of all tasks at the end of runtime's scope
+  executor.run(taskflow).wait();
+  @endcode
+  */
+  template <TaskParamsLike P, typename F, std::input_iterator I>
+  tf::AsyncTask silent_dependent_async(P&& params, F&& func, I first, I last);
+
+
 
   // ----------------------------------------------------------------------------------------------
   // cooperative execution methods
@@ -601,9 +569,7 @@ class Runtime {
   });
   @endcode
 
-  @attention
-  This method can only be called by the parent worker of this runtime,
-  or the behavior is undefined.
+  Only the parent worker of this runtime is allowed to call this corun.
   */
   void corun();
 
@@ -613,7 +579,7 @@ class Runtime {
   void corun_all();
 
   /**
-  @brief This method verifies if the task has been cancelled.
+  @brief queries if this runtime task has been cancelled
   */
   bool is_cancelled();
 
@@ -637,14 +603,14 @@ class Runtime {
   /**
   @private
   */
-  Node* _parent;
+  Node* _node;
 };
 
 // constructor
-inline Runtime::Runtime(Executor& executor, Worker& worker, Node* parent) :
+inline Runtime::Runtime(Executor& executor, Worker& worker, Node* node) :
   _executor {executor},
   _worker   {worker},
-  _parent   {parent} {
+  _node     {node} {
 }
 
 // Function: executor
@@ -675,12 +641,12 @@ inline void Runtime::schedule(Task task) {
 // Function: corun
 inline void Runtime::corun() {
   {
-    AnchorGuard anchor(_parent);
+    ExplicitAnchorGuard anchor(_node);
     _executor._corun_until(_worker, [this] () -> bool {
-      return _parent->_join_counter.load(std::memory_order_acquire) == 1;
+      return _node->_join_counter.load(std::memory_order_acquire) == 1;
     });
   }
-  _parent->_rethrow_exception();
+  _node->_rethrow_exception();
 }
 
 // Function: corun_all
@@ -689,7 +655,7 @@ inline void Runtime::corun_all() {
 }
 
 inline bool Runtime::is_cancelled() { 
-  return _parent->_is_cancelled(); 
+  return _node->_is_parent_cancelled(); 
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -703,11 +669,11 @@ void Runtime::silent_async(F&& f) {
 }
 
 // Function: silent_async
-template <typename P, typename F>
+template <TaskParamsLike P, typename F>
 void Runtime::silent_async(P&& params, F&& f) {
-  _parent->_join_counter.fetch_add(1, std::memory_order_relaxed);
+  _node->_join_counter.fetch_add(1, std::memory_order_relaxed);
   _executor._silent_async(
-    std::forward<P>(params), std::forward<F>(f), _parent->_topology, _parent
+    std::forward<P>(params), std::forward<F>(f), _node->_topology, _node
   );
 }
 
@@ -722,11 +688,11 @@ auto Runtime::async(F&& f) {
 }
 
 // Function: async
-template <typename P, typename F>
+template <TaskParamsLike P, typename F>
 auto Runtime::async(P&& params, F&& f) {
-  _parent->_join_counter.fetch_add(1, std::memory_order_relaxed);
+  _node->_join_counter.fetch_add(1, std::memory_order_relaxed);
   return _executor._async(
-    std::forward<P>(params), std::forward<F>(f), _parent->_topology, _parent
+    std::forward<P>(params), std::forward<F>(f), _node->_topology, _node
   );
 }
 
@@ -735,9 +701,7 @@ auto Runtime::async(P&& params, F&& f) {
 // ------------------------------------------------------------------------------------------------
 
 // Function: silent_dependent_async
-template <typename F, typename... Tasks,
-  std::enable_if_t<all_same_v<AsyncTask, std::decay_t<Tasks>...>, void>*
->
+template <typename F, AsyncTaskHandleLike... Tasks>
 tf::AsyncTask Runtime::silent_dependent_async(F&& func, Tasks&&... tasks) {
   return silent_dependent_async(
     DefaultTaskParams{}, std::forward<F>(func), std::forward<Tasks>(tasks)...
@@ -745,36 +709,30 @@ tf::AsyncTask Runtime::silent_dependent_async(F&& func, Tasks&&... tasks) {
 }
 
 // Function: silent_dependent_async
-template <typename P, typename F, typename... Tasks,
-  std::enable_if_t<is_task_params_v<P> && all_same_v<AsyncTask, std::decay_t<Tasks>...>, void>*
->
+template <TaskParamsLike P, typename F, AsyncTaskHandleLike... Tasks>
 tf::AsyncTask Runtime::silent_dependent_async(
   P&& params, F&& func, Tasks&&... tasks 
 ){
-  std::array<AsyncTask, sizeof...(Tasks)> array = { std::forward<Tasks>(tasks)... };
+  std::array<AsyncTask*, sizeof...(Tasks)> array = { (&tasks)... };
   return silent_dependent_async(
     std::forward<P>(params), std::forward<F>(func), array.begin(), array.end()
   );
 }
 
 // Function: silent_dependent_async
-template <typename F, typename I,
-  std::enable_if_t<!std::is_same_v<std::decay_t<I>, AsyncTask>, void>*
->
+template <typename F, std::input_iterator I>
 tf::AsyncTask Runtime::silent_dependent_async(F&& func, I first, I last) {
   return silent_dependent_async(DefaultTaskParams{}, std::forward<F>(func), first, last);
 }
 
 // Function: silent_dependent_async
-template <typename P, typename F, typename I,
-  std::enable_if_t<is_task_params_v<P> && !std::is_same_v<std::decay_t<I>, AsyncTask>, void>*
->
+template <TaskParamsLike P, typename F, std::input_iterator I>
 tf::AsyncTask Runtime::silent_dependent_async(
   P&& params, F&& func, I first, I last
 ) {
-  _parent->_join_counter.fetch_add(1, std::memory_order_relaxed);
+  _node->_join_counter.fetch_add(1, std::memory_order_relaxed);
   return _executor._silent_dependent_async(
-    std::forward<P>(params), std::forward<F>(func), first, last, _parent->_topology, _parent
+    std::forward<P>(params), std::forward<F>(func), first, last, _node->_topology, _node
   );
 }
 
@@ -783,40 +741,32 @@ tf::AsyncTask Runtime::silent_dependent_async(
 // ------------------------------------------------------------------------------------------------
 
 // Function: dependent_async
-template <typename F, typename... Tasks,
-  std::enable_if_t<all_same_v<AsyncTask, std::decay_t<Tasks>...>, void>*
->
+template <typename F, AsyncTaskHandleLike... Tasks>
 auto Runtime::dependent_async(F&& func, Tasks&&... tasks) {
   return dependent_async(DefaultTaskParams{}, std::forward<F>(func), std::forward<Tasks>(tasks)...);
 }
 
 // Function: dependent_async
-template <typename P, typename F, typename... Tasks,
-  std::enable_if_t<is_task_params_v<P> && all_same_v<AsyncTask, std::decay_t<Tasks>...>, void>*
->
+template <TaskParamsLike P, typename F, AsyncTaskHandleLike... Tasks>
 auto Runtime::dependent_async(P&& params, F&& func, Tasks&&... tasks) {
-  std::array<AsyncTask, sizeof...(Tasks)> array = { std::forward<Tasks>(tasks)... };
+  std::array<AsyncTask*, sizeof...(Tasks)> array = { (&tasks)... };
   return dependent_async(
     std::forward<P>(params), std::forward<F>(func), array.begin(), array.end()
   );
 }
 
 // Function: dependent_async
-template <typename F, typename I,
-  std::enable_if_t<!std::is_same_v<std::decay_t<I>, AsyncTask>, void>*
->
+template <typename F, std::input_iterator I>
 auto Runtime::dependent_async(F&& func, I first, I last) {
   return dependent_async(DefaultTaskParams{}, std::forward<F>(func), first, last);
 }
 
 // Function: dependent_async
-template <typename P, typename F, typename I,
-  std::enable_if_t<is_task_params_v<P> && !std::is_same_v<std::decay_t<I>, AsyncTask>, void>*
->
+template <TaskParamsLike P, typename F, std::input_iterator I>
 auto Runtime::dependent_async(P&& params, F&& func, I first, I last) {
-  _parent->_join_counter.fetch_add(1, std::memory_order_relaxed);
+  _node->_join_counter.fetch_add(1, std::memory_order_relaxed);
   return _executor._dependent_async(
-    std::forward<P>(params), std::forward<F>(func), first, last, _parent->_topology, _parent
+    std::forward<P>(params), std::forward<F>(func), first, last, _node->_topology, _node
   );
 }
 
@@ -840,7 +790,8 @@ inline bool Executor::_invoke_runtime_task_impl(
 
     Runtime rt(*this, worker, node);
 
-    node->_nstate |= NSTATE::PREEMPTED;
+    node->_nstate |= (NSTATE::PREEMPTED | NSTATE::IMPLICITLY_ANCHORED);
+
     node->_join_counter.fetch_add(1, std::memory_order_release);
 
     _observer_prologue(worker, node);
@@ -851,8 +802,9 @@ inline bool Executor::_invoke_runtime_task_impl(
     
     // Last one to leave the runtime; no need to preempt this runtime.
     if(node->_join_counter.fetch_sub(1, std::memory_order_acq_rel) == 1) {
-      node->_nstate &= ~NSTATE::PREEMPTED;
+      node->_nstate &= ~(NSTATE::PREEMPTED | NSTATE::IMPLICITLY_ANCHORED);
     }
+    // There are still child tasks running; need to preempt this runtime.
     // Here, we cannot let caller check the state from node->_nstate due to data race,
     // but return a stateless boolean to indicate preemption.
     // Ex: if preempted, another task may finish real quck and insert this parent task
@@ -864,7 +816,7 @@ inline bool Executor::_invoke_runtime_task_impl(
   }
   // second time - previously preempted
   else {
-    node->_nstate &= ~NSTATE::PREEMPTED;
+    node->_nstate &= ~(NSTATE::PREEMPTED | NSTATE::IMPLICITLY_ANCHORED);
   }
   return false;
 }
@@ -879,7 +831,7 @@ inline bool Executor::_invoke_runtime_task_impl(
   // first time
   if((node->_nstate & NSTATE::PREEMPTED) == 0) {
     
-    node->_nstate |= NSTATE::PREEMPTED;
+    node->_nstate |= (NSTATE::PREEMPTED | NSTATE::IMPLICITLY_ANCHORED);
     node->_join_counter.fetch_add(1, std::memory_order_release);
 
     _observer_prologue(worker, node);
@@ -890,7 +842,7 @@ inline bool Executor::_invoke_runtime_task_impl(
     
     // Last one to leave this runtime; no need to preempt this runtime
     if(node->_join_counter.fetch_sub(1, std::memory_order_acq_rel) == 1) {
-      node->_nstate &= ~NSTATE::PREEMPTED;
+      node->_nstate &= ~(NSTATE::PREEMPTED | NSTATE::IMPLICITLY_ANCHORED);
     }
     // Here, we cannot let caller check the state from node->_nstate due to data race,
     // but return a stateless boolean to indicate preemption.
@@ -903,7 +855,7 @@ inline bool Executor::_invoke_runtime_task_impl(
   }
   // second time - previously preempted
   else {
-    node->_nstate &= ~NSTATE::PREEMPTED;
+    node->_nstate &= ~(NSTATE::PREEMPTED | NSTATE::IMPLICITLY_ANCHORED);
   }
 
   // clean up outstanding work (e.g., exception)
@@ -918,8 +870,6 @@ inline bool Executor::_invoke_runtime_task_impl(
 
 /**
 @private
-
-@brief currently for internal use only
 */
 class NonpreemptiveRuntime {
 
@@ -982,14 +932,41 @@ inline void Executor::_invoke_nonpreemptive_runtime_task(Worker& worker, Node* n
 }
 
 
+// Function: run_until
+template <typename P, typename C>
+tf::Future<void> Executor::run_until(Taskflow&& f, P&& p, C&& c) {
+
+  // No need to create a real topology but returns an dummy future for invariant.
+  if(f.empty() || p()) {
+    c();
+    std::promise<void> promise;
+    promise.set_value();
+    return tf::Future<void>(promise.get_future());
+  }
+  
+  _increment_topology();
+
+  auto g = std::make_unique<Taskflow>(std::move(f)); 
+
+  // creates a topology for this run
+  auto t = std::make_shared<Topology>(*g, std::forward<P>(p), std::forward<C>(c));
+  //auto t = std::make_shared<DerivedTopology<P, C>>(*g, std::forward<P>(p), std::forward<C>(c));
+
+  // need to create future before the topology got torn down quickly
+  tf::Future<void> future(t->_promise.get_future(), t);
+
+  // creates a silent-async that holds the taskflow
+  silent_async([g=MoC{std::move(g)}, t](tf::Runtime& rt) mutable {
+    t->_parent = rt._node;
+    t->_parent->_join_counter.fetch_add(1, std::memory_order_release);
+    if(g.object->_fetch_enqueue(t) == 0) {
+      rt._executor._schedule_graph(
+        rt._worker, g.object->_graph, t.get(), t.get()
+      );
+    }
+  });
+
+  return future;
+}
 
 }  // end of namespace tf -----------------------------------------------------
-
-
-
-
-
-
-
-
-

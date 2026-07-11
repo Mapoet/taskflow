@@ -225,7 +225,6 @@ target_link_libraries(
 )
 set_target_properties(bench_sort PROPERTIES COMPILE_FLAGS ${OpenMP_CXX_FLAGS})
 
-
 ## benchmark 11: linear_pipeline
 add_executable(
   bench_linear_pipeline
@@ -243,7 +242,6 @@ target_link_libraries(
   tf::default_settings
 )
 set_target_properties(bench_linear_pipeline PROPERTIES COMPILE_FLAGS ${OpenMP_CXX_FLAGS})
-
 
 ## benchmark 12: graph_pipeline
 add_executable(
@@ -298,21 +296,24 @@ target_link_libraries(
 )
 set_target_properties(bench_data_pipeline PROPERTIES COMPILE_FLAGS ${OpenMP_CXX_FLAGS})
 
-## benchmark 15: deferred_pipeline                                                                               
+## benchmark 15: merge_sort
 add_executable(
-  bench_deferred_pipeline
-  ${TF_BENCHMARK_DIR}/deferred_pipeline/main.cpp
-  ${TF_BENCHMARK_DIR}/deferred_pipeline/pthread.cpp
-  ${TF_BENCHMARK_DIR}/deferred_pipeline/taskflow.cpp
+  bench_merge_sort
+  ${TF_BENCHMARK_DIR}/merge_sort/main.cpp
+  ${TF_BENCHMARK_DIR}/merge_sort/seq.cpp
+  ${TF_BENCHMARK_DIR}/merge_sort/omp.cpp
+  ${TF_BENCHMARK_DIR}/merge_sort/tbb.cpp
+  ${TF_BENCHMARK_DIR}/merge_sort/taskflow.cpp
 )
-target_include_directories(bench_deferred_pipeline PRIVATE ${PROJECT_SOURCE_DIR}/3rd-party/CLI11)
+target_include_directories(bench_merge_sort PRIVATE ${PROJECT_SOURCE_DIR}/3rd-party/CLI11)
 target_link_libraries(
-  bench_deferred_pipeline
-  ${PROJECT_NAME}
-  ${OpenMP_CXX_LIBRARIES}
+  bench_merge_sort 
+  ${PROJECT_NAME} 
+  ${TBB_IMPORTED_TARGETS} 
+  ${OpenMP_CXX_LIBRARIES} 
   tf::default_settings
 )
-set_target_properties(bench_deferred_pipeline PROPERTIES COMPILE_FLAGS ${OpenMP_CXX_FLAGS})
+set_target_properties(bench_merge_sort PROPERTIES COMPILE_FLAGS ${OpenMP_CXX_FLAGS})
 
 ## benchmark 16: for_each
 add_executable(
@@ -458,6 +459,25 @@ target_link_libraries(
   tf::default_settings
 )
 set_target_properties(bench_skynet PROPERTIES COMPILE_FLAGS ${OpenMP_CXX_FLAGS})
+
+## benchmark 24: embarrassing parallelism
+add_executable(
+  bench_embarrassing_parallelism
+  ${TF_BENCHMARK_DIR}/embarrassing_parallelism/main.cpp
+  ${TF_BENCHMARK_DIR}/embarrassing_parallelism/omp.cpp
+  ${TF_BENCHMARK_DIR}/embarrassing_parallelism/tbb.cpp
+  ${TF_BENCHMARK_DIR}/embarrassing_parallelism/seq.cpp
+  ${TF_BENCHMARK_DIR}/embarrassing_parallelism/taskflow.cpp
+)
+target_include_directories(bench_embarrassing_parallelism PRIVATE ${PROJECT_SOURCE_DIR}/3rd-party/CLI11)
+target_link_libraries(
+  bench_embarrassing_parallelism 
+  ${PROJECT_NAME} 
+  ${TBB_IMPORTED_TARGETS} 
+  ${OpenMP_CXX_LIBRARIES} 
+  tf::default_settings
+)
+set_target_properties(bench_embarrassing_parallelism PROPERTIES COMPILE_FLAGS ${OpenMP_CXX_FLAGS})
 
 ###############################################################################
 # CUDA benchmarks

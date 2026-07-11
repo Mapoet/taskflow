@@ -2,8 +2,7 @@ namespace tf {
 
 /** @mainpage A General-purpose Task-parallel Programming System
 
-%Taskflow helps you quickly write task-parallel programs with <i>high performance</i>
-and simultaneous <i>high productivity</i>.
+%Taskflow helps you quickly write high-performance task-parallel programs with high programming productivity.
 It is faster, more expressive, fewer lines of code, and easier for drop-in integration
 than many of existing task programming libraries.
 The source code is available in our @ProjectGitHub.
@@ -41,10 +40,9 @@ int main(){
 }
 @endcode
 
-<!-- @image html images/simple.svg width=35% -->
 @dotfile images/simple.dot
 
-%Taskflow is *header-only* and there is no wrangle with installation.
+%Taskflow is *header-only* and there is no struggle with installation.
 To compile the program, clone the %Taskflow project and 
 tell the compiler to include the headers under @c taskflow/.
 
@@ -62,17 +60,28 @@ TaskD
 for you to profile and visualize taskflow programs
 in an easy-to-use web-based interface.
 
-@image html images/tfprof.png 
+@image html images/tfprof_overview.png 
 
 @code{.bash}
 # run the program with the environment variable TF_ENABLE_PROFILER enabled
-~$ TF_ENABLE_PROFILER=simple.json ./simple
-~$ cat simple.json
-[
-{"executor":"0","data":[{"worker":0,"level":0,"data":[{"span":[172,186],"name":"0_0","type":"static"},{"span":[187,189],"name":"0_1","type":"static"}]},{"worker":2,"level":0,"data":[{"span":[93,164],"name":"2_0","type":"static"},{"span":[170,179],"name":"2_1","type":"static"}]}]}
-]
-# paste the profiling json data to https://taskflow.github.io/tfprof/
+~$ TF_ENABLE_PROFILER=simple.tfp ./simple
+# drag the generated tfp file to https://taskflow.github.io/tfprof/
 @endcode
+
+@htmlonly
+<p>Watch a quick-start video to learn Taskflow programming in just 5 minutes:</p>
+<div style="margin:1.5em 0;">
+  <div style="position:relative;padding-bottom:56.25%;height:0;overflow:hidden;">
+    <iframe
+      src="https://www.youtube.com/embed/u4vaY0cjzos"
+      title="Taskflow in 5 Minutes"
+      style="position:absolute;top:0;left:0;width:100%;height:100%;border:0;"
+      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+      allowfullscreen>
+    </iframe>
+  </div>
+</div>
+@endhtmlonly
 
 @section QuickStartCreateASubflowGraph Create a Subflow Graph
 
@@ -234,7 +243,7 @@ executor.wait_for_all();
 
 @section QuickStartOffloadTasksToGPU Offload Tasks to a GPU
 
-%Taskflow supports GPU tasking for you to accelerate a wide range of scientific computing applications by harnessing the power of CPU-GPU collaborative computing using Nvidia CUDA Graph.
+%Taskflow supports GPU tasking for you to accelerate a wide range of scientific computing applications by harnessing the power of CPU-GPU collaborative computing using Nvidia CUDA %Graph.
 
 @code{.cpp}
 __global__ void saxpy(int n, float a, float *x, float *y) {
@@ -243,7 +252,7 @@ __global__ void saxpy(int n, float a, float *x, float *y) {
     y[i] = a*x[i] + y[i];
   }
 }
-// create a CUDA Gaph task
+// create a CUDA Graph task
 tf::Task cudaflow = taskflow.emplace([&]() {
   tf::cudaGraph cg;
   tf::cudaTask h2d_x = cg.copy(dx, hx.data(), N);
@@ -289,21 +298,16 @@ taskflow.dump(std::cout);
 
 @section SupportedCompilers Supported Compilers
 
-To use %Taskflow, you only need a compiler that supports C++17:
+To use %Taskflow v4.0.0, you need a compiler that supports C++20:
 
-@li GNU C++ Compiler at least v8.4 with -std=c++17
-@li Clang C++ Compiler at least v6.0 with -std=c++17
-@li Microsoft Visual Studio at least v19.14 with /std:c++17
-@li Apple Clang Xcode Version at least v12.0 with -std=c++17
-@li Nvidia CUDA Toolkit and Compiler (nvcc) at least v11.1 with -std=c++17
-@li Intel C++ Compiler at least v19.0.1 with -std=c++17
-@li Intel DPC++ Clang Compiler at least v13.0.0 with -std=c++17 and SYCL20
+@li GNU C++ Compiler at least v11.0 with -std=c++20
+@li Clang C++ Compiler at least v12.0 with -std=c++20
+@li Microsoft Visual Studio at least v19.29 (VS 2019) with /std:c++20
+@li Apple Clang (Xcode) at least v13.0 with -std=c++20
+@li NVIDIA CUDA Toolkit and Compiler (nvcc) at least v12.0 with host compiler supporting C++20
+@li Intel oneAPI DPC++/C++ Compiler at least v2022.0 with -std=c++20
 
 %Taskflow works on Linux, Windows, and Mac OS X.
-
-@attention
-Although %Taskflow supports primarily C++17, you can enable C++20 compilation
-through `-std=c++20` (or `/std:c++20` for MSVC) to achieve better performance due to new C++20 features.
 
 @section QuickStartGetInvolved Get Involved
 
@@ -326,16 +330,25 @@ If you are using %Taskflow, please cite the following paper we published at 2022
 More importantly, we appreciate all %Taskflow @ref contributors and 
 the following organizations for sponsoring the %Taskflow project!
 
-| <!-- --> | <!-- --> | <!-- --> | <!-- --> |
-|:-- -----:|:--------:|:--------:|:--------:|
-|@image html "images/utah-ece-logo.png" |@image html "images/nsf.png"|@image html "images/darpa.png"|@image html "images/NumFocus.png"|
-|@image html "images/nvidia-logo.png" | @image html "images/uw-madison-ece-logo.png" | | |
-
+<table class="sponsor-table">
+<tr>
+  <td>@image html "images/utah-ece-logo.png"</td>
+  <td>@image html "images/nsf.png"</td>
+  <td>@image html "images/darpa.png"</td>
+  <td>@image html "images/NumFocus.png"</td>
+</tr>
+<tr>
+  <td>@image html "images/nvidia-logo.png"</td>
+  <td>@image html "images/uw-madison-ece-logo.png"</td>
+  <td></td>
+  <td></td>
+</tr>
+</table>
 
 
 @section License License
 
-%Taskflow is open-source under permissive MIT license.
+%Taskflow is open-source the under permissive MIT license.
 You are completely free to use, modify, and redistribute any work 
 on top of %Taskflow.
 The source code is available in @ProjectGitHub and is actively

@@ -3,12 +3,12 @@ name: Ubuntu
 on: [push, pull_request]
 
 jobs:
-  debug-test-cpp17:
+  debug-test-cpp20-extended:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v3
     - name: cmake
-      run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DCMAKE_BUILD_BENCHMARKS=ON -DCMAKE_BUILD_PROFILER=ON -DCMAKE_CXX_STANDARD=17
+      run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DCMAKE_BUILD_BENCHMARKS=ON -DCMAKE_BUILD_PROFILER=ON -DCMAKE_CXX_STANDARD=20
     - name: build
       run: cmake --build build --parallel 10
     # Full ctest includes Agent Framework M3 targets: a2a_contract_json, a2a_contract_sse,
@@ -16,23 +16,23 @@ jobs:
     - name: test
       run: cd build ; ctest --output-on-failure
   
-  release-test-cpp17:
+  release-test-cpp20-extended:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v3
     - name: cmake
-      run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_STANDARD=17
+      run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_STANDARD=20
     - name: build
       run: cmake --build build --parallel 10
     - name: test
       run: cd build ; ctest --output-on-failure
   
-  leak-test-cpp17:
+  leak-test-cpp20-extended:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v3
     - name: cmake
-      run: cmake -S . -B build -DCMAKE_CXX_FLAGS="-fsanitize=address -fsanitize=leak -g" -DCMAKE_CXX_STANDARD=17
+      run: cmake -S . -B build -DCMAKE_CXX_FLAGS="-fsanitize=address -fsanitize=leak -g" -DCMAKE_CXX_STANDARD=20
     - name: build
       run: cmake --build build --parallel 10
     - name: test
@@ -49,12 +49,12 @@ jobs:
   #  - name: test
   #    run: cd build ; ctest -j 10 --output-on-failure
   
-  tsan-test-cpp17:
+  tsan-test-cpp20-extended:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v3
     - name: cmake
-      run: cmake -S . -B build -DCMAKE_CXX_FLAGS="-fsanitize=thread -g" -DCMAKE_CXX_STANDARD=17
+      run: cmake -S . -B build -DCMAKE_CXX_FLAGS="-fsanitize=thread -g" -DCMAKE_CXX_STANDARD=20
     - name: build
       run: cmake --build build --parallel 10
     - name: test
@@ -127,4 +127,3 @@ jobs:
       run: cmake -S . -B build-wpu -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_STANDARD=20 -DAGENT_BUILD_IMGUI=ON
     - name: build imgui_agent_demo
       run: cmake --build build-wpu --parallel 10 --target imgui_agent_demo
-

@@ -260,9 +260,9 @@ void subflow_task(unsigned W) {
   // subflow work throws
   for(int i=0; i<100; i++) {
     taskflow.emplace([](tf::Subflow& sf){
-      throw std::runtime_error("x");
       sf.emplace([](){});
       sf.emplace([](){ throw std::runtime_error("z"); });
+      throw std::runtime_error("x");
     });
   }
   REQUIRE_THROWS_WITH_AS(executor.run(taskflow).get(), "x", std::runtime_error);
@@ -1433,15 +1433,15 @@ void probe2(size_t num_threads) {
 }
 
 
-TEST_CASE("Exception.Probe2.2threads") {
+TEST_CASE("Exception.Probe2.2threads" * doctest::timeout(300)) {
   probe2(2);
 }
 
-TEST_CASE("Exception.Probe2.3threads") {
+TEST_CASE("Exception.Probe2.3threads" * doctest::timeout(300)) {
   probe2(3);
 }
 
-TEST_CASE("Exception.Probe2.4threads") {
+TEST_CASE("Exception.Probe2.4threads" * doctest::timeout(300)) {
   probe2(4);
 }
 
@@ -1475,15 +1475,15 @@ void probe3(size_t num_threads) {
 }
 
 
-TEST_CASE("Exception.Probe3.2threads") {
+TEST_CASE("Exception.Probe3.2threads" * doctest::timeout(300)) {
   probe3(2);
 }
 
-TEST_CASE("Exception.Probe3.3threads") {
+TEST_CASE("Exception.Probe3.3threads" * doctest::timeout(300)) {
   probe3(3);
 }
 
-TEST_CASE("Exception.Probe3.4threads") {
+TEST_CASE("Exception.Probe3.4threads" * doctest::timeout(300)) {
   probe3(4);
 }
 
@@ -1517,16 +1517,150 @@ void probe4(size_t num_threads) {
 }
 
 
-TEST_CASE("Exception.Probe4.2threads") {
+TEST_CASE("Exception.Probe4.2threads" * doctest::timeout(300)) {
   probe4(2);
 }
 
-TEST_CASE("Exception.Probe4.3threads") {
+TEST_CASE("Exception.Probe4.3threads" * doctest::timeout(300)) {
   probe4(3);
 }
 
-TEST_CASE("Exception.Probe4.4threads") {
+TEST_CASE("Exception.Probe4.4threads" * doctest::timeout(300)) {
   probe4(4);
 }
 
+// ----------------------------------------------------------------------------
+// Task Group corun
+// ----------------------------------------------------------------------------
 
+TEST_CASE("Exception.TaskGroup.Basics" * doctest::timeout(300)) {
+  tf::Executor executor;
+  bool exception = false;
+  try {
+    tf::TaskGroup tg = executor.task_group();
+  } catch(...) {
+    exception = true;
+  }
+  REQUIRE(exception==true);
+}
+
+void task_group_async_task(unsigned W) {
+  tf::Executor executor(W);
+  executor.async([&](){
+    std::atomic<size_t> counter;
+    tf::TaskGroup tg = executor.task_group();
+    for(size_t r=0; r<100; r++) {
+      // async will propagate exceptions to future
+      counter = 0;
+      for(size_t i=0; i<100; i=i+1) {
+        tg.async([&](){ ++counter; throw std::runtime_error("x"); });
+      }
+      REQUIRE_NOTHROW(tg.corun()); 
+      REQUIRE(tg.is_cancelled() == false);
+      REQUIRE(counter == 100);
+
+      // silent async will propagate exceptions to caller
+      counter = 0;
+      for(size_t i=0; i<100; i=i+1) {
+        tg.silent_async([&](){ ++counter; throw std::runtime_error("x"); });
+      }
+      REQUIRE_THROWS_WITH_AS(tg.corun(), "x", std::runtime_error);
+      REQUIRE(counter <= W);
+      REQUIRE(tg.is_cancelled() == false);
+    }
+  }).wait();
+}
+
+TEST_CASE("Exception.TaskGroup.Async.1thread" * doctest::timeout(300)) {
+  task_group_async_task(1);
+}
+
+TEST_CASE("Exception.TaskGroup.Async.2threads" * doctest::timeout(300)) {
+  task_group_async_task(2);
+}
+
+TEST_CASE("Exception.TaskGroup.Async.3threads" * doctest::timeout(300)) {
+  task_group_async_task(3);
+}
+
+TEST_CASE("Exception.TaskGroup.Async.4threads" * doctest::timeout(300)) {
+  task_group_async_task(4);
+}
+
+TEST_CASE("Exception.TaskGroup.Async.5threads" * doctest::timeout(300)) {
+  task_group_async_task(5);
+}
+
+TEST_CASE("Exception.TaskGroup.Async.6threads" * doctest::timeout(300)) {
+  task_group_async_task(6);
+}
+
+TEST_CASE("Exception.TaskGroup.Async.7threads" * doctest::timeout(300)) {
+  task_group_async_task(7);
+}
+
+TEST_CASE("Exception.TaskGroup.Async.8threads" * doctest::timeout(300)) {
+  task_group_async_task(8);
+}
+
+// ----------------------------------------------------------------------------
+// Runtime corun
+// ----------------------------------------------------------------------------
+
+void runtime_async_task(unsigned W) {
+  tf::Executor executor(W);
+  executor.async([&](tf::Runtime& rt){
+    std::atomic<size_t> counter;
+    for(size_t r=1; r<100; r++) { 
+      // async will propagate exceptions to future
+      counter = 0;
+      for(size_t i=0; i<100; i=i+1) {
+        rt.async([&](){ ++counter; throw std::runtime_error("x"); });
+      }
+      REQUIRE_NOTHROW(rt.corun()); 
+      REQUIRE(rt.is_cancelled() == false);
+      REQUIRE(counter == 100);
+
+      // silent async will propagate exceptions to caller
+      counter = 0;
+      for(size_t i=0; i<100; i=i+1) {
+        rt.silent_async([&](){ ++counter; throw std::runtime_error("x"); });
+      }
+      REQUIRE_THROWS_WITH_AS(rt.corun(), "x", std::runtime_error);
+      REQUIRE(counter <= W);
+      REQUIRE(rt.is_cancelled() == false);
+    }
+  }).wait();
+}
+
+TEST_CASE("Exception.Runtime.Async.1thread" * doctest::timeout(300)) {
+  runtime_async_task(1);
+}
+
+TEST_CASE("Exception.Runtime.Async.2threads" * doctest::timeout(300)) {
+  runtime_async_task(2);
+}
+
+TEST_CASE("Exception.Runtime.Async.3threads" * doctest::timeout(300)) {
+  runtime_async_task(3);
+}
+
+TEST_CASE("Exception.Runtime.Async.4threads" * doctest::timeout(300)) {
+  runtime_async_task(4);
+}
+
+TEST_CASE("Exception.Runtime.Async.5threads" * doctest::timeout(300)) {
+  runtime_async_task(5);
+}
+
+TEST_CASE("Exception.Runtime.Async.6threads" * doctest::timeout(300)) {
+  runtime_async_task(6);
+}
+
+TEST_CASE("Exception.Runtime.Async.7threads" * doctest::timeout(300)) {
+  runtime_async_task(7);
+}
+
+TEST_CASE("Exception.Runtime.Async.8threads" * doctest::timeout(300)) {
+  runtime_async_task(8);
+}

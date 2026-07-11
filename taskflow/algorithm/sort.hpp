@@ -589,13 +589,13 @@ void parallel_3wqsort(Runtime& rt, RandItr first, RandItr last, C compare) {
 namespace tf { 
 
 // Function: make_sort_task
-template <typename B, typename E, typename C>
+template <InputIteratorLike B, InputIteratorLike E, typename C>
 auto make_sort_task(B b, E e, C cmp) {
   
   return [b, e, cmp] (Runtime& rt) mutable {
 
-    using B_t = std::decay_t<unwrap_ref_decay_t<B>>;
-    using E_t = std::decay_t<unwrap_ref_decay_t<E>>;
+    using B_t = std::decay_t<std::unwrap_ref_decay_t<B>>;
+    using E_t = std::decay_t<std::unwrap_ref_decay_t<E>>;
 
     // fetch the iterator values
     B_t beg = b;
@@ -620,11 +620,11 @@ auto make_sort_task(B b, E e, C cmp) {
     detail::parallel_pdqsort<B_t, C,
       is_std_compare_v<std::decay_t<C>> &&
       std::is_arithmetic_v<typename std::iterator_traits<B_t>::value_type>
-    >(rt, beg, end, cmp, log2(size_t(end - beg)));
+    >(rt, beg, end, cmp, static_cast<int>(log2(size_t(end - beg))));
   };
 }
   
-template <typename B, typename E>
+template <InputIteratorLike B, InputIteratorLike E>
 auto make_sort_task(B beg, E end) {
   using value_type = std::decay_t<decltype(*std::declval<B>())>;
   return make_sort_task(beg, end, std::less<value_type>{});
@@ -635,16 +635,15 @@ auto make_sort_task(B beg, E end) {
 // ----------------------------------------------------------------------------
 
 // Function: sort
-template <typename B, typename E, typename C>
+template <InputIteratorLike B, InputIteratorLike E, typename C>
 Task FlowBuilder::sort(B beg, E end, C cmp) {
   return emplace(make_sort_task(beg, end, cmp));
 }
 
 // Function: sort
-template <typename B, typename E>
+template <InputIteratorLike B, InputIteratorLike E>
 Task FlowBuilder::sort(B beg, E end) {
   return emplace(make_sort_task(beg, end));
 }
 
 }  // namespace tf ------------------------------------------------------------
-
