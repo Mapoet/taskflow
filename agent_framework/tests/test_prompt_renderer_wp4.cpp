@@ -119,11 +119,15 @@ void test_history_truncate_avoids_orphan_tool() {
     r.register_tool_formatter("gpt-*", std::make_shared<OpenAIToolFormatter>());
 
     std::vector<Message> h;
-    h.push_back(Message{"user", "u1", std::nullopt, std::nullopt, 0});
+    h.push_back(Message{"user", "u1", std::nullopt, std::nullopt, std::nullopt, 0});
     h.push_back(Message{"assistant", "{\"tool_calls\":[{\"id\":\"c1\",\"type\":\"function\",\"function\":{\"name\":\"x\",\"arguments\":\"{}\"}}]}",
-                        std::nullopt, std::nullopt, 0});
-    h.push_back(Message{"tool", "", std::optional<std::string>("x"), json{{"ok", true}}, 0});
-    h.push_back(Message{"assistant", "done", std::nullopt, std::nullopt, 0});
+                        std::nullopt, std::nullopt, std::nullopt, 0});
+    h.push_back(Message{"tool", "",
+                        std::nullopt,
+                        std::optional<std::string>("x"),
+                        std::optional<json>(json{{"ok", true}}),
+                        0});
+    h.push_back(Message{"assistant", "done", std::nullopt, std::nullopt, std::nullopt, 0});
 
     LLMInput in;
     in.system_prompt = "sys";
