@@ -198,6 +198,68 @@ private:
     std::atomic_int calls_ {0};
 };
 
+class StreamingCancelAdapter final : public ModelAdapter {
+public:
+    std::future<LLMOutput> invoke(
+        const LLMInput&, std::function<void(std::string_view)> callback = nullptr) override {
+        return output(std::move(callback));
+    }
+    std::future<LLMOutput> invoke_with_rendered(
+        const RenderedPrompt&, std::function<void(std::string_view)> callback = nullptr) override {
+        return output(std::move(callback));
+    }
+    std::vector<ToolMeta> get_available_tools() const override { return {}; }
+    void configure(const ModelConfig&) override {}
+    std::string get_model_name() const override { return "stream-cancel"; }
+    bool supports_multimodal() const override { return false; }
+
+private:
+    static std::future<LLMOutput> output(std::function<void(std::string_view)> callback) {
+        return std::async(std::launch::async, [callback = std::move(callback)]() {
+            if (callback) callback("first");
+            if (callback) callback("second");
+            LLMOutput result;
+            result.is_final = true;
+            result.final_answer = "should-not-complete";
+            return result;
+        });
+    }
+};
+
+void test_cancel_during_llm_stream_stops_delivery_and_commit() {
+    auto adapter = std::make_shared<StreamingCancelAdapter>();
+    auto llm = std::make_shared<LLMClient>();
+    llm->set_prompt_renderer(std::make_shared<PromptRenderer>());
+    llm->register_adapter("stream", adapter);
+    llm->set_default_adapter("stream");
+    auto control = std::make_shared<TaskControl>();
+    auto store = std::make_shared<InMemorySessionStore>();
+    int delivered_chunks = 0;
+
+    ExecutionRequest request;
+    request.config.system_prompt = "test";
+    request.config.max_iterations = 2;
+    request.deps = {llm, std::make_shared<ToolBus>(), nullptr};
+    request.session = std::make_shared<internal::AgentThreadState>();
+    request.session->initial_user_prompt = "cancel while streaming";
+    request.context.session_id = "stream-cancel-session";
+    request.control = control;
+    request.session_store = store;
+    request.options.react.graph_options.stream_callback = [&](std::string_view) {
+        ++delivered_chunks;
+        control->request_cancel();
+    };
+    request.options.react.sink.on_final_json = [](const nlohmann::json&) {};
+
+    tf::Executor executor(2);
+    GraphExecutor graph_executor;
+    ExecutionResult result = graph_executor.execute_sync(executor, std::move(request));
+    assert(!result.success);
+    assert(result.status == ExecutionTerminalStatus::Cancelled);
+    assert(delivered_chunks == 1);
+    assert(store->load_or_create("stream-cancel-session").revision == 0);
+}
+
 void test_resume_does_not_replay_tool_call() {
     tf::Executor executor(2);
     auto adapter = std::make_shared<ResumeAdapter>();
@@ -249,4 +311,5 @@ int main() {
     test_three_rounds_and_parallel_sessions();
     test_cancelled_session();
     test_resume_does_not_replay_tool_call();
+    test_cancel_during_llm_stream_stops_delivery_and_commit();
 }

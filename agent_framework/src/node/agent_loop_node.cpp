@@ -334,7 +334,19 @@ AgentLoopNode::create(
         const auto t0 = std::chrono::steady_clock::now();
         LLMOutput llm_out;
         try {
-            llm_out = llm_client->invoke(llm_in, "", stream_callback).get();
+            auto cancellable_stream = [stream_callback, task_control](std::string_view chunk) {
+                if (task_control) {
+                    task_control->check_deadline_now();
+                    if (task_control->is_cancel_requested()) {
+                        throw std::runtime_error("execution cancelled during LLM stream");
+                    }
+                    if (task_control->is_deadline_exceeded()) {
+                        throw std::runtime_error("execution deadline exceeded during LLM stream");
+                    }
+                }
+                if (stream_callback) stream_callback(chunk);
+            };
+            llm_out = llm_client->invoke(llm_in, "", std::move(cancellable_stream)).get();
         } catch (const std::exception& e) {
             if (dbg) {
                 std::cout << "[AgentLoop] LLM call threw exception: " << e.what() << "\n";
@@ -485,6 +497,13 @@ AgentLoopNode::create(
 
         bool stop_tools = false;
         for (std::size_t i = 0; i < calls.size() && !stop_tools && toolbus;) {
+            if (task_control) {
+                task_control->check_deadline_now();
+                if (task_control->is_cancel_requested() || task_control->is_deadline_exceeded()) {
+                    stop_tools = true;
+                    break;
+                }
+            }
             const ToolSideEffect se = classify_side(calls[i].name);
             const bool parallel_read_group =
                 orch_opts.enable_parallel_reads && se == ToolSideEffect::ReadOnly;
@@ -558,6 +577,14 @@ AgentLoopNode::create(
                 const std::size_t chunk2 = static_cast<std::size_t>(max_a2a);
                 for (std::size_t chunk_start = 0; chunk_start < glen2 && !stop_tools;
                      chunk_start += chunk2) {
+                    if (task_control) {
+                        task_control->check_deadline_now();
+                        if (task_control->is_cancel_requested() ||
+                            task_control->is_deadline_exceeded()) {
+                            stop_tools = true;
+                            break;
+                        }
+                    }
                     const std::size_t chunk_end = std::min(chunk_start + chunk2, glen2);
                     std::vector<std::future<json>> futs;
                     futs.reserve(chunk_end - chunk_start);
