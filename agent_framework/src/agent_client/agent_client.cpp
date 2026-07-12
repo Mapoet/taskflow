@@ -285,22 +285,52 @@ void AgentClient::subscribe_task_updates(
     const std::string sse_key = make_sse_key(agent_endpoint, task_id);
 
     std::string sse_endpoint;
+    std::optional<json> post_body;
     if (use_legacy_rest_) {
         std::ostringstream path;
         path << agent_endpoint << "/tasks/sendSubscribe?task_id=" << task_id;
         sse_endpoint = join_url(server_url_, path.str());
     } else {
-        sse_endpoint = join_url(server_url_, std::string(a2a::kTaskSseSubscribePathQueryPrefix) + task_id);
+        sse_endpoint = join_url(server_url_, json_rpc_path_);
+        post_body = {{"jsonrpc", "2.0"}, {"id", jsonrpc_next_id_.fetch_add(1)},
+                     {"method", a2a::kMethodSubscribeToTask}, {"params", {{"id", task_id}}}};
     }
 
     auto headers = build_auth_headers();
     headers["Accept"] = "text/event-stream";
 
     auto sse_conn =
-        std::make_unique<SSEConnection>(sse_endpoint, task_id, http_client_.get());
+        std::make_unique<SSEConnection>(sse_endpoint, task_id, http_client_.get(), std::move(post_body));
     sse_conn->subscribe(headers, std::move(on_status_update), std::move(on_artifact_update));
 
     sse_connections_[sse_key] = std::move(sse_conn);
+}
+
+void AgentClient::send_streaming_task(
+    const std::string& agent_endpoint,
+    const AgentMessage& initial_message,
+    const std::optional<std::string>& session_id,
+    const json& metadata,
+    std::function<void(const AgentTask&)> on_status_update,
+    std::function<void(const AgentArtifact&)> on_artifact_update) {
+    if (use_legacy_rest_) {
+        throw std::logic_error("SendStreamingMessage is unavailable in legacy REST mode");
+    }
+    json meta = metadata;
+    if (session_id) meta["contextId"] = *session_id;
+    const auto rpc_id = jsonrpc_next_id_.fetch_add(1);
+    json body = {{"jsonrpc", "2.0"}, {"id", rpc_id},
+                 {"method", a2a::kMethodSendStreamingMessage},
+                 {"params", {{"message", a2a::message_to_a2a_wire(initial_message)},
+                              {"metadata", std::move(meta)}}}};
+    const std::string key = agent_endpoint + ":stream:" + std::to_string(rpc_id);
+    auto headers = build_auth_headers();
+    headers["Accept"] = "text/event-stream";
+    auto connection = std::make_unique<SSEConnection>(
+        join_url(server_url_, json_rpc_path_), key, http_client_.get(), std::move(body));
+    connection->subscribe(headers, std::move(on_status_update), std::move(on_artifact_update));
+    std::lock_guard<std::mutex> lock(sse_mutex_);
+    sse_connections_[key] = std::move(connection);
 }
 
 void AgentClient::resubscribe_task_updates(

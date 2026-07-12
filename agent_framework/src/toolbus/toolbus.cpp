@@ -268,6 +268,16 @@ void ToolBus::register_local_tool(const std::string& name,
     tools_.emplace(name, std::make_shared<LocalTool>(name, std::move(func), meta));
 }
 
+void ToolBus::ensure_default_tools_registered(const std::function<void()>& registrar) {
+    if (!registrar) {
+        throw std::invalid_argument("default tool registrar is empty");
+    }
+    std::lock_guard<std::mutex> lock(default_tools_mutex_);
+    if (default_tools_registered_) return;
+    registrar();
+    default_tools_registered_ = true;
+}
+
 void ToolBus::register_mcp_service(const std::string& service_name, std::shared_ptr<MCPClient> client) {
     if (service_name.empty()) {
         throw std::invalid_argument("register_mcp_service: empty service_name");

@@ -6,8 +6,10 @@
 #include <agent/a2a/outbound_task_supervisor.hpp>
 #include <agent/a2a/peer_registry.hpp>
 #include <agent/agent_server.hpp>
+#include <agent/agent_client.hpp>
 #include <agent/toolbus.hpp>
 #include <agent/types.hpp>
+#include "support/test_execution_profile.hpp"
 
 #include <chrono>
 #include <cstdlib>
@@ -73,21 +75,10 @@ int main() {
     card.api_endpoint = "http://127.0.0.1:0/rpc";
     server.register_agent_card(card);
 
-    server.set_task_handler(
-        [](AgentTask t, std::shared_ptr<workflow::GraphBuilder>, std::shared_ptr<agent_framework::TaskControl>) {
-            return std::async(std::launch::async, [t]() mutable {
-                std::this_thread::sleep_for(std::chrono::milliseconds(40));
-                AgentMessage reply;
-                reply.role = AgentMessage::Role::AGENT;
-                AgentPart part;
-                part.type = AgentPart::Type::TEXT;
-                part.text = std::string("x");
-                reply.parts.push_back(std::move(part));
-                t.messages.push_back(std::move(reply));
-                t.status = AgentTaskStatus::COMPLETED;
-                t.updated_at = std::chrono::system_clock::now();
-                return t;
-            });
+    agent_framework::test::configure_execution_profile(
+        server, [](const agent_framework::RenderedPrompt&) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(40));
+            return "x";
         });
 
     std::thread th([&] { server.start(); });
@@ -158,6 +149,18 @@ int main() {
     wargs["mode"] = "all";
     json wr = sup->tool_wait_tasks(wargs);
     if (!wr.at("results")[0].value("ok", false) || !wr.at("results")[1].value("ok", false)) {
+        std::cerr << wr.dump(2) << '\n';
+        agent_framework::AgentClientOptions client_options;
+        client_options.use_legacy_rest = false;
+        client_options.json_rpc_path = "/rpc";
+        agent_framework::AgentClient diagnostic(
+            std::string("http://127.0.0.1:") + std::to_string(port), client_options);
+        for (const auto& item : wr.at("results")) {
+            const std::string remote_id = item.value("remote_task_id", "");
+            if (!remote_id.empty()) {
+                std::cerr << diagnostic.get_task("", remote_id).get().to_json().dump(2) << '\n';
+            }
+        }
         fail("wait not ok");
     }
 

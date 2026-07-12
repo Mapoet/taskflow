@@ -94,7 +94,11 @@ static void check_agent_card_roundtrip(const std::string& path) {
     if (c.skills.empty()) {
         fail("card_with_skills expected non-empty skills");
     }
-    if (w["name"] != j["name"] || w["url"] != j["url"]) {
+    const std::string normalized_url = w.at("supportedInterfaces").front().at("url");
+    const std::string fixture_url = j.contains("supportedInterfaces")
+        ? j.at("supportedInterfaces").front().at("url").get<std::string>()
+        : j.at("url").get<std::string>();
+    if (w["name"] != j["name"] || normalized_url != fixture_url) {
         fail("card round-trip name/url mismatch");
     }
 }

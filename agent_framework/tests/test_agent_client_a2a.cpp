@@ -44,16 +44,6 @@ void fail(const char* msg) {
     std::exit(1);
 }
 
-int pick_listen_port() {
-    httplib::Server s;
-    s.Get("/p", [](const httplib::Request&, httplib::Response& res) { res.set_content("ok", "text/plain"); });
-    const int p = s.bind_to_any_port("127.0.0.1");
-    if (p <= 0) {
-        fail("bind_to_any_port");
-    }
-    return p;
-}
-
 /** After /health succeeds, the listen thread may still be ramping; avoids intermittent httplib Error::Read on POST. */
 void settle_after_health_ready() {
     std::this_thread::sleep_for(std::chrono::milliseconds(300));
@@ -83,7 +73,6 @@ void retry_httplib_transport_void(Fn&& fn, int max_attempts = 8) {
 
 /** C-1: JSON-RPC SendMessage → task id */
 void test_c1_jsonrpc_send() {
-    const int port = pick_listen_port();
     httplib::Server srv;
     // Add health check endpoint for server readiness
     srv.Get("/health", [](const httplib::Request&, httplib::Response& res) {
@@ -125,7 +114,9 @@ void test_c1_jsonrpc_send() {
         res.set_content(out.dump(), "application/json");
     });
 
-    std::thread th([&] { srv.listen("127.0.0.1", port); });
+    const int port = srv.bind_to_any_port("127.0.0.1");
+    if (port <= 0) fail("C-1 bind_to_any_port");
+    std::thread th([&] { srv.listen_after_bind(); });
     while (!srv.is_running()) {
         std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
@@ -188,7 +179,6 @@ void test_c1_jsonrpc_send() {
 
 /** C-2: JSON-RPC error → A2aRpcException */
 void test_c2_jsonrpc_error() {
-    const int port = pick_listen_port();
     httplib::Server srv;
     // Add health check endpoint for server readiness
     srv.Get("/health", [](const httplib::Request&, httplib::Response& res) {
@@ -217,7 +207,9 @@ void test_c2_jsonrpc_error() {
         res.set_content(out.dump(), "application/json");
     });
 
-    std::thread th([&] { srv.listen("127.0.0.1", port); });
+    const int port = srv.bind_to_any_port("127.0.0.1");
+    if (port <= 0) fail("C-2 bind_to_any_port");
+    std::thread th([&] { srv.listen_after_bind(); });
     while (!srv.is_running()) {
         std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
@@ -299,7 +291,6 @@ void test_c2_jsonrpc_error() {
 
 /** C-3: Legacy REST path（实例级 `use_legacy_rest`） */
 void test_c3_legacy_rest() {
-    const int port = pick_listen_port();
     std::string last_path;
     httplib::Server srv;
     // Add health check endpoint for server readiness
@@ -317,7 +308,9 @@ void test_c3_legacy_rest() {
         }
     });
 
-    std::thread th([&] { srv.listen("127.0.0.1", port); });
+    const int port = srv.bind_to_any_port("127.0.0.1");
+    if (port <= 0) fail("C-3 bind_to_any_port");
+    std::thread th([&] { srv.listen_after_bind(); });
     while (!srv.is_running()) {
         std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
@@ -381,8 +374,6 @@ void test_c3_legacy_rest() {
 
 /** C-4: get_sse + StreamResponse ×2 */
 void test_c4_get_sse() {
-    const int port = pick_listen_port();
-    std::cerr << "C-4: starting test on port " << port << std::endl;
     httplib::Server srv;
 
     // Add health check endpoint for server readiness
@@ -403,7 +394,10 @@ void test_c4_get_sse() {
         res.set_content(buf, "text/event-stream");
     });
 
-    std::thread th([&] { srv.listen("127.0.0.1", port); });
+    const int port = srv.bind_to_any_port("127.0.0.1");
+    if (port <= 0) fail("C-4 bind_to_any_port");
+    std::cerr << "C-4: starting test on port " << port << std::endl;
+    std::thread th([&] { srv.listen_after_bind(); });
     while (!srv.is_running()) {
         std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }

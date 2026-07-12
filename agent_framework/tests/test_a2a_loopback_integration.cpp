@@ -7,6 +7,7 @@
 #include <agent/a2a/client_config.hpp>
 #include <agent/task_state_machine.hpp>
 #include <agent/types.hpp>
+#include "support/test_execution_profile.hpp"
 
 #include <atomic>
 #include <chrono>
@@ -81,22 +82,13 @@ void loopback_happy() {
     card.api_endpoint = "http://127.0.0.1:0/rpc";
     server.register_agent_card(card);
 
-    server.set_task_handler([](AgentTask t,
-                               std::shared_ptr<workflow::GraphBuilder>,
-                               std::shared_ptr<agent_framework::TaskControl>) {
-        return std::async(std::launch::async, [t]() mutable {
-            for (const auto& m : t.messages) {
-                for (const auto& p : m.parts) {
-                    if (p.type == AgentPart::Type::TEXT && p.text == std::string("sse")) {
-                        std::this_thread::sleep_for(std::chrono::milliseconds(200));
-                    }
-                }
+    agent_framework::test::configure_execution_profile(
+        server, [](const agent_framework::RenderedPrompt& rendered) {
+            if (agent_framework::test::rendered_contains(rendered, "sse")) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(200));
             }
-            t.status = AgentTaskStatus::COMPLETED;
-            t.updated_at = std::chrono::system_clock::now();
-            return t;
+            return "ok";
         });
-    });
 
     std::thread th([&] { server.start(); });
     if (!wait_bound(server, 5000)) {
@@ -186,15 +178,7 @@ void loopback_concurrent() {
     card.api_endpoint = "http://127.0.0.1:0/rpc";
     server.register_agent_card(card);
 
-    server.set_task_handler([](AgentTask t,
-                               std::shared_ptr<workflow::GraphBuilder>,
-                               std::shared_ptr<agent_framework::TaskControl>) {
-        return std::async(std::launch::async, [t]() mutable {
-            t.status = AgentTaskStatus::COMPLETED;
-            t.updated_at = std::chrono::system_clock::now();
-            return t;
-        });
-    });
+    agent_framework::test::configure_execution_profile(server);
 
     std::thread th([&] { server.start(); });
     if (!wait_bound(server, 5000)) {

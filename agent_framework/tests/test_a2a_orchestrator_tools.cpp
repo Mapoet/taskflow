@@ -7,6 +7,7 @@
 #include <agent/agent_server.hpp>
 #include <agent/toolbus.hpp>
 #include <agent/types.hpp>
+#include "support/test_execution_profile.hpp"
 
 #include <chrono>
 #include <cstdlib>
@@ -62,8 +63,6 @@ void test_send_message_tool() {
     (void)::setenv("AGENT_SERVER_JSON_RPC_PATH", "/rpc", 1);
     (void)::setenv("AGENT_SERVER_LEGACY_REST", "0", 1);
 
-    auto inbound_session_ids = std::make_shared<std::vector<std::optional<std::string>>>();
-
     AgentServer server(0);
     AgentCard card;
     card.name = "orch-tool-test";
@@ -73,25 +72,8 @@ void test_send_message_tool() {
     card.api_endpoint = "http://127.0.0.1:0/rpc";
     server.register_agent_card(card);
 
-    server.set_task_handler(
-        [inbound_session_ids](AgentTask t,
-                             std::shared_ptr<workflow::GraphBuilder>,
-                             std::shared_ptr<agent_framework::TaskControl>) {
-            return std::async(std::launch::async, [t, inbound_session_ids]() mutable {
-                inbound_session_ids->push_back(t.session_id);
-                AgentMessage reply;
-                reply.role = AgentMessage::Role::AGENT;
-                AgentPart part;
-                part.type = AgentPart::Type::TEXT;
-                part.text = std::string("ok");
-                reply.parts.push_back(std::move(part));
-                t.messages.push_back(std::move(reply));
-                t.status = AgentTaskStatus::COMPLETED;
-                t.session_id = std::string("ctx-loopback");
-                t.updated_at = std::chrono::system_clock::now();
-                return t;
-            });
-        });
+    agent_framework::test::configure_execution_profile(
+        server, [](const agent_framework::RenderedPrompt&) { return "ok"; });
 
     std::thread th([&] { server.start(); });
     if (!wait_bound(server, 5000)) {
@@ -130,14 +112,9 @@ void test_send_message_tool() {
     if (!r.value("ok", false)) {
         fail("first call not ok");
     }
-    if (r.value("context_id", json()) != "ctx-loopback") {
+    const std::string first_context = r.value("context_id", "");
+    if (first_context.empty()) {
         fail("context_id not propagated");
-    }
-    if (inbound_session_ids->size() != 1U) {
-        fail("expected one handler invocation");
-    }
-    if (inbound_session_ids->at(0).has_value()) {
-        fail("first call should not send session id");
     }
 
     json args2;
@@ -148,10 +125,7 @@ void test_send_message_tool() {
     if (!r2.value("ok", false)) {
         fail("second call not ok");
     }
-    if (inbound_session_ids->size() != 2U) {
-        fail("expected two handler invocations");
-    }
-    if (!inbound_session_ids->at(1).has_value() || *inbound_session_ids->at(1) != "ctx-loopback") {
+    if (r2.value("context_id", "") != first_context) {
         fail("continue_session should pass context id");
     }
 

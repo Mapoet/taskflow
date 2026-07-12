@@ -4,6 +4,7 @@
  */
 #include <agent/a2a/peer_registry.hpp>
 #include <agent/agent_server.hpp>
+#include "support/test_execution_profile.hpp"
 #include <agent/types.hpp>
 
 #include <chrono>
@@ -94,6 +95,7 @@ void test_discover_all_loopback() {
     card.capabilities = {};
     card.api_endpoint = "http://127.0.0.1:0/rpc";
     server.register_agent_card(card);
+    agent_framework::test::configure_execution_profile(server);
 
     std::thread th([&] { server.start(); });
     if (!wait_bound(server, 5000)) {

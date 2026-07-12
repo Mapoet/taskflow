@@ -5,6 +5,9 @@
 #include <agent/agent_server.hpp>
 #include <agent/a2a/auth_gate.hpp>
 #include <agent/types.hpp>
+#include <agent/llm_client.hpp>
+#include <agent/prompt_renderer.hpp>
+#include <agent/toolbus.hpp>
 
 #include <chrono>
 #include <cstdlib>
@@ -38,6 +41,46 @@ std::string card_name_for_role(const std::string& role) {
     }
     return "agent-server-demo";
 }
+
+class DemoAdapter final : public agent_framework::ModelAdapter {
+public:
+    explicit DemoAdapter(std::string role) : role_(std::move(role)) {}
+    std::future<agent_framework::LLMOutput> invoke(
+        const agent_framework::LLMInput& input,
+        std::function<void(std::string_view)> = nullptr) override {
+        agent_framework::RenderedPrompt rendered;
+        for (const auto& message : input.history) {
+            rendered.messages.push_back({{"role", message.role}, {"content", message.content}});
+        }
+        return invoke_with_rendered(rendered);
+    }
+    std::future<agent_framework::LLMOutput> invoke_with_rendered(
+        const agent_framework::RenderedPrompt& rendered,
+        std::function<void(std::string_view)> = nullptr) override {
+        std::promise<agent_framework::LLMOutput> promise;
+        agent_framework::LLMOutput output;
+        output.is_final = true;
+        if (role_ == "integration-worker") {
+            output.final_answer = R"({"signature":"SIG_TIER_D_A"})";
+        } else if (role_ == "integration-reviewer") {
+            bool found = false;
+            for (const auto& message : rendered.messages) {
+                found = found || message.value("content", "").find("SIG_TIER_D_A") != std::string::npos;
+            }
+            output.final_answer = found ? "review_pass" : "review_failed: missing signature";
+        } else {
+            output.final_answer = "ok";
+        }
+        promise.set_value(std::move(output));
+        return promise.get_future();
+    }
+    std::vector<agent_framework::ToolMeta> get_available_tools() const override { return {}; }
+    void configure(const agent_framework::ModelConfig&) override {}
+    std::string get_model_name() const override { return "agent-server-demo"; }
+    bool supports_multimodal() const override { return false; }
+private:
+    std::string role_;
+};
 
 std::string json_rpc_path_normalized() {
     const char* o = std::getenv("AGENT_SERVER_JSON_RPC_PATH");
@@ -124,45 +167,16 @@ int main(int argc, char** argv) {
     server.register_agent_card(card);
 
     const std::string role = demo_role();
-    server.set_task_handler(
-        [role](AgentTask t,
-               std::shared_ptr<workflow::GraphBuilder>,
-               std::shared_ptr<agent_framework::TaskControl>) {
-            return std::async(std::launch::async, [t, role]() mutable {
-                if (role == "integration-worker") {
-                    AgentMessage reply;
-                    reply.role = AgentMessage::Role::AGENT;
-                    AgentPart p;
-                    p.type = AgentPart::Type::TEXT;
-                    p.text = std::string(R"({"signature":"SIG_TIER_D_A"})");
-                    reply.parts.push_back(std::move(p));
-                    t.messages.push_back(std::move(reply));
-                    t.status = AgentTaskStatus::COMPLETED;
-                    t.updated_at = std::chrono::system_clock::now();
-                    return t;
-                }
-                if (role == "integration-reviewer") {
-                    std::string blob;
-                    for (const auto& m : t.messages) {
-                        for (const auto& p : m.parts) {
-                            if (p.type == AgentPart::Type::TEXT && p.text.has_value()) {
-                                blob += *p.text;
-                            }
-                        }
-                    }
-                    if (blob.find("SIG_TIER_D_A") != std::string::npos) {
-                        t.status = AgentTaskStatus::COMPLETED;
-                    } else {
-                        t.status = AgentTaskStatus::FAILED;
-                    }
-                    t.updated_at = std::chrono::system_clock::now();
-                    return t;
-                }
-                t.status = AgentTaskStatus::COMPLETED;
-                t.updated_at = std::chrono::system_clock::now();
-                return t;
-            });
-        });
+    auto llm = std::make_shared<agent_framework::LLMClient>();
+    llm->set_prompt_renderer(std::make_shared<agent_framework::PromptRenderer>());
+    llm->register_adapter("demo", std::make_shared<DemoAdapter>(role));
+    llm->set_default_adapter("demo");
+    agent_framework::AgentExecutionProfile profile;
+    profile.config.name = card.name;
+    profile.config.system_prompt = "Execute the demo role deterministically.";
+    profile.config.max_iterations = 2;
+    profile.deps = {llm, std::make_shared<agent_framework::ToolBus>(), nullptr};
+    server.set_execution_profile(std::move(profile));
 
     const char* token = std::getenv("AGENT_SERVER_AUTH_TOKEN");
     if (token && token[0]) {

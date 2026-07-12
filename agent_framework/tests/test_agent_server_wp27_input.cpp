@@ -9,6 +9,7 @@
 #include <agent/types.hpp>
 #include <agent/user_input_preprocessor.hpp>
 #include <workflow/nodeflow.hpp>
+#include "support/test_execution_profile.hpp"
 
 #include <chrono>
 #include <cstdlib>
@@ -119,17 +120,7 @@ int main() {
     card.api_endpoint = "http://127.0.0.1:9/rpc";
     server.register_agent_card(card);
 
-    server.set_task_handler(
-        [](agent_framework::AgentTask t,
-           std::shared_ptr<workflow::GraphBuilder>,
-           std::shared_ptr<agent_framework::TaskControl>) {
-            return std::async(std::launch::deferred,
-                              [t]() mutable {
-                                  t.status = agent_framework::AgentTaskStatus::COMPLETED;
-                                  t.updated_at = std::chrono::system_clock::now();
-                                  return t;
-                              });
-        });
+    agent_framework::test::configure_execution_profile(server);
 
     std::thread th([&] { server.start(); });
     if (!wait_bound(server, 5000)) {

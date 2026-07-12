@@ -20,11 +20,9 @@
 #include <agent/a2a/auth_gate.hpp>
 #include <agent/types.hpp>
 #include <agent/task_state_machine.hpp>
+#include <agent/graph_executor.hpp>
+#include <agent/session_store.hpp>
 #include <nlohmann/json.hpp>
-
-namespace workflow {
-class GraphBuilder;
-}
 
 namespace tf {
 class Executor;
@@ -50,6 +48,13 @@ class DispatchTable;
 using json = nlohmann::json;
 
 class ToolBus;
+
+struct AgentExecutionProfile {
+    std::string template_id = kWorkflowTemplateReactCli;
+    AgentConfig config;
+    AgentWorkflowDeps deps;
+    InputPolicyConfig input_policy;
+};
 
 /**
  * @brief Agent 服务器（A2A 协议）
@@ -87,16 +92,9 @@ public:
      */
     void register_agent_card(const AgentCard& card);
 
-    /**
-     * @brief 设置任务处理器（将 Agent Task 转换为 workflow 执行）
-     */
-    void set_task_handler(
-        std::function<std::future<AgentTask>(
-            const AgentTask& task,
-            std::shared_ptr<workflow::GraphBuilder> builder,
-            std::shared_ptr<TaskControl> task_control
-        )> handler
-    );
+    void set_execution_profile(AgentExecutionProfile profile);
+    void set_graph_executor(std::shared_ptr<GraphExecutor> executor);
+    void set_session_store(std::shared_ptr<SessionStore> store);
 
     /**
      * @brief 设置附加认证验证器（在内置 AuthGate 通过后与关系 AND）
@@ -134,14 +132,12 @@ private:
     mutable std::mutex tasks_mutex_;
     mutable std::mutex sse_mutex_;
 
-    std::function<std::future<AgentTask>(
-        const AgentTask&,
-        std::shared_ptr<workflow::GraphBuilder>,
-        std::shared_ptr<TaskControl>)>
-        task_handler_;
     std::function<bool(const a2a::AuthContext&)> auth_validator_;
     a2a::AuthGateConfig auth_gate_config_;
     std::shared_ptr<ToolBus> preprocess_toolbus_;
+    std::optional<AgentExecutionProfile> execution_profile_;
+    std::shared_ptr<GraphExecutor> graph_executor_;
+    std::shared_ptr<SessionStore> session_store_;
 
     std::unique_ptr<internal::TaskDispatchQueue> task_queue_;
     std::vector<std::thread> dispatch_workers_;
@@ -155,7 +151,6 @@ private:
     void dispatch_worker_loop();
     void run_agent_task_on_executor(const std::string& task_id,
                                     AgentTask task_snapshot,
-                                    std::shared_ptr<workflow::GraphBuilder> builder,
                                     std::shared_ptr<TaskControl> control);
 
     void setup_routes();
@@ -171,6 +166,7 @@ private:
     void handle_tasks_cancel(const httplib::Request& req, httplib::Response& res);
     void handle_tasks_update(const httplib::Request& req, httplib::Response& res);
     void handle_tasks_send_subscribe(const httplib::Request& req, httplib::Response& res);
+    void attach_task_stream(const std::string& task_id, httplib::Response& res);
     void handle_tasks_resubscribe(const httplib::Request& req, httplib::Response& res);
     void handle_push_notification_set(const httplib::Request& req, httplib::Response& res);
     void handle_push_notification_get(const httplib::Request& req, httplib::Response& res);

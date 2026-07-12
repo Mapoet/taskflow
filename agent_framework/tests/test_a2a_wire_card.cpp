@@ -91,7 +91,7 @@ static void c3_missing_required() {
         c.authentication_scheme = json::object();
         return c;
     }());
-    j.erase("url");
+    j.erase("supportedInterfaces");
     try {
         (void)agent_card_from_a2a_wire(j);
         assert(false);

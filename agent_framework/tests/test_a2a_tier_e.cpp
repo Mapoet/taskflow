@@ -5,6 +5,7 @@
 #include <agent/agent_server.hpp>
 #include <agent/a2a/auth_gate.hpp>
 #include <agent/types.hpp>
+#include "support/test_execution_profile.hpp"
 
 #include <chrono>
 #include <cstdlib>
@@ -70,15 +71,7 @@ int main() {
     card.provider = "t";
     card.api_endpoint = "http://127.0.0.1:0/rpc";
     server.register_agent_card(card);
-    server.set_task_handler([](AgentTask t,
-                               std::shared_ptr<workflow::GraphBuilder>,
-                               std::shared_ptr<agent_framework::TaskControl>) {
-        return std::async(std::launch::async, [t]() mutable {
-            t.status = AgentTaskStatus::COMPLETED;
-            t.updated_at = std::chrono::system_clock::now();
-            return t;
-        });
-    });
+    agent_framework::test::configure_execution_profile(server);
 
     const char* auth_tok = std::getenv("AGENT_A2A_TIER_E_AUTH_TOKEN");
     if (auth_tok != nullptr && auth_tok[0]) {

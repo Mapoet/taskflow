@@ -18,6 +18,8 @@ inline constexpr const char* kA2aJsonRpcDefaultPath = "/";
 inline constexpr const char* kMethodSendMessage = "SendMessage";
 inline constexpr const char* kMethodGetTask = "GetTask";
 inline constexpr const char* kMethodCancelTask = "CancelTask";
+inline constexpr const char* kMethodSendStreamingMessage = "SendStreamingMessage";
+inline constexpr const char* kMethodSubscribeToTask = "SubscribeToTask";
 
 /**
  * @brief HTTP SSE subscribe path prefix (tracker §7 legacy对照).

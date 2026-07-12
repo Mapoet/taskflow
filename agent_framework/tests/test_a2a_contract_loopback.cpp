@@ -69,6 +69,7 @@ struct ListenThread {
     std::thread worker;
     // port must be captured by value: the ctor parameter does not outlive this ctor body.
     ListenThread(httplib::Server& s, int port) : srv(s), worker([&s, port] { s.listen("127.0.0.1", port); }) {}
+    explicit ListenThread(httplib::Server& s) : srv(s), worker([&s] { s.listen_after_bind(); }) {}
     ~ListenThread() {
         try {
             srv.stop();
@@ -82,18 +83,6 @@ struct ListenThread {
     ListenThread(const ListenThread&) = delete;
     ListenThread& operator=(const ListenThread&) = delete;
 };
-
-int pick_listen_port() {
-    httplib::Server s;
-    s.Get("/health", [](const httplib::Request&, httplib::Response& res) {
-        res.set_content("OK", "text/plain");
-    });
-    const int p = s.bind_to_any_port("127.0.0.1");
-    if (p <= 0) {
-        fail("bind_to_any_port");
-    }
-    return p;
-}
 
 json read_fixture_json(const char* rel) {
     std::string path = std::string(AGENT_TEST_A2A_ROOT) + "/synthetic-v1/" + rel;
@@ -149,7 +138,6 @@ AgentMessage make_fixture_user_message() {
 
 void test_l1_fixture_send_message() {
     json golden_res = read_fixture_json("jsonrpc/send_message_response.json");
-    const int port = pick_listen_port();
 
     httplib::Server srv;
     srv.Get("/health", [](const httplib::Request&, httplib::Response& res) {
@@ -175,7 +163,9 @@ void test_l1_fixture_send_message() {
         res.set_content(out.dump(), "application/json");
     });
 
-    ListenThread listen{srv, port};
+    const int port = srv.bind_to_any_port("127.0.0.1");
+    if (port <= 0) fail("bind_to_any_port L-1");
+    ListenThread listen{srv};
     wait_until_running(srv);
     wait_health_ok("127.0.0.1", port, 15000);
 
@@ -198,8 +188,6 @@ void test_l2_bearer_optional() {
         return;
     }
     json golden_res = read_fixture_json("jsonrpc/send_message_response.json");
-    const int port = pick_listen_port();
-
     httplib::Server srv;
     srv.Get("/health", [](const httplib::Request&, httplib::Response& res) {
         res.set_content("OK", "text/plain");
@@ -227,7 +215,9 @@ void test_l2_bearer_optional() {
         res.set_content(out.dump(), "application/json");
     });
 
-    ListenThread listen{srv, port};
+    const int port = srv.bind_to_any_port("127.0.0.1");
+    if (port <= 0) fail("bind_to_any_port L-2");
+    ListenThread listen{srv};
     wait_until_running(srv);
     wait_health_ok("127.0.0.1", port, 15000);
 

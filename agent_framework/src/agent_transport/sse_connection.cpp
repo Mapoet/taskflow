@@ -6,6 +6,7 @@
 #include <agent/agent_client.hpp>
 #include <agent/a2a/sse_framing.hpp>
 #include <agent/a2a/wire_mapping.hpp>
+#include <agent/httplib_http_client.hpp>
 
 #include <cstdlib>
 #include <iostream>
@@ -26,8 +27,9 @@ bool sse_legacy_payload_enabled() {
 
 } // namespace
 
-SSEConnection::SSEConnection(const std::string& endpoint, const std::string& task_id, HTTPClient* http)
-    : endpoint_(endpoint), task_id_(task_id), http_client_(http) {}
+SSEConnection::SSEConnection(const std::string& endpoint, const std::string& task_id, HTTPClient* http,
+                             std::optional<json> post_body)
+    : endpoint_(endpoint), task_id_(task_id), http_client_(http), post_body_(std::move(post_body)) {}
 
 SSEConnection::~SSEConnection() {
     close();
@@ -140,6 +142,18 @@ void SSEConnection::event_thread_func() {
     a2a::SseParser parser;
 
     try {
+        if (post_body_) {
+            auto* httplib = dynamic_cast<HttplibClient*>(http_client_);
+            if (!httplib) {
+                throw std::runtime_error("JSON-RPC SSE requires HttplibClient");
+            }
+            httplib->post_sse(
+                endpoint_, *post_body_, request_headers_,
+                [&](const std::string&, const json& data) { handle_sse_event(data.dump()); }, 0);
+            std::lock_guard<std::mutex> lock(connection_mutex_);
+            active_ = false;
+            return;
+        }
         http_client_->get_sse(
             endpoint_,
             request_headers_,
@@ -154,7 +168,11 @@ void SSEConnection::event_thread_func() {
             0,
             &cancelled_);
     } catch (const std::exception& e) {
-        std::cerr << "SSEConnection: get_sse: " << e.what() << "\n";
+        // cpp-httplib reports a closed chunked response as a read/cancel error after
+        // the terminal SSE frame. For JSON-RPC streams that is the normal lifecycle.
+        if (!post_body_) {
+            std::cerr << "SSEConnection: get_sse: " << e.what() << "\n";
+        }
     }
 
     std::lock_guard<std::mutex> lock(connection_mutex_);

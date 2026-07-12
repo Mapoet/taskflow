@@ -7,6 +7,8 @@
 
 #include <agent/internal/agent_thread_state.hpp>
 #include <agent/llm_client.hpp>
+#include <agent/task_state_machine.hpp>
+#include <agent/user_input_preprocessor.hpp>
 #include <agent/verifier_runner.hpp>
 #include <agent/verifier_types.hpp>
 
@@ -23,6 +25,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <unordered_set>
 
 namespace agent_framework {
 namespace {
@@ -122,6 +125,18 @@ json verifier_issues_to_json(const std::vector<VerifierIssue>& issues) {
     return arr;
 }
 
+std::string stable_result_digest(const json& value) {
+    const std::string bytes = value.dump();
+    std::uint64_t hash = 1469598103934665603ULL;
+    for (unsigned char byte : bytes) {
+        hash ^= byte;
+        hash *= 1099511628211ULL;
+    }
+    std::ostringstream out;
+    out << std::hex << std::setw(16) << std::setfill('0') << hash;
+    return out.str();
+}
+
 std::string verifier_log_outcome(VerifierGateKind k, bool skipped) {
     if (skipped) {
         return "skipped";
@@ -180,6 +195,32 @@ void validate_react_cli_request(const ReactCliRunRequest& r) {
 }
 
 } // namespace
+
+ExecutionEventEmitter::ExecutionEventEmitter(ExecutionEventSink sink, std::string task_id,
+                                             std::string session_id, std::string run_id)
+    : sink_(std::move(sink)), task_id_(std::move(task_id)),
+      session_id_(std::move(session_id)), run_id_(std::move(run_id)) {}
+
+void ExecutionEventEmitter::emit(ExecutionEventType type, json payload,
+                                 std::optional<std::string> child_id) noexcept {
+    if (!sink_) return;
+    try {
+        ExecutionEvent event;
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            event = {type, task_id_, session_id_, run_id_, std::move(child_id),
+                     ++sequence_, utc_timestamp_iso_ms(), std::move(payload)};
+        }
+        sink_(event);
+    } catch (...) {
+        // Observability adapters cannot alter execution semantics.
+    }
+}
+
+std::uint64_t ExecutionEventEmitter::sequence() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return sequence_;
+}
 
 bool merge_react_session_state(
     internal::AgentThreadState& session,
@@ -250,11 +291,6 @@ void GraphExecutor::build_agent_workflow(const AgentConfig& config,
                                          std::shared_ptr<internal::AgentThreadState> agent_state,
                                          const CliAgentTerminalSinkOptions& sink) {
     build_cli_agent_graph_with_terminal_sink(builder, config, deps, std::move(agent_state), sink);
-}
-
-void GraphExecutor::build_custom_workflow(const WorkflowConfig& /*config*/,
-                                            workflow::GraphBuilder& /*builder*/) {
-    throw std::logic_error("GraphExecutor::build_custom_workflow: not implemented");
 }
 
 void GraphExecutor::register_template(const std::string& name,
@@ -506,8 +542,177 @@ std::future<WorkflowResult> GraphExecutor::run_react_cli_async(tf::Executor& exe
     });
 }
 
-std::future<WorkflowResult> GraphExecutor::execute(const std::string& /*workflow_name*/) {
-    throw std::logic_error("GraphExecutor::execute removed: use GraphExecutor::run_react_cli_sync");
+ExecutionResult GraphExecutor::execute_sync(tf::Executor& executor, ExecutionRequest request) {
+    ExecutionResult result;
+    if (request.template_id != kWorkflowTemplateReactCli) {
+        result.error = "unknown workflow template: " + request.template_id;
+        return result;
+    }
+    if (!request.session) {
+        result.error = "execution session is null";
+        return result;
+    }
+
+    std::string session_id;
+    if (request.context.session_id) session_id = *request.context.session_id;
+    if (session_id.empty() && request.session->execution_context &&
+        request.session->execution_context->session_id) {
+        session_id = *request.session->execution_context->session_id;
+    }
+    if (session_id.empty()) {
+        result.error = "execution context session_id is required";
+        return result;
+    }
+    result.session_id = session_id;
+
+    std::uint64_t expected_revision = 0;
+    SessionSnapshot loaded_snapshot;
+    const std::string user_prompt = request.session->initial_user_prompt;
+    if (request.session_store && request.options.persist_session) {
+        loaded_snapshot = request.session_store->load_or_create(session_id);
+        expected_revision = loaded_snapshot.revision;
+        if (loaded_snapshot.revision != 0) *request.session = loaded_snapshot.state;
+        request.session->initial_user_prompt = user_prompt;
+    }
+    auto committed_session = request.session;
+    auto working_session = std::make_shared<internal::AgentThreadState>(*committed_session);
+    request.session = working_session;
+    request.context.session_id = session_id;
+    request.session->execution_context = request.context;
+    request.options.react.graph_options.task_control = request.control;
+    const std::size_t history_size_before = request.session->history.size();
+    const auto compact_ts_before = request.session->last_memory_compaction_ts;
+
+    const std::string run_id = request.context.task_id.value_or(session_id) + ":" +
+                               std::to_string(expected_revision + 1);
+    ExecutionEventEmitter emitter(request.event_sink, request.context.task_id.value_or(""),
+                                  session_id, run_id);
+    auto emit = [&](ExecutionEventType type, json payload) {
+        emitter.emit(type, std::move(payload));
+    };
+    emit(ExecutionEventType::TaskStarted, json::object());
+
+    if (!request.options.input_already_processed) {
+        if (request.input_policy.tier_b_enabled && !request.input_policy.tier_b_llm) {
+            result.error = "Tier B input policy enabled without a dedicated LLM client";
+            return result;
+        }
+        PreprocessOptions preprocess;
+        preprocess.toolbus = request.deps.toolbus;
+        preprocess.enable_tier_b = request.input_policy.tier_b_enabled;
+        preprocess.tier_b_llm = request.input_policy.tier_b_llm;
+        preprocess.tier_b_timeout_ms = request.input_policy.tier_b_timeout_ms;
+        preprocess.tier_b_max_calls = request.input_policy.tier_b_max_calls_per_request;
+        preprocess.tier_b_reject_on_failure =
+            request.input_policy.failure_mode == TierBFailureMode::Reject;
+        UserInputPreprocessor pipeline(std::move(preprocess));
+        ProcessedUserInput processed = pipeline.process(user_prompt, request.context);
+        if (!processed.tier_a_violations.empty()) {
+            result.error = "input_policy_violation: " + processed.tier_a_violations.front();
+            emit(ExecutionEventType::TaskStatusChanged,
+                 {{"component", "input_policy"}, {"outcome", "rejected"},
+                  {"violations", processed.tier_a_violations}});
+            return result;
+        }
+        apply_processed_to_agent_state(std::move(processed), request.context, *request.session);
+        emit(ExecutionEventType::TaskStatusChanged,
+             {{"component", "input_policy"}, {"outcome", "accepted"},
+              {"tier_b_enabled", request.input_policy.tier_b_enabled}});
+    }
+
+    ReactCliRunRequest react;
+    react.config = request.config;
+    react.deps = request.deps;
+    react.session = request.session;
+    react.options = request.options.react;
+    auto prior_verifier_event = react.options.on_verifier_event;
+    react.options.on_verifier_event = [&, prior_verifier_event](std::string_view name, const json& payload) {
+        emit(name == "verifier_started" ? ExecutionEventType::VerifierStarted
+                                         : ExecutionEventType::VerifierCompleted, payload);
+        if (prior_verifier_event) prior_verifier_event(name, payload);
+    };
+
+    WorkflowResult wr = run_react_cli_sync(executor, react);
+    result.outputs = wr.outputs;
+    result.exit_code = wr.exit_code;
+    result.error = wr.error_message;
+    for (std::size_t i = history_size_before; i < request.session->history.size(); ++i) {
+        const auto& message = request.session->history[i];
+        if (message.role == "tool") {
+            emit(ExecutionEventType::ToolCompleted,
+                 {{"tool_call_id", message.tool_call_id.value_or("")},
+                  {"tool_name", message.tool_name.value_or("")},
+                  {"restored", false}});
+        }
+    }
+    if (request.session->last_memory_compaction_ts != compact_ts_before) {
+        emit(ExecutionEventType::MemoryCompacted,
+             {{"history_size_before", history_size_before},
+              {"history_size_after", request.session->history.size()},
+              {"strategy", "configured"}});
+    }
+    if (request.control) {
+        request.control->check_deadline_now();
+    }
+    const bool cancelled = request.control && request.control->is_cancel_requested();
+    const bool deadline_exceeded = request.control && request.control->is_deadline_exceeded();
+    if (!wr.success || cancelled || deadline_exceeded) {
+        result.status = deadline_exceeded ? ExecutionTerminalStatus::DeadlineExceeded
+                                         : cancelled ? ExecutionTerminalStatus::Cancelled
+                                                     : ExecutionTerminalStatus::Failed;
+        if (deadline_exceeded) result.error = "execution deadline exceeded";
+        if (cancelled) result.error = "execution cancelled";
+        emit(ExecutionEventType::ExecutionCompleted,
+             {{"success", false}, {"exit_code", result.exit_code},
+              {"cancelled", cancelled}, {"deadline_exceeded", deadline_exceeded}});
+        return result;
+    }
+
+    if (request.session_store && request.options.persist_session) {
+        SessionSnapshot next;
+        next.session_id = session_id;
+        next.revision = expected_revision;
+        next.checkpoint_id = session_id + ":" + std::to_string(expected_revision + 1);
+        next.state = *request.session;
+        next.tool_commits = loaded_snapshot.tool_commits;
+        next.child_tasks = loaded_snapshot.child_tasks;
+        std::unordered_set<std::string> committed_ids;
+        for (const auto& record : next.tool_commits) committed_ids.insert(record.tool_call_id);
+        for (const auto& message : request.session->history) {
+            if (message.role != "tool" || !message.tool_call_id || !message.tool_result ||
+                committed_ids.contains(*message.tool_call_id)) {
+                continue;
+            }
+            next.tool_commits.push_back(
+                {*message.tool_call_id, 0, "completed", stable_result_digest(*message.tool_result)});
+            committed_ids.insert(*message.tool_call_id);
+        }
+        SessionCommitResult committed = request.session_store->commit(next, expected_revision);
+        if (committed.status != SessionCommitStatus::Committed) {
+            result.status = committed.status == SessionCommitStatus::RevisionConflict
+                ? ExecutionTerminalStatus::Conflict : ExecutionTerminalStatus::Failed;
+            result.error = committed.error;
+            result.exit_code = 1;
+            return result;
+        }
+        result.committed_revision = committed.revision;
+        result.checkpoint_id = next.checkpoint_id;
+        emit(ExecutionEventType::CheckpointCommitted,
+             {{"revision", committed.revision}, {"checkpoint_id", next.checkpoint_id}});
+    }
+    *committed_session = *working_session;
+    result.success = true;
+    result.exit_code = 0;
+    result.status = ExecutionTerminalStatus::Completed;
+    emit(ExecutionEventType::ExecutionCompleted, {{"success", true}});
+    return result;
+}
+
+std::future<ExecutionResult> GraphExecutor::execute_async(tf::Executor& executor,
+                                                          ExecutionRequest request) {
+    return std::async(std::launch::async, [this, &executor, req = std::move(request)]() mutable {
+        return execute_sync(executor, std::move(req));
+    });
 }
 
 std::shared_ptr<WorkflowTemplate> GraphExecutor::get_template(const std::string& name) const {

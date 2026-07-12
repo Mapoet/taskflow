@@ -15,6 +15,7 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <optional>
 #include <agent/types.hpp>
 #include <nlohmann/json.hpp>
 
@@ -36,7 +37,8 @@ public:
      * @param task_id Task id (for logging / legacy payload)
      * @param http Must outlive subscribe thread until close(); typically AgentClient's HttplibClient
      */
-    SSEConnection(const std::string& endpoint, const std::string& task_id, HTTPClient* http);
+    SSEConnection(const std::string& endpoint, const std::string& task_id, HTTPClient* http,
+                  std::optional<json> post_body = std::nullopt);
 
     ~SSEConnection();
 
@@ -54,6 +56,7 @@ private:
     std::string endpoint_;
     std::string task_id_;
     HTTPClient* http_client_{nullptr};
+    std::optional<json> post_body_;
 
     std::atomic<bool> cancelled_{false};
     bool active_ = false;

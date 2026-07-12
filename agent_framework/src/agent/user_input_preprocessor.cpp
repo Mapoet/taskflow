@@ -334,11 +334,13 @@ std::optional<json> json_from_llm_answer(std::string raw) {
     }
 }
 
-bool tier_b_try_resolve(std::string_view fragment, const ExecutionContext& ctx, ProcessedUserInput& out,
+enum class TierBResolveResult { Resolved, Failed };
+
+TierBResolveResult tier_b_try_resolve(std::string_view fragment, const ExecutionContext& ctx, ProcessedUserInput& out,
                         InjectionByteTracker& tracker, const PreprocessOptions& opt,
                         const std::optional<FsSandboxConfig>& cfg_opt) {
     if (!opt.enable_tier_b || !opt.tier_b_llm) {
-        return false;
+        return TierBResolveResult::Failed;
     }
     LLMInput in;
     in.system_prompt =
@@ -351,32 +353,33 @@ bool tier_b_try_resolve(std::string_view fragment, const ExecutionContext& ctx, 
     try {
         fut = opt.tier_b_llm->invoke(in, "");
     } catch (...) {
-        return false;
+        return TierBResolveResult::Failed;
     }
-    if (fut.wait_for(std::chrono::seconds(5)) != std::future_status::ready) {
-        return false;
+    if (fut.wait_for(std::chrono::milliseconds(std::max(1, opt.tier_b_timeout_ms))) !=
+        std::future_status::ready) {
+        return TierBResolveResult::Failed;
     }
     LLMOutput lo;
     try {
         lo = fut.get();
     } catch (...) {
-        return false;
+        return TierBResolveResult::Failed;
     }
     const auto j = json_from_llm_answer(lo.final_answer.empty() ? lo.reasoning : lo.final_answer);
     if (!j) {
-        return false;
+        return TierBResolveResult::Failed;
     }
     const std::string act = j->value("action", "");
     if (act == "ignore") {
-        return true;
+        return TierBResolveResult::Resolved;
     }
     const std::string pu = j->value("path_or_url", "");
     if (pu.empty() || !opt.toolbus) {
-        return false;
+        return TierBResolveResult::Failed;
     }
     if (act == "inject_file") {
         if (!cfg_opt) {
-            return false;
+            return TierBResolveResult::Failed;
         }
         namespace fs = std::filesystem;
         fs::path raw_path(pu);
@@ -384,12 +387,12 @@ bool tier_b_try_resolve(std::string_view fragment, const ExecutionContext& ctx, 
         std::error_code ec;
         fs::path canon = fs::weakly_canonical(combined, ec);
         if (ec) {
-            return false;
+            return TierBResolveResult::Failed;
         }
         json path_err = json::object();
         auto resolved = fs_resolve_under_root(canon.string(), cfg_opt->root, path_err);
         if (!resolved) {
-            return false;
+            return TierBResolveResult::Failed;
         }
         std::size_t cap_read = cfg_opt->max_read_bytes;
         if (const std::size_t inj_cap = file_inject_max_bytes()) {
@@ -400,15 +403,15 @@ bool tier_b_try_resolve(std::string_view fragment, const ExecutionContext& ctx, 
                       .get();
         std::string text = extract_fs_read_text(fr);
         if (text.empty() && fr.contains("error")) {
-            return false;
+            return TierBResolveResult::Failed;
         }
         if (text.size() > file_inject_max_bytes()) {
-            return false;
+            return TierBResolveResult::Failed;
         }
         const std::string ref_trunc = truncate_utf8(pu, 200);
         const std::string hdr = injection_header("file", ref_trunc);
         if (!tracker.try_consume(hdr, text.size())) {
-            return false;
+            return TierBResolveResult::Failed;
         }
         InjectedContextBlock blk;
         blk.source_kind = "file";
@@ -416,18 +419,18 @@ bool tier_b_try_resolve(std::string_view fragment, const ExecutionContext& ctx, 
         blk.text_utf8 = std::move(text);
         blk.byte_length = blk.text_utf8.size();
         out.injected_context.push_back(std::move(blk));
-        return true;
+        return TierBResolveResult::Resolved;
     }
     if (act == "inject_url") {
         json wr = opt.toolbus->call_tool("web_fetch", json{{"url", pu}}).get();
         std::string text = extract_web_fetch_text(wr);
         if (text.empty() && wr.contains("error")) {
-            return false;
+            return TierBResolveResult::Failed;
         }
         const std::string ref_trunc = truncate_utf8(pu, 200);
         const std::string hdr = injection_header("url", ref_trunc);
         if (!tracker.try_consume(hdr, text.size())) {
-            return false;
+            return TierBResolveResult::Failed;
         }
         InjectedContextBlock blk;
         blk.source_kind = "url";
@@ -435,9 +438,9 @@ bool tier_b_try_resolve(std::string_view fragment, const ExecutionContext& ctx, 
         blk.text_utf8 = std::move(text);
         blk.byte_length = blk.text_utf8.size();
         out.injected_context.push_back(std::move(blk));
-        return true;
+        return TierBResolveResult::Resolved;
     }
-    return false;
+    return TierBResolveResult::Failed;
 }
 
 } // namespace
@@ -622,11 +625,16 @@ ProcessedUserInput UserInputPreprocessor::process(std::string_view raw_user_text
         if (!file_tok && !url_tok) {
             if (strict) {
                 bool resolved = false;
-                if (opt_.enable_tier_b && opt_.tier_b_llm && tier_b_calls < 1) {
+                if (opt_.enable_tier_b && opt_.tier_b_llm &&
+                    tier_b_calls < std::max(0, opt_.tier_b_max_calls)) {
                     ++tier_b_calls;
                     const std::size_t frag_len = std::min(sv.size() - at, std::size_t{2048});
-                    resolved =
-                        tier_b_try_resolve(sv.substr(at, frag_len), ctx, out, tracker, opt_, cfg_opt);
+                    const auto tier_b = tier_b_try_resolve(
+                        sv.substr(at, frag_len), ctx, out, tracker, opt_, cfg_opt);
+                    resolved = tier_b == TierBResolveResult::Resolved;
+                    if (!resolved && opt_.tier_b_reject_on_failure) {
+                        out.tier_a_violations.push_back("tier_b_resolution_failed");
+                    }
                 }
                 if (!resolved) {
                     out.tier_a_violations.push_back("malformed_injection_token");

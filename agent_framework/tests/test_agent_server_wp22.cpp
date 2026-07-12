@@ -7,6 +7,7 @@
 #include <agent/a2a/sse_framing.hpp>
 #include <agent/a2a/wire_mapping.hpp>
 #include <agent/types.hpp>
+#include "support/test_execution_profile.hpp"
 
 #include <chrono>
 #include <cstdlib>
@@ -225,6 +226,46 @@ void e1_e2_sse(int port) {
     }
 }
 
+void e3_jsonrpc_streaming(int port) {
+    httplib::Client cli("127.0.0.1", port);
+    cli.set_connection_timeout(2, 0);
+    cli.set_read_timeout(20, 0);
+    json body = {
+        {"jsonrpc", "2.0"}, {"method", "SendStreamingMessage"}, {"id", 100},
+        {"params", {{"message", {{"messageId", "m-stream"}, {"role", "ROLE_USER"},
+            {"parts", json::array({{{"text", "sse"}, {"mediaType", "text/plain"}}})}}}}}
+    };
+    SseParser parser;
+    bool completed = false;
+    httplib::Request request;
+    request.method = "POST";
+    request.path = "/rpc";
+    request.body = body.dump();
+    request.set_header("Content-Type", "application/json");
+    request.set_header("Accept", "text/event-stream");
+    request.content_receiver_ = [&](const char* data, std::size_t len, std::uint64_t, std::uint64_t) {
+        parser.feed(std::string_view(data, len));
+        std::vector<agent_framework::a2a::SseEvent> events;
+        parser.drain_events(events);
+        for (const auto& event : events) {
+            AgentTask task;
+            if (try_parse_task_status_sse(event, task) &&
+                task.status == AgentTaskStatus::COMPLETED) {
+                completed = true;
+                return false;
+            }
+        }
+        return true;
+    };
+    auto response = cli.send(request);
+    const bool transport_ok = static_cast<bool>(response) ||
+                              response.error() == httplib::Error::Read ||
+                              response.error() == httplib::Error::Canceled;
+    if (!transport_ok || !completed) {
+        throw std::runtime_error("E-3 JSON-RPC streaming");
+    }
+}
+
 } // namespace
 
 int main() {
@@ -246,26 +287,15 @@ int main() {
         card.api_endpoint = "http://127.0.0.1:9/rpc";
         server.register_agent_card(card);
 
-        server.set_task_handler([](AgentTask t,
-                                   std::shared_ptr<workflow::GraphBuilder>,
-                                   std::shared_ptr<agent_framework::TaskControl>) {
-            return std::async(std::launch::async, [t]() mutable {
-                for (const auto& m : t.messages) {
-                    for (const auto& p : m.parts) {
-                        if (p.type == AgentPart::Type::TEXT && p.text.has_value()) {
-                            if (*p.text == "slow") {
-                                std::this_thread::sleep_for(std::chrono::seconds(2));
-                            } else if (*p.text == "sse") {
-                                std::this_thread::sleep_for(std::chrono::milliseconds(300));
-                            }
-                        }
-                    }
+        agent_framework::test::configure_execution_profile(
+            server, [](const agent_framework::RenderedPrompt& rendered) {
+                if (agent_framework::test::rendered_contains(rendered, "slow")) {
+                    std::this_thread::sleep_for(std::chrono::seconds(2));
+                } else if (agent_framework::test::rendered_contains(rendered, "sse")) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(300));
                 }
-                t.status = AgentTaskStatus::COMPLETED;
-                t.updated_at = std::chrono::system_clock::now();
-                return t;
+                return "ok";
             });
-        });
 
         th = std::thread([&] { server.start(); });
         if (!wait_bound(server, 5000)) {
@@ -279,6 +309,7 @@ int main() {
         s2_jsonrpc_send(port);
         s4_concurrent_posts(port);
         e1_e2_sse(port);
+        e3_jsonrpc_streaming(port);
         s3_async_timing(port);
 
         server.stop();

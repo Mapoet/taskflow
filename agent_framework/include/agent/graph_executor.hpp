@@ -10,6 +10,8 @@
 
 #include "types.hpp"
 #include "skill_services.hpp"
+#include "execution_context.hpp"
+#include "session_store.hpp"
 #include <workflow/nodeflow.hpp>
 #include <functional>
 #include <future>
@@ -156,6 +158,93 @@ struct ReactCliRunRequest {
     AgentWorkflowDeps deps;
     std::shared_ptr<internal::AgentThreadState> session;
     ReactCliRunOptions options;
+};
+
+enum class ExecutionEventType {
+    TaskSubmitted,
+    TaskStarted,
+    TaskStatusChanged,
+    ToolStarted,
+    ToolCompleted,
+    ChildTaskUpdated,
+    VerifierStarted,
+    VerifierCompleted,
+    MemoryCompacted,
+    ArtifactUpdated,
+    CheckpointCommitted,
+    ExecutionCompleted
+};
+
+struct ExecutionEvent {
+    ExecutionEventType type = ExecutionEventType::TaskStatusChanged;
+    std::string task_id;
+    std::string session_id;
+    std::string run_id;
+    std::optional<std::string> child_id;
+    std::uint64_t sequence = 0;
+    std::string timestamp;
+    json payload = json::object();
+};
+
+using ExecutionEventSink = std::function<void(const ExecutionEvent&)>;
+
+class ExecutionEventEmitter {
+public:
+    ExecutionEventEmitter(ExecutionEventSink sink, std::string task_id,
+                          std::string session_id, std::string run_id);
+    void emit(ExecutionEventType type, json payload = json::object(),
+              std::optional<std::string> child_id = std::nullopt) noexcept;
+    std::uint64_t sequence() const;
+
+private:
+    ExecutionEventSink sink_;
+    std::string task_id_;
+    std::string session_id_;
+    std::string run_id_;
+    mutable std::mutex mutex_;
+    std::uint64_t sequence_ = 0;
+};
+
+struct ExecutionOptions {
+    ReactCliRunOptions react{};
+    bool persist_session = true;
+    bool input_already_processed = false;
+};
+
+enum class TierBFailureMode { FallbackTierA, Reject };
+
+struct InputPolicyConfig {
+    bool tier_b_enabled = false;
+    std::shared_ptr<LLMClient> tier_b_llm;
+    int tier_b_timeout_ms = 3000;
+    int tier_b_max_calls_per_request = 1;
+    TierBFailureMode failure_mode = TierBFailureMode::FallbackTierA;
+};
+
+struct ExecutionRequest {
+    std::string template_id = kWorkflowTemplateReactCli;
+    AgentConfig config;
+    AgentWorkflowDeps deps;
+    std::shared_ptr<internal::AgentThreadState> session;
+    ExecutionContext context;
+    std::shared_ptr<TaskControl> control;
+    std::shared_ptr<SessionStore> session_store;
+    ExecutionEventSink event_sink;
+    InputPolicyConfig input_policy;
+    ExecutionOptions options;
+};
+
+enum class ExecutionTerminalStatus { Completed, Failed, Cancelled, DeadlineExceeded, Conflict };
+
+struct ExecutionResult {
+    bool success = false;
+    int exit_code = 1;
+    json outputs = json::object();
+    std::optional<std::string> error;
+    std::string session_id;
+    std::uint64_t committed_revision = 0;
+    std::optional<std::string> checkpoint_id;
+    ExecutionTerminalStatus status = ExecutionTerminalStatus::Failed;
 };
 
 /**
@@ -316,13 +405,6 @@ public:
                               const CliAgentTerminalSinkOptions& sink);
 
     /**
-     * @brief 构建自定义工作流（非 WP2.0；仍为占位实现）
-     * @param config 工作流配置
-     * @param builder 图构建器
-     */
-    void build_custom_workflow(const WorkflowConfig& config, workflow::GraphBuilder& builder);
-    
-    /**
      * @brief 注册工作流模板
      * @param name 模板名称
      * @param template_ptr 模板指针
@@ -345,18 +427,14 @@ public:
     std::future<WorkflowResult> run_react_cli_async(tf::Executor& executor,
                                                       ReactCliRunRequest request);
 
+    ExecutionResult execute_sync(tf::Executor& executor, ExecutionRequest request);
+    std::future<ExecutionResult> execute_async(tf::Executor& executor, ExecutionRequest request);
+
     /**
      * @brief 注册 react_cli 逻辑模板名（ReActTemplate；build(json) 仍抛异常，仅用于发现/列表）
      */
     void register_react_cli_template();
 
-    /**
-     * @brief 已移除；请使用 run_react_cli_sync
-     * @deprecated
-     */
-    [[deprecated("use GraphExecutor::run_react_cli_sync")]] std::future<WorkflowResult>
-    execute(const std::string& workflow_name);
-    
     /**
      * @brief 获取模板
      * @param name 模板名称
@@ -372,9 +450,7 @@ public:
     
 private:
     std::map<std::string, std::shared_ptr<WorkflowTemplate>> templates_;
-    std::map<std::string, workflow::GraphBuilder> workflows_;
     mutable std::mutex templates_mutex_;
-    mutable std::mutex workflows_mutex_;
 };
 
 } // namespace agent_framework

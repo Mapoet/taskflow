@@ -146,6 +146,15 @@ public:
         std::function<void(const AgentTask&)> on_status_update,
         std::function<void(const AgentArtifact&)> on_artifact_update
     );
+
+    /** SendStreamingMessage over JSON-RPC and consume its SSE stream asynchronously. */
+    void send_streaming_task(
+        const std::string& agent_endpoint,
+        const AgentMessage& initial_message,
+        const std::optional<std::string>& session_id,
+        const json& metadata,
+        std::function<void(const AgentTask&)> on_status_update,
+        std::function<void(const AgentArtifact&)> on_artifact_update);
     
     /**
      * @brief 重新订阅（SSE 连接中断后）
@@ -235,4 +244,3 @@ private:
 } // namespace agent_framework
 
 #endif // __AGENT_CLIENT_H__
-

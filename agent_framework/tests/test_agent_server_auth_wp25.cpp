@@ -4,6 +4,7 @@
  */
 #include <agent/agent_server.hpp>
 #include <agent/types.hpp>
+#include "support/test_execution_profile.hpp"
 
 #include <chrono>
 #include <cstdlib>
@@ -70,22 +71,8 @@ int main() {
     card.provider = "t";
     card.api_endpoint = "http://127.0.0.1:0/rpc";
     server.register_agent_card(card);
-    server.set_task_handler([](AgentTask t,
-                               std::shared_ptr<workflow::GraphBuilder>,
-                               std::shared_ptr<agent_framework::TaskControl>) {
-        return std::async(std::launch::async, [t]() mutable {
-            AgentMessage reply;
-            reply.role = AgentMessage::Role::AGENT;
-            AgentPart part;
-            part.type = AgentPart::Type::TEXT;
-            part.text = "ok";
-            reply.parts.push_back(std::move(part));
-            t.messages.push_back(std::move(reply));
-            t.status = AgentTaskStatus::COMPLETED;
-            t.updated_at = std::chrono::system_clock::now();
-            return t;
-        });
-    });
+    agent_framework::test::configure_execution_profile(
+        server, [](const agent_framework::RenderedPrompt&) { return "ok"; });
 
     std::thread th([&] { server.start(); });
     if (!wait_bound(server, 5000)) {

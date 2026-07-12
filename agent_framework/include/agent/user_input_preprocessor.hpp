@@ -39,6 +39,9 @@ struct PreprocessOptions {
     std::shared_ptr<LLMClient> tier_b_llm;
     std::shared_ptr<ToolBus> toolbus;
     const AgentConfig* agent_config = nullptr;
+    int tier_b_timeout_ms = 3000;
+    int tier_b_max_calls = 1;
+    bool tier_b_reject_on_failure = false;
 };
 
 /**

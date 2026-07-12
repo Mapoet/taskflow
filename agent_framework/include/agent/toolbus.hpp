@@ -236,6 +236,9 @@ public:
     void register_local_tool(const std::string& name,
                             std::function<json(const json&)> func,
                             const ToolMeta& meta);
+
+    /** Run default-tool registration exactly once per ToolBus, including under concurrent graph builds. */
+    void ensure_default_tools_registered(const std::function<void()>& registrar);
     
     /**
      * @brief 注册 MCP 服务
@@ -335,6 +338,8 @@ private:
     std::unordered_set<std::string> mcp_services_;
     std::vector<ToolCallHook> hooks_;
     mutable std::mutex hooks_mutex_;
+    mutable std::mutex default_tools_mutex_;
+    bool default_tools_registered_ = false;
     
     /**
      * @brief 根据工具名称查找工具接口

@@ -116,7 +116,12 @@ json agent_card_to_a2a_wire(const AgentCard& card) {
     json j = json::object();
     j["name"] = card.name;
     j["description"] = card.description;
-    j["url"] = card.api_endpoint;
+    j["protocolVersion"] = "1.0";
+    j["supportedInterfaces"] = json::array({{
+        {"url", card.api_endpoint},
+        {"protocolBinding", "JSONRPC"},
+        {"protocolVersion", "1.0"}
+    }});
     j["version"] = kDefaultWireAgentVersion;
     j["capabilities"] = capabilities_to_object(card.capabilities);
     j["defaultInputModes"] = json::array({"text/plain"});
@@ -143,7 +148,14 @@ AgentCard agent_card_from_a2a_wire(const json& j) {
     }
     require_string_field(j, "name");
     require_string_field(j, "description");
-    require_string_field(j, "url");
+    const bool has_legacy_url = j.contains("url") && j["url"].is_string();
+    const bool has_interfaces = j.contains("supportedInterfaces") &&
+                                j["supportedInterfaces"].is_array() &&
+                                !j["supportedInterfaces"].empty();
+    if (!has_legacy_url && !has_interfaces) {
+        throw std::invalid_argument(
+            "agent_card_from_a2a_wire: missing supportedInterfaces (or legacy url)");
+    }
     require_string_field(j, "version");
     require_object_field(j, "capabilities");
     require_array_field(j, "defaultInputModes");
@@ -164,7 +176,13 @@ AgentCard agent_card_from_a2a_wire(const json& j) {
     AgentCard card;
     card.name = j["name"].get<std::string>();
     card.description = j["description"].get<std::string>();
-    card.api_endpoint = j["url"].get<std::string>();
+    if (has_interfaces) {
+        const auto& iface = j["supportedInterfaces"].front();
+        require_string_field(iface, "url");
+        card.api_endpoint = iface["url"].get<std::string>();
+    } else {
+        card.api_endpoint = j["url"].get<std::string>();
+    }
     capabilities_from_object(j["capabilities"], card.capabilities);
     if (j.contains("provider") && j["provider"].is_object()) {
         const auto& p = j["provider"];

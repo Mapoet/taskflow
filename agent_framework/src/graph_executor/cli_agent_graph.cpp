@@ -44,11 +44,13 @@ void build_cli_agent_graph_impl(workflow::GraphBuilder& builder,
     if (deps.skills) {
         register_skill_script_tool(*deps.toolbus, deps.skills);
     }
-    register_builtin_fs_tools_if_configured(*deps.toolbus);
-    register_builtin_web_tools_if_configured(*deps.toolbus);
-    register_web_configured_source_if_configured(*deps.toolbus);
-    register_builtin_expr_tools_if_configured(*deps.toolbus);
-    register_builtin_draw_tools_if_configured(*deps.toolbus);
+    deps.toolbus->ensure_default_tools_registered([&] {
+        register_builtin_fs_tools_if_configured(*deps.toolbus);
+        register_builtin_web_tools_if_configured(*deps.toolbus);
+        register_web_configured_source_if_configured(*deps.toolbus);
+        register_builtin_expr_tools_if_configured(*deps.toolbus);
+        register_builtin_draw_tools_if_configured(*deps.toolbus);
+    });
 
     auto [sys_src, _st] = builder.create_any_source(
         "SystemPrompt",

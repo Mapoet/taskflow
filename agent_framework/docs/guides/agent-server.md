@@ -17,7 +17,9 @@
 |------|------|
 | `GET /.well-known/agent-card.json` | Well-Known Agent Card，正文为 WP2.1a **wire**（`agent_card_discovery_json_string`） |
 | `POST {jsonrpc_path}` | 单一路径 JSON-RPC 2.0；`Content-Type: application/json` |
-| `GET /tasks/sendSubscribe?task_id=` | HTTP 侧任务 SSE（`StreamResponse` 帧，见 tracker §5） |
+| `SendStreamingMessage` | JSON-RPC POST 后切换为 chunked SSE，并创建任务 |
+| `SubscribeToTask` | JSON-RPC POST 后切换为 chunked SSE，先重放当前快照 |
+| `GET /tasks/sendSubscribe?task_id=` | 兼容订阅端点；非 legacy Client 不再使用 |
 | `GET /health` | **非规范**诊断端点，`200` + `{"ok":true}` |
 
 ### `jsonrpc_path` 解析
@@ -46,16 +48,17 @@
 | `AGENT_SERVER_LEGACY_REST` | `0` | `1` 且 **`AGENT_A2A_STRICT=0`** 时注册 `/tasks/send` 等过渡路由 |
 | `AGENT_SERVER_MAX_QUEUED_TASKS` | `64` | 有界队列长度 |
 | `AGENT_SERVER_WORKER_THREADS` | `max(2, hw/2)` | Worker 线程数 |
-| `AGENT_SERVER_EXECUTOR_THREADS` | `hardware_concurrency`（裁剪） | `tf::Executor`（预留给 WP2.0） |
+| `AGENT_SERVER_EXECUTOR_THREADS` | `hardware_concurrency`（裁剪） | 统一 GraphExecutor 使用的 `tf::Executor` |
+| `AGENT_SESSION_DB` | `.agent/session.db` | Server 默认 SQLite SessionStore 路径 |
 | `AGENT_SERVER_SSE_PING_SEC` | `30` | SSE 注释帧间隔；`0` 禁用 |
 | `AGENT_TASK_DEFAULT_TIMEOUT_SEC` | `0` | 默认 wall-clock 超时（秒）；`0` 表示无默认超时 |
 | `AGENT_TASK_MAX_TIMEOUT_SEC` | `86400` | 单任务超时上限（含 `metadata.timeout_sec`），超出则钳制并告警 |
 
-### WP2.3：`task_handler` 与 `TaskControl`
+### Execution profile 与 `TaskControl`
 
-`set_task_handler` 回调签名为：
-
-`std::future<AgentTask>(const AgentTask&, std::shared_ptr<GraphBuilder>, std::shared_ptr<TaskControl>)`。
+Server 启动前必须配置 `AgentExecutionProfile`。每个任务由 Server 构造
+`ExecutionRequest` 并调用 `GraphExecutor::execute_sync`；旧 `set_task_handler` 双轨接口已删除。
+未显式注入 SessionStore 时，Server 使用 SQLite；测试可注入 `InMemorySessionStore`。
 
 - **`TaskControl`**：协作式 **`request_cancel` / `is_cancel_requested`**，以及 **`arm_working_deadline` / `check_deadline_now` / `is_deadline_exceeded`**（进入 `WORKING` 时由 Server 根据超时配置 `arm`）。
 - **`AgentLoopNode::create`** 与 **`build_cli_agent_graph`** 可通过 **`CliAgentGraphOptions::task_control`** 将同一指针注入循环体，在迭代边界观察取消/超时（见 `src/node/agent_loop_node.cpp`）。
@@ -69,12 +72,12 @@
 
 - 未知任务 id：JSON-RPC **invalid params**（与 `GetTask` 一致）。
 - 已为 **终态**（`COMPLETED` / `FAILED` / `CANCELLED`）：**幂等**返回当前任务 wire，**不**改状态，**不**额外 `push`。
-- **`PENDING` / `INPUT_REQUIRED`**：立即 **`CANCELLED`**（若合法迁移），**`push_task_status_update`**，并从内部 `task_controls_` 摘除（队列内任务在 worker 入口见终态即不再调用 handler）。
+- **`PENDING` / `INPUT_REQUIRED`**：立即 **`CANCELLED`**（若合法迁移），**`push_task_status_update`**，并从内部 `task_controls_` 摘除（队列内任务在 worker 入口见终态即不再执行图）。
 - **`WORKING`**：仅置取消标志；终态与 SSE 在 worker 协作退出后落地。
 
 ### Termination precedence（worker 尾部）
 
-在 handler 的 `future` 完成后，Server 按序判定：**取消** 优先于 **超时**；二者优先于 handler 返回的 **`COMPLETED`**。若 handler 已返回 **`FAILED`** 但同时 **超时** 已触发，**超时原因**（`a2a_failure_reason=timeout`）优先写入。
+在 GraphExecutor 的 future 完成后，Server 按序判定：**取消** 优先于 **超时**；二者优先于图返回的 **`COMPLETED`**。取消、超时、Verifier abort 或 revision conflict 均不提交 session 工作副本。
 
 ## JSON-RPC 方法支持矩阵（WP2.2 / WP2.3）
 
@@ -84,12 +87,13 @@
 | `GetTask` | 已实现 |
 | `CancelTask` | WP2.3：协作式取消 + 幂等终态；`PENDING` 立即 `CANCELLED` + SSE |
 | `ListTasks` | 空列表占位 |
-| `SendStreamingMessage` | 未实现（`-32601`） |
-| `SubscribeToTask`（JSON-RPC 流） | 未实现；使用 **`GET /tasks/sendSubscribe`** |
+| `SendStreamingMessage` | 已实现；创建任务并返回标准 SSE `StreamResponse` |
+| `SubscribeToTask`（JSON-RPC 流） | 已实现；快照重放、增量事件、终态关闭 |
 
 ## 客户端与 SSE（cpp-httplib）
 
-对分块 SSE 使用 `Client::Get(path, ContentReceiver)` 时，`Result` 可能为“空指针 + `Error::Read` 或 `Error::Canceled`”，数据已通过 receiver 送达。参见 **`test_agent_server_wp22`**。
+`AgentClient::send_streaming_task` 和 `subscribe_task_updates` 在非 legacy 模式使用 JSON-RPC POST SSE。
+兼容 GET 端点仍保留一个迁移周期。参见 `test_phase2_a2a_execution` 与 `test_agent_server_wp22`。
 
 ## 相关代码
 

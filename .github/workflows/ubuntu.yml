@@ -78,6 +78,8 @@ jobs:
       run: cd build && ctest -R 'a2a_contract_json|a2a_contract_sse' --output-on-failure
     - name: A2A Tier B loopback
       run: cd build && AGENT_A2A_INTEGRATION_LOOPBACK=1 AGENT_CLIENT_USE_LEGACY_REST=0 AGENT_TOOL_ALLOWLIST= ctest -R a2a_loopback_integration --output-on-failure
+    - name: Phase 2 vertical integration gates
+      run: cd build && ctest -L 'phase2-(cli|a2a|quality|multi-agent|recovery)-e2e' --output-on-failure
 
   release-test-cpp20:
     runs-on: ubuntu-latest

@@ -697,8 +697,35 @@ void AgentLoopNode::build_loop_body(
         auto classify_side = [toolbus](std::string_view nm) -> ToolSideEffect {
             return toolbus->get_tool_meta(std::string(nm)).side_effect;
         };
-        std::vector<json> results =
-            execute_tool_calls_sequenced(toolbus, calls, orch_opts, classify_side);
+        std::vector<json> results(calls.size());
+        std::vector<CallSpec> pending_calls;
+        std::vector<std::size_t> pending_indexes;
+        auto state = std::any_cast<std::shared_ptr<internal::AgentThreadState>>(
+            inps.at(std::string(internal::kAgentState)));
+        for (std::size_t i = 0; i < calls.size(); ++i) {
+            bool restored = false;
+            if (state && calls[i].tool_call_id) {
+                for (auto it = state->history.rbegin(); it != state->history.rend(); ++it) {
+                    if (it->role == "tool" && it->tool_call_id == calls[i].tool_call_id &&
+                        it->tool_result) {
+                        results[i] = *it->tool_result;
+                        restored = true;
+                        break;
+                    }
+                }
+            }
+            if (!restored) {
+                pending_indexes.push_back(i);
+                pending_calls.push_back(calls[i]);
+            }
+        }
+        if (!pending_calls.empty()) {
+            auto executed = execute_tool_calls_sequenced(
+                toolbus, pending_calls, orch_opts, classify_side);
+            for (std::size_t i = 0; i < executed.size(); ++i) {
+                results[pending_indexes[i]] = std::move(executed[i]);
+            }
+        }
         for (std::size_t idx = 0; idx < calls.size(); ++idx) {
             json result = results[idx];
             apply_per_tool_result_budget(result, tool_agg_budget, AfTruncationKind::tool_result);
@@ -723,7 +750,8 @@ void AgentLoopNode::build_loop_body(
 
     auto [tool_node, tool_task] = builder.create_any_node(
         "ToolAggregator",
-        {{"LLM", std::string(internal::kLlmOutput)}},
+        {{"LLM", std::string(internal::kLlmOutput)},
+         {"LoopInput", std::string(internal::kAgentState)}},
         tool_agg,
         {std::string(internal::kToolMessages), std::string(internal::kToolHadError)});
     (void)tool_task;

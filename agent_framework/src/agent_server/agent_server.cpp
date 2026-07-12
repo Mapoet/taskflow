@@ -220,6 +220,22 @@ void wp27_preprocess_agent_message(AgentMessage& msg, json& metadata,
     wp27_store_pending_in_task_metadata(out, ctx, metadata);
 }
 
+void validate_agent_message_tier_a(const AgentMessage& msg,
+                                   const std::optional<std::string>& session_id,
+                                   const std::shared_ptr<ToolBus>& toolbus) {
+    ExecutionContext ctx = ExecutionContext::from_environment();
+    ctx.session_id = session_id;
+    PreprocessOptions options;
+    options.toolbus = toolbus;
+    ProcessedUserInput output =
+        UserInputPreprocessor(std::move(options)).process(concat_user_text_from_message(msg), ctx);
+    if (env_input_strict_enabled() && !output.tier_a_violations.empty()) {
+        throw a2a::JsonRpcInvokeError(a2a::JsonRpcErrorCode::invalid_params,
+                                      "input_policy_violation",
+                                      json{{"violations", output.tier_a_violations}});
+    }
+}
+
 } // namespace
 
 AgentServer::AgentServer(int port) : port_(port) {}
@@ -233,6 +249,16 @@ AgentServer::~AgentServer() {
 }
 
 void AgentServer::ensure_runtime() {
+    if (!execution_profile_) {
+        throw std::runtime_error("AgentServer requires an execution profile before start");
+    }
+    if (!execution_profile_->deps.llm || !execution_profile_->deps.toolbus) {
+        throw std::runtime_error("AgentServer execution profile requires llm and toolbus");
+    }
+    if (execution_profile_->input_policy.tier_b_enabled &&
+        !execution_profile_->input_policy.tier_b_llm) {
+        throw std::runtime_error("AgentServer Tier B requires a dedicated LLM client");
+    }
     if (!http_server_) {
         http_server_ = new HttplibHolder(std::make_unique<httplib::Server>());
     }
@@ -242,6 +268,14 @@ void AgentServer::ensure_runtime() {
     if (!process_executor_) {
         unsigned nt = env_u32("AGENT_SERVER_EXECUTOR_THREADS", std::max(1u, std::thread::hardware_concurrency()));
         process_executor_ = std::make_shared<tf::Executor>(static_cast<int>(nt));
+    }
+    if (execution_profile_ && !graph_executor_) {
+        graph_executor_ = std::make_shared<GraphExecutor>();
+    }
+    if (execution_profile_ && !session_store_) {
+        const char* configured = std::getenv("AGENT_SESSION_DB");
+        const std::string path = configured && *configured ? configured : ".agent/session.db";
+        session_store_ = std::make_shared<SQLiteSessionStore>(path);
     }
     if (!rpc_dispatch_) {
         rpc_dispatch_ = std::make_unique<a2a::DispatchTable>();
@@ -256,14 +290,6 @@ void AgentServer::register_jsonrpc_methods() {
     rpc_dispatch_->register_method("CancelTask",
                                    [this](const json& p) { return this->jsonrpc_cancel_task(p); });
     rpc_dispatch_->register_method("ListTasks", [this](const json& p) { return this->jsonrpc_list_tasks(p); });
-    rpc_dispatch_->register_method("SendStreamingMessage", [](const json&) -> json {
-        throw a2a::JsonRpcInvokeError(a2a::JsonRpcErrorCode::method_not_found, "SendStreamingMessage not implemented");
-    });
-    rpc_dispatch_->register_method("SubscribeToTask", [](const json&) -> json {
-        throw a2a::JsonRpcInvokeError(
-            a2a::JsonRpcErrorCode::method_not_found,
-            "SubscribeToTask JSON-RPC not implemented; use GET /tasks/sendSubscribe");
-    });
 }
 
 void AgentServer::start_dispatch_workers() {
@@ -293,13 +319,9 @@ void AgentServer::dispatch_worker_loop() {
 }
 
 void AgentServer::run_agent_task_on_executor(const std::string& task_id,
-                                             AgentTask task_snapshot,
-                                             std::shared_ptr<workflow::GraphBuilder> builder,
+                                             AgentTask /*task_snapshot*/,
                                              std::shared_ptr<TaskControl> control) {
-    (void)process_executor_;
-    (void)task_snapshot;
-    // WP2.0: replace with GraphExecutor::execute using process_executor_
-    if (!task_handler_ || !control) {
+    if (!execution_profile_ || !graph_executor_ || !control) {
         return;
     }
     try {
@@ -332,7 +354,66 @@ void AgentServer::run_agent_task_on_executor(const std::string& task_id,
             snap = it->second;
         }
 
-        std::future<AgentTask> fut = task_handler_(snap, builder, control);
+        std::future<AgentTask> fut;
+        {
+            AgentExecutionProfile profile = *execution_profile_;
+            auto session = std::make_shared<internal::AgentThreadState>();
+            wp27_restore_pending_from_task_metadata(snap, *session);
+            if (!snap.messages.empty()) {
+                session->initial_user_prompt = concat_user_text_from_message(snap.messages.back());
+            }
+            ExecutionRequest request;
+            request.template_id = profile.template_id;
+            request.config = profile.config;
+            request.deps = profile.deps;
+            request.session = session;
+            request.context = ExecutionContext::from_environment();
+            request.context.task_id = task_id;
+            request.context.session_id = snap.session_id.value_or(task_id);
+            request.control = control;
+            request.session_store = session_store_;
+            request.options.react.require_final_json_callback = false;
+            request.options.input_already_processed = false;
+            request.input_policy = execution_profile_->input_policy;
+            request.event_sink = [this, task_id](const ExecutionEvent& event) {
+                json payload = event.payload;
+                payload["event_type"] = static_cast<int>(event.type);
+                payload["task_id"] = event.task_id;
+                payload["session_id"] = event.session_id;
+                payload["run_id"] = event.run_id;
+                payload["sequence"] = event.sequence;
+                payload["timestamp"] = event.timestamp;
+                if (event.child_id) payload["child_id"] = *event.child_id;
+                if (event.type == ExecutionEventType::VerifierStarted) {
+                    push_verifier_sse(task_id, "verifier_started", payload);
+                } else if (event.type == ExecutionEventType::VerifierCompleted) {
+                    push_verifier_sse(task_id, "verifier_completed", payload);
+                } else {
+                    push_verifier_sse(task_id, "execution_event", payload);
+                }
+            };
+            fut = std::async(std::launch::async,
+                [this, request = std::move(request), snap = std::move(snap)]() mutable {
+                    AgentTask done = std::move(snap);
+                    ExecutionResult r = graph_executor_->execute_sync(*process_executor_, std::move(request));
+                    done.status = r.success ? AgentTaskStatus::COMPLETED : AgentTaskStatus::FAILED;
+                    done.session_id = r.session_id;
+                    done.metadata["execution_status"] = r.success ? "completed" : "failed";
+                    done.metadata["session_revision"] = r.committed_revision;
+                    if (r.error) done.metadata["execution_error"] = *r.error;
+                    if (r.outputs.contains("final_answer")) {
+                        AgentMessage message;
+                        message.role = AgentMessage::Role::AGENT;
+                        message.timestamp = std::chrono::system_clock::now();
+                        AgentPart part;
+                        part.type = AgentPart::Type::TEXT;
+                        part.text = r.outputs.at("final_answer").get<std::string>();
+                        message.parts.push_back(std::move(part));
+                        done.messages.push_back(std::move(message));
+                    }
+                    return done;
+                });
+        }
         for (;;) {
             if (fut.wait_for(std::chrono::milliseconds(50)) == std::future_status::ready) {
                 break;
@@ -495,13 +576,17 @@ void AgentServer::register_agent_card(const AgentCard& card) {
     agent_card_ = card;
 }
 
-void AgentServer::set_task_handler(
-    std::function<std::future<AgentTask>(
-        const AgentTask&,
-        std::shared_ptr<workflow::GraphBuilder>,
-        std::shared_ptr<TaskControl>)> handler
-) {
-    task_handler_ = std::move(handler);
+void AgentServer::set_execution_profile(AgentExecutionProfile profile) {
+    execution_profile_ = std::move(profile);
+    preprocess_toolbus_ = execution_profile_->deps.toolbus;
+}
+
+void AgentServer::set_graph_executor(std::shared_ptr<GraphExecutor> executor) {
+    graph_executor_ = std::move(executor);
+}
+
+void AgentServer::set_session_store(std::shared_ptr<SessionStore> store) {
+    session_store_ = std::move(store);
 }
 
 void AgentServer::set_authentication_validator(
@@ -561,6 +646,9 @@ void AgentServer::push_task_status_update(const std::string& task_id, const Agen
     for (auto& ch : it->second) {
         if (ch) {
             ch->push_framed(framed);
+            if (task_status_is_terminal(task.status)) {
+                ch->close();
+            }
         }
     }
 }
@@ -708,6 +796,19 @@ void AgentServer::handle_jsonrpc_post(const httplib::Request& req, httplib::Resp
 
     try {
         json params = jr.params.value_or(json::object());
+        if (jr.method == "SendStreamingMessage") {
+            json result = jsonrpc_send_message(params);
+            attach_task_stream(result.at("task").at("id").get<std::string>(), res);
+            return;
+        }
+        if (jr.method == "SubscribeToTask") {
+            if (!params.is_object() || !params.contains("id") || !params["id"].is_string()) {
+                throw a2a::JsonRpcInvokeError(a2a::JsonRpcErrorCode::invalid_params,
+                                              "SubscribeToTask requires string id");
+            }
+            attach_task_stream(params["id"].get<std::string>(), res);
+            return;
+        }
         json result = rpc_dispatch_->invoke(jr.method, params);
         res.set_content(a2a::make_success_response(id, result).dump(), "application/json");
     } catch (const a2a::JsonRpcInvokeError& e) {
@@ -748,7 +849,7 @@ json AgentServer::jsonrpc_send_message(const json& params) {
         session_id = metadata["contextId"].get<std::string>();
     }
 
-    wp27_preprocess_agent_message(msg, metadata, session_id, preprocess_toolbus_);
+    validate_agent_message_tier_a(msg, session_id, execution_profile_->deps.toolbus);
 
     AgentTask task = create_task_from_message_wire(msg, session_id, metadata);
 
@@ -761,13 +862,11 @@ json AgentServer::jsonrpc_send_message(const json& params) {
         task_controls_[task.task_id] = control;
     }
 
-    auto builder = std::make_shared<workflow::GraphBuilder>("AgentTask_" + task.task_id);
-
-    if (task_handler_ && task_queue_) {
+    if (execution_profile_ && task_queue_) {
         const std::string tid = task.task_id;
         AgentTask snap = task;
-        if (!task_queue_->try_push([this, tid, snap, builder, control]() {
-                run_agent_task_on_executor(tid, snap, builder, control);
+        if (!task_queue_->try_push([this, tid, snap, control]() {
+                run_agent_task_on_executor(tid, snap, control);
             })) {
             std::lock_guard<std::mutex> lk(tasks_mutex_);
             active_tasks_.erase(tid);
@@ -873,12 +972,11 @@ void AgentServer::handle_tasks_send(const httplib::Request& req, httplib::Respon
             task_controls_[task.task_id] = control;
         }
 
-        auto builder = std::make_shared<workflow::GraphBuilder>("AgentTask_" + task.task_id);
-        if (task_handler_ && task_queue_) {
+        if (execution_profile_ && task_queue_) {
             const std::string tid = task.task_id;
             AgentTask snap = task;
-            if (!task_queue_->try_push([this, tid, snap, builder, control]() {
-                    run_agent_task_on_executor(tid, snap, builder, control);
+            if (!task_queue_->try_push([this, tid, snap, control]() {
+                    run_agent_task_on_executor(tid, snap, control);
                 })) {
                 std::lock_guard<std::mutex> lk(tasks_mutex_);
                 active_tasks_.erase(tid);
@@ -1005,19 +1103,30 @@ void AgentServer::handle_tasks_send_subscribe(const httplib::Request& req, httpl
         return;
     }
 
-    std::string task_id = req.get_param_value("task_id");
+    attach_task_stream(req.get_param_value("task_id"), res);
+}
+
+void AgentServer::attach_task_stream(const std::string& task_id, httplib::Response& res) {
+    auto channel = std::make_shared<internal::SseServerChannel>();
+    AgentTask snapshot;
     {
         std::lock_guard<std::mutex> lk(tasks_mutex_);
-        if (active_tasks_.find(task_id) == active_tasks_.end()) {
+        auto it = active_tasks_.find(task_id);
+        if (it == active_tasks_.end()) {
             res.status = 404;
             res.set_content(R"({"error":"Task not found"})", "application/json");
             return;
         }
-    }
-
-    auto channel = std::make_shared<internal::SseServerChannel>();
-    {
-        std::lock_guard<std::mutex> lk(sse_mutex_);
+        snapshot = it->second;
+        json payload = a2a::stream_response_status_update(snapshot);
+        apply_wire_payload_cap(payload, ContextBudgetLimits{}.max_wire_message_bytes, nullptr);
+        std::string initial;
+        a2a::append_sse_event(initial, "", payload.dump());
+        channel->push_framed(std::move(initial));
+        if (task_status_is_terminal(snapshot.status)) {
+            channel->close();
+        }
+        std::lock_guard<std::mutex> stream_lock(sse_mutex_);
         sse_subscribers_[task_id].push_back(channel);
     }
 

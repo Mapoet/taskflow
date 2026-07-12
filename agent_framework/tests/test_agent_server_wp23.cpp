@@ -6,6 +6,7 @@
 #include <agent/a2a/wire_mapping.hpp>
 #include <agent/task_state_machine.hpp>
 #include <agent/types.hpp>
+#include "support/test_execution_profile.hpp"
 
 #include <atomic>
 #include <chrono>
@@ -135,61 +136,16 @@ int main() {
         card.api_endpoint = "http://127.0.0.1:9/rpc";
         server.register_agent_card(card);
 
-        std::map<std::string, int> runs;
-        std::mutex run_mu;
-
-        server.set_task_handler([&runs, &run_mu](AgentTask t,
-                                                 std::shared_ptr<workflow::GraphBuilder>,
-                                                 std::shared_ptr<TaskControl> control) {
-            return std::async(std::launch::async, [t, control, &runs, &run_mu]() mutable {
-                bool slow = false;
-                bool coop_timeout = false;
-                for (const auto& m : t.messages) {
-                    for (const auto& p : m.parts) {
-                        if (p.type == AgentPart::Type::TEXT && p.text) {
-                            if (*p.text == "slow_cancel") {
-                                slow = true;
-                            }
-                            if (*p.text == "timeout_coop") {
-                                slow = true;
-                                coop_timeout = true;
-                            }
-                        }
-                    }
+        std::atomic<int> runs{0};
+        agent_framework::test::configure_execution_profile(
+            server, [&runs](const agent_framework::RenderedPrompt& rendered) {
+                ++runs;
+                if (agent_framework::test::rendered_contains(rendered, "slow_cancel") ||
+                    agent_framework::test::rendered_contains(rendered, "timeout_coop")) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(1200));
                 }
-                {
-                    std::lock_guard<std::mutex> lk(run_mu);
-                    runs[t.task_id] += 1;
-                }
-                if (!slow) {
-                    t.status = AgentTaskStatus::COMPLETED;
-                    t.updated_at = std::chrono::system_clock::now();
-                    return t;
-                }
-                for (int iter = 0;; ++iter) {
-                    if (control) {
-                        control->check_deadline_now();
-                        if (coop_timeout && control->is_deadline_exceeded()) {
-                            t.status = AgentTaskStatus::FAILED;
-                            t.metadata["a2a_failure_reason"] = "timeout";
-                            t.updated_at = std::chrono::system_clock::now();
-                            return t;
-                        }
-                        if (control->is_cancel_requested()) {
-                            t.status = AgentTaskStatus::CANCELLED;
-                            t.updated_at = std::chrono::system_clock::now();
-                            return t;
-                        }
-                    }
-                    if (iter >= 24) {
-                        t.status = AgentTaskStatus::COMPLETED;
-                        t.updated_at = std::chrono::system_clock::now();
-                        return t;
-                    }
-                    std::this_thread::sleep_for(std::chrono::milliseconds(50));
-                }
+                return "ok";
             });
-        });
 
         th = std::thread([&] { server.start(); });
         if (!wait_bound(server, 5000)) {
@@ -205,14 +161,8 @@ int main() {
         std::string id3 = jsonrpc_send(port, "slow_cancel");
         jsonrpc_cancel(port, id3);
         std::this_thread::sleep_for(std::chrono::milliseconds(3200));
-        {
-            std::lock_guard<std::mutex> lk(run_mu);
-            if (runs[id3] != 0) {
-                throw std::runtime_error("I-3 handler ran for cancelled pending task");
-            }
-            if (runs[id1] < 1 || runs[id2] < 1) {
-                throw std::runtime_error("I-3 expected first two tasks to run");
-            }
+        if (runs.load() != 2) {
+            throw std::runtime_error("I-3 cancelled queued task entered execution");
         }
         json gt3 = jsonrpc_get_task(port, id3);
         if (gt3["status"]["state"].get<std::string>() != "TASK_STATE_CANCELED") {

@@ -8,6 +8,7 @@
 #include <agent/llm_client.hpp>
 #include <agent/prompt_renderer.hpp>
 #include <agent/toolbus.hpp>
+#include <agent/task_state_machine.hpp>
 #include <agent/types.hpp>
 
 #include <cassert>
@@ -197,10 +198,81 @@ void test_i2_single_run_success() {
     assert(r.outputs.at("history_size").get<std::size_t>() >= 1U);
 }
 
+void test_i3_unified_execute_persists_two_turns() {
+    (void)::setenv("AGENT_VERIFIER", "off", 1);
+    (void)::setenv("AGENT_TOOL_ALLOWLIST", "", 1);
+    auto adapter = std::make_shared<TwoTurnHistoryAdapter>();
+    auto llm = std::make_shared<LLMClient>();
+    llm->set_prompt_renderer(std::make_shared<PromptRenderer>());
+    llm->register_adapter("fake", adapter);
+    llm->set_default_adapter("fake");
+    auto bus = std::make_shared<ToolBus>();
+    auto store = std::make_shared<InMemorySessionStore>();
+    tf::Executor executor;
+    GraphExecutor gx;
+
+    AgentConfig cfg;
+    cfg.system_prompt = "sys";
+    cfg.max_iterations = 4;
+    AgentWorkflowDeps deps{llm, bus, nullptr};
+
+    auto run = [&](const char* prompt) {
+        ExecutionRequest req;
+        req.config = cfg;
+        req.deps = deps;
+        req.session = std::make_shared<internal::AgentThreadState>();
+        req.session->initial_user_prompt = prompt;
+        req.context.session_id = "persistent-session";
+        req.session_store = store;
+        req.options.react.sink.on_final_json = [](const json&) {};
+        return gx.execute_sync(executor, std::move(req));
+    };
+
+    ExecutionResult first = run(kFirstUser);
+    assert(first.success && first.committed_revision == 1);
+    ExecutionResult second = run(kSecondUser);
+    assert(second.success && second.committed_revision == 2);
+    assert(second.outputs.at("final_answer") == "answer_two");
+    assert(store->load_or_create("persistent-session").state.history.size() >= 4U);
+}
+
+void test_i4_cancel_does_not_commit_or_mutate_session() {
+    (void)::setenv("AGENT_VERIFIER", "off", 1);
+    auto adapter = std::make_shared<TwoTurnHistoryAdapter>();
+    auto llm = std::make_shared<LLMClient>();
+    llm->set_prompt_renderer(std::make_shared<PromptRenderer>());
+    llm->register_adapter("fake", adapter);
+    llm->set_default_adapter("fake");
+    auto store = std::make_shared<InMemorySessionStore>();
+    auto session = std::make_shared<internal::AgentThreadState>();
+    session->initial_user_prompt = "cancelled";
+    auto control = std::make_shared<TaskControl>();
+    control->request_cancel();
+
+    ExecutionRequest req;
+    req.config.system_prompt = "sys";
+    req.deps = {llm, std::make_shared<ToolBus>(), nullptr};
+    req.session = session;
+    req.context.session_id = "cancel-session";
+    req.control = control;
+    req.session_store = store;
+    req.options.react.sink.on_final_json = [](const json&) {};
+    tf::Executor executor;
+    GraphExecutor gx;
+    ExecutionResult result = gx.execute_sync(executor, std::move(req));
+    assert(!result.success);
+    assert(result.status == ExecutionTerminalStatus::Cancelled);
+    assert(store->load_or_create("cancel-session").revision == 0);
+    assert(session->history.empty());
+    assert(session->initial_user_prompt == "cancelled");
+}
+
 } // namespace
 
 int main() {
     test_i1_two_runs_history_carries();
     test_i2_single_run_success();
+    test_i3_unified_execute_persists_two_turns();
+    test_i4_cancel_does_not_commit_or_mutate_session();
     return 0;
 }
