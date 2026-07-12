@@ -366,6 +366,10 @@ endif(TF_BUILD_EXAMPLES)
 # -----------------------------------------------------------------------------
 # Workflow library and examples
 # -----------------------------------------------------------------------------
+if(TF_BUILD_TESTS)
+  include(CTest)
+endif()
+
 if(TF_BUILD_WORKFLOW)
   add_subdirectory(workflow)
 endif(TF_BUILD_WORKFLOW)
@@ -381,7 +385,6 @@ endif(TF_BUILD_MODULES)
 # Unittest
 # -----------------------------------------------------------------------------
 if(TF_BUILD_TESTS)
-  include(CTest)
   add_subdirectory(unittests)
 endif(TF_BUILD_TESTS)
 

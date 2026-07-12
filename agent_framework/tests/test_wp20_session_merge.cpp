@@ -140,6 +140,34 @@ void test_m5_delta_only_no_second_user() {
     assert(S.history[2].content == "A1");
 }
 
+void test_m6_resume_is_idempotent() {
+    internal::AgentThreadState session;
+    Message old;
+    old.role = "assistant";
+    old.content = "committed";
+    old.timestamp = 1;
+    session.history.push_back(old);
+
+    auto checkpoint = std::make_shared<internal::AgentThreadState>();
+    checkpoint->history = session.history;
+    Message delta;
+    delta.role = "tool";
+    delta.tool_call_id = "call-1";
+    delta.tool_name = "lookup";
+    delta.tool_result = nlohmann::json{{"ok", true}};
+    delta.timestamp = 2;
+    checkpoint->history.push_back(delta);
+    checkpoint->iteration = 2;
+
+    assert(merge_react_session_state(
+        session, "", checkpoint, MergeReactSessionMode::ResumeFromCheckpoint));
+    assert(session.history.size() == 2U);
+    assert(session.iteration == 2);
+    assert(merge_react_session_state(
+        session, "", checkpoint, MergeReactSessionMode::ResumeFromCheckpoint));
+    assert(session.history.size() == 2U);
+}
+
 } // namespace
 
 int main() {
@@ -148,6 +176,7 @@ int main() {
     test_m3_prefix_mismatch_no_touch();
     test_m4_empty_user_skips_user_bubble();
     test_m5_delta_only_no_second_user();
+    test_m6_resume_is_idempotent();
     std::cout << "test_wp20_session_merge: all passed\n";
     return 0;
 }

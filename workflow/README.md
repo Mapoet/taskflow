@@ -2,6 +2,42 @@
 
 A high-level **declarative dataflow library** built on Taskflow, supporting both **compile-time type-safe nodes** and **runtime type-erased nodes** through a unified, key-based interface with **automatic dependency inference**.
 
+## Recommended control-flow API (Taskflow 4.x)
+
+New code should use `GraphBuilder::create_loop`, `create_subgraph_module`, and
+`create_subtask_module`. The older keyed `create_subgraph`/`create_subtask` overloads cannot
+declare which nested node owns an output and now fail explicitly instead of returning empty
+`std::any` values. `create_loop_decl` remains only as a compatibility API.
+
+`create_loop` creates an isolated runtime Taskflow for each graph run with the native conditional
+topology `entry -> condition -> body -> back(condition) -> condition`, plus the exit branch. The
+first condition starts the body, each later condition receives the committed body output, and
+`LoopOptions::feedback` maps output keys to the next iteration's input keys. Final outputs are
+published once after every terminal state.
+
+Any-based graphs can be run sequentially more than once. Internal edges use reusable value slots;
+`get_output_future` remains a first-publication compatibility view and `get_latest_output` returns
+the newest run. Overlapping runs of the same `GraphBuilder` throw `std::logic_error`; separate
+builders may run concurrently on one executor.
+
+Reusable module builders return explicit bindings:
+
+```cpp
+auto module = std::make_shared<workflow::SubflowModule>(
+  [](workflow::GraphBuilder& nested, const workflow::ValueMap& inputs,
+     const workflow::RunContext&) {
+    nested.create_any_source("result", {{"value", inputs.at("value")}});
+    return workflow::OutputBindings{{"value", {"result", "value"}}};
+  });
+
+builder.create_subgraph_module(
+  "StaticModule", {{"Input", "value"}}, module, {"value"});
+```
+
+`create_subgraph_module` reuses a static definition; `create_subtask_module` stores an
+execution-time builder factory. Both create a fresh invocation context and nested graph per run,
+propagate identity/depth/cancellation/deadline context, and publish only explicitly bound outputs.
+
 ## 🎯 Overview
 
 The Workflow library provides a powerful abstraction for building dataflow graphs with:

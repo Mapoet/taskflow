@@ -35,6 +35,24 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
     target_compile_options(workflow PRIVATE /std:c++20)
 endif()
 
+if(BUILD_TESTING)
+  enable_testing()
+  add_executable(test_workflow_runtime_slots tests/test_runtime_slots.cpp)
+  target_link_libraries(test_workflow_runtime_slots PRIVATE workflow)
+  add_test(NAME workflow_runtime_slots COMMAND test_workflow_runtime_slots)
+  set_tests_properties(workflow_runtime_slots PROPERTIES LABELS "workflow-control-flow")
+
+  add_executable(test_workflow_modules tests/test_modules.cpp)
+  target_link_libraries(test_workflow_modules PRIVATE workflow)
+  add_test(NAME workflow_modules COMMAND test_workflow_modules)
+  set_tests_properties(workflow_modules PROPERTIES LABELS "workflow-module")
+
+  add_executable(test_workflow_control_flow tests/test_control_flow.cpp)
+  target_link_libraries(test_workflow_control_flow PRIVATE workflow)
+  add_test(NAME workflow_control_flow COMMAND test_workflow_control_flow)
+  set_tests_properties(workflow_control_flow PROPERTIES LABELS "workflow-control-flow")
+endif()
+
 # Link against Taskflow
 get_filename_component(TASKFLOW_PARENT_DIR ${CMAKE_SOURCE_DIR} DIRECTORY)
 target_include_directories(workflow PUBLIC ${TASKFLOW_PARENT_DIR})
@@ -105,6 +123,11 @@ set_property(TARGET loop_only PROPERTY CXX_STANDARD_REQUIRED ON)
 if(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
     target_compile_options(loop_only PRIVATE /std:c++20)
 endif()
+
+add_executable(control_flow_v4 examples/control_flow_v4.cpp)
+set_property(TARGET control_flow_v4 PROPERTY CXX_STANDARD 20)
+set_property(TARGET control_flow_v4 PROPERTY CXX_STANDARD_REQUIRED ON)
+target_link_libraries(control_flow_v4 PRIVATE workflow)
 target_link_libraries(loop_only workflow)
 if(TARGET Taskflow::Taskflow)
   target_link_libraries(loop_only Taskflow::Taskflow)
@@ -137,4 +160,3 @@ endif()
 #   FILE workflowTargets.cmake
 #   NAMESPACE workflow::
 #   DESTINATION lib/cmake/workflow)
-

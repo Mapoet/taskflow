@@ -53,23 +53,6 @@ bool guard_repeat_tool_in_iteration_enabled() {
     return env_truthy("AGENT_LOOP_GUARD_REPEAT_TOOL_IN_ITERATION");
 }
 
-bool guard_no_progress_enabled() {
-    // default OFF (conservative)
-    if (std::getenv("AGENT_LOOP_GUARD_NO_PROGRESS") == nullptr) {
-        return false;
-    }
-    return env_truthy("AGENT_LOOP_GUARD_NO_PROGRESS");
-}
-
-int guard_no_progress_k() {
-    const char* v = std::getenv("AGENT_LOOP_GUARD_NO_PROGRESS_K");
-    if (!v || !*v) {
-        return 3;
-    }
-    const int n = std::atoi(v);
-    return (n <= 0) ? 3 : n;
-}
-
 std::size_t guard_text_trunc() {
     const char* v = std::getenv("AGENT_LOOP_GUARD_TEXT_TRUNC");
     if (!v || !*v) {
@@ -151,25 +134,37 @@ AgentLoopNode::create(
     std::shared_ptr<SkillServices> skills,
     std::shared_ptr<TaskControl> task_control
 ) {
-    // NOTE: workflow::create_loop_decl currently does NOT pass body outputs into condition_func.
-    // Therefore WP1.5 loop uses closure state:
-    // - body_func updates shared state
-    // - condition_func reads shared state (ignores its argument)
-    // - exit_func emits final outputs once (avoid promise re-set)
-
+    (void)memory_store;
+    (void)vector_store;
     struct Shared {
         std::shared_ptr<internal::AgentThreadState> state;
         LLMOutput last_llm;
         std::string final_answer;
         bool is_final = false;
     };
-    auto shared = std::make_shared<Shared>();
 
-    auto body_func = [agent_config, llm_client, toolbus, shared, stream_callback, skills, task_control](
-                         const std::unordered_map<std::string, std::any>& inps)
+    auto body_func = [agent_config, llm_client, toolbus, stream_callback, skills, task_control](
+                         const workflow::ValueMap& inps,
+                         const workflow::IterationContext&)
         -> std::unordered_map<std::string, std::any> {
         const char* dbg_env = std::getenv("AGENT_TEST_AGENT_LOOP_DEBUG");
         const bool dbg = dbg_env && std::string(dbg_env) != "0";
+
+        auto incoming = std::any_cast<std::shared_ptr<internal::AgentThreadState>>(
+            inps.at(std::string(internal::kAgentState)));
+        auto shared = std::make_shared<Shared>();
+        shared->state = std::make_shared<internal::AgentThreadState>();
+        if (incoming) {
+            *shared->state = *incoming;
+        }
+        auto emit = [shared]() -> workflow::ValueMap {
+            return {
+                {std::string(internal::kFinalAnswer), std::any{shared->final_answer}},
+                {std::string(internal::kNextAgentState), std::any{shared->state}},
+                {std::string(internal::kLlmOutput), std::any{shared->last_llm}},
+                {std::string(internal::kIsFinal), std::any{shared->is_final}}
+            };
+        };
 
         if (task_control) {
             task_control->check_deadline_now();
@@ -180,17 +175,8 @@ AgentLoopNode::create(
                 shared->last_llm.is_final = true;
                 shared->last_llm.final_answer = shared->final_answer;
                 shared->last_llm.tool_calls.clear();
-                return {};
+                return emit();
             }
-        }
-
-        auto st = std::any_cast<std::shared_ptr<internal::AgentThreadState>>(
-            inps.at(std::string(internal::kAgentState)));
-        if (!shared->state) {
-            // Use the graph's session shared_ptr (not a copy) so WP2.7 pending injection / violations
-            // and history stay on the object the caller holds; LoopInput re-emits the same ptr each
-            // iteration while shared->state accumulates iteration-local updates on it.
-            shared->state = st ? st : std::make_shared<internal::AgentThreadState>();
         }
         const int it = shared->state ? shared->state->iteration : 0;
         if (dbg) {
@@ -240,7 +226,10 @@ AgentLoopNode::create(
                 shared->last_llm.final_answer = msg;
                 shared->last_llm.tool_calls.clear();
                 shared->state->pending_input_violations.clear();
-                return {};
+                if (incoming) {
+                    incoming->pending_input_violations.clear();
+                }
+                return emit();
             }
             dispatch_pending_control_actions(
                 shared->state->pending_control_actions,
@@ -250,6 +239,14 @@ AgentLoopNode::create(
                 llm_client.get());
             wp27_context_suffix = take_injected_blocks_as_llm_context(
                 shared->state->pending_injected_context);
+
+            // Preserve the public session contract: one-shot inputs are consumed from the
+            // caller-owned state even though loop execution continues on an isolated snapshot.
+            if (incoming) {
+                incoming->pending_injected_context = shared->state->pending_injected_context;
+                incoming->pending_control_actions = shared->state->pending_control_actions;
+                incoming->pending_input_violations = shared->state->pending_input_violations;
+            }
         }
 
         if (control_only_skip_llm) {
@@ -267,7 +264,7 @@ AgentLoopNode::create(
             mcopt.agent_config = &agent_config;
             mcopt.llm_client = llm_client.get();
             maybe_auto_compact_memory(*shared->state, mcopt);
-            return {};
+            return emit();
         }
 
         LLMInput llm_in;
@@ -339,7 +336,7 @@ AgentLoopNode::create(
             shared->last_llm.is_final = true;
             shared->last_llm.final_answer = shared->final_answer;
             shared->last_llm.tool_calls.clear();
-            return {};
+            return emit();
         }
         const auto t1 = std::chrono::steady_clock::now();
         if (dbg) {
@@ -350,6 +347,32 @@ AgentLoopNode::create(
                       << " is_final=" << (llm_out.is_final ? "true" : "false")
                       << " final_answer_len=" << llm_out.final_answer.size() << "\n";
             std::cout.flush();
+        }
+        // A resumed attempt may receive the same stable tool_call_id again. Do not replay a
+        // previously committed side effect; the matching tool result is already in history.
+        if (!llm_out.tool_calls.empty()) {
+            const bool had_tool_calls = true;
+            std::unordered_set<std::string> committed_tool_calls;
+            for (const auto& message : shared->state->history) {
+                if (message.role == "tool" && message.tool_call_id &&
+                    !message.tool_call_id->empty()) {
+                    committed_tool_calls.insert(*message.tool_call_id);
+                }
+            }
+            std::vector<CallSpec> pending_calls;
+            pending_calls.reserve(llm_out.tool_calls.size());
+            for (auto& call : llm_out.tool_calls) {
+                if (!call.tool_call_id || call.tool_call_id->empty() ||
+                    committed_tool_calls.find(*call.tool_call_id) == committed_tool_calls.end()) {
+                    pending_calls.push_back(std::move(call));
+                }
+            }
+            llm_out.tool_calls = std::move(pending_calls);
+            if (had_tool_calls && llm_out.tool_calls.empty() && llm_out.final_answer.empty()) {
+                // Tool routing wins over an inconsistent is_final flag. Advance once more so the
+                // model can observe the already committed tool result and produce a final answer.
+                llm_out.is_final = false;
+            }
         }
         shared->last_llm = llm_out;
 
@@ -580,49 +603,42 @@ AgentLoopNode::create(
             maybe_auto_compact_memory(*shared->state, mcopt);
         }
 
-        return {};
+        return emit();
     };
 
-    auto condition_func = [agent_config, shared, task_control](const std::unordered_map<std::string, std::any>&)
-        -> int {
+    auto condition_func = [task_control](const workflow::ValueMap& outputs,
+                                        const workflow::IterationContext&)
+        -> workflow::LoopDecision {
         if (task_control) {
             task_control->check_deadline_now();
             if (task_control->is_deadline_exceeded() || task_control->is_cancel_requested()) {
-                shared->is_final = true;
-                shared->final_answer = task_control->is_cancel_requested() ? "[task] cancelled"
-                                                                           : "[task] timeout";
-                shared->last_llm.is_final = true;
-                shared->last_llm.final_answer = shared->final_answer;
-                shared->last_llm.tool_calls.clear();
-                return 1;
+                return workflow::LoopDecision::Exit;
             }
         }
-        const int it = shared->state ? shared->state->iteration : 0;
-        if (it >= agent_config.max_iterations) {
-            return 1;
-        }
-        if (shared->is_final) {
-            return 1;
-        }
-        return 0;
+        const auto it = outputs.find(std::string(internal::kIsFinal));
+        const bool is_final = it != outputs.end() && std::any_cast<bool>(it->second);
+        return is_final ? workflow::LoopDecision::Exit : workflow::LoopDecision::Continue;
     };
 
-    auto exit_func = [shared](const std::unordered_map<std::string, std::any>&) -> std::unordered_map<std::string, std::any> {
+    auto exit_func = [](const workflow::ValueMap& outputs,
+                        const workflow::IterationContext&) -> workflow::ValueMap {
         const char* dbg_env = std::getenv("AGENT_TEST_AGENT_LOOP_DEBUG");
         const bool dbg = dbg_env && std::string(dbg_env) != "0";
         if (dbg) {
-            std::cout << "[AgentLoop] exit_func called, final_answer='" << shared->final_answer << "' is_final=" << shared->is_final << "\n";
+            std::cout << "[AgentLoop] exit_func called\n";
             std::cout.flush();
         }
-        return {
-            {std::string(internal::kFinalAnswer), std::any{shared->final_answer}},
-            {std::string(internal::kNextAgentState), std::any{shared->state}},
-            {std::string(internal::kLlmOutput), std::any{shared->last_llm}},
-            {std::string(internal::kIsFinal), std::any{shared->is_final}}
-        };
+        return outputs;
     };
 
-    return builder.create_loop_decl(name, input_specs, body_func, condition_func, exit_func, output_keys);
+    workflow::LoopOptions loop_options;
+    loop_options.max_iterations = static_cast<std::size_t>(std::max(0, agent_config.max_iterations));
+    loop_options.feedback = {
+        {std::string(internal::kNextAgentState), std::string(internal::kAgentState)}
+    };
+    return builder.create_loop(
+        name, input_specs, std::move(body_func), std::move(condition_func),
+        std::move(exit_func), output_keys, std::move(loop_options));
 }
 
 void AgentLoopNode::build_loop_body(
@@ -634,6 +650,8 @@ void AgentLoopNode::build_loop_body(
     std::shared_ptr<VectorStore> vector_store,
     const std::unordered_map<std::string, std::any>& inputs
 ) {
+    (void)memory_store;
+    (void)vector_store;
     // expose loop inputs as a source node
     auto [loop_in, loop_task] = builder.create_any_source("LoopInput", inputs);
     (void)loop_task;
@@ -813,4 +831,3 @@ void AgentLoopNode::build_exit_handler(
 
 } // namespace node
 } // namespace agent_framework
-

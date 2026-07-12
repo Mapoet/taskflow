@@ -192,6 +192,17 @@ bool merge_react_session_state(
 
     const std::vector<Message>& old_hist = session.history;
     const std::vector<Message>& nh = next->history;
+    if (mode == MergeReactSessionMode::ResumeFromCheckpoint && nh.size() <= old_hist.size()) {
+        for (std::size_t i = 0; i < nh.size(); ++i) {
+            if (!message_equal_for_merge(old_hist[i], nh[i])) {
+                return false;
+            }
+        }
+        session.iteration = std::max(session.iteration, next->iteration);
+        session.last_error.clear();
+        session.initial_user_prompt.clear();
+        return true;
+    }
     if (nh.size() < old_hist.size()) {
         return false;
     }

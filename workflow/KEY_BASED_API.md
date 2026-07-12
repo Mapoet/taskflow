@@ -1,5 +1,24 @@
 # Key-Based API 与声明式构图设计
 
+## Taskflow 4.x 可重入模块与循环
+
+| 需求 | 推荐 API | 运行契约 |
+| --- | --- | --- |
+| 静态可复用定义 | `create_subgraph_module` | 复用 `SubflowModule`，每次运行创建独立实例与结果槽 |
+| 动态嵌套任务 | `create_subtask_module` | 执行期实例化 builder，并派生子 `RunContext` |
+| 迭代控制 | `create_loop` | body 输出直接进入 condition，并可 feedback 到下一轮 |
+
+模块输出必须显式绑定为 `external_key -> OutputPort{nested_node, nested_key}`。缺失、重复或
+未声明的绑定会失败，不再返回占位 `std::any`。`RunContext` 提供
+`run_id/parent_run_id/subtask_id/attempt/depth`，并递归传播取消和 deadline。
+
+`LoopOptions::max_iterations` 统计已完成的 body 次数。body 先返回不可变的本轮结果，
+计数递增，condition 再读取该结果；`feedback` 把已提交输出映射为下一轮输入。exit 对
+正常完成、达到上限、取消、超时和错误终态都只执行一次。
+
+Any 图支持顺序重跑；每轮后使用 `get_latest_output`。同一个 builder 禁止重叠执行，
+并行 session 应使用不同 builder。
+
 ## ✅ 当前实现状态
 
 ### 已完成功能

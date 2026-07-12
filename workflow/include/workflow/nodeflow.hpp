@@ -18,11 +18,18 @@
 #include <iostream>
 #include <tuple>
 #include <type_traits>
+#include <atomic>
+#include <chrono>
+#include <cstdint>
+#include <limits>
+#include <mutex>
+#include <optional>
 
 namespace workflow {
 
 // Forward declarations
 struct AnyOutputs;
+class AnyValueSlot;
 class INode;
 template <typename... Ts> struct TypedOutputs;
 template <typename InputsTuple, typename... Outs> class TypedNode;
@@ -36,6 +43,94 @@ class MultiConditionNode;
 class PipelineNode;
 class LoopNode;
 class GraphBuilder;
+
+using ValueMap = std::unordered_map<std::string, std::any>;
+
+enum class RunStatus {
+  Running,
+  Completed,
+  Cancelled,
+  DeadlineExceeded,
+  BodyError,
+  ConditionError,
+  ExitError
+};
+
+struct RunContext {
+  std::string run_id;
+  std::string parent_run_id;
+  std::string subtask_id;
+  std::size_t attempt {0};
+  std::size_t iteration {0};
+  std::size_t depth {0};
+  std::size_t max_depth {16};
+  std::shared_ptr<std::atomic_bool> cancel_requested {
+    std::make_shared<std::atomic_bool>(false)
+  };
+  std::optional<std::chrono::steady_clock::time_point> deadline;
+
+  bool cancelled() const;
+  bool deadline_exceeded() const;
+  RunContext child(const std::string& child_id, std::size_t child_attempt = 0) const;
+};
+
+struct OutputPort {
+  std::string node;
+  std::string key;
+};
+
+using OutputBindings = std::unordered_map<std::string, OutputPort>;
+using SubflowBuilder = std::function<OutputBindings(
+  GraphBuilder&, const ValueMap&, const RunContext&)>;
+
+struct SubflowOptions {
+  std::size_t max_depth {16};
+  std::size_t attempt {0};
+};
+
+class SubflowModule {
+ public:
+  explicit SubflowModule(SubflowBuilder builder, SubflowOptions options = {});
+  const SubflowBuilder& builder() const;
+  const SubflowOptions& options() const;
+
+ private:
+  SubflowBuilder builder_;
+  SubflowOptions options_;
+};
+
+enum class LoopDecision { Continue, Exit };
+
+enum class LoopStatus {
+  Running,
+  Completed,
+  MaxIterations,
+  Cancelled,
+  DeadlineExceeded,
+  BodyError,
+  ConditionError,
+  ExitError
+};
+
+struct IterationContext : RunContext {};
+
+struct LoopOptions {
+  std::size_t max_iterations {std::numeric_limits<std::size_t>::max()};
+  std::unordered_map<std::string, std::string> feedback;
+  std::shared_ptr<std::atomic_bool> cancel_requested;
+  std::optional<std::chrono::steady_clock::time_point> deadline;
+};
+
+struct LoopResult {
+  LoopStatus status {LoopStatus::Running};
+  std::size_t iterations {0};
+  ValueMap outputs;
+  std::string error;
+};
+
+using LoopBody = std::function<ValueMap(const ValueMap&, const IterationContext&)>;
+using LoopCondition = std::function<LoopDecision(const ValueMap&, const IterationContext&)>;
+using LoopExit = std::function<ValueMap(const ValueMap&, const IterationContext&)>;
 
 // ============================================================================
 // Pure virtual base class for all nodes
@@ -80,21 +175,47 @@ class INode {
    * @return Vector of output key names
    */
   virtual std::vector<std::string> get_output_keys() const = 0;
+
+  /**
+   * @brief Get the reusable runtime value slot for an output.
+   * @details Typed and legacy nodes may return nullptr and continue using futures.
+   */
+  virtual std::shared_ptr<AnyValueSlot> get_output_slot(const std::string&) const {
+    return nullptr;
+  }
 };
 
 // ============================================================================
 // Any-based outputs (runtime type-erased)
 // ============================================================================
 
+class AnyValueSlot {
+ public:
+  void publish(std::any value);
+  std::any read() const;
+  bool ready() const;
+  std::uint64_t generation() const;
+
+ private:
+  mutable std::mutex mutex_;
+  std::any value_;
+  std::uint64_t generation_ {0};
+  bool ready_ {false};
+};
+
 struct AnyOutputs {
   std::unordered_map<std::string, std::shared_ptr<std::promise<std::any>>> promises;
   std::unordered_map<std::string, std::shared_future<std::any>> futures;
+  std::unordered_map<std::string, std::shared_ptr<AnyValueSlot>> slots;
+  std::unordered_map<std::string, std::shared_ptr<std::atomic_bool>> first_publication;
 
   AnyOutputs() = default;
   explicit AnyOutputs(const std::vector<std::string>& keys);
   
   void add(const std::string& key);
   void add(const std::vector<std::string>& keys);
+  void publish(const std::string& key, std::any value) const;
+  std::shared_ptr<AnyValueSlot> slot(const std::string& key) const;
 };
 
 // ============================================================================
@@ -259,6 +380,7 @@ struct AnySource : public INode {
   std::function<void()> functor(const char* node_name) const override;
   std::shared_future<std::any> get_output_future(const std::string& key) const override;
   std::vector<std::string> get_output_keys() const override;
+  std::shared_ptr<AnyValueSlot> get_output_slot(const std::string& key) const override;
 
  private:
   static std::vector<std::string> extract_keys(const std::unordered_map<std::string, std::any>& m);
@@ -270,6 +392,7 @@ struct AnySource : public INode {
 
 struct AnyNode : public INode {
   std::unordered_map<std::string, std::shared_future<std::any>> inputs;
+  std::unordered_map<std::string, std::shared_ptr<AnyValueSlot>> slot_inputs;
   AnyOutputs out;
   std::function<std::unordered_map<std::string, std::any>(
       const std::unordered_map<std::string, std::any>&)> op;
@@ -281,11 +404,17 @@ struct AnyNode : public INode {
           std::function<std::unordered_map<std::string, std::any>(
               const std::unordered_map<std::string, std::any>&)> fn,
           const std::string& name = "");
+  AnyNode(std::unordered_map<std::string, std::shared_ptr<AnyValueSlot>> fin,
+          const std::vector<std::string>& out_keys,
+          std::function<std::unordered_map<std::string, std::any>(
+              const std::unordered_map<std::string, std::any>&)> fn,
+          const std::string& name = "");
   std::string name() const override { return node_name_; }
   std::string type() const override { return "AnyNode"; }
   std::function<void()> functor(const char* node_name) const override;
   std::shared_future<std::any> get_output_future(const std::string& key) const override;
   std::vector<std::string> get_output_keys() const override;
+  std::shared_ptr<AnyValueSlot> get_output_slot(const std::string& key) const override;
 };
 
 // ============================================================================
@@ -294,6 +423,7 @@ struct AnyNode : public INode {
 
 struct AnySink : public INode {
   std::unordered_map<std::string, std::shared_future<std::any>> inputs;
+  std::unordered_map<std::string, std::shared_ptr<AnyValueSlot>> slot_inputs;
   std::string node_name_;
   std::function<void(const std::unordered_map<std::string, std::any>&)> callback_;
 
@@ -302,6 +432,9 @@ struct AnySink : public INode {
   explicit AnySink(std::unordered_map<std::string, std::shared_future<std::any>> fin,
                     std::function<void(const std::unordered_map<std::string, std::any>&)> callback,
                     const std::string& name = "");
+  explicit AnySink(std::unordered_map<std::string, std::shared_ptr<AnyValueSlot>> fin,
+                   std::function<void(const std::unordered_map<std::string, std::any>&)> callback,
+                   const std::string& name = "");
   std::string name() const override { return node_name_; }
   std::string type() const override { return "AnySink"; }
   std::function<void()> functor(const char* node_name) const override;
@@ -409,6 +542,7 @@ class PipelineNode : public INode {
  */
 class LoopNode : public INode {
  public:
+  friend class GraphBuilder;
   using LoopConditionFunc = std::function<int(const std::unordered_map<std::string, std::any>&)>;  // Returns 0 to continue, non-zero to exit
   
   LoopNode() = default;
@@ -432,12 +566,16 @@ class LoopNode : public INode {
   std::function<void()> functor(const char* node_name) const override;
   std::shared_future<std::any> get_output_future(const std::string& key) const override;
   std::vector<std::string> get_output_keys() const override;
+  std::shared_ptr<AnyValueSlot> get_output_slot(const std::string& key) const override;
+  LoopResult last_result() const;
   
   std::unordered_map<std::string, std::shared_future<std::any>> inputs;
   AnyOutputs out;
   std::function<void(const std::unordered_map<std::string, std::any>&)> body_func_;
   LoopConditionFunc condition_func_;
   std::string node_name_;
+  mutable std::mutex result_mutex_;
+  LoopResult last_result_;
 };
 
 // ============================================================================
@@ -547,6 +685,12 @@ class GraphBuilder {
    */
   void run(tf::Executor& executor);
 
+  /** @brief Configure cancellation, deadline, and nesting limits inherited by child modules. */
+  void configure_run_context(
+      std::shared_ptr<std::atomic_bool> cancel_requested,
+      std::optional<std::chrono::steady_clock::time_point> deadline = std::nullopt,
+      std::size_t max_depth = 16);
+
   /**
    * @brief Dump graph to DOT format
    * @param os Output stream
@@ -581,6 +725,9 @@ class GraphBuilder {
    * @brief Get output future from a node by key (works for both typed and any nodes)
    */
   std::shared_future<std::any> get_output(const std::string& node_name, const std::string& key) const;
+
+  /** @brief Read the most recently published value, including after sequential re-runs. */
+  std::any get_latest_output(const std::string& node_name, const std::string& key) const;
 
   /**
    * @brief Get typed input from a node by key (for TypedNode construction)
@@ -728,6 +875,7 @@ class GraphBuilder {
    * @return Pair of (subgraph_node_ptr, task_handle)
    * @details The subgraph receives inputs and can produce outputs. Automatically establishes dependencies.
    */
+  [[deprecated("Use create_subgraph_module with explicit OutputBindings")]]
   std::pair<std::shared_ptr<AnyNode>, tf::Task>
   create_subgraph(const std::string& name,
                   const std::vector<std::pair<std::string, std::string>>& input_specs,
@@ -755,11 +903,44 @@ class GraphBuilder {
    * @return Pair of (subtask_node_ptr, task_handle)
    * @details The subtask receives inputs and can produce outputs. Automatically establishes dependencies.
    */
+  [[deprecated("Use create_subtask_module with explicit OutputBindings")]]
   std::pair<std::shared_ptr<AnyNode>, tf::Task>
   create_subtask(const std::string& name,
                  const std::vector<std::pair<std::string, std::string>>& input_specs,
                  std::function<void(GraphBuilder&, const std::unordered_map<std::string, std::any>&)> builder_fn,
                  const std::vector<std::string>& output_keys);
+
+  /**
+   * @brief Register a reusable static module and execute a fresh invocation per graph run.
+   * @details Outputs are explicitly bound to nested node ports; no placeholder values are used.
+   */
+  std::pair<std::shared_ptr<AnyNode>, tf::Task>
+  create_subgraph_module(const std::string& name,
+                         const std::vector<std::pair<std::string, std::string>>& input_specs,
+                         std::shared_ptr<const SubflowModule> module,
+                         const std::vector<std::string>& output_keys);
+
+  /** @brief Create an execution-time subtask with an isolated RunContext and output ports. */
+  std::pair<std::shared_ptr<AnyNode>, tf::Task>
+  create_subtask_module(const std::string& name,
+                        const std::vector<std::pair<std::string, std::string>>& input_specs,
+                        SubflowBuilder builder_fn,
+                        const std::vector<std::string>& output_keys,
+                        SubflowOptions options = {});
+
+  /**
+   * @brief Create a re-entrant loop backed by a Taskflow conditional-task cycle.
+   * @details The body returns one immutable iteration snapshot. The condition consumes that
+   * snapshot, and feedback maps body output keys to the next body's input keys.
+   */
+  std::pair<std::shared_ptr<LoopNode>, tf::Task>
+  create_loop(const std::string& name,
+              const std::vector<std::pair<std::string, std::string>>& input_specs,
+              LoopBody body,
+              LoopCondition condition,
+              LoopExit exit,
+              const std::vector<std::string>& output_keys,
+              LoopOptions options = {});
 
   /**
    * @brief Declarative condition with string-keyed inputs and outputs
@@ -1012,6 +1193,15 @@ class GraphBuilder {
   mutable std::unordered_map<std::string, tf::Task> adapter_tasks_;
   // Hold nested subgraph builders to keep composed_of lifetimes valid
   std::vector<std::unique_ptr<GraphBuilder>> subgraph_builders_;
+  std::shared_ptr<std::atomic_bool> running_;
+  RunContext run_context_;
+  mutable std::shared_ptr<std::mutex> context_mutex_;
+
+  ValueMap execute_subflow(const std::string& name,
+                           const ValueMap& inputs,
+                           const SubflowBuilder& builder_fn,
+                           const std::vector<std::string>& output_keys,
+                           const SubflowOptions& options);
 };
 
 }  // namespace workflow

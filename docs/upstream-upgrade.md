@@ -84,3 +84,23 @@ cmake -S . -B build-upgrade-full -DCMAKE_BUILD_TYPE=Debug \
 - Upstream ancestry check `git merge-base --is-ancestor upstream/master HEAD` may report false on shallow/partial upstream fetches; the merge commit records upstream parent `0ebd18849` (grafted from `46a9c1ab`).
 - CUDA builds, live LLM credentials, and GUI demos (`imgui_agent_demo`) were not exercised in this offline pass.
 - `AGENT_BUILD_EXAMPLES=OFF` during full configure; CLI/GUI examples were not rebuilt in `build-upgrade-full`.
+- The passing build and existing CTest suites establish source/API compatibility, not complete runtime-semantic coverage for repeated loops, graph re-entry, keyed subgraph outputs, or nested subtask restart/resume. The follow-up implementation, documentation, and regression-test backlog is tracked in [Workflow 与 Agent Framework 控制流升级清单](./workflow-agent-control-flow-upgrade.md).
+
+## Control-flow Semantic Upgrade Results
+
+The follow-up backlog was implemented and verified on 2026-07-12. This result is separate from
+the original upstream API-compatibility totals above.
+
+| Verification | Result |
+| --- | --- |
+| Full Debug build | Passed for Taskflow CPU, Workflow, and Agent Framework targets |
+| Semantic CTest labels | 5/5 passed (`workflow-control-flow`, `workflow-module`, `agent-loop`, `agent-subflow`) |
+| Full CTest inventory | 2989 tests covered; 2988 passed in one parallel run and the remaining long-running `agent_client_a2a` passed alone in 26.46 s |
+| ThreadSanitizer | 3/3 Workflow control-flow tests passed with no race report |
+| Example | `workflow/control_flow_v4` printed `value=3` |
+| Static audit | No placeholder/debug control-flow patterns; `git diff --check` passed |
+
+`a2a_contract_loopback` was found to be unsafe under parallel CTest scheduling because it owns a
+loopback HTTP server. It is now marked `RUN_SERIAL`; the test passed in the subsequent full run.
+The isolated `agent_client_a2a` pass is recorded explicitly rather than claiming a single-command
+2989/2989 result.

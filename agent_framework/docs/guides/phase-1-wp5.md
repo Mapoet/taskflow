@@ -1,6 +1,6 @@
 # WP1.5：Agent 循环（workflow）— 实现计划
 
-本文档将 [phase-1-plan.md](./phase-1-plan.md) **§3 WP1.5** 细化为可执行任务、**`create_loop_decl`** 用法、对话状态在 **key-based I/O** 下的传递方式、工具执行顺序与退出条件。与 [phase-1-wp4.md](./phase-1-wp4.md)（`LLMInput` / `history`）、[phase-1-wp1.md](./phase-1-wp1.md)（`LLMOutput`）、[phase-1-wp2.md](./phase-1-wp2.md)（`call_tool`）衔接。
+本文档将 [phase-1-plan.md](./phase-1-plan.md) **§3 WP1.5** 细化为可执行任务、**`create_loop`** 用法、对话状态在 **key-based I/O** 下的传递方式、工具执行顺序与退出条件。与 [phase-1-wp4.md](./phase-1-wp4.md)（`LLMInput` / `history`）、[phase-1-wp1.md](./phase-1-wp1.md)（`LLMOutput`）、[phase-1-wp2.md](./phase-1-wp2.md)（`call_tool`）衔接。
 
 **文档版本**：0.1  
 **日期**：2026-03-31  
@@ -15,7 +15,7 @@
 | 编号 | 能力 |
 |------|------|
 | G1 | **单图闭环**：`LLM` → **解析/分发** → **工具执行** → **历史合并** → 条件判断 → 若继续则下一轮 `LLM`，否则退出 |
-| G2 | **循环驱动**：使用 `workflow::GraphBuilder::create_loop_decl`（**body_builder_fn** 子图版，见 §3），**不得**手连 `precede/succeed` 破坏声明式依赖 |
+| G2 | **循环驱动**：使用 `workflow::GraphBuilder::create_loop`（见 §3），由 Workflow 内部建立 Taskflow 4.x conditional-task 回边 |
 | G3 | **终止条件**：`LLMOutput::tool_calls` **为空** 或 **`iteration >= max_iterations`**（`AgentConfig::max_iterations`）或 **`is_final` 与无 tool** 组合（见 §4.3） |
 | G4 | **工具策略**：首版 **顺序执行** 全部 `CallSpec`；`ToolCallNode::create_parallel` 保留但 CLI 默认不走 |
 | G5 | **状态传递**：每轮后 **`std::vector<Message> history`** 与 **`iteration` 计数** 对下一轮 `LLMInput` 可见（通过节点输出键 + aggregator，见 §5） |
@@ -38,22 +38,23 @@
 | `AgentConfig` | `types.hpp` | `max_iterations`、`max_tool_calls_per_iteration`、`system_prompt`、`model_config` |
 | `LLMNode::create` | `llm_node.hpp` | 从 `input_specs` 组 `LLMInput`，调 `LLMClient::invoke`，输出 `LLMOutput` 或拆键 |
 | `ToolCallNode::create_single` / `create_parallel` | `tool_call_node.hpp` | 单工具 / 并行；本阶段主路径 **自写顺序聚合节点** 或多次 `create_single` 链式（见 §6） |
-| `AgentLoopNode` | `agent_loop_node.hpp` | 封装 `create_loop_decl` + `build_loop_body` + `check_loop_condition` |
+| `AgentLoopNode` | `agent_loop_node.hpp` | 封装 `create_loop`，显式返回本轮状态并配置 feedback |
 | `ReActTemplate` | `graph_executor.hpp` | 可与 `agent_templates` 合并或委托 `AgentLoopNode` |
 
 ---
 
-## 3. `create_loop_decl` 用法（约定）
+## 3. `create_loop` 用法（当前约定）
 
 参考 `workflow/include/workflow/nodeflow.hpp`：
 
-- **选用重载**：`create_loop_decl(name, input_specs, body_builder_fn, condition_func, exit_builder_fn, output_keys)`。
+- **选用接口**：`create_loop(name, input_specs, body, condition, exit, output_keys, options)`。
 - **`input_specs`**：循环入口依赖的源节点（例如 `SystemPrompt`、`UserInput`、**`AgentState` 源**），用于把初始 `query` 与 **可变的 `history` / `iteration`** 注入循环体。
-- **`body_builder_fn(GraphBuilder&, inputs)`**：在子 **GraphBuilder** 上挂：**LLM 节点 → 工具路由节点 → 状态归约节点**；输出键必须包含 condition 与下一轮所需键（§5）。
-- **`condition_func(outputs) -> int`**：**0 = 继续循环**，**非 0 = 退出**（与库注释一致）。
-- **`exit_builder_fn`**（可选）：将最后一次循环体输出映射为对外的 `final_answer`、`reasoning` 等。
+- **`body(inputs, IterationContext) -> ValueMap`**：返回本轮 `next_agent_state`、`is_final`、`final_answer` 和 `llm_output`，不得通过共享可变闭包旁路传递。
+- **`condition(outputs, IterationContext) -> LoopDecision`**：直接读取刚提交的 body outputs。
+- **`LoopOptions::feedback`**：配置 `next_agent_state -> agent_state`，作为下一轮显式输入。
+- **`exit`**（可选）：将最后一次循环体输出映射为对外结果；所有输出只在终态发布一次。
 
-**备选**：`body_func` 原生重载在同一 lambda 内同步调用 LLM——**不推荐用于 WP1.1 流式**，因无法复用 `LLMNode` 的细粒度回调；阶段 1 **以子图为准**。
+旧 `create_loop_decl` 只用于源码兼容。其 GraphBuilder callback 版本没有显式 body 输出端口，运行时会拒绝；不得用于新 Agent 图。
 
 ---
 
@@ -96,8 +97,8 @@ struct AgentThreadState {
 };
 ```
 
-- **注入方式 A（推荐）**：`create_any_source("AgentState", [state](...) { return outputs; })` 每轮 **或由「归约节点」写回** —— workflow 的 key 流通常需要 **归约节点输出新的 `history` 序列化到 `std::any`**，下一轮 **LLM 节点 `input_specs` 依赖该归约节点**。
-- **注入方式 B**：`std::shared_ptr<AgentThreadState>` 放在 **LLM / 聚合节点的 lambda 捕获**中（与 GraphBuilder 节点并存）；**注意线程安全**：单 executor 跑图时同一线程执行可接受，文档写明「阶段 1 单图单线程假设」。
+- **当前推荐方式**：body 从 `agent_state` 输入克隆本轮 snapshot，归约后输出 `next_agent_state`；Workflow feedback 将其映射回下一轮 `agent_state`。
+- **禁止方式**：在 body/condition/exit 之间捕获共享可变 `AgentThreadState`。该模式无法隔离并发 session，也无法支持 checkpoint resume。
 
 **与 [phase-1-wp4.md](./phase-1-wp4.md) 对齐**：`LLMInput.history = state.history`；`LLMInput.user_prompt` 仅为**当前用户问题**（首轮来自 `UserInput`，后续轮可为空串若完全依赖 history — **建议**每轮仍把「原始任务」保留在 history 外的 `state.initial_user_message`，避免截断丢意图）。
 
@@ -109,6 +110,28 @@ struct AgentThreadState {
 | **B** | `iteration` = **工具轮次数**；仅在有 tool 时递增 |
 
 推荐 **A**，与 `max_iterations` 直观一致（防无限 LLM）。
+
+### 5.3 重试、重启与恢复
+
+| 操作 | attempt | history 提交 | 适用场景 |
+| --- | ---: | --- | --- |
+| `Retry` | 递增 | 当前未提交 delta 不进入 session | 同一子任务瞬时失败 |
+| `Restart` | 新 attempt | 从模块入口重新建立隔离状态 | 放弃失败实例 |
+| `Resume` | 保持 checkpoint 身份 | `ResumeFromCheckpoint` 幂等合并未提交后缀 | 中断恢复 |
+
+`merge_react_session_state(..., ResumeFromCheckpoint)` 接受已提交 checkpoint 的重复提交且
+不产生重复消息。工具调用必须保留 `tool_call_id`；具有外部副作用的工具不得因恢复而
+无条件重放。
+
+### 5.4 并发 session 与子流程
+
+同一个 `GraphBuilder` 不允许重叠运行。并发 agent session 使用不同 builder，共享同一
+Taskflow executor；每轮 state snapshot、iteration 与 final output 互相隔离。
+
+静态注册的子 agent/subflow 使用 `SubflowNode`。`SubflowRequest` 携带父/子 run identity、
+attempt、取消、deadline、最大深度、迭代和工具预算；`SubflowResult` 返回结构化
+`ok/outputs/error/usage`。动态生成任意图不属于该接口。一个 child 失败时，其他 child
+已经提交的结果保持可用。
 
 ---
 
