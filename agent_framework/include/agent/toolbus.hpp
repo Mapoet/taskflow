@@ -371,13 +371,26 @@ ToolOrchestrationOptions resolve_tool_orchestration_options(const AgentConfig& c
  */
 using ToolSideEffectResolver = std::function<ToolSideEffect(std::string_view tool_name)>;
 
+enum class ToolExecutionPhase { Started, Completed };
+
+struct ToolExecutionEvent {
+    ToolExecutionPhase phase = ToolExecutionPhase::Started;
+    std::string tool_name;
+    std::string tool_call_id;
+    json arguments = json::object();
+    json result = json::object();
+};
+
+using ToolExecutionObserver = std::function<void(const ToolExecutionEvent&)>;
+
 /**
  * @brief 读并行（有上限）+ 写/Unknown 串行；结果顺序与 calls 一致
  */
 std::vector<json> execute_tool_calls_sequenced(std::shared_ptr<ToolBus> bus,
                                                const std::vector<CallSpec>& calls,
                                                const ToolOrchestrationOptions& opts,
-                                               ToolSideEffectResolver classify);
+                                               ToolSideEffectResolver classify,
+                                               ToolExecutionObserver observer = {});
 
 } // namespace agent_framework
 

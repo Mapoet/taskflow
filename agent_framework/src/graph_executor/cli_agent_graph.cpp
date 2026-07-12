@@ -86,7 +86,8 @@ void build_cli_agent_graph_impl(workflow::GraphBuilder& builder,
          std::string(internal::kLlmOutput)},
         graph_options.stream_callback,
         deps.skills,
-        graph_options.task_control);
+        graph_options.task_control,
+        graph_options.tool_execution_observer);
     (void)loop_node;
     (void)loop_task;
 }

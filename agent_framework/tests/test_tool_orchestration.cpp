@@ -362,6 +362,40 @@ void test_o6() {
     }
 }
 
+void test_o7_realtime_observer_contract() {
+    clear_tool_env();
+    auto bus = std::make_shared<ToolBus>();
+    bus->register_local_tool("observed", [](const json&) { return json{{"value", 7}}; },
+                             meta_named("observed", ToolSideEffect::ReadOnly));
+    CallSpec call;
+    call.name = "observed";
+    call.arguments = json::object();
+    call.tool_call_id = "call-7";
+    std::vector<ToolExecutionEvent> events;
+    ToolOrchestrationOptions opts;
+    auto classify = [&](std::string_view name) {
+        return bus->get_tool_meta(std::string(name)).side_effect;
+    };
+    const auto results = execute_tool_calls_sequenced(
+        bus, {call}, opts, classify,
+        [&](const ToolExecutionEvent& event) { events.push_back(event); });
+    if (events.size() != 2U || events[0].phase != ToolExecutionPhase::Started ||
+        events[1].phase != ToolExecutionPhase::Completed ||
+        events[0].tool_call_id != "call-7" || events[1].result.at("value") != 7 ||
+        results[0].at("value") != 7) {
+        std::cerr << "O-7: observer contract mismatch\n";
+        std::abort();
+    }
+
+    const auto unaffected = execute_tool_calls_sequenced(
+        bus, {call}, opts, classify,
+        [](const ToolExecutionEvent&) { throw std::runtime_error("observer failure"); });
+    if (unaffected[0].at("value") != 7) {
+        std::cerr << "O-7: observer changed tool semantics\n";
+        std::abort();
+    }
+}
+
 } // namespace
 
 int main() {
@@ -372,6 +406,7 @@ int main() {
     test_o4();
     test_o5();
     test_o6();
+    test_o7_realtime_observer_contract();
     std::cout << "test_tool_orchestration: all passed\n";
     return 0;
 }

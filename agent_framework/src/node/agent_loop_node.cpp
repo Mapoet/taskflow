@@ -132,7 +132,8 @@ AgentLoopNode::create(
     const std::vector<std::string>& output_keys,
     std::function<void(std::string_view)> stream_callback,
     std::shared_ptr<SkillServices> skills,
-    std::shared_ptr<TaskControl> task_control
+    std::shared_ptr<TaskControl> task_control,
+    ToolExecutionObserver tool_execution_observer
 ) {
     (void)memory_store;
     (void)vector_store;
@@ -143,12 +144,21 @@ AgentLoopNode::create(
         bool is_final = false;
     };
 
-    auto body_func = [agent_config, llm_client, toolbus, stream_callback, skills, task_control](
+    auto body_func = [agent_config, llm_client, toolbus, stream_callback, skills, task_control,
+                      tool_execution_observer](
                          const workflow::ValueMap& inps,
                          const workflow::IterationContext&)
         -> std::unordered_map<std::string, std::any> {
         const char* dbg_env = std::getenv("AGENT_TEST_AGENT_LOOP_DEBUG");
         const bool dbg = dbg_env && std::string(dbg_env) != "0";
+        auto notify_tool = [&](ToolExecutionEvent event) noexcept {
+            if (!tool_execution_observer) return;
+            try {
+                tool_execution_observer(event);
+            } catch (...) {
+                // Observability must not alter agent execution semantics.
+            }
+        };
 
         auto incoming = std::any_cast<std::shared_ptr<internal::AgentThreadState>>(
             inps.at(std::string(internal::kAgentState)));
@@ -512,7 +522,8 @@ AgentLoopNode::create(
                 }
             }
             std::vector<json> part =
-                execute_tool_calls_sequenced(toolbus, sub, orch_opts, classify_side);
+                execute_tool_calls_sequenced(toolbus, sub, orch_opts, classify_side,
+                                              tool_execution_observer);
             for (std::size_t t = 0; t < sub.size(); ++t) {
                 append_tool_message(sub[t], std::move(part[t]));
             }
@@ -558,10 +569,16 @@ AgentLoopNode::create(
                                       << " args=" << c.arguments.dump() << "\n";
                             std::cout.flush();
                         }
+                        notify_tool({ToolExecutionPhase::Started, c.name,
+                                     c.tool_call_id.value_or(""), c.arguments, {}});
                         futs.push_back(toolbus->call_tool(c.name, c.arguments));
                     }
                     for (std::size_t u = 0; u < futs.size(); ++u) {
-                        append_tool_message(calls[i + chunk_start + u], futs[u].get());
+                        const CallSpec& c = calls[i + chunk_start + u];
+                        json tool_result = futs[u].get();
+                        notify_tool({ToolExecutionPhase::Completed, c.name,
+                                     c.tool_call_id.value_or(""), c.arguments, tool_result});
+                        append_tool_message(c, std::move(tool_result));
                     }
                 }
                 i = j2;
@@ -583,7 +600,11 @@ AgentLoopNode::create(
                     }
                     seen_calls.insert(call_key);
                 }
+                notify_tool({ToolExecutionPhase::Started, c.name, c.tool_call_id.value_or(""),
+                             c.arguments, {}});
                 json result = toolbus->call_tool(c.name, c.arguments).get();
+                notify_tool({ToolExecutionPhase::Completed, c.name, c.tool_call_id.value_or(""),
+                             c.arguments, result});
                 append_tool_message(c, std::move(result));
                 ++i;
             }

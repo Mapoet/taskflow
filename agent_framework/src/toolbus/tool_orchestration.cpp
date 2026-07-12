@@ -14,6 +14,16 @@
 namespace agent_framework {
 namespace {
 
+void notify_tool_observer(const ToolExecutionObserver& observer,
+                          ToolExecutionEvent event) noexcept {
+    if (!observer) return;
+    try {
+        observer(event);
+    } catch (...) {
+        // Observability must not alter tool execution semantics.
+    }
+}
+
 constexpr const char* kA2aSubmitTaskName = "a2a_submit_task";
 
 void ascii_lower_inplace(std::string& s) {
@@ -103,7 +113,8 @@ ToolOrchestrationOptions resolve_tool_orchestration_options(const AgentConfig& c
 std::vector<json> execute_tool_calls_sequenced(std::shared_ptr<ToolBus> bus,
                                                const std::vector<CallSpec>& calls,
                                                const ToolOrchestrationOptions& opts,
-                                               ToolSideEffectResolver classify) {
+                                               ToolSideEffectResolver classify,
+                                               ToolExecutionObserver observer) {
     const std::size_t n = calls.size();
     std::vector<json> results(n);
 
@@ -133,10 +144,15 @@ std::vector<json> execute_tool_calls_sequenced(std::shared_ptr<ToolBus> bus,
                 futs.reserve(chunk_end - chunk_start);
                 for (std::size_t t = chunk_start; t < chunk_end; ++t) {
                     const std::size_t gi = i + t;
+                    notify_tool_observer(observer, {ToolExecutionPhase::Started, calls[gi].name,
+                                                    calls[gi].tool_call_id.value_or(""), calls[gi].arguments, {}});
                     futs.push_back(bus->call_tool(calls[gi].name, calls[gi].arguments));
                 }
                 for (std::size_t u = 0; u < futs.size(); ++u) {
-                    results[i + chunk_start + u] = futs[u].get();
+                    const std::size_t gi = i + chunk_start + u;
+                    results[gi] = futs[u].get();
+                    notify_tool_observer(observer, {ToolExecutionPhase::Completed, calls[gi].name,
+                                                    calls[gi].tool_call_id.value_or(""), calls[gi].arguments, results[gi]});
                 }
             }
             i = j;
@@ -144,7 +160,11 @@ std::vector<json> execute_tool_calls_sequenced(std::shared_ptr<ToolBus> bus,
         }
 
         if (!parallel_on || !is_readonly_for_grouping(se)) {
+            notify_tool_observer(observer, {ToolExecutionPhase::Started, calls[i].name,
+                                            calls[i].tool_call_id.value_or(""), calls[i].arguments, {}});
             results[i] = bus->call_tool(calls[i].name, calls[i].arguments).get();
+            notify_tool_observer(observer, {ToolExecutionPhase::Completed, calls[i].name,
+                                            calls[i].tool_call_id.value_or(""), calls[i].arguments, results[i]});
             ++i;
             continue;
         }
@@ -163,10 +183,15 @@ std::vector<json> execute_tool_calls_sequenced(std::shared_ptr<ToolBus> bus,
             futs.reserve(chunk_end - chunk_start);
             for (std::size_t t = chunk_start; t < chunk_end; ++t) {
                 const std::size_t gi = i + t;
+                notify_tool_observer(observer, {ToolExecutionPhase::Started, calls[gi].name,
+                                                calls[gi].tool_call_id.value_or(""), calls[gi].arguments, {}});
                 futs.push_back(bus->call_tool(calls[gi].name, calls[gi].arguments));
             }
             for (std::size_t u = 0; u < futs.size(); ++u) {
-                results[i + chunk_start + u] = futs[u].get();
+                const std::size_t gi = i + chunk_start + u;
+                results[gi] = futs[u].get();
+                notify_tool_observer(observer, {ToolExecutionPhase::Completed, calls[gi].name,
+                                                calls[gi].tool_call_id.value_or(""), calls[gi].arguments, results[gi]});
             }
         }
 

@@ -585,6 +585,7 @@ ExecutionResult GraphExecutor::execute_sync(tf::Executor& executor, ExecutionReq
     request.context.session_id = session_id;
     request.session->execution_context = request.context;
     request.options.react.graph_options.task_control = request.control;
+    auto prior_tool_observer = request.options.react.graph_options.tool_execution_observer;
     const std::size_t history_size_before = request.session->history.size();
     const auto compact_ts_before = request.session->last_memory_compaction_ts;
 
@@ -595,6 +596,17 @@ ExecutionResult GraphExecutor::execute_sync(tf::Executor& executor, ExecutionReq
     auto emit = [&](ExecutionEventType type, json payload) {
         emitter.emit(type, std::move(payload));
     };
+    request.options.react.graph_options.tool_execution_observer =
+        [&, prior_tool_observer](const ToolExecutionEvent& event) {
+            json payload{{"tool_name", event.tool_name},
+                         {"tool_call_id", event.tool_call_id},
+                         {"arguments", event.arguments}};
+            if (event.phase == ToolExecutionPhase::Completed) payload["result"] = event.result;
+            emit(event.phase == ToolExecutionPhase::Started ? ExecutionEventType::ToolStarted
+                                                             : ExecutionEventType::ToolCompleted,
+                 std::move(payload));
+            if (prior_tool_observer) prior_tool_observer(event);
+        };
     emit(ExecutionEventType::TaskStarted, json::object());
 
     if (!request.options.input_already_processed) {
@@ -636,15 +648,6 @@ ExecutionResult GraphExecutor::execute_sync(tf::Executor& executor, ExecutionReq
     result.outputs = wr.outputs;
     result.exit_code = wr.exit_code;
     result.error = wr.error_message;
-    for (std::size_t i = history_size_before; i < request.session->history.size(); ++i) {
-        const auto& message = request.session->history[i];
-        if (message.role == "tool") {
-            emit(ExecutionEventType::ToolCompleted,
-                 {{"tool_call_id", message.tool_call_id.value_or("")},
-                  {"tool_name", message.tool_name.value_or("")},
-                  {"restored", false}});
-        }
-    }
     if (request.session->last_memory_compaction_ts != compact_ts_before) {
         emit(ExecutionEventType::MemoryCompacted,
              {{"history_size_before", history_size_before},

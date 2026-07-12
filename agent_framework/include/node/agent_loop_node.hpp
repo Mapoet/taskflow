@@ -67,7 +67,8 @@ public:
         const std::vector<std::string>& output_keys,
         std::function<void(std::string_view)> stream_callback = nullptr,
         std::shared_ptr<SkillServices> skills = nullptr,
-        std::shared_ptr<TaskControl> task_control = nullptr
+        std::shared_ptr<TaskControl> task_control = nullptr,
+        ToolExecutionObserver tool_execution_observer = {}
     );
 
 private:
@@ -119,4 +120,3 @@ private:
 } // namespace agent_framework
 
 #endif // __AGENT_NODE_AGENT_LOOP_NODE_H__
-

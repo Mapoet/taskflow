@@ -12,6 +12,7 @@
 #include "skill_services.hpp"
 #include "execution_context.hpp"
 #include "session_store.hpp"
+#include "toolbus.hpp"
 #include <workflow/nodeflow.hpp>
 #include <functional>
 #include <future>
@@ -51,6 +52,7 @@ struct AgentWorkflowDeps {
 struct CliAgentGraphOptions {
     std::function<void(std::string_view)> stream_callback{};
     std::shared_ptr<TaskControl> task_control{};
+    ToolExecutionObserver tool_execution_observer{};
 };
 
 /**
