@@ -284,6 +284,7 @@ RenderedPrompt PromptRenderer::render(const LLMInput& input, const std::string& 
     vars["tools_text"] = OpenAIToolFormatter().format_tools_as_text(input.tools);
 
     RenderedPrompt rendered;
+    rendered.cancellation_requested = input.cancellation_requested;
     rendered.rendered_text = tpl->render(vars);
 
     std::shared_ptr<HistoryFormatter> hf =

@@ -298,7 +298,7 @@ std::future<LLMOutput> AnthropicAdapter::invoke_with_rendered(
                 };
                 std::map<int, PendingTool> tools_by_index;
 
-                http_transport_->post_sse(
+                http_transport_->post_sse_cancellable(
                     url, body, hdrs,
                     [&](const std::string&, const json& j) {
                         const std::string ty = j.value("type", "");
@@ -332,7 +332,7 @@ std::future<LLMOutput> AnthropicAdapter::invoke_with_rendered(
                             }
                         }
                     },
-                    config_.http_timeout_sec, "anthropic");
+                    config_.http_timeout_sec, "anthropic", rendered.cancellation_requested);
 
                 LLMOutput out;
                 out.final_answer = text_acc;

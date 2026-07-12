@@ -278,6 +278,13 @@ AgentLoopNode::create(
         }
 
         LLMInput llm_in;
+        if (task_control) {
+            llm_in.cancellation_requested = [task_control]() {
+                task_control->check_deadline_now();
+                return task_control->is_cancel_requested() ||
+                       task_control->is_deadline_exceeded();
+            };
+        }
         llm_in.system_prompt =
             std::any_cast<std::string>(inps.at(std::string(internal::kSystemPrompt)));
         llm_in.user_prompt = user_query;

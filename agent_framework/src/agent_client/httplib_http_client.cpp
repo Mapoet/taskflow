@@ -430,7 +430,8 @@ void HttplibClient::post_sse(const std::string& url, const json& body,
                              const std::map<std::string, std::string>& headers,
                              const std::function<void(const std::string& event_name, const json& data)>&
                                  on_event,
-                             int timeout_sec) {
+                             int timeout_sec,
+                             const std::function<bool()>& cancellation_requested) {
     ParsedHttpUrl parsed = parse_absolute_url(url);
     const int eff = timeout_sec > 0 ? timeout_sec : timeout_sec_;
 
@@ -451,6 +452,7 @@ void HttplibClient::post_sse(const std::string& url, const json& body,
     bool headers_ok = true;
 
     req.response_handler_ = [&](const httplib::Response& res) {
+        if (cancellation_requested && cancellation_requested()) return false;
         response_status = res.status;
         if (res.status < 200 || res.status >= 300) {
             headers_ok = false;
@@ -460,6 +462,7 @@ void HttplibClient::post_sse(const std::string& url, const json& body,
 
     req.content_receiver_ =
         [&](const char* data, std::size_t data_length, std::uint64_t /*off*/, std::uint64_t /*total*/) {
+            if (cancellation_requested && cancellation_requested()) return false;
             if (!headers_ok) {
                 error_body_accum.append(data, data_length);
                 return true;
@@ -556,6 +559,15 @@ void HttplibLlmTransport::post_sse(const std::string& url, const json& body,
                                    const std::function<void(const std::string&, const json&)>& on_event,
                                    int timeout_sec, const std::string& /*provider*/) {
     client_->post_sse(url, body, headers, on_event, timeout_sec);
+}
+
+void HttplibLlmTransport::post_sse_cancellable(
+    const std::string& url, const json& body,
+    const std::map<std::string, std::string>& headers,
+    const std::function<void(const std::string&, const json&)>& on_event,
+    int timeout_sec, const std::string& /*provider*/,
+    const std::function<bool()>& cancellation_requested) {
+    client_->post_sse(url, body, headers, on_event, timeout_sec, cancellation_requested);
 }
 
 } // namespace agent_framework

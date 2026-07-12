@@ -155,6 +155,7 @@ public:
     std::vector<json> sse_chunks;
     int post_llm_calls = 0;
     int fail_post_with_503 = 0;
+    int cancellable_sse_calls = 0;
 
     json post_llm(const std::string&, const json&, const std::map<std::string, std::string>&,
                   const std::string&) override {
@@ -172,6 +173,17 @@ public:
         (void)headers;
         for (const auto& ch : sse_chunks) {
             on_event("", ch);
+        }
+    }
+
+    void post_sse_cancellable(
+        const std::string&, const json&, const std::map<std::string, std::string>&,
+        const std::function<void(const std::string&, const json&)>& on_event, int,
+        const std::string&, const std::function<bool()>& cancellation_requested) override {
+        ++cancellable_sse_calls;
+        for (const auto& chunk : sse_chunks) {
+            if (cancellation_requested && cancellation_requested()) break;
+            on_event("", chunk);
         }
     }
 };
@@ -235,6 +247,32 @@ void test_openai_stream_text() {
     assert(acc == "Hello");
     assert(out.final_answer == "Hello");
     assert(out.is_final);
+}
+
+void test_openai_stream_transport_cancellation() {
+    auto fake = std::make_shared<FakeLlmTransport>();
+    fake->sse_chunks = {
+        json::parse(R"({"choices":[{"delta":{"content":"first"}}]})"),
+        json::parse(R"({"choices":[{"delta":{"content":"second"}}]})"),
+    };
+    OpenAIAdapter adapter("sk-test", "https://api.example.com/v1", fake);
+    ModelConfig config;
+    config.model_name = "gpt-test";
+    config.stream = true;
+    adapter.configure(config);
+    bool cancelled = false;
+    RenderedPrompt prompt;
+    prompt.messages = {{{"role", "user"}, {"content", "hi"}}};
+    prompt.cancellation_requested = [&] { return cancelled; };
+    std::string received;
+    LLMOutput output = adapter.invoke_with_rendered(
+        prompt, [&](std::string_view chunk) {
+            received += chunk;
+            cancelled = true;
+        }).get();
+    assert(fake->cancellable_sse_calls == 1);
+    assert(received == "first");
+    assert(output.final_answer == "first");
 }
 
 void test_openai_stream_tools() {
@@ -356,6 +394,7 @@ void run_offline_tests() {
     test_openai_nonstream_text();
     test_openai_nonstream_tools();
     test_openai_stream_text();
+    test_openai_stream_transport_cancellation();
     test_openai_stream_tools();
     test_anthropic_nonstream();
     test_anthropic_stream();

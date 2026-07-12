@@ -209,7 +209,7 @@ std::future<LLMOutput> OpenAIAdapter::invoke_with_rendered(
                               << " payload_chars=" << body.dump().size() << "\n";
                     std::cout.flush();
                 }
-                http_transport_->post_sse(
+                http_transport_->post_sse_cancellable(
                     url, body, hdrs,
                     [&](const std::string&, const json& ev) {
                         if (!ev.contains("choices") || !ev["choices"].is_array()) {
@@ -249,7 +249,7 @@ std::future<LLMOutput> OpenAIAdapter::invoke_with_rendered(
                             }
                         }
                     },
-                    config_.http_timeout_sec, "openai");
+                    config_.http_timeout_sec, "openai", rendered.cancellation_requested);
 
                 LLMOutput out;
                 out.final_answer = full_text;

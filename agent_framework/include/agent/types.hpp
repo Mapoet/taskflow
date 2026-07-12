@@ -19,6 +19,7 @@
 #include <chrono>
 #include <memory>
 #include <ctime>
+#include <functional>
 
 using json = nlohmann::json;
 
@@ -154,6 +155,8 @@ struct LLMInput {
     std::optional<std::string> orchestrator_subtask_digest;
     std::optional<std::string> image_data;  // 图像 base64 编码（可选）
     std::optional<std::string> audio_data;  // 音频 base64 编码（可选）
+    /** Request-scoped cooperative cancellation/deadline check. */
+    std::function<bool()> cancellation_requested;
 };
 
 /**
@@ -169,6 +172,7 @@ struct RenderedPrompt {
     int total_tokens = 0;                   // 估算的总 token 数
     /** WP2.1c：`AGENT_CONTEXT_BUDGET_STRICT=1` 且合并/注入后仍超限时为 true，调用方应跳过 LLM */
     bool context_budget_blocked = false;
+    std::function<bool()> cancellation_requested;
 };
 
 /**
@@ -585,4 +589,3 @@ struct AgentTask {
 } // namespace agent_framework
 
 #endif // __AGENT_TYPES_H__
-

@@ -66,7 +66,8 @@ public:
     void post_sse(const std::string& url, const json& body,
                   const std::map<std::string, std::string>& headers,
                   const std::function<void(const std::string& event_name, const json& data)>& on_event,
-                  int timeout_sec = 0);
+                  int timeout_sec = 0,
+                  const std::function<bool()>& cancellation_requested = {});
 
 private:
     int timeout_sec_ = 0;
@@ -87,6 +88,15 @@ public:
                           const std::map<std::string, std::string>& headers,
                           const std::function<void(const std::string& event_name, const json& data)>& on_event,
                           int timeout_sec, const std::string& provider) = 0;
+    virtual void post_sse_cancellable(
+        const std::string& url, const json& body,
+        const std::map<std::string, std::string>& headers,
+        const std::function<void(const std::string& event_name, const json& data)>& on_event,
+        int timeout_sec, const std::string& provider,
+        const std::function<bool()>& cancellation_requested) {
+        (void)cancellation_requested;
+        post_sse(url, body, headers, on_event, timeout_sec, provider);
+    }
 };
 
 /** 默认实现：委托 HttplibClient */
@@ -104,6 +114,12 @@ public:
                   const std::map<std::string, std::string>& headers,
                   const std::function<void(const std::string& event_name, const json& data)>& on_event,
                   int timeout_sec, const std::string& provider) override;
+    void post_sse_cancellable(
+        const std::string& url, const json& body,
+        const std::map<std::string, std::string>& headers,
+        const std::function<void(const std::string& event_name, const json& data)>& on_event,
+        int timeout_sec, const std::string& provider,
+        const std::function<bool()>& cancellation_requested) override;
 
 private:
     std::shared_ptr<HttplibClient> client_;
