@@ -51,6 +51,8 @@
 | `AGENT_SERVER_EXECUTOR_THREADS` | `hardware_concurrency`（裁剪） | 统一 GraphExecutor 使用的 `tf::Executor` |
 | `AGENT_SESSION_DB` | `.agent/session.db` | Server 默认 SQLite SessionStore 路径 |
 | `AGENT_SERVER_SSE_PING_SEC` | `30` | SSE 注释帧间隔；`0` 禁用 |
+| `AGENT_SERVER_SSE_QUEUE_CAP` | `256` | 每个 SSE 订阅者的最大待发送帧数；满时丢弃最旧帧 |
+| `AGENT_SERVER_SSE_MAX_DROPPED` | `1024` | 单订阅累计丢弃达到该值后关闭慢订阅 |
 | `AGENT_TASK_DEFAULT_TIMEOUT_SEC` | `0` | 默认 wall-clock 超时（秒）；`0` 表示无默认超时 |
 | `AGENT_TASK_MAX_TIMEOUT_SEC` | `86400` | 单任务超时上限（含 `metadata.timeout_sec`），超出则钳制并告警 |
 
@@ -94,6 +96,10 @@ Server 启动前必须配置 `AgentExecutionProfile`。每个任务由 Server �
 
 `AgentClient::send_streaming_task` 和 `subscribe_task_updates` 在非 legacy 模式使用 JSON-RPC POST SSE。
 兼容 GET 端点仍保留一个迁移周期。参见 `test_phase2_a2a_execution` 与 `test_agent_server_wp22`。
+
+每个订阅者使用独立有界队列。生产任务线程不会等待慢客户端；队列满时丢弃最旧帧，达到
+`AGENT_SERVER_SSE_MAX_DROPPED` 后停止接收新帧，并在排空现有帧后关闭连接。该策略不会影响
+同一任务的其他订阅者。
 
 ## 相关代码
 

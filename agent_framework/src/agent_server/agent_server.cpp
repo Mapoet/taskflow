@@ -140,6 +140,15 @@ std::string sse_ping_interval_sec() {
     return std::string(v);
 }
 
+std::size_t positive_size_env(const char* key, std::size_t fallback) {
+    const char* raw = std::getenv(key);
+    if (!raw || !*raw) return fallback;
+    char* end = nullptr;
+    const unsigned long long parsed = std::strtoull(raw, &end, 10);
+    if (end == raw || *end != '\0' || parsed == 0) return fallback;
+    return static_cast<std::size_t>(parsed);
+}
+
 bool task_status_is_terminal(AgentTaskStatus s) {
     return s == AgentTaskStatus::COMPLETED || s == AgentTaskStatus::FAILED ||
            s == AgentTaskStatus::CANCELLED;
@@ -1107,7 +1116,9 @@ void AgentServer::handle_tasks_send_subscribe(const httplib::Request& req, httpl
 }
 
 void AgentServer::attach_task_stream(const std::string& task_id, httplib::Response& res) {
-    auto channel = std::make_shared<internal::SseServerChannel>();
+    auto channel = std::make_shared<internal::SseServerChannel>(
+        positive_size_env("AGENT_SERVER_SSE_QUEUE_CAP", 256),
+        positive_size_env("AGENT_SERVER_SSE_MAX_DROPPED", 1024));
     AgentTask snapshot;
     {
         std::lock_guard<std::mutex> lk(tasks_mutex_);

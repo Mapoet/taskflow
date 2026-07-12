@@ -6,10 +6,36 @@
 namespace agent_framework {
 namespace internal {
 
-void SseServerChannel::push_framed(std::string data) {
+SseServerChannel::SseServerChannel(std::size_t max_pending,
+                                   std::size_t max_dropped_before_close)
+    : max_pending_(max_pending == 0 ? 1 : max_pending),
+      max_dropped_before_close_(max_dropped_before_close) {}
+
+SseServerChannel::PushResult SseServerChannel::push_framed(std::string data) {
     std::lock_guard<std::mutex> lock(mu_);
+    if (closed_.load(std::memory_order_acquire)) return PushResult::closed;
+    PushResult result = PushResult::accepted;
+    if (pending_.size() >= max_pending_) {
+        pending_.pop_front();
+        ++dropped_;
+        result = PushResult::dropped_oldest;
+        if (max_dropped_before_close_ > 0 && dropped_ >= max_dropped_before_close_) {
+            closed_.store(true, std::memory_order_release);
+        }
+    }
     pending_.push_back(std::move(data));
     cv_.notify_one();
+    return result;
+}
+
+std::size_t SseServerChannel::pending_count() const {
+    std::lock_guard<std::mutex> lock(mu_);
+    return pending_.size();
+}
+
+std::size_t SseServerChannel::dropped_count() const {
+    std::lock_guard<std::mutex> lock(mu_);
+    return dropped_;
 }
 
 void SseServerChannel::close() {
