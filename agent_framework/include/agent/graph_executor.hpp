@@ -27,6 +27,7 @@ namespace agent_framework {
 class LLMClient;
 class TaskControl;
 class ToolBus;
+class GraphExecutor;
 
 namespace internal {
 struct AgentThreadState;
@@ -311,6 +312,16 @@ public:
      * @return true 如果配置有效
      */
     virtual bool validate_config(const json& config) const = 0;
+
+    /**
+     * @brief Execute this template inside GraphExecutor's common policy/persistence envelope.
+     *
+     * Build-only templates may keep the default implementation, which returns a structured
+     * unsupported-template failure instead of throwing from the unified execution path.
+     */
+    virtual WorkflowResult execute(GraphExecutor& graph_executor,
+                                   tf::Executor& executor,
+                                   const ExecutionRequest& request);
 };
 
 /**
@@ -325,6 +336,9 @@ public:
     std::string get_template_name() const override;
     std::string get_template_description() const override;
     bool validate_config(const json& config) const override;
+    WorkflowResult execute(GraphExecutor& graph_executor,
+                           tf::Executor& executor,
+                           const ExecutionRequest& request) override;
 
     /**
      * @brief 与 build_cli_agent_graph 等价，便于以模板类名义调用
@@ -385,6 +399,8 @@ private:
  */
 class GraphExecutor {
 public:
+    GraphExecutor();
+
     /**
      * @brief 构建标准 Agent（ReAct）工作流
      * @param deps LLM 与 ToolBus；renderer 请在 llm 上预配置
@@ -430,9 +446,7 @@ public:
     ExecutionResult execute_sync(tf::Executor& executor, ExecutionRequest request);
     std::future<ExecutionResult> execute_async(tf::Executor& executor, ExecutionRequest request);
 
-    /**
-     * @brief 注册 react_cli 逻辑模板名（ReActTemplate；build(json) 仍抛异常，仅用于发现/列表）
-     */
+    /** @brief Register or restore the built-in executable react_cli template. */
     void register_react_cli_template();
 
     /**

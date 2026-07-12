@@ -267,6 +267,45 @@ void test_i4_cancel_does_not_commit_or_mutate_session() {
     assert(session->initial_user_prompt == "cancelled");
 }
 
+void test_i5_template_registry_drives_unified_execution() {
+    (void)::setenv("AGENT_VERIFIER", "off", 1);
+    auto adapter = std::make_shared<TwoTurnHistoryAdapter>();
+    auto llm = std::make_shared<LLMClient>();
+    llm->set_prompt_renderer(std::make_shared<PromptRenderer>());
+    llm->register_adapter("fake", adapter);
+    llm->set_default_adapter("fake");
+
+    GraphExecutor gx;
+    assert(gx.get_template(kWorkflowTemplateReactCli) != nullptr);
+    gx.register_template("react_alias", std::make_shared<ReActTemplate>());
+
+    ExecutionRequest req;
+    req.template_id = "react_alias";
+    req.config.system_prompt = "sys";
+    req.config.max_iterations = 4;
+    req.deps = {llm, std::make_shared<ToolBus>(), nullptr};
+    req.session = std::make_shared<internal::AgentThreadState>();
+    req.session->initial_user_prompt = kFirstUser;
+    req.context.session_id = "template-alias-session";
+    req.options.persist_session = false;
+    req.options.react.sink.on_final_json = [](const json&) {};
+
+    tf::Executor executor;
+    ExecutionResult result = gx.execute_sync(executor, std::move(req));
+    assert(result.success);
+    assert(result.outputs.at("final_answer") == "answer_one");
+}
+
+void test_i6_unknown_template_fails_before_execution() {
+    GraphExecutor gx;
+    ExecutionRequest req;
+    req.template_id = "missing_template";
+    tf::Executor executor;
+    ExecutionResult result = gx.execute_sync(executor, std::move(req));
+    assert(!result.success);
+    assert(result.error == "unknown workflow template: missing_template");
+}
+
 } // namespace
 
 int main() {
@@ -274,5 +313,7 @@ int main() {
     test_i2_single_run_success();
     test_i3_unified_execute_persists_two_turns();
     test_i4_cancel_does_not_commit_or_mutate_session();
+    test_i5_template_registry_drives_unified_execution();
+    test_i6_unknown_template_fails_before_execution();
     return 0;
 }

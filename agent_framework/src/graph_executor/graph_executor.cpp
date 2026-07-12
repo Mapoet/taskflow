@@ -278,6 +278,10 @@ bool merge_react_session_state(
     return true;
 }
 
+GraphExecutor::GraphExecutor() {
+    register_react_cli_template();
+}
+
 void GraphExecutor::build_agent_workflow(const AgentConfig& config,
                                          workflow::GraphBuilder& builder,
                                          const AgentWorkflowDeps& deps,
@@ -544,7 +548,8 @@ std::future<WorkflowResult> GraphExecutor::run_react_cli_async(tf::Executor& exe
 
 ExecutionResult GraphExecutor::execute_sync(tf::Executor& executor, ExecutionRequest request) {
     ExecutionResult result;
-    if (request.template_id != kWorkflowTemplateReactCli) {
+    const std::shared_ptr<WorkflowTemplate> workflow_template = get_template(request.template_id);
+    if (!workflow_template) {
         result.error = "unknown workflow template: " + request.template_id;
         return result;
     }
@@ -620,19 +625,14 @@ ExecutionResult GraphExecutor::execute_sync(tf::Executor& executor, ExecutionReq
               {"tier_b_enabled", request.input_policy.tier_b_enabled}});
     }
 
-    ReactCliRunRequest react;
-    react.config = request.config;
-    react.deps = request.deps;
-    react.session = request.session;
-    react.options = request.options.react;
-    auto prior_verifier_event = react.options.on_verifier_event;
-    react.options.on_verifier_event = [&, prior_verifier_event](std::string_view name, const json& payload) {
+    auto prior_verifier_event = request.options.react.on_verifier_event;
+    request.options.react.on_verifier_event = [&, prior_verifier_event](std::string_view name, const json& payload) {
         emit(name == "verifier_started" ? ExecutionEventType::VerifierStarted
                                          : ExecutionEventType::VerifierCompleted, payload);
         if (prior_verifier_event) prior_verifier_event(name, payload);
     };
 
-    WorkflowResult wr = run_react_cli_sync(executor, react);
+    WorkflowResult wr = workflow_template->execute(*this, executor, request);
     result.outputs = wr.outputs;
     result.exit_code = wr.exit_code;
     result.error = wr.error_message;
