@@ -221,6 +221,34 @@ Model、Test 必须走同一条相对路径、canonical jail、普通文件、�
 
 ## Stage 2：Schema 与权限强制，P0
 
+### 完成证据（2026-07-13）
+
+- 新增通用 JSON schema 运行时校验，Script、CLI、MCP、Workflow 使用相同的
+  `SkillRuntime::begin/finish` 契约；错误包含 instance path、schema path 和 schema
+  resource location。
+- 新增 `SkillPolicyEngine`，对 Tool、Network、Environment、Filesystem Read/Write、
+  Secret 执行 manifest request 与 task grant 求交，六类权限均有允许和拒绝测试。
+- Agent Loop 只导出授权工具；ToolBus 在 hook 参数改写前后执行 request-scoped
+  authorization。内建 Web/Filesystem Tool 通过 `ToolMeta.permission_targets` 约束真实
+  origin/path，伪造 ToolCall 无法绕过。
+- v1 Script/CLI/Resource 访问绑定 active Skill 请求上下文；Linux Script/CLI 使用
+  `unshare` network namespace 与 `bwrap` 文件系统沙箱，包默认只读、写目录最小挂载、
+  HOME 隐藏、网络关闭、环境白名单、secret reference 文件注入和输出脱敏。
+- Skill event 统一覆盖 started/completed、permission denied、schema invalid、budget、
+  cancel 和 timeout；运行中子进程取消也会回传 `Cancelled` 事件，稳定失败码已固化为
+  公共常量。
+- Stage 2 垂直 CTest 8/8 通过，覆盖 unit、schema contract、runtime integration、
+  policy security、Agent Loop integration、真实进程沙箱和 legacy v0 兼容。
+- 完整构建成功；最终全量 CTest 3000/3000 通过，0 失败，总耗时 275.33 秒。收口前一次
+  全量 CTest 同样 3000/3000 通过，总耗时 278.88 秒。
+
+### 实施边界
+
+**已完成。** MCP 与 Workflow 在本阶段共享
+`TaskControl`、Policy、schema 和 event sink guard contract；MCP server 生命周期、Tool
+命名空间与过滤属于 Stage 3，Workflow DSL、循环、subflow/submodule、restart/resume
+属于 Stage 4，本阶段不提前声明这些执行能力完成。
+
 ### 步骤
 
 1. 为 Skill、Script、CLI、Tool、Workflow 定义 input/output schema 引用。

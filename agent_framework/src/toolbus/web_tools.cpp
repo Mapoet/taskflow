@@ -97,6 +97,8 @@ void register_builtin_web_tools_if_configured(ToolBus& bus) {
             "required": ["query"]
         })");
         meta.side_effect = ToolSideEffect::ReadOnly;
+        meta.permission_targets.push_back(
+            {ToolMeta::PermissionTargetKind::Network, {}, {}, "https://html.duckduckgo.com"});
         bus.register_local_tool(
             "web_search", [](const json& args) { return web_search_invoke(args); }, meta);
     }
@@ -118,6 +120,8 @@ void register_builtin_web_tools_if_configured(ToolBus& bus) {
             "required": ["url"]
         })");
         meta.side_effect = ToolSideEffect::ReadOnly;
+        meta.permission_targets.push_back(
+            {ToolMeta::PermissionTargetKind::Network, "url", {}, {}});
         bus.register_local_tool(
             "web_fetch", [](const json& args) { return web_fetch_invoke(args); }, meta);
     }
@@ -137,6 +141,9 @@ void register_builtin_web_tools_if_configured(ToolBus& bus) {
             },
             "required": ["feed_url"]
         })");
+        meta.side_effect = ToolSideEffect::ReadOnly;
+        meta.permission_targets.push_back(
+            {ToolMeta::PermissionTargetKind::Network, "feed_url", {}, {}});
         bus.register_local_tool(
             "web_rss_feed", [](const json& args) { return web_rss_feed_invoke(args); }, meta);
     }
@@ -155,6 +162,8 @@ void register_builtin_web_tools_if_configured(ToolBus& bus) {
             "required": ["url"]
         })");
         meta.side_effect = ToolSideEffect::Write;
+        meta.permission_targets.push_back(
+            {ToolMeta::PermissionTargetKind::Network, "url", {}, {}});
         bus.register_local_tool(
             "web_fetch_archive", [](const json& args) { return web_fetch_archive_invoke(args); },
             meta);

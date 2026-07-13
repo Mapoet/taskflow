@@ -6,6 +6,7 @@
 #include "agent/schema_validate.hpp"
 
 #include <cmath>
+#include <regex>
 #include <string>
 #include <string_view>
 #include <unordered_set>
@@ -274,6 +275,218 @@ bool validate_against_schema(const json& schema, const json& instance, const std
     return check_primitive_type(type_token, instance, path, error_obj);
 }
 
+std::string pointer_token(std::string_view token) {
+    std::string out;
+    out.reserve(token.size());
+    for (char c : token) {
+        if (c == '~') out += "~0";
+        else if (c == '/') out += "~1";
+        else out.push_back(c);
+    }
+    return out;
+}
+
+std::string pointer_child(const std::string& base, std::string_view token) {
+    return base + "/" + pointer_token(token);
+}
+
+bool generic_error(json& error_obj, const std::string& message,
+                   const std::string& instance_path, const std::string& schema_path,
+                   const std::string& keyword, json extra = json::object()) {
+    extra["instance_path"] = instance_path.empty() ? "/" : instance_path;
+    extra["schema_path"] = schema_path.empty() ? "/" : schema_path;
+    extra["keyword"] = keyword;
+    fill_error(error_obj, "validation_failed", message, std::move(extra));
+    return false;
+}
+
+bool validate_json_value(const json& schema, const json& instance,
+                         const std::string& instance_path, const std::string& schema_path,
+                         json& error_obj) {
+    if (!schema.is_object()) {
+        return generic_error(error_obj, "schema node must be an object", instance_path,
+                             schema_path, "schema");
+    }
+    std::string unsupported;
+    if (schema_has_unsupported_keywords(schema, unsupported)) {
+        generic_error(error_obj, "JSON Schema keyword is not supported", instance_path,
+                      pointer_child(schema_path, unsupported), unsupported);
+        error_obj["code"] = "schema_unsupported";
+        return false;
+    }
+    if (schema.contains("enum")) {
+        if (!schema["enum"].is_array()) {
+            return generic_error(error_obj, "enum must be an array", instance_path,
+                                 pointer_child(schema_path, "enum"), "enum");
+        }
+        if (!value_matches_enum(instance, schema["enum"])) {
+            return generic_error(error_obj, "value is not in enum", instance_path,
+                                 pointer_child(schema_path, "enum"), "enum");
+        }
+    }
+
+    std::string type;
+    if (schema.contains("type")) {
+        if (!schema["type"].is_string()) {
+            return generic_error(error_obj, "type must be a string", instance_path,
+                                 pointer_child(schema_path, "type"), "type");
+        }
+        type = schema["type"].get<std::string>();
+    } else if (schema.contains("properties") || schema.contains("required")) {
+        type = "object";
+    } else if (schema.contains("items")) {
+        type = "array";
+    } else if (schema.contains("enum")) {
+        return true;
+    } else {
+        return generic_error(error_obj, "schema must declare a type", instance_path,
+                             schema_path, "type");
+    }
+
+    const auto wrong_type = [&](const char* expected) {
+        return generic_error(error_obj, std::string("type mismatch: expected ") + expected,
+                             instance_path, pointer_child(schema_path, "type"), "type",
+                             {{"expected", expected}});
+    };
+    if (type == "null") return instance.is_null() ? true : wrong_type("null");
+    if (type == "boolean") return instance.is_boolean() ? true : wrong_type("boolean");
+    if (type == "integer" && !is_json_integer(instance)) return wrong_type("integer");
+    if (type == "number" && !instance.is_number()) return wrong_type("number");
+    if (type == "string" && !instance.is_string()) return wrong_type("string");
+    if (type == "array" && !instance.is_array()) return wrong_type("array");
+    if (type == "object" && !instance.is_object()) return wrong_type("object");
+    if (type != "null" && type != "boolean" && type != "integer" && type != "number" &&
+        type != "string" && type != "array" && type != "object") {
+        return generic_error(error_obj, "unsupported schema type", instance_path,
+                             pointer_child(schema_path, "type"), "type", {{"type", type}});
+    }
+
+    if (type == "number" || type == "integer") {
+        const double value = instance.get<double>();
+        for (const auto& bound : {std::pair{"minimum", false}, std::pair{"maximum", true}}) {
+            if (!schema.contains(bound.first)) continue;
+            if (!schema[bound.first].is_number()) {
+                return generic_error(error_obj, "numeric bound must be a number", instance_path,
+                                     pointer_child(schema_path, bound.first), bound.first);
+            }
+            const double limit = schema[bound.first].get<double>();
+            if ((!bound.second && value < limit) || (bound.second && value > limit)) {
+                return generic_error(error_obj, "numeric bound violated", instance_path,
+                                     pointer_child(schema_path, bound.first), bound.first,
+                                     {{"limit", limit}});
+            }
+        }
+    }
+    if (type == "string") {
+        const auto& value = instance.get_ref<const std::string&>();
+        for (const auto& bound : {std::pair{"minLength", false}, std::pair{"maxLength", true}}) {
+            if (!schema.contains(bound.first)) continue;
+            if (!schema[bound.first].is_number_unsigned()) {
+                return generic_error(error_obj, "string length bound must be unsigned", instance_path,
+                                     pointer_child(schema_path, bound.first), bound.first);
+            }
+            const auto limit = schema[bound.first].get<std::size_t>();
+            if ((!bound.second && value.size() < limit) || (bound.second && value.size() > limit)) {
+                return generic_error(error_obj, "string length bound violated", instance_path,
+                                     pointer_child(schema_path, bound.first), bound.first,
+                                     {{"limit", limit}});
+            }
+        }
+        if (schema.contains("pattern")) {
+            if (!schema["pattern"].is_string()) {
+                return generic_error(error_obj, "pattern must be a string", instance_path,
+                                     pointer_child(schema_path, "pattern"), "pattern");
+            }
+            try {
+                if (!std::regex_search(value, std::regex(schema["pattern"].get<std::string>()))) {
+                    return generic_error(error_obj, "string does not match pattern", instance_path,
+                                         pointer_child(schema_path, "pattern"), "pattern");
+                }
+            } catch (const std::regex_error&) {
+                generic_error(error_obj, "schema pattern is invalid", instance_path,
+                              pointer_child(schema_path, "pattern"), "pattern");
+                error_obj["code"] = "schema_unsupported";
+                return false;
+            }
+        }
+    }
+    if (type == "array") {
+        for (const auto& bound : {std::pair{"minItems", false}, std::pair{"maxItems", true}}) {
+            if (!schema.contains(bound.first)) continue;
+            if (!schema[bound.first].is_number_unsigned()) {
+                return generic_error(error_obj, "array bound must be unsigned", instance_path,
+                                     pointer_child(schema_path, bound.first), bound.first);
+            }
+            const auto limit = schema[bound.first].get<std::size_t>();
+            if ((!bound.second && instance.size() < limit) ||
+                (bound.second && instance.size() > limit)) {
+                return generic_error(error_obj, "array bound violated", instance_path,
+                                     pointer_child(schema_path, bound.first), bound.first,
+                                     {{"limit", limit}});
+            }
+        }
+        if (schema.contains("items")) {
+            for (std::size_t i = 0; i < instance.size(); ++i) {
+                if (!validate_json_value(schema["items"], instance[i],
+                                         pointer_child(instance_path, std::to_string(i)),
+                                         pointer_child(schema_path, "items"), error_obj)) return false;
+            }
+        }
+    }
+    if (type == "object") {
+        if (schema.contains("required")) {
+            if (!schema["required"].is_array()) {
+                return generic_error(error_obj, "required must be an array", instance_path,
+                                     pointer_child(schema_path, "required"), "required");
+            }
+            for (std::size_t i = 0; i < schema["required"].size(); ++i) {
+                const auto& required = schema["required"][i];
+                if (!required.is_string()) {
+                    return generic_error(error_obj, "required item must be a string", instance_path,
+                                         pointer_child(pointer_child(schema_path, "required"),
+                                                       std::to_string(i)), "required");
+                }
+                if (!instance.contains(required.get<std::string>())) {
+                    return generic_error(error_obj, "missing required property", instance_path,
+                                         pointer_child(schema_path, "required"), "required",
+                                         {{"missing", required}});
+                }
+            }
+        }
+        const json* properties = nullptr;
+        if (schema.contains("properties")) {
+            if (!schema["properties"].is_object()) {
+                return generic_error(error_obj, "properties must be an object", instance_path,
+                                     pointer_child(schema_path, "properties"), "properties");
+            }
+            properties = &schema["properties"];
+        }
+        bool allow_additional = false;
+        if (schema.contains("additionalProperties")) {
+            if (!schema["additionalProperties"].is_boolean()) {
+                return generic_error(error_obj, "additionalProperties must be boolean", instance_path,
+                                     pointer_child(schema_path, "additionalProperties"),
+                                     "additionalProperties");
+            }
+            allow_additional = schema["additionalProperties"].get<bool>();
+        }
+        for (auto it = instance.begin(); it != instance.end(); ++it) {
+            if (properties && properties->contains(it.key())) {
+                if (!validate_json_value((*properties)[it.key()], it.value(),
+                                         pointer_child(instance_path, it.key()),
+                                         pointer_child(pointer_child(schema_path, "properties"), it.key()),
+                                         error_obj)) return false;
+            } else if (!allow_additional) {
+                return generic_error(error_obj, "additional property is not allowed",
+                                     pointer_child(instance_path, it.key()),
+                                     pointer_child(schema_path, "additionalProperties"),
+                                     "additionalProperties", {{"unexpected_key", it.key()}});
+            }
+        }
+    }
+    return true;
+}
+
 } // namespace
 
 void extract_json_schema_root_meta(const json& root_schema, JsonSchemaRootMeta& out) {
@@ -328,6 +541,12 @@ bool validate_tool_arguments(const json& schema, const json& arguments, json& er
         return false;
     }
     return validate_object(schema, arguments, "", error_obj);
+}
+
+bool validate_json_instance(const json& schema, const json& instance, json& error_obj,
+                            JsonSchemaRootMeta* root_meta_out) {
+    if (root_meta_out != nullptr) extract_json_schema_root_meta(schema, *root_meta_out);
+    return validate_json_value(schema, instance, "", "", error_obj);
 }
 
 } // namespace agent_framework

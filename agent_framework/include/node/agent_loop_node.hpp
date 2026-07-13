@@ -12,6 +12,7 @@
 #include "../agent/types.hpp"
 #include "../agent/llm_client.hpp"
 #include "../agent/toolbus.hpp"
+#include "../agent/skill_runtime.hpp"
 #include "../agent/memory.hpp"
 #include "../agent/vectorstore.hpp"
 #include <functional>
@@ -68,7 +69,8 @@ public:
         std::function<void(std::string_view)> stream_callback = nullptr,
         std::shared_ptr<SkillServices> skills = nullptr,
         std::shared_ptr<TaskControl> task_control = nullptr,
-        ToolExecutionObserver tool_execution_observer = {}
+        ToolExecutionObserver tool_execution_observer = {},
+        SkillEventSink skill_event_sink = {}
     );
 
 private:

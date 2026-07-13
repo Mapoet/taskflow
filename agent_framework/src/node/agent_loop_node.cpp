@@ -20,6 +20,7 @@
 #include <algorithm>
 #include <any>
 #include <future>
+#include <filesystem>
 #include <functional>
 #include <unordered_map>
 #include <chrono>
@@ -133,7 +134,8 @@ AgentLoopNode::create(
     std::function<void(std::string_view)> stream_callback,
     std::shared_ptr<SkillServices> skills,
     std::shared_ptr<TaskControl> task_control,
-    ToolExecutionObserver tool_execution_observer
+    ToolExecutionObserver tool_execution_observer,
+    SkillEventSink skill_event_sink
 ) {
     (void)memory_store;
     (void)vector_store;
@@ -145,7 +147,7 @@ AgentLoopNode::create(
     };
 
     auto body_func = [agent_config, llm_client, toolbus, stream_callback, skills, task_control,
-                      tool_execution_observer](
+                      tool_execution_observer, skill_event_sink](
                          const workflow::ValueMap& inps,
                          const workflow::IterationContext&)
         -> std::unordered_map<std::string, std::any> {
@@ -229,6 +231,115 @@ AgentLoopNode::create(
             }
         }
 
+        std::shared_ptr<const SkillPolicyEngine> active_skill_policy;
+        if (skills && skills->registry && shared->state && shared->state->active_skill_id) {
+            const auto entry = skills->registry->get(*shared->state->active_skill_id);
+            const auto manifest = skills->registry->get_manifest(*shared->state->active_skill_id);
+            if (entry && manifest) {
+                SkillPermissionGrant grants;
+                if (shared->state->execution_context) {
+                    grants = shared->state->execution_context->skill_grants;
+                }
+                if (manifest->legacy_v0) {
+                    // One-major-version compatibility: v0 allowed-tools remain their own task cap.
+                    grants.tools = manifest->permissions.tools;
+                    grants.network = manifest->permissions.network;
+                    grants.environment = manifest->permissions.environment;
+                    grants.filesystem_read = manifest->permissions.filesystem_read;
+                    grants.filesystem_write = manifest->permissions.filesystem_write;
+                    grants.secrets = manifest->permissions.secrets;
+                }
+                const auto package_root = entry->script_jail.value_or(entry->file_path.parent_path());
+                active_skill_policy = std::make_shared<SkillPolicyEngine>(
+                    manifest->permissions, grants, package_root);
+                const std::string active_id = *shared->state->active_skill_id;
+                const std::string task_id = shared->state->execution_context &&
+                                                    shared->state->execution_context->task_id
+                                                ? *shared->state->execution_context->task_id
+                                                : std::string{};
+                const std::string run_id = shared->state->execution_context &&
+                                                   shared->state->execution_context->session_id
+                                               ? *shared->state->execution_context->session_id
+                                               : std::string{};
+                tool_control.authorization =
+                    [policy = active_skill_policy, skill_event_sink, active_id, task_id, run_id, it](
+                        const std::string& tool_name, const json& arguments,
+                        const ToolMeta& meta) -> std::optional<json> {
+                    auto deny = [&](const SkillPolicyDecision& denied) -> std::optional<json> {
+                        if (skill_event_sink) {
+                            try {
+                                skill_event_sink({SkillEventType::PermissionDenied,
+                                                  kSkillPermissionDenied, active_id, {}, task_id,
+                                                  run_id, 0, it,
+                                                  {{"permission", skill_permission_kind_cstr(denied.kind)},
+                                                   {"action", denied.action},
+                                                   {"target", denied.target}}});
+                            } catch (...) {
+                            }
+                        }
+                        return SkillRuntime::permission_error(denied);
+                    };
+                    auto decision = policy->authorize_tool(tool_name);
+                    if (!decision.allowed) return deny(decision);
+                    for (const auto& target : meta.permission_targets) {
+                        std::string value = target.static_target;
+                        if (!target.argument.empty()) {
+                            const auto found = arguments.find(target.argument);
+                            if (found != arguments.end()) {
+                                if (!found->is_string()) {
+                                    SkillPolicyDecision invalid;
+                                    invalid.kind = target.kind == ToolMeta::PermissionTargetKind::Network
+                                                       ? SkillPermissionKind::Network
+                                                       : (target.kind == ToolMeta::PermissionTargetKind::FilesystemWrite
+                                                              ? SkillPermissionKind::FilesystemWrite
+                                                              : SkillPermissionKind::FilesystemRead);
+                                    invalid.action = "resolve_target";
+                                    invalid.target = target.argument;
+                                    invalid.reason = "permission target argument must be a string";
+                                    return deny(invalid);
+                                }
+                                value = found->get<std::string>();
+                            } else if (value.empty() && !target.base_path.empty()) {
+                                value = target.base_path;
+                            }
+                        }
+                        if (target.kind == ToolMeta::PermissionTargetKind::Network) {
+                            decision = policy->authorize_network(value);
+                        } else {
+                            std::filesystem::path path(value);
+                            if (!path.is_absolute() && !target.base_path.empty()) {
+                                path = std::filesystem::path(target.base_path) / path;
+                            }
+                            decision = policy->authorize_filesystem(
+                                path, target.kind == ToolMeta::PermissionTargetKind::FilesystemWrite);
+                        }
+                        if (!decision.allowed) return deny(decision);
+                    }
+                    return std::nullopt;
+                };
+                SkillInvocationContext invocation_context;
+                invocation_context.control = task_control;
+                invocation_context.grants = std::move(grants);
+                invocation_context.event_sink = skill_event_sink;
+                invocation_context.task_id = task_id;
+                invocation_context.run_id = run_id;
+                invocation_context.iteration = it;
+                if (shared->state->execution_context) {
+                    invocation_context.environment =
+                        shared->state->execution_context->skill_environment;
+                    invocation_context.secret_provider =
+                        shared->state->execution_context->skill_secret_provider;
+                    invocation_context.limits.max_input_bytes =
+                        shared->state->execution_context->skill_max_input_bytes;
+                    invocation_context.limits.max_output_bytes =
+                        shared->state->execution_context->skill_max_output_bytes;
+                }
+                tool_control.skill_context =
+                    std::make_shared<SkillInvocationContext>(std::move(invocation_context));
+                tool_control.active_skill_id = active_id;
+            }
+        }
+
         std::string wp27_context_suffix;
         if (it == 0 && shared->state) {
             if (!shared->state->pending_input_violations.empty()) {
@@ -309,7 +420,14 @@ AgentLoopNode::create(
             llm_in.active_skill_id = shared->state->active_skill_id;
         }
         if (toolbus) {
-            llm_in.tools = toolbus->export_as_llm_tools();
+            if (active_skill_policy) {
+                llm_in.tools = toolbus->export_as_llm_tools(
+                    [active_skill_policy](std::string_view name) {
+                        return active_skill_policy->authorize_tool(name).allowed;
+                    });
+            } else {
+                llm_in.tools = toolbus->export_as_llm_tools();
+            }
         }
         if (shared->state && shared->state->outbound_supervisor) {
             std::size_t max_ev = 8;

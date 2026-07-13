@@ -427,7 +427,8 @@ void test_o8_cancellation_stops_later_tools() {
     auto classify = [&](std::string_view name) {
         return bus->get_tool_meta(std::string(name)).side_effect;
     };
-    ToolCallControl control{[&] { return cancelled.load(); }};
+    ToolCallControl control;
+    control.cancellation_requested = [&] { return cancelled.load(); };
     const auto results = execute_tool_calls_sequenced(bus, calls, opts, classify, {}, control);
     if (control_checks != 1 || later_calls != 0 || results.size() != 2U ||
         !results[0].value("cancelled_next", false) || results[1].contains("unexpected")) {

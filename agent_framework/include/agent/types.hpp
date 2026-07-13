@@ -135,6 +135,17 @@ struct ToolMeta {
     std::string description;       // 工具说明
     /** WP2.1b：编排用；不进入 LLM tools JSON（tool_formatter 仅导出 name/schema/description） */
     ToolSideEffect side_effect = ToolSideEffect::Unknown;
+    enum class PermissionTargetKind { Network, FilesystemRead, FilesystemWrite };
+    struct PermissionTarget {
+        PermissionTargetKind kind = PermissionTargetKind::Network;
+        /** JSON object member containing the target. Empty means `static_target`. */
+        std::string argument;
+        /** Base directory used to resolve relative filesystem arguments. */
+        std::string base_path;
+        std::string static_target;
+    };
+    /** Runtime-only permission metadata; PromptRenderer deliberately does not export it. */
+    std::vector<PermissionTarget> permission_targets;
 };
 
 /**

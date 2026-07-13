@@ -3,6 +3,7 @@
  */
 
 #include <agent/skill_services.hpp>
+#include <agent/skill_runtime.hpp>
 
 #include <cstdlib>
 #include <filesystem>
@@ -41,6 +42,7 @@ std::shared_ptr<SkillServices> SkillServices::from_env() {
         auto svc = std::make_shared<SkillServices>();
         svc->registry = std::move(reg);
         svc->loader = std::move(loader);
+        svc->runtime = std::make_shared<SkillRuntime>(svc->registry, svc->loader);
         return svc;
     } catch (...) {
         return nullptr;
@@ -72,6 +74,7 @@ std::shared_ptr<SkillServices> SkillServices::from_cursor_default_skill_roots() 
         auto svc = std::make_shared<SkillServices>();
         svc->registry = std::move(reg);
         svc->loader = std::move(loader);
+        svc->runtime = std::make_shared<SkillRuntime>(svc->registry, svc->loader);
         return svc;
     } catch (...) {
         return nullptr;

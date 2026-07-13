@@ -43,6 +43,16 @@ void extract_json_schema_root_meta(const json& root_schema, JsonSchemaRootMeta& 
 bool validate_tool_arguments(const json& schema, const json& arguments, json& error_obj,
                              JsonSchemaRootMeta* root_meta_out = nullptr);
 
+/**
+ * @brief Validate an arbitrary JSON instance against the supported JSON Schema subset.
+ *
+ * Failure details contain both `instance_path` and `schema_path` JSON pointers. This API is
+ * used by Skill input/output contracts; `validate_tool_arguments` remains the object-root
+ * compatibility wrapper used by ToolBus.
+ */
+bool validate_json_instance(const json& schema, const json& instance, json& error_obj,
+                            JsonSchemaRootMeta* root_meta_out = nullptr);
+
 } // namespace agent_framework
 
 #endif // __AGENT_SCHEMA_VALIDATE_H__

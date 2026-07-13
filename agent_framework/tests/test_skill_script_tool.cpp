@@ -105,7 +105,8 @@ int main() {
 
     {
         std::atomic<bool> cancelled{false};
-        ToolCallControl control{[&] { return cancelled.load(); }};
+        ToolCallControl control;
+        control.cancellation_requested = [&] { return cancelled.load(); };
         auto future = bus.call_tool(
             "run_skill_script", json{{"skill_id", "run"}, {"relative_path", "wait.sh"}}, control);
         std::this_thread::sleep_for(std::chrono::milliseconds(100));

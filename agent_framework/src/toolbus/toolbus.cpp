@@ -375,6 +375,26 @@ std::future<json> ToolBus::call_tool(const std::string& name, const json& argume
                                             {"code", "tool_not_allowed"},
                                             {"details", json{{"name", name}}}});
     }
+    ToolMeta tm = tool->get_tool_meta(name);
+    const auto authorize = [&](const json& candidate) -> std::optional<json> {
+        if (!control.authorization) return std::nullopt;
+        try {
+            return control.authorization(name, candidate, tm);
+        } catch (const std::exception& error) {
+            return json{{"error", "tool authorization failed"},
+                        {"code", "skill_permission_denied"},
+                        {"details", json{{"name", name},
+                                         {"reason", truncate_utf8_chars(error.what(), 512)}}}};
+        } catch (...) {
+            return json{{"error", "tool authorization failed"},
+                        {"code", "skill_permission_denied"},
+                        {"details", json{{"name", name},
+                                         {"reason", "non-standard exception"}}}};
+        }
+    };
+    if (auto denied = authorize(arguments)) {
+        return make_ready_json_future(std::move(*denied));
+    }
 
     std::vector<ToolCallHook> hooks_copy;
     {
@@ -389,8 +409,13 @@ std::future<json> ToolBus::call_tool(const std::string& name, const json& argume
         }
     }
 
+    if (current != arguments) {
+        if (auto denied = authorize(current)) {
+            return make_ready_json_future(std::move(*denied));
+        }
+    }
+
     json err = json::object();
-    ToolMeta tm = tool->get_tool_meta(name);
     const json& schema = tm.schema;
     if (!validate_tool_arguments(schema, current, err)) {
         return make_ready_json_future(std::move(err));
@@ -398,11 +423,13 @@ std::future<json> ToolBus::call_tool(const std::string& name, const json& argume
     return tool->call_cancellable(name, current, control);
 }
 
-std::vector<ToolMeta> ToolBus::export_as_llm_tools() const {
+std::vector<ToolMeta> ToolBus::export_as_llm_tools(
+    const std::function<bool(std::string_view)>& filter) const {
     std::lock_guard<std::mutex> lock(tools_mutex_);
     std::vector<ToolMeta> out;
     out.reserve(tools_.size());
     for (const auto& kv : tools_) {
+        if (filter && !filter(kv.first)) continue;
         ToolMeta m = kv.second->get_tool_meta(kv.first);
         if (!m.name.empty()) {
             out.push_back(std::move(m));

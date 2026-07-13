@@ -1,5 +1,5 @@
 > **与本仓库（Agent Framework）的关系**  
-> 本框架以 **C++17** 实现。文中出现的 Python 片段仅说明解析与执行器**语义**；落地实现应对应 **C++ 目录扫描、Frontmatter/YAML 解析（如 yaml-cpp 或受限子集手写解析）、经由 ToolBus 的子进程/MCP 调用** 等。
+> 本框架当前以 **C++20** 构建。文中出现的 Python 片段仅说明解析与执行器**语义**；落地实现对应 **C++ 目录扫描、受限 Frontmatter/YAML 解析、经由 ToolBus 的受控子进程/MCP 调用** 等。
 >
 > **推荐存储形态**  
 > 新技能建议统一为下文 **「单文件 `SKILL.md`（YAML Frontmatter + Markdown 正文）」** 一节所述格式，目录上为 **`<skills_root>/<skill-folder>/SKILL.md`**（与 Cursor / Agent Framework 的 `SkillRegistry` 扫描约定一致）。较早出现的 `skill.yaml` + `SKILL.md` 分文件布局仍可作兼容迁移路径，**不必**混用于同一技能。
@@ -14,10 +14,14 @@
 - L1 将 `agent.taskflow/v1` 的 `SkillManifest` 解析为规范化模型，覆盖元数据、兼容范围、依赖、权限和 Script、CLI、Reference、Tool、MCP、Template、Schema、Prompt、Workflow、Config、Asset、Model、Test 13 类资源；legacy frontmatter 归一化为 `agent.taskflow/v0`。
 - Registry 发布前校验资源 ID、SemVer、跨 schema 引用、相对路径、canonical jail、普通文件、大小和 SHA-256；无效 Skill 仅产生带位置和修复建议的 diagnostics，不进入可执行快照。
 - L2 的 `SkillLoader` 对指令设置字节预算；v1 资源必须显式声明，legacy 仅在对应资源列表为空时允许 `scripts/`、`references/`、`cli/` 兼容目录。
-- L3 的 `run_skill_script` 使用解释器 allowlist、最小环境、超时、输出上限、参数数量/总长度上限和协作式取消；`read_skill_resource` 对 13 类资源执行类型化读取和统一安全检查。
+- L3 的 `SkillRuntime` 对 Script、CLI、MCP、Workflow 使用相同的输入/输出 schema、预算、`TaskControl`、策略和事件契约；schema 错误包含 instance JSON Pointer、schema JSON Pointer 和 schema resource location。
+- `SkillPolicyEngine` 对任务 grant 与 manifest permission 求交。Agent Loop 只向模型暴露授权工具，ToolBus 在 hooks 前后都重新授权；文件和网络工具通过运行时元数据校验实际路径或 origin，拒绝结果使用稳定失败码。
+- `run_skill_script` 和 `run_skill_cli` 在 Linux 上通过外层 user/network namespace 与内层 `bwrap` 运行，包目录默认只读，仅将获批写目录挂载为可写；宿主 HOME 不可见，网络不可用，环境变量按引用注入。
+- Secret 只由请求级 provider 按 manifest reference 解析，通过 `/run/secrets/*` 文件注入；manifest、Prompt、CLI JSON 和 Skill event 不包含 secret value，stdout/stderr 中的已解析值会被脱敏。
+- v1 的 `run_skill_script`、`run_skill_cli` 和 `read_skill_resource` 要求匹配的 Skill 请求上下文，并执行 resource declaration 与文件 read grant 双重校验；legacy v0 保留一个大版本兼容路径。
 - `skillctl <root> list|validate|show|read|inspect <id> --resolved` 支持 CI 校验、受控资源读取和规范化 manifest 检查；`validate` 在存在 error 诊断时返回非零状态。
 
-运行时变量为 `AGENT_SKILL_SCRIPT_ALLOWLIST`、`AGENT_SKILL_SCRIPT_TIMEOUT_SEC` 和 `AGENT_SKILL_SCRIPT_OUTPUT_MAX_BYTES`。Manifest 声明 SHA-256 时，OpenSSL 构建执行摘要校验；无 OpenSSL 构建返回 `resource_hash_unavailable`，不会静默跳过。运行时 schema 输入/输出校验、权限 grant 求交、动态安装、签名/供应链验证、运行中热切换和版本解析属于后续阶段，不属于当前完成范围。
+运行时变量为 `AGENT_SKILL_SCRIPT_ALLOWLIST`、`AGENT_SKILL_SCRIPT_TIMEOUT_SEC` 和 `AGENT_SKILL_SCRIPT_OUTPUT_MAX_BYTES`。Linux 进程执行需要 `/usr/bin/unshare` 与 `/usr/bin/bwrap`，任一缺失时 fail closed。Manifest 声明 SHA-256 时，OpenSSL 构建执行摘要校验；无 OpenSSL 构建返回 `resource_hash_unavailable`，不会静默跳过。MCP 生命周期与私有 Tool 绑定属于 Stage 3，Workflow DSL、循环、subflow/submodule 和 restart/resume 属于 Stage 4；动态安装、签名/供应链验证和运行中热切换仍属于后续阶段。
 
 ---
 

@@ -25,8 +25,16 @@
 
 namespace agent_framework {
 
+struct ToolMeta;
+struct SkillInvocationContext;
+
 struct ToolCallControl {
     std::function<bool()> cancellation_requested;
+    /** Return a structured error to deny this request-scoped call. */
+    std::function<std::optional<json>(const std::string&, const json&, const ToolMeta&)>
+        authorization;
+    std::shared_ptr<const SkillInvocationContext> skill_context;
+    std::string active_skill_id;
     bool should_stop() const noexcept {
         if (!cancellation_requested) return false;
         try { return cancellation_requested(); } catch (...) { return true; }
@@ -319,7 +327,8 @@ public:
      * @brief 导出工具列表（供 LLM 使用）
      * @return 工具元数据列表
      */
-    std::vector<ToolMeta> export_as_llm_tools() const;
+    std::vector<ToolMeta> export_as_llm_tools(
+        const std::function<bool(std::string_view)>& filter = {}) const;
 
     /**
      * @brief 工具元数据（含 WP2.1b side_effect）；未知工具返回空 ToolMeta

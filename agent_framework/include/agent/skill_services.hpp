@@ -12,9 +12,12 @@
 
 namespace agent_framework {
 
+class SkillRuntime;
+
 struct SkillServices {
     std::shared_ptr<SkillRegistry> registry;
     std::shared_ptr<SkillLoader> loader;
+    std::shared_ptr<SkillRuntime> runtime;
 
     /** `AGENT_SKILLS_DIR` 未设置或为空则返回 nullptr */
     static std::shared_ptr<SkillServices> from_env();

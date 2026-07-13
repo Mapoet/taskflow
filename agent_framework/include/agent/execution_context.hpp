@@ -8,7 +8,11 @@
 #ifndef __AGENT_EXECUTION_CONTEXT_H__
 #define __AGENT_EXECUTION_CONTEXT_H__
 
+#include "skill_policy.hpp"
+
 #include <optional>
+#include <functional>
+#include <map>
 #include <string>
 #include <unordered_set>
 
@@ -26,6 +30,12 @@ struct ExecutionContext {
     std::string input_policy_version = "wp27-v1";
     std::optional<std::string> session_id;
     std::optional<std::string> task_id;
+    /** Request-scoped upper bound. Empty vectors deny the corresponding Skill capability. */
+    SkillPermissionGrant skill_grants;
+    std::map<std::string, std::string> skill_environment;
+    std::function<std::optional<std::string>(std::string_view)> skill_secret_provider;
+    std::size_t skill_max_input_bytes = 1024U * 1024U;
+    std::size_t skill_max_output_bytes = 1024U * 1024U;
 
     /**
      * @brief 从环境构造：AGENT_FS_ROOT（经 fs 模块）、PWD、当前路径

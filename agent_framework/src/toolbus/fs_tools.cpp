@@ -718,6 +718,8 @@ static void register_fs_tools_impl(ToolBus& bus, const FsSandboxConfig& cfg) {
             "required": ["path"]
         })");
         meta.side_effect = ToolSideEffect::ReadOnly;
+        meta.permission_targets.push_back(
+            {ToolMeta::PermissionTargetKind::FilesystemRead, "path", cfg.root.string(), {}});
         bus.register_local_tool(
             "fs_read",
             [state](const json& j) { return state->do_read(j); },
@@ -738,6 +740,8 @@ static void register_fs_tools_impl(ToolBus& bus, const FsSandboxConfig& cfg) {
             "required": ["path", "content"]
         })");
         meta.side_effect = ToolSideEffect::Write;
+        meta.permission_targets.push_back(
+            {ToolMeta::PermissionTargetKind::FilesystemWrite, "path", cfg.root.string(), {}});
         bus.register_local_tool(
             "fs_write",
             [state](const json& j) { return state->do_write(j); },
@@ -757,6 +761,8 @@ static void register_fs_tools_impl(ToolBus& bus, const FsSandboxConfig& cfg) {
             "required": ["path"]
         })");
         meta.side_effect = ToolSideEffect::ReadOnly;
+        meta.permission_targets.push_back(
+            {ToolMeta::PermissionTargetKind::FilesystemRead, "path", cfg.root.string(), {}});
         bus.register_local_tool(
             "fs_list_dir",
             [state](const json& j) { return state->do_list_dir(j); },
@@ -775,6 +781,8 @@ static void register_fs_tools_impl(ToolBus& bus, const FsSandboxConfig& cfg) {
             "required": ["path"]
         })");
         meta.side_effect = ToolSideEffect::Write;
+        meta.permission_targets.push_back(
+            {ToolMeta::PermissionTargetKind::FilesystemWrite, "path", cfg.root.string(), {}});
         bus.register_local_tool(
             "fs_mkdir",
             [state](const json& j) { return state->do_mkdir(j); },
@@ -795,6 +803,8 @@ static void register_fs_tools_impl(ToolBus& bus, const FsSandboxConfig& cfg) {
             "required": ["path", "confirm"]
         })");
         meta.side_effect = ToolSideEffect::Write;
+        meta.permission_targets.push_back(
+            {ToolMeta::PermissionTargetKind::FilesystemWrite, "path", cfg.root.string(), {}});
         bus.register_local_tool(
             "fs_delete",
             [state](const json& j) { return state->do_delete(j); },
@@ -815,6 +825,8 @@ static void register_fs_tools_impl(ToolBus& bus, const FsSandboxConfig& cfg) {
             "required": ["pattern"]
         })");
         meta.side_effect = ToolSideEffect::ReadOnly;
+        meta.permission_targets.push_back(
+            {ToolMeta::PermissionTargetKind::FilesystemRead, {}, cfg.root.string(), cfg.root.string()});
         bus.register_local_tool(
             "fs_search",
             [state](const json& j) { return state->do_search(j); },
@@ -837,6 +849,8 @@ static void register_fs_tools_impl(ToolBus& bus, const FsSandboxConfig& cfg) {
             "required": ["regex"]
         })");
         meta.side_effect = ToolSideEffect::ReadOnly;
+        meta.permission_targets.push_back(
+            {ToolMeta::PermissionTargetKind::FilesystemRead, "root_path", cfg.root.string(), {}});
         bus.register_local_tool(
             "fs_grep",
             [state](const json& j) { return state->do_grep(j); },
@@ -861,6 +875,8 @@ static void register_fs_tools_impl(ToolBus& bus, const FsSandboxConfig& cfg) {
             "required": ["path", "old_string", "new_string"]
         })");
         meta.side_effect = ToolSideEffect::Write;
+        meta.permission_targets.push_back(
+            {ToolMeta::PermissionTargetKind::FilesystemWrite, "path", cfg.root.string(), {}});
         bus.register_local_tool(
             "fs_replace",
             [state](const json& j) { return state->do_replace(j); },
