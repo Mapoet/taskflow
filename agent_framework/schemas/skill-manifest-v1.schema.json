@@ -1,0 +1,95 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://taskflow.dev/schemas/agent/skill-manifest-v1.schema.json",
+  "title": "Agent Framework Skill Manifest v1",
+  "type": "object",
+  "required": ["api-version", "kind", "name", "version", "description"],
+  "properties": {
+    "api-version": {"const": "agent.taskflow/v1"},
+    "kind": {"const": "Skill"},
+    "name": {"type": "string", "pattern": "^[A-Za-z0-9_.-]{1,128}$"},
+    "version": {"type": "string", "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?(\\+[0-9A-Za-z.-]+)?$"},
+    "description": {"type": "string"},
+    "license": {"type": "string"},
+    "authors": {"type": "array", "items": {"type": "string"}},
+    "dependencies": {"type": "array", "items": {"$ref": "#/$defs/dependency"}},
+    "permissions": {"$ref": "#/$defs/permissions"},
+    "resources": {"$ref": "#/$defs/resources"},
+    "tests": {"type": "array", "items": {"$ref": "#/$defs/resource"}}
+  },
+  "additionalProperties": true,
+  "$defs": {
+    "string-list": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+    "dependency": {
+      "type": "object",
+      "required": ["name", "version"],
+      "properties": {
+        "name": {"type": "string", "pattern": "^[A-Za-z0-9_.-]{1,128}$"},
+        "version": {"type": "string", "minLength": 1},
+        "optional": {"type": "boolean", "default": false}
+      },
+      "additionalProperties": false
+    },
+    "permissions": {
+      "type": "object",
+      "properties": {
+        "tools": {"$ref": "#/$defs/string-list"},
+        "network": {"$ref": "#/$defs/string-list"},
+        "env": {"$ref": "#/$defs/string-list"},
+        "secrets": {"$ref": "#/$defs/string-list"},
+        "filesystem": {
+          "type": "object",
+          "properties": {
+            "read": {"$ref": "#/$defs/string-list"},
+            "write": {"$ref": "#/$defs/string-list"}
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "resource": {
+      "oneOf": [
+        {"type": "string", "minLength": 1},
+        {
+          "type": "object",
+          "required": ["path"],
+          "properties": {
+            "id": {"type": "string", "pattern": "^[A-Za-z0-9_.-]{1,128}$"},
+            "path": {"type": "string", "minLength": 1},
+            "media-type": {"type": "string"},
+            "sha256": {"type": "string", "pattern": "^[0-9A-Fa-f]{64}$"},
+            "size-limit": {"type": "integer", "minimum": 0},
+            "optional": {"type": "boolean", "default": false},
+            "executable": {"type": "boolean", "default": false},
+            "input-schema": {"type": "string"},
+            "output-schema": {"type": "string"},
+            "runtime": {"type": "string"},
+            "cache-policy": {"type": "string"}
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "resource-list": {"type": "array", "items": {"$ref": "#/$defs/resource"}},
+    "resources": {
+      "type": "object",
+      "properties": {
+        "scripts": {"$ref": "#/$defs/resource-list"},
+        "cli": {"$ref": "#/$defs/resource-list"},
+        "references": {"$ref": "#/$defs/resource-list"},
+        "tools": {"$ref": "#/$defs/resource-list"},
+        "mcp": {"$ref": "#/$defs/resource-list"},
+        "templates": {"$ref": "#/$defs/resource-list"},
+        "schemas": {"$ref": "#/$defs/resource-list"},
+        "prompts": {"$ref": "#/$defs/resource-list"},
+        "workflows": {"$ref": "#/$defs/resource-list"},
+        "configs": {"$ref": "#/$defs/resource-list"},
+        "assets": {"$ref": "#/$defs/resource-list"},
+        "models": {"$ref": "#/$defs/resource-list"},
+        "tests": {"$ref": "#/$defs/resource-list"}
+      },
+      "additionalProperties": false
+    }
+  }
+}

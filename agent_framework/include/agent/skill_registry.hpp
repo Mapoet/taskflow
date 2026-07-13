@@ -9,6 +9,7 @@
 #define __AGENT_SKILL_REGISTRY_H__
 
 #include "skill_types.hpp"
+#include "skill_manifest.hpp"
 
 #include <filesystem>
 #include <optional>
@@ -47,6 +48,7 @@ public:
     }
 
     std::optional<SkillIndexEntry> get(std::string_view skill_id) const;
+    std::shared_ptr<const SkillManifest> get_manifest(std::string_view skill_id) const;
 
     /**
      * @brief 关键词/标签子串计分；多命中取最大分，平手取 id 字典序最小。

@@ -6,6 +6,7 @@
 #include <agent/skill_registry.hpp>
 
 #include <agent/internal/skill_frontmatter_parse.hpp>
+#include <agent/skill_manifest.hpp>
 
 #include <cstdlib>
 #include <fstream>
@@ -149,18 +150,43 @@ void SkillRegistry::scan_one_root(const std::filesystem::path& scan_root,
         const internal::SplitFrontmatterResult sp = internal::split_skill_file_content(content);
         if (!sp.ok) {
             diagnostics_.push_back({SkillDiagnosticSeverity::Warning, "missing_frontmatter",
-                                    skill_md, "SKILL.md has no YAML frontmatter"});
+                                    skill_md, "SKILL.md has no YAML frontmatter", "/", "add YAML frontmatter"});
             std::clog << "[SkillRegistry] skip (no frontmatter): " << skill_md << '\n';
             continue;
         }
 
-        auto parsed = internal::parse_skill_frontmatter_yaml(sp.yaml_inner, nullptr);
-        if (!parsed.has_value()) {
+        auto parsed_manifest = parse_skill_manifest_yaml(sp.yaml_inner);
+        if (!parsed_manifest.manifest.has_value()) {
             std::clog << "[SkillRegistry] skip (empty YAML block): " << skill_md << '\n';
             continue;
         }
+        auto manifest = std::move(*parsed_manifest.manifest);
+        auto validation = validate_skill_manifest(manifest, skill_dir);
+        parsed_manifest.issues.insert(parsed_manifest.issues.end(), validation.begin(), validation.end());
+        bool manifest_error = false;
+        for (const auto& issue : parsed_manifest.issues) {
+            diagnostics_.push_back({issue.error ? SkillDiagnosticSeverity::Error : SkillDiagnosticSeverity::Warning,
+                                    issue.code, skill_md, issue.message, issue.location, issue.suggestion});
+            manifest_error = manifest_error || issue.error;
+        }
+        if (manifest_error) continue;
 
-        SkillIndexEntry e = std::move(*parsed);
+        SkillIndexEntry e;
+        e.name = manifest.name;
+        e.yaml_id = manifest.legacy_id;
+        e.description = manifest.description;
+        e.version = manifest.version;
+        e.license = manifest.license;
+        e.trigger_keywords = manifest.trigger_keywords;
+        e.tags = manifest.tags;
+        e.disable_model_invocation = manifest.disable_model_invocation;
+        e.allowed_tools = manifest.permissions.tools;
+        for (const auto& resource : manifest.resources) {
+            if (resource.kind == SkillResourceType::Script) e.scripts.push_back(resource.path);
+            if (resource.kind == SkillResourceType::Reference) e.references.push_back(resource.path);
+            if (resource.kind == SkillResourceType::Cli) e.cli_programs.push_back(resource.path);
+        }
+        e.manifest = std::make_shared<SkillManifest>(std::move(manifest));
         const std::string folder_name = skill_dir.filename().string();
 
         if (!e.name.empty() && !e.yaml_id.empty() && e.name != e.yaml_id) {
@@ -183,12 +209,12 @@ void SkillRegistry::scan_one_root(const std::filesystem::path& scan_root,
         e.id = std::move(canonical);
         if (!safe_skill_id(e.id)) {
             diagnostics_.push_back({SkillDiagnosticSeverity::Error, "invalid_skill_id", skill_md,
-                                    "canonical skill id must match [A-Za-z0-9_.-]{1,128}"});
+                                    "canonical skill id must match [A-Za-z0-9_.-]{1,128}", "/name", {}});
             continue;
         }
         if (e.description.empty()) {
             diagnostics_.push_back({SkillDiagnosticSeverity::Warning, "missing_description",
-                                    skill_md, "skill description is empty"});
+                                    skill_md, "skill description is empty", "/description", {}});
         }
 
         std::error_code c_md;
@@ -204,7 +230,7 @@ void SkillRegistry::scan_one_root(const std::filesystem::path& scan_root,
 
         if (seen_ids.count(e.id) != 0U) {
             diagnostics_.push_back({SkillDiagnosticSeverity::Error, "duplicate_skill_id", skill_md,
-                                    "duplicate canonical skill id: " + e.id});
+                                    "duplicate canonical skill id: " + e.id, "/name", {}});
             std::clog << "[SkillRegistry] duplicate canonical id \"" << e.id << "\" skipped: " << skill_md
                       << '\n';
             continue;
@@ -215,7 +241,8 @@ void SkillRegistry::scan_one_root(const std::filesystem::path& scan_root,
                 if (!safe_relative_resource(value)) {
                     diagnostics_.push_back({SkillDiagnosticSeverity::Error,
                                             "invalid_resource_path", skill_md,
-                                            std::string(kind) + " path is not jail-relative: " + value});
+                                            std::string(kind) + " path is not jail-relative: " + value,
+                                            "/resources", {}});
                 }
             }
         };
@@ -257,6 +284,11 @@ std::optional<SkillIndexEntry> SkillRegistry::get(std::string_view skill_id) con
         }
     }
     return std::nullopt;
+}
+
+std::shared_ptr<const SkillManifest> SkillRegistry::get_manifest(std::string_view skill_id) const {
+    const auto entry = get(skill_id);
+    return entry ? entry->manifest : nullptr;
 }
 
 std::optional<std::string> SkillRegistry::match(std::string_view user_text) const {

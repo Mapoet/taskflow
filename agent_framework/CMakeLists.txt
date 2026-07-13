@@ -240,6 +240,9 @@ endif()
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/skills/skill_frontmatter_parse.cpp)
     list(APPEND AGENT_SOURCES src/skills/skill_frontmatter_parse.cpp)
 endif()
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/skills/skill_manifest.cpp)
+    list(APPEND AGENT_SOURCES src/skills/skill_manifest.cpp src/skills/skill_manifest_validate.cpp)
+endif()
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/skills/skill_registry.cpp)
     list(APPEND AGENT_SOURCES src/skills/skill_registry.cpp)
 endif()
@@ -735,6 +738,11 @@ if(AGENT_BUILD_EXAMPLES)
             add_test(NAME skillctl_validate COMMAND skillctl
                 ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/skills validate)
             set_tests_properties(skillctl_validate PROPERTIES LABELS "phase2-cli-e2e")
+            add_test(NAME skillctl_inspect_resolved COMMAND skillctl
+                ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/skills inspect managed --resolved)
+            set_tests_properties(skillctl_inspect_resolved PROPERTIES
+                PASS_REGULAR_EXPRESSION "agent.taskflow/v0"
+                LABELS "skill-manifest-contract;phase2-cli-e2e")
         endif()
     endif()
 
@@ -1499,6 +1507,16 @@ if(BUILD_TESTING)
         set_tests_properties(skill_registry_wp18 PROPERTIES
             ENVIRONMENT "AGENT_TOOL_ALLOWLIST=" LABELS "skill-unit;skill-policy-security")
     endif()
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_skill_manifest_v1.cpp)
+        add_executable(test_skill_manifest_v1 tests/test_skill_manifest_v1.cpp)
+        target_link_libraries(test_skill_manifest_v1 PRIVATE agent_framework)
+        if(CMAKE_USE_PTHREADS_INIT)
+            target_link_libraries(test_skill_manifest_v1 PRIVATE Threads::Threads)
+        endif()
+        add_test(NAME skill_manifest_v1_contract COMMAND test_skill_manifest_v1)
+        set_tests_properties(skill_manifest_v1_contract PROPERTIES
+            LABELS "skill-unit;skill-manifest-contract;skill-policy-security")
+    endif()
     if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_skill_cursor_bundle.cpp
        AND EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/data/skills-cursor)
         add_executable(test_skill_cursor_bundle tests/test_skill_cursor_bundle.cpp)
@@ -1644,3 +1662,5 @@ install(DIRECTORY include/agent
     DESTINATION include
     FILES_MATCHING PATTERN "*.hpp"
 )
+install(FILES schemas/skill-manifest-v1.schema.json
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/agent_framework/schemas)

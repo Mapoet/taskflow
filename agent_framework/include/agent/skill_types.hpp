@@ -9,10 +9,13 @@
 
 #include <filesystem>
 #include <optional>
+#include <memory>
 #include <string>
 #include <vector>
 
 namespace agent_framework {
+
+struct SkillManifest;
 
 struct SkillIndexEntry {
     /**
@@ -42,6 +45,7 @@ struct SkillIndexEntry {
     std::vector<std::string> references;
     std::vector<std::string> cli_programs;
     std::vector<std::string> allowed_tools;
+    std::shared_ptr<const SkillManifest> manifest;
 };
 
 enum class SkillDiagnosticSeverity { Warning, Error };
@@ -51,9 +55,14 @@ struct SkillDiagnostic {
     std::string code;
     std::filesystem::path path;
     std::string message;
+    std::string location;
+    std::string suggestion;
 };
 
-enum class SkillResourceKind { Script, Reference, Cli, AnyDeclared };
+enum class SkillResourceKind {
+    Script, Cli, Reference, Tool, Mcp, Template, Schema, Prompt,
+    Workflow, Config, Asset, Model, Test, AnyDeclared
+};
 
 } // namespace agent_framework
 

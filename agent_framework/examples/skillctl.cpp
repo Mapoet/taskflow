@@ -3,6 +3,7 @@
 
 #include <cstdlib>
 #include <iostream>
+#include <map>
 #include <string>
 
 using namespace agent_framework;
@@ -10,7 +11,7 @@ using json = nlohmann::json;
 
 namespace {
 void usage() {
-    std::cerr << "usage: skillctl <skills-root> list|validate|show <id>|read <id> <reference|script|cli> <path> [max-bytes]\n";
+    std::cerr << "usage: skillctl <skills-root> list|validate|show <id>|inspect <id> --resolved|read <id> <kind> <path> [max-bytes]\n";
 }
 
 json entry_json(const SkillIndexEntry& e) {
@@ -39,7 +40,8 @@ int main(int argc, char** argv) {
         for (const auto& diagnostic : registry.diagnostics()) {
             diagnostics.push_back({{"severity", diagnostic.severity == SkillDiagnosticSeverity::Error ? "error" : "warning"},
                                    {"code", diagnostic.code}, {"path", diagnostic.path.string()},
-                                   {"message", diagnostic.message}});
+                                   {"location", diagnostic.location}, {"message", diagnostic.message},
+                                   {"suggestion", diagnostic.suggestion}});
         }
         std::cout << json{{"valid", registry.valid()}, {"skills", registry.entries().size()},
                           {"diagnostics", diagnostics}}.dump(2) << '\n';
@@ -51,12 +53,26 @@ int main(int argc, char** argv) {
         std::cout << entry_json(*entry).dump(2) << '\n';
         return 0;
     }
+    if (command == "inspect" && argc == 5 && std::string(argv[4]) == "--resolved") {
+        const auto manifest = registry.get_manifest(argv[3]);
+        if (!manifest) return 3;
+        std::cout << skill_manifest_to_json(*manifest, true).dump(2) << '\n';
+        return 0;
+    }
     if (command == "read" && argc >= 6) {
         SkillResourceKind kind = SkillResourceKind::Reference;
         const std::string kind_text = argv[4];
-        if (kind_text == "script") kind = SkillResourceKind::Script;
-        else if (kind_text == "cli") kind = SkillResourceKind::Cli;
-        else if (kind_text != "reference") { usage(); return 64; }
+        const std::map<std::string, SkillResourceKind> kinds = {
+            {"script",SkillResourceKind::Script},{"cli",SkillResourceKind::Cli},
+            {"reference",SkillResourceKind::Reference},{"tool",SkillResourceKind::Tool},
+            {"mcp",SkillResourceKind::Mcp},{"template",SkillResourceKind::Template},
+            {"schema",SkillResourceKind::Schema},{"prompt",SkillResourceKind::Prompt},
+            {"workflow",SkillResourceKind::Workflow},{"config",SkillResourceKind::Config},
+            {"asset",SkillResourceKind::Asset},{"model",SkillResourceKind::Model},
+            {"test",SkillResourceKind::Test}};
+        const auto found = kinds.find(kind_text);
+        if (found == kinds.end()) { usage(); return 64; }
+        kind = found->second;
         const std::size_t max_bytes = argc >= 7 ? std::strtoull(argv[6], nullptr, 10) : 65536;
         SkillLoader loader(registry);
         std::string error;

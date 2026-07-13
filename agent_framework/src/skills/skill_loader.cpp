@@ -4,6 +4,7 @@
  */
 
 #include <agent/skill_loader.hpp>
+#include <agent/skill_manifest.hpp>
 
 #include <agent/internal/skill_frontmatter_parse.hpp>
 
@@ -14,6 +15,46 @@
 namespace agent_framework {
 
 namespace {
+
+SkillResourceType manifest_kind(SkillResourceKind kind) {
+    switch (kind) {
+    case SkillResourceKind::Script: return SkillResourceType::Script;
+    case SkillResourceKind::Cli: return SkillResourceType::Cli;
+    case SkillResourceKind::Reference: return SkillResourceType::Reference;
+    case SkillResourceKind::Tool: return SkillResourceType::Tool;
+    case SkillResourceKind::Mcp: return SkillResourceType::Mcp;
+    case SkillResourceKind::Template: return SkillResourceType::Template;
+    case SkillResourceKind::Schema: return SkillResourceType::Schema;
+    case SkillResourceKind::Prompt: return SkillResourceType::Prompt;
+    case SkillResourceKind::Workflow: return SkillResourceType::Workflow;
+    case SkillResourceKind::Config: return SkillResourceType::Config;
+    case SkillResourceKind::Asset: return SkillResourceType::Asset;
+    case SkillResourceKind::Model: return SkillResourceType::Model;
+    case SkillResourceKind::Test: return SkillResourceType::Test;
+    case SkillResourceKind::AnyDeclared: return SkillResourceType::Unknown;
+    }
+    return SkillResourceType::Unknown;
+}
+
+const char* legacy_directory(SkillResourceKind kind) {
+    switch (kind) {
+    case SkillResourceKind::Script: return "scripts/";
+    case SkillResourceKind::Cli: return "cli/";
+    case SkillResourceKind::Reference: return "references/";
+    case SkillResourceKind::Tool: return "tools/";
+    case SkillResourceKind::Mcp: return "mcp/";
+    case SkillResourceKind::Template: return "templates/";
+    case SkillResourceKind::Schema: return "schemas/";
+    case SkillResourceKind::Prompt: return "prompts/";
+    case SkillResourceKind::Workflow: return "workflows/";
+    case SkillResourceKind::Config: return "configs/";
+    case SkillResourceKind::Asset: return "assets/";
+    case SkillResourceKind::Model: return "models/";
+    case SkillResourceKind::Test: return "tests/";
+    case SkillResourceKind::AnyDeclared: return nullptr;
+    }
+    return nullptr;
+}
 
 std::uintmax_t file_time_stamp(const std::filesystem::path& p) {
     std::error_code ec;
@@ -99,22 +140,23 @@ std::optional<std::string> SkillLoader::load_resource(const std::string& skill_i
         if (part == "..") return fail("resource path must not contain ..");
     }
 
-    const std::vector<std::string>* declared = nullptr;
-    const char* legacy_prefix = nullptr;
-    if (kind == SkillResourceKind::Script) { declared = &entry->scripts; legacy_prefix = "scripts/"; }
-    if (kind == SkillResourceKind::Reference) { declared = &entry->references; legacy_prefix = "references/"; }
-    if (kind == SkillResourceKind::Cli) { declared = &entry->cli_programs; legacy_prefix = "cli/"; }
     bool authorized = false;
-    if (kind == SkillResourceKind::AnyDeclared) {
-        const auto contains = [&](const std::vector<std::string>& values) {
-            return std::find(values.begin(), values.end(), relative_path) != values.end();
-        };
-        authorized = contains(entry->scripts) || contains(entry->references) ||
-                     contains(entry->cli_programs);
-    } else if (declared && !declared->empty()) {
-        authorized = std::find(declared->begin(), declared->end(), relative_path) != declared->end();
-    } else if (legacy_prefix) {
-        authorized = relative_path.rfind(legacy_prefix, 0) == 0;
+    if (entry->manifest) {
+        const SkillResourceType requested = manifest_kind(kind);
+        for (const auto& resource : entry->manifest->resources) {
+            if (resource.path == relative_path &&
+                (kind == SkillResourceKind::AnyDeclared || resource.kind == requested)) {
+                authorized = true;
+                break;
+            }
+        }
+        if (!authorized && entry->manifest->legacy_v0 && kind != SkillResourceKind::AnyDeclared) {
+            const char* prefix = legacy_directory(kind);
+            bool kind_declared = false;
+            for (const auto& resource : entry->manifest->resources)
+                kind_declared = kind_declared || resource.kind == requested;
+            authorized = !kind_declared && prefix && relative_path.rfind(prefix, 0) == 0;
+        }
     }
     if (!authorized) return fail("resource is not declared for requested kind");
 

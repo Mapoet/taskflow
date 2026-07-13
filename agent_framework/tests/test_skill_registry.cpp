@@ -135,6 +135,7 @@ int main() {
     // --- typed metadata, declared resources, limits, and diagnostics ---
     fs::create_directories(base / "managed" / "references");
     fs::create_directories(base / "managed" / "scripts");
+    fs::create_directories(base / "managed" / "cli");
     write_file(base / "managed" / "SKILL.md",
                "---\nname: managed\ndescription: controlled resources\nversion: 1.2.3\n"
                "license: Apache-2.0\nscripts:\n  - scripts/run.sh\nreferences:\n"
@@ -142,6 +143,7 @@ int main() {
                "  - read_file\n---\nbody\n");
     write_file(base / "managed" / "references" / "guide.md", "guide");
     write_file(base / "managed" / "scripts" / "run.sh", "echo run\n");
+    write_file(base / "managed" / "cli" / "helper", "echo helper\n");
     {
         SkillRegistry reg(base);
         reg.scan_or_reload();

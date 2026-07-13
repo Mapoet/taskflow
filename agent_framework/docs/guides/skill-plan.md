@@ -158,6 +158,27 @@ Model、Test 必须走同一条相对路径、canonical jail、普通文件、�
 
 ## Stage 1：Manifest v1 与完整资源类型，P0
 
+### 完成证据（2026-07-13）
+
+- 新增 `SkillManifest`、`SkillDependency`、`SkillPermissionSet` 和统一资源描述符，覆盖
+  Script、CLI、Reference、Tool、MCP、Template、Schema、Prompt、Workflow、Config、
+  Asset、Model、Test 13 类资源。
+- `SKILL.md` 支持 `agent.taskflow/v1`/`Skill`；legacy frontmatter 归一化为
+  `agent.taskflow/v0`，未知普通字段保留并告警，未知资源类型确定性报错。
+- Registry 发布前校验 ID、SemVer、引用、存在性、canonical jail、普通文件、大小和
+  SHA-256；无效 Skill 仅保留结构化 diagnostics，不进入可执行快照。
+- v1 资源严格按声明授权；legacy 仅在对应资源列表为空时保留 `scripts/`、
+  `references/`、`cli/` 目录兼容回退。
+- `skillctl inspect <id> --resolved` 输出不含 secret 值的规范化 manifest；schema 随
+  Agent Framework 安装。
+- 完整构建成功；全量 CTest 2997/2997 通过，0 失败，总耗时 142.33 秒。
+- 无 OpenSSL 配置下本阶段四个 Skill 对象可独立编译；完整无 OpenSSL 构建仍被既有
+  `web_search_ddg.cpp` 对 `httplib::SSLClient` 的无条件引用阻断，不属于本阶段回归。
+
+### 实施状态
+
+**已完成。** Stage 2 的 schema 运行时校验和权限求交未提前实现，保持阶段边界。
+
 ### 文件范围
 
 新增：
