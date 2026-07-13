@@ -114,7 +114,8 @@ std::vector<json> execute_tool_calls_sequenced(std::shared_ptr<ToolBus> bus,
                                                const std::vector<CallSpec>& calls,
                                                const ToolOrchestrationOptions& opts,
                                                ToolSideEffectResolver classify,
-                                               ToolExecutionObserver observer) {
+                                               ToolExecutionObserver observer,
+                                               ToolCallControl control) {
     const std::size_t n = calls.size();
     std::vector<json> results(n);
 
@@ -129,6 +130,7 @@ std::vector<json> execute_tool_calls_sequenced(std::shared_ptr<ToolBus> bus,
 
     std::size_t i = 0;
     while (i < n) {
+        if (control.should_stop()) break;
         const ToolSideEffect se = classify(calls[i].name);
 
         if (a2a_parallel_on && calls[i].name == kA2aSubmitTaskName) {
@@ -143,10 +145,11 @@ std::vector<json> execute_tool_calls_sequenced(std::shared_ptr<ToolBus> bus,
                 std::vector<std::future<json>> futs;
                 futs.reserve(chunk_end - chunk_start);
                 for (std::size_t t = chunk_start; t < chunk_end; ++t) {
+                    if (control.should_stop()) break;
                     const std::size_t gi = i + t;
                     notify_tool_observer(observer, {ToolExecutionPhase::Started, calls[gi].name,
                                                     calls[gi].tool_call_id.value_or(""), calls[gi].arguments, {}});
-                    futs.push_back(bus->call_tool(calls[gi].name, calls[gi].arguments));
+                    futs.push_back(bus->call_tool(calls[gi].name, calls[gi].arguments, control));
                 }
                 for (std::size_t u = 0; u < futs.size(); ++u) {
                     const std::size_t gi = i + chunk_start + u;
@@ -162,7 +165,7 @@ std::vector<json> execute_tool_calls_sequenced(std::shared_ptr<ToolBus> bus,
         if (!parallel_on || !is_readonly_for_grouping(se)) {
             notify_tool_observer(observer, {ToolExecutionPhase::Started, calls[i].name,
                                             calls[i].tool_call_id.value_or(""), calls[i].arguments, {}});
-            results[i] = bus->call_tool(calls[i].name, calls[i].arguments).get();
+            results[i] = bus->call_tool(calls[i].name, calls[i].arguments, control).get();
             notify_tool_observer(observer, {ToolExecutionPhase::Completed, calls[i].name,
                                             calls[i].tool_call_id.value_or(""), calls[i].arguments, results[i]});
             ++i;
@@ -182,10 +185,11 @@ std::vector<json> execute_tool_calls_sequenced(std::shared_ptr<ToolBus> bus,
             std::vector<std::future<json>> futs;
             futs.reserve(chunk_end - chunk_start);
             for (std::size_t t = chunk_start; t < chunk_end; ++t) {
+                if (control.should_stop()) break;
                 const std::size_t gi = i + t;
                 notify_tool_observer(observer, {ToolExecutionPhase::Started, calls[gi].name,
                                                 calls[gi].tool_call_id.value_or(""), calls[gi].arguments, {}});
-                futs.push_back(bus->call_tool(calls[gi].name, calls[gi].arguments));
+                futs.push_back(bus->call_tool(calls[gi].name, calls[gi].arguments, control));
             }
             for (std::size_t u = 0; u < futs.size(); ++u) {
                 const std::size_t gi = i + chunk_start + u;

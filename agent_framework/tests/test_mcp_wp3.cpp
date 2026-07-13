@@ -123,6 +123,12 @@ std::optional<CursorMcpServer> load_cursor_mcp_server(const std::string& server_
 
 class MockMcpTransport : public MCPTransportInterface {
 public:
+    struct ControlState {
+        bool cancellable_called = false;
+        bool cancellation_observed = false;
+    };
+
+    explicit MockMcpTransport(std::shared_ptr<ControlState> state = {}) : state_(std::move(state)) {}
     bool connect(const std::string& /*endpoint*/) override {
         connected_ = true;
         return true;
@@ -167,10 +173,21 @@ public:
                     {"error", {{"code", -32601}, {"message", "unknown method"}}}};
     }
 
+    json transceive_cancellable(
+        const json& req, const std::function<bool()>& cancellation_requested) override {
+        if (state_) state_->cancellable_called = true;
+        if (cancellation_requested && cancellation_requested()) {
+            if (state_) state_->cancellation_observed = true;
+            throw std::runtime_error("mock request cancelled");
+        }
+        return transceive(req);
+    }
+
     void send_notification(const json& /*jsonrpc_notification*/) override {}
 
 private:
     bool connected_ = false;
+    std::shared_ptr<ControlState> state_;
 };
 
 void test_parse_jsonrpc() {
@@ -208,6 +225,26 @@ void test_toolbus_mcp_register_and_call() {
     auto tools = bus.export_as_llm_tools();
     assert(tools.size() == 1U);
     assert(tools[0].name == "svc__echo");
+}
+
+void test_mcp_cancellation_contract() {
+    auto state = std::make_shared<MockMcpTransport::ControlState>();
+    auto client = MCPClient::create_with_transport(std::make_unique<MockMcpTransport>(state), true);
+    bool cancelled = false;
+    json out = client->call_tool("echo", json::object(), [&] { return cancelled; }).get();
+    assert(out.contains("content"));
+    assert(state->cancellable_called);
+    assert(!state->cancellation_observed);
+
+    cancelled = true;
+    const json cancelled_result =
+        client->call_tool("echo", json::object(), [&] { return cancelled; }).get();
+    assert(cancelled_result.value("code", "") == "mcp_jsonrpc_error");
+    assert(state->cancellation_observed);
+
+    // Legacy transports that only override transceive retain the default adapter.
+    auto legacy = MCPClient::create_with_transport(std::make_unique<MockMcpTransport>(), true);
+    assert(legacy->call_tool("echo", json::object(), [] { return false; }).get().contains("content"));
 }
 
 void test_parse_sse_body_single_line() {
@@ -505,6 +542,7 @@ int main(int argc, char** argv) {
     }
     test_parse_jsonrpc();
     test_toolbus_mcp_register_and_call();
+    test_mcp_cancellation_contract();
     test_parse_sse_body_single_line();
     test_parse_sse_body_multi_line_concat();
     test_parse_sse_body_done_stops();

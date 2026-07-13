@@ -244,20 +244,31 @@ void StdioMCPTransport::write_framed_message(const json& msg) {
 }
 
 json StdioMCPTransport::read_framed_message() {
+    return read_framed_message({});
+}
+
+json StdioMCPTransport::read_framed_message(
+    const std::function<bool()>& cancellation_requested) {
     int tmo = mcp_timeout_ms();
     constexpr std::size_t k_max_scan_bytes = 256U * 1024U;
     const std::string body_text =
-        internal::read_one_framed_body_text(io_->from_child, pending_read_, tmo, k_max_scan_bytes);
+        internal::read_one_framed_body_text(io_->from_child, pending_read_, tmo, k_max_scan_bytes,
+                                            cancellation_requested);
     return json::parse(body_text);
 }
 
 json StdioMCPTransport::transceive(const json& jsonrpc_request) {
+    return transceive_cancellable(jsonrpc_request, {});
+}
+
+json StdioMCPTransport::transceive_cancellable(
+    const json& jsonrpc_request, const std::function<bool()>& cancellation_requested) {
     std::lock_guard<std::mutex> lock(io_mutex_);
     if (!connected_ || !io_) {
         throw std::runtime_error("StdioMCPTransport: not connected");
     }
     write_framed_message(jsonrpc_request);
-    return read_framed_message();
+    return read_framed_message(cancellation_requested);
 }
 
 void StdioMCPTransport::send_notification(const json& jsonrpc_notification) {

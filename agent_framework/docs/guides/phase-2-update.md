@@ -312,7 +312,7 @@ flowchart TD
 - [x] Tier B 独立依赖、timeout、调用预算和失败策略进入统一执行请求，默认关闭。
 - [x] Verifier 事件自动接 Server SSE。
 - [x] memory compact 结果进入统一事件流。
-- [~] `TaskControl` 已贯穿 AgentLoop/GraphExecutor/Server 和 ChildTask policy；第三方网络调用的主动中断仍不完整。
+- [x] `TaskControl` 已贯穿 AgentLoop/GraphExecutor/Server、ToolBus、LocalTool、MCP HTTP/stdio 和 ChildTask policy；旧 Tool/Transport 实现通过默认适配保持兼容。
 - [x] cancel/deadline 后使用事务工作副本且禁止 session commit。
 
 **退出标准**：A2A 请求可观察 InputPolicy、Verifier、memory 和 cancel 的完整结构化事件序列。
@@ -346,6 +346,16 @@ flowchart TD
 - [ ] 增加 Phase 2 聚合 CTest labels。
 - [ ] CI 强制运行垂直集成测试。
 - [ ] 记录规范 revision、fixture revision 和测试总量。
+
+### Stage 7：Skills 深度控制，P1
+
+- [x] 元数据扩展到 version/license/scripts/references/cli/allowed-tools，并提供结构化 warning/error 诊断。
+- [x] 资源读取执行声明列表、类型、canonical jail、普通文件和字节预算约束。
+- [x] 脚本执行支持参数边界、最小环境、解释器 allowlist、timeout、输出截断和 TaskControl 取消。
+- [x] 增加 `skillctl list|validate|show|read` 与 `phase2-cli-e2e` fixture 门禁。
+- [ ] Phase 3：包签名、依赖锁定、动态安装/卸载、版本解析、热切换和资源缓存失效。
+
+边界：Phase 2 保证已注册技能的静态发现、受控读取和确定性执行，不承诺运行中变更技能包后的原子热更新。
 
 ## 6. 必须新增的垂直测试
 

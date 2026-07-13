@@ -11,6 +11,7 @@
 #include <agent/internal/agent_thread_state.hpp>
 
 #include <cassert>
+#include <atomic>
 #include <chrono>
 #include <cstdlib>
 #include <memory>
@@ -111,13 +112,20 @@ void test_parallel_two_readonly_tools_order() {
     llm->set_default_adapter("fake");
 
     auto bus = std::make_shared<ToolBus>();
+    std::atomic<int> active{0};
+    std::atomic<int> max_active{0};
     auto reg_ro = [&](const char* name) {
         const std::string nm(name);
         ToolMeta meta = meta_named(nm, ToolSideEffect::ReadOnly);
         bus->register_local_tool(
             nm,
-            [nm](const json& /*j*/) {
+            [&, nm](const json& /*j*/) {
+                const int now = ++active;
+                int observed = max_active.load();
+                while (observed < now && !max_active.compare_exchange_weak(observed, now)) {
+                }
                 std::this_thread::sleep_for(std::chrono::milliseconds(45));
+                --active;
                 return json{{"tool", nm}};
             },
             meta);
@@ -152,18 +160,13 @@ void test_parallel_two_readonly_tools_order() {
         final_state = s;
     };
 
-    const auto t0 = std::chrono::steady_clock::now();
     build_cli_agent_graph_with_terminal_sink(b, cfg, deps, st, sink);
     b.run_async(ex).wait();
-    const auto ms =
-        std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0)
-            .count();
 
     assert(final_state);
     assert(history_has_tool_order(final_state->history, {"parallel_ro_a", "parallel_ro_b"}));
-    // Parallel overlap: two ~45ms reads overlapped should beat ~90ms serial (generous margin for CI).
-    if (ms >= 115) {
-        throw std::runtime_error("expected parallel read overlap (wall ms=" + std::to_string(ms) + ")");
+    if (max_active.load() < 2) {
+        throw std::runtime_error("expected parallel read overlap");
     }
     (void)final_json;
 }

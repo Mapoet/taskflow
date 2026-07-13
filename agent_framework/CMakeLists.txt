@@ -727,6 +727,17 @@ if(AGENT_BUILD_EXAMPLES)
         list(APPEND _agent_framework_example_targets tool_integration)
     endif()
 
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/examples/skillctl.cpp)
+        add_executable(skillctl examples/skillctl.cpp)
+        target_link_libraries(skillctl PRIVATE agent_framework)
+        list(APPEND _agent_framework_example_targets skillctl)
+        if(BUILD_TESTING AND EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/skills)
+            add_test(NAME skillctl_validate COMMAND skillctl
+                ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/skills validate)
+            set_tests_properties(skillctl_validate PROPERTIES LABELS "phase2-cli-e2e")
+        endif()
+    endif()
+
     if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/examples/workflow_custom.cpp)
         add_executable(workflow_custom examples/workflow_custom.cpp)
         target_link_libraries(workflow_custom PRIVATE agent_framework)
@@ -1345,7 +1356,8 @@ if(BUILD_TESTING)
         endif()
         add_test(NAME tool_orchestration COMMAND test_tool_orchestration)
         set_tests_properties(tool_orchestration PROPERTIES
-            ENVIRONMENT "AGENT_TOOL_ALLOWLIST=;AGENT_TOOL_PARALLEL_READS=;AGENT_TOOL_MAX_PARALLEL=")
+            ENVIRONMENT "AGENT_TOOL_ALLOWLIST=;AGENT_TOOL_PARALLEL_READS=;AGENT_TOOL_MAX_PARALLEL="
+            LABELS "skill-runtime-integration")
     endif()
     if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_tool_call_hooks.cpp)
         add_executable(test_tool_call_hooks tests/test_tool_call_hooks.cpp)
@@ -1484,7 +1496,8 @@ if(BUILD_TESTING)
             target_link_libraries(test_skill_registry PRIVATE Threads::Threads)
         endif()
         add_test(NAME skill_registry_wp18 COMMAND test_skill_registry)
-        set_tests_properties(skill_registry_wp18 PROPERTIES ENVIRONMENT "AGENT_TOOL_ALLOWLIST=")
+        set_tests_properties(skill_registry_wp18 PROPERTIES
+            ENVIRONMENT "AGENT_TOOL_ALLOWLIST=" LABELS "skill-unit;skill-policy-security")
     endif()
     if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_skill_cursor_bundle.cpp
        AND EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/data/skills-cursor)
@@ -1515,7 +1528,8 @@ if(BUILD_TESTING)
         endif()
         add_test(NAME skill_script_tool_wp18 COMMAND test_skill_script_tool)
         set_tests_properties(skill_script_tool_wp18 PROPERTIES
-            ENVIRONMENT "AGENT_TOOL_ALLOWLIST=;AGENT_SKILL_SCRIPT_ALLOWLIST=/bin/sh")
+            ENVIRONMENT "AGENT_TOOL_ALLOWLIST=;AGENT_SKILL_SCRIPT_ALLOWLIST=/bin/sh"
+            LABELS "skill-runtime-integration;skill-policy-security")
     endif()
     if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_fs_tools.cpp)
         add_executable(test_fs_tools tests/test_fs_tools.cpp)

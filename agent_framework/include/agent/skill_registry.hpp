@@ -34,6 +34,8 @@ public:
     const std::vector<SkillIndexEntry>& entries() const {
         return entries_;
     }
+    const std::vector<SkillDiagnostic>& diagnostics() const { return diagnostics_; }
+    bool valid() const;
 
     /** 单根时为该根；多根时为 **第一个** 根目录（仅作兼容；L3 请优先用 `SkillIndexEntry::script_jail`） */
     const std::filesystem::path& root() const {
@@ -56,6 +58,7 @@ private:
     std::filesystem::path primary_root_;
     std::vector<std::filesystem::path> roots_;
     std::vector<SkillIndexEntry> entries_;
+    std::vector<SkillDiagnostic> diagnostics_;
 
     void scan_one_root(const std::filesystem::path& scan_root,
                        std::unordered_set<std::string>& seen_ids);

@@ -47,7 +47,20 @@ LocalTool::LocalTool(const std::string& name, std::function<json(const json&)> f
     info_.name = name_;
 }
 
+LocalTool::LocalTool(const std::string& name,
+                     std::function<json(const json&, const ToolCallControl&)> func,
+                     const ToolMeta& meta)
+    : name_(name), cancellable_func_(std::move(func)), meta_(meta) {
+    meta_.name = name_;
+    info_.name = name_;
+}
+
 std::future<json> LocalTool::call(const std::string& name, const json& arguments) {
+    return call_cancellable(name, arguments, {});
+}
+
+std::future<json> LocalTool::call_cancellable(const std::string& name, const json& arguments,
+                                              const ToolCallControl& control) {
     if (name != name_) {
         return make_ready_json_future(
             json{{"error", "tool name does not match LocalTool registration"},
@@ -55,9 +68,12 @@ std::future<json> LocalTool::call(const std::string& name, const json& arguments
                  {"details",
                   json{{"reason", "name mismatch"}, {"expected", name_}, {"got", name}}}});
     }
-    return std::async(std::launch::async, [this, arguments]() {
+    return std::async(std::launch::async, [this, arguments, control]() {
         try {
-            return func_(arguments);
+            if (control.should_stop()) {
+                return json{{"error", "tool call cancelled"}, {"code", "cancelled"}};
+            }
+            return cancellable_func_ ? cancellable_func_(arguments, control) : func_(arguments);
         } catch (const std::exception& e) {
             return tool_exception_payload(truncate_what(e.what()));
         } catch (...) {

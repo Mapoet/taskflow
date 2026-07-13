@@ -396,6 +396,48 @@ void test_o7_realtime_observer_contract() {
     }
 }
 
+void test_o8_cancellation_stops_later_tools() {
+    clear_tool_env();
+    auto bus = std::make_shared<ToolBus>();
+    std::atomic<bool> cancelled{false};
+    std::atomic<int> later_calls{0};
+    std::atomic<int> control_checks{0};
+    bus->register_cancellable_local_tool(
+        "cancel_source",
+        [&](const json&, const ToolCallControl& control) {
+            if (!control.should_stop()) ++control_checks;
+            cancelled.store(true);
+            return json{{"cancelled_next", true}};
+        },
+        meta_named("cancel_source", ToolSideEffect::Write));
+    bus->register_local_tool(
+        "must_not_run",
+        [&](const json&) {
+            ++later_calls;
+            return json{{"unexpected", true}};
+        },
+        meta_named("must_not_run", ToolSideEffect::Write));
+
+    std::vector<CallSpec> calls(2);
+    calls[0].name = "cancel_source";
+    calls[0].arguments = json::object();
+    calls[1].name = "must_not_run";
+    calls[1].arguments = json::object();
+    ToolOrchestrationOptions opts;
+    auto classify = [&](std::string_view name) {
+        return bus->get_tool_meta(std::string(name)).side_effect;
+    };
+    ToolCallControl control{[&] { return cancelled.load(); }};
+    const auto results = execute_tool_calls_sequenced(bus, calls, opts, classify, {}, control);
+    if (control_checks != 1 || later_calls != 0 || results.size() != 2U ||
+        !results[0].value("cancelled_next", false) || results[1].contains("unexpected")) {
+        std::cerr << "O-8: cancellation propagation mismatch checks=" << control_checks
+                  << " later=" << later_calls << " results=" << results.size()
+                  << " first=" << results[0].dump() << " second=" << results[1].dump() << "\n";
+        std::abort();
+    }
+}
+
 } // namespace
 
 int main() {
@@ -407,6 +449,7 @@ int main() {
     test_o5();
     test_o6();
     test_o7_realtime_observer_contract();
+    test_o8_cancellation_stops_later_tools();
     std::cout << "test_tool_orchestration: all passed\n";
     return 0;
 }

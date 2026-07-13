@@ -268,6 +268,22 @@ void ToolBus::register_local_tool(const std::string& name,
     tools_.emplace(name, std::make_shared<LocalTool>(name, std::move(func), meta));
 }
 
+void ToolBus::register_cancellable_local_tool(
+    const std::string& name,
+    std::function<json(const json&, const ToolCallControl&)> func,
+    const ToolMeta& meta) {
+    load_allowlist_once();
+    const auto& al = allowlist();
+    if (al.has_value() && al->count(name) == 0U) {
+        throw std::invalid_argument("tool name not in AGENT_TOOL_ALLOWLIST: " + name);
+    }
+    std::lock_guard<std::mutex> lock(tools_mutex_);
+    if (tools_.count(name) != 0U) {
+        throw std::invalid_argument("register_cancellable_local_tool: tool already registered: " + name);
+    }
+    tools_.emplace(name, std::make_shared<LocalTool>(name, std::move(func), meta));
+}
+
 void ToolBus::ensure_default_tools_registered(const std::function<void()>& registrar) {
     if (!registrar) {
         throw std::invalid_argument("default tool registrar is empty");
@@ -342,7 +358,11 @@ std::size_t ToolBus::tool_call_hook_count() const {
     return hooks_.size();
 }
 
-std::future<json> ToolBus::call_tool(const std::string& name, const json& arguments) {
+std::future<json> ToolBus::call_tool(const std::string& name, const json& arguments,
+                                     const ToolCallControl& control) {
+    if (control.should_stop()) {
+        return make_ready_json_future(json{{"error", "tool call cancelled"}, {"code", "cancelled"}});
+    }
     load_allowlist_once();
     auto tool = find_tool(name);
     if (tool == nullptr) {
@@ -375,7 +395,7 @@ std::future<json> ToolBus::call_tool(const std::string& name, const json& argume
     if (!validate_tool_arguments(schema, current, err)) {
         return make_ready_json_future(std::move(err));
     }
-    return tool->call(name, current);
+    return tool->call_cancellable(name, current, control);
 }
 
 std::vector<ToolMeta> ToolBus::export_as_llm_tools() const {

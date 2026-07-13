@@ -132,6 +132,69 @@ int main() {
     }
     fs::remove_all(base / "route", ec);
 
+    // --- typed metadata, declared resources, limits, and diagnostics ---
+    fs::create_directories(base / "managed" / "references");
+    fs::create_directories(base / "managed" / "scripts");
+    write_file(base / "managed" / "SKILL.md",
+               "---\nname: managed\ndescription: controlled resources\nversion: 1.2.3\n"
+               "license: Apache-2.0\nscripts:\n  - scripts/run.sh\nreferences:\n"
+               "  - references/guide.md\ncli:\n  - cli/helper\nallowed-tools:\n"
+               "  - read_file\n---\nbody\n");
+    write_file(base / "managed" / "references" / "guide.md", "guide");
+    write_file(base / "managed" / "scripts" / "run.sh", "echo run\n");
+    {
+        SkillRegistry reg(base);
+        reg.scan_or_reload();
+        assert(reg.valid());
+        const auto entry = reg.get("managed");
+        assert(entry && entry->version == "1.2.3" && entry->license == "Apache-2.0");
+        assert(entry->scripts.size() == 1U && entry->references.size() == 1U);
+        assert(entry->cli_programs.size() == 1U && entry->allowed_tools.size() == 1U);
+        SkillLoader loader(reg);
+        std::string error;
+        const auto guide = loader.load_resource(
+            "managed", "references/guide.md", SkillResourceKind::Reference, 16, &error);
+        assert(guide && *guide == "guide");
+        assert(!loader.load_resource(
+            "managed", "scripts/run.sh", SkillResourceKind::Reference, 16, &error));
+        assert(!loader.load_resource(
+            "managed", "references/guide.md", SkillResourceKind::Reference, 2, &error));
+        assert(!loader.load_resource(
+            "managed", "../SKILL.md", SkillResourceKind::AnyDeclared, 16, &error));
+    }
+    fs::remove_all(base / "managed", ec);
+
+    fs::create_directories(base / "invalid");
+    write_file(base / "invalid" / "SKILL.md",
+               "---\nname: bad/id\nscripts:\n  - ../escape.sh\n---\n");
+    {
+        SkillRegistry reg(base);
+        reg.scan_or_reload();
+        assert(!reg.valid());
+        assert(!reg.get("bad/id"));
+        bool invalid_id = false;
+        for (const auto& d : reg.diagnostics()) invalid_id |= d.code == "invalid_skill_id";
+        assert(invalid_id);
+    }
+    fs::remove_all(base / "invalid", ec);
+
+    // Legacy packages without declarations remain restricted to kind directories.
+    fs::create_directories(base / "legacy" / "references");
+    write_file(base / "legacy" / "SKILL.md", "---\nid: legacy\n---\n");
+    write_file(base / "legacy" / "references" / "note.md", "legacy-note");
+    write_file(base / "legacy" / "other.txt", "not-authorized");
+    {
+        SkillRegistry reg(base);
+        reg.scan_or_reload();
+        SkillLoader loader(reg);
+        std::string error;
+        assert(loader.load_resource(
+            "legacy", "references/note.md", SkillResourceKind::Reference, 64, &error));
+        assert(!loader.load_resource(
+            "legacy", "other.txt", SkillResourceKind::Reference, 64, &error));
+    }
+    fs::remove_all(base / "legacy", ec);
+
     // --- merge two scan roots ---
     fs::create_directories(base / "r1" / "one");
     fs::create_directories(base / "r2" / "two");

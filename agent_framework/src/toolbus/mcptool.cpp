@@ -29,6 +29,11 @@ MCPProxyTool::MCPProxyTool(std::shared_ptr<MCPClient> client, std::string regist
 }
 
 std::future<json> MCPProxyTool::call(const std::string& name, const json& arguments) {
+    return call_cancellable(name, arguments, {});
+}
+
+std::future<json> MCPProxyTool::call_cancellable(const std::string& name, const json& arguments,
+                                                 const ToolCallControl& control) {
     if (name != registered_name_) {
         return make_ready_json_future(
             json{{"error", "tool name does not match MCP proxy registration"},
@@ -36,7 +41,7 @@ std::future<json> MCPProxyTool::call(const std::string& name, const json& argume
                  {"details",
                   json{{"reason", "name mismatch"}, {"expected", registered_name_}, {"got", name}}}});
     }
-    return client_->call_tool(remote_tool_name_, arguments);
+    return client_->call_tool(remote_tool_name_, arguments, control.cancellation_requested);
 }
 
 ToolMeta MCPProxyTool::get_tool_meta(const std::string& name) const {
@@ -86,7 +91,12 @@ void MCPTool::refresh_tools_cache() {
 }
 
 std::future<json> MCPTool::call(const std::string& name, const json& arguments) {
-    return client_ ? client_->call_tool(name, arguments)
+    return call_cancellable(name, arguments, {});
+}
+
+std::future<json> MCPTool::call_cancellable(const std::string& name, const json& arguments,
+                                            const ToolCallControl& control) {
+    return client_ ? client_->call_tool(name, arguments, control.cancellation_requested)
                    : make_ready_json_future(json{{"error", "no MCP client"},
                                                  {"code", "mcp_jsonrpc_error"},
                                                  {"details", json::object()}});

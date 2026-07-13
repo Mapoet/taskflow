@@ -227,7 +227,7 @@ std::optional<SkillIndexEntry> parse_skill_frontmatter_yaml(const std::string& y
     SkillIndexEntry e;
     const std::vector<std::string> lines = split_lines(yaml_block);
 
-    enum class Mode { None, Keywords, Tags };
+    enum class Mode { None, Keywords, Tags, Scripts, References, Cli, AllowedTools };
     Mode mode = Mode::None;
 
     std::size_t i = 0;
@@ -245,8 +245,16 @@ std::optional<SkillIndexEntry> parse_skill_frontmatter_yaml(const std::string& y
             if (is_list_item(trimmed, item)) {
                 if (mode == Mode::Keywords) {
                     e.trigger_keywords.push_back(std::move(item));
-                } else {
+                } else if (mode == Mode::Tags) {
                     e.tags.push_back(std::move(item));
+                } else if (mode == Mode::Scripts) {
+                    e.scripts.push_back(std::move(item));
+                } else if (mode == Mode::References) {
+                    e.references.push_back(std::move(item));
+                } else if (mode == Mode::Cli) {
+                    e.cli_programs.push_back(std::move(item));
+                } else {
+                    e.allowed_tools.push_back(std::move(item));
                 }
                 ++i;
                 continue;
@@ -303,6 +311,9 @@ std::optional<SkillIndexEntry> parse_skill_frontmatter_yaml(const std::string& y
             continue;
         }
 
+        if (key == "version") { e.version = rest; ++i; continue; }
+        if (key == "license") { e.license = rest; ++i; continue; }
+
         if (key == "trigger_keywords") {
             if (rest.empty()) {
                 mode = Mode::Keywords;
@@ -314,6 +325,18 @@ std::optional<SkillIndexEntry> parse_skill_frontmatter_yaml(const std::string& y
             if (rest.empty()) {
                 mode = Mode::Tags;
             }
+            ++i;
+            continue;
+        }
+        if (key == "scripts") { if (rest.empty()) mode = Mode::Scripts; ++i; continue; }
+        if (key == "references") { if (rest.empty()) mode = Mode::References; ++i; continue; }
+        if (key == "cli" || key_norm == "cli_programs") {
+            if (rest.empty()) mode = Mode::Cli;
+            ++i;
+            continue;
+        }
+        if (key_norm == "allowed_tools") {
+            if (rest.empty()) mode = Mode::AllowedTools;
             ++i;
             continue;
         }

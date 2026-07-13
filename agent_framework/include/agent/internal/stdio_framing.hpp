@@ -16,6 +16,8 @@
 #include <string>
 #include <string_view>
 #include <vector>
+#include <functional>
+#include <chrono>
 
 #if !defined(_WIN32)
 #include <cerrno>
@@ -48,6 +50,19 @@ inline bool poll_readable(int fd, int timeout_ms) {
         return false;
     }
     return (pfd.revents & (POLLIN | POLLHUP)) != 0;
+}
+
+inline bool poll_readable_cancellable(int fd, int timeout_ms,
+                                      const std::function<bool()>& cancellation_requested) {
+    if (!cancellation_requested) return poll_readable(fd, timeout_ms);
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
+    for (;;) {
+        if (cancellation_requested()) throw std::runtime_error("MCP request cancelled");
+        const auto now = std::chrono::steady_clock::now();
+        if (now >= deadline) return false;
+        const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(deadline - now).count();
+        if (poll_readable(fd, static_cast<int>(std::min<long long>(remaining, 50)))) return true;
+    }
 }
 
 inline std::size_t parse_content_length(const std::string& headers) {
@@ -127,7 +142,8 @@ inline std::size_t header_delim_len(std::string_view buf, std::size_t end_pos) {
 
 inline FramedHeaderRead read_http_style_headers_scanning(int fd, std::string& pending_read,
                                                          int timeout_ms,
-                                                         std::size_t max_scan_bytes) {
+                                                         std::size_t max_scan_bytes,
+                                                         const std::function<bool()>& cancellation_requested = {}) {
     std::string buf;
     buf.swap(pending_read);
 
@@ -165,7 +181,7 @@ inline FramedHeaderRead read_http_style_headers_scanning(int fd, std::string& pe
                 "StdioMCPTransport: framing header not found (stdout noise?)");
         }
 
-        if (!poll_readable(fd, timeout_ms)) {
+        if (!poll_readable_cancellable(fd, timeout_ms, cancellation_requested)) {
             throw std::runtime_error("StdioMCPTransport: read timeout");
         }
         char tmp[4096];
@@ -186,7 +202,8 @@ inline FramedHeaderRead read_http_style_headers_scanning(int fd, std::string& pe
 }
 
 inline std::string read_exact_with_pending(int fd, std::string& pending_read, std::size_t n,
-                                           int timeout_ms) {
+                                           int timeout_ms,
+                                           const std::function<bool()>& cancellation_requested = {}) {
     std::string out;
     out.reserve(n);
 
@@ -200,7 +217,7 @@ inline std::string read_exact_with_pending(int fd, std::string& pending_read, st
     }
 
     while (out.size() < n) {
-        if (!poll_readable(fd, timeout_ms)) {
+        if (!poll_readable_cancellable(fd, timeout_ms, cancellation_requested)) {
             throw std::runtime_error("StdioMCPTransport: read timeout");
         }
         char tmp[4096];
@@ -222,9 +239,10 @@ inline std::string read_exact_with_pending(int fd, std::string& pending_read, st
 }
 
 inline std::string read_one_framed_body_text(int fd, std::string& pending_read, int timeout_ms,
-                                             std::size_t max_scan_bytes) {
+                                             std::size_t max_scan_bytes,
+                                             const std::function<bool()>& cancellation_requested = {}) {
     FramedHeaderRead hdr = read_http_style_headers_scanning(fd, pending_read, timeout_ms,
-                                                            max_scan_bytes);
+                                                            max_scan_bytes, cancellation_requested);
     const std::size_t n = parse_content_length(hdr.headers);
 
     std::string body;
@@ -234,7 +252,8 @@ inline std::string read_one_framed_body_text(int fd, std::string& pending_read, 
         return body;
     }
     body = std::move(hdr.buffered_body);
-    const std::string rest = read_exact_with_pending(fd, pending_read, n - body.size(), timeout_ms);
+    const std::string rest = read_exact_with_pending(fd, pending_read, n - body.size(), timeout_ms,
+                                                     cancellation_requested);
     body += rest;
     return body;
 }

@@ -136,14 +136,15 @@ std::shared_ptr<MCPClient> MCPClient::create_with_transport(std::unique_ptr<MCPT
     return c;
 }
 
-json MCPClient::send_jsonrpc_request(const std::string& method, const json& params) {
+json MCPClient::send_jsonrpc_request(const std::string& method, const json& params,
+                                     const std::function<bool()>& cancellation_requested) {
     std::lock_guard<std::mutex> lock(rpc_mutex_);
     std::int64_t id = next_id_.fetch_add(1);
     json req = {{"jsonrpc", std::string(mcp_protocol::k_jsonrpc_version)},
                 {"id", id},
                 {"method", method},
                 {"params", params}};
-    json resp = transport_->transceive(req);
+    json resp = transport_->transceive_cancellable(req, cancellation_requested);
     return parse_jsonrpc_response(resp, id);
 }
 
@@ -185,12 +186,15 @@ std::future<std::vector<ToolMeta>> MCPClient::list_tools() {
     });
 }
 
-std::future<json> MCPClient::call_tool(const std::string& name, const json& arguments) {
-    return std::async(std::launch::async, [this, name, arguments]() {
+std::future<json> MCPClient::call_tool(const std::string& name, const json& arguments,
+                                       std::function<bool()> cancellation_requested) {
+    return std::async(std::launch::async, [this, name, arguments,
+                                           cancellation_requested = std::move(cancellation_requested)]() {
         try {
             json params = json{{"name", name}, {"arguments", arguments}};
             json result =
-                send_jsonrpc_request(std::string(mcp_protocol::k_method_tools_call), params);
+                send_jsonrpc_request(std::string(mcp_protocol::k_method_tools_call), params,
+                                     cancellation_requested);
             return unwrap_tool_result(result);
         } catch (const std::exception& e) {
             return json{{"error", e.what()}, {"code", "mcp_jsonrpc_error"}, {"details", json::object()}};

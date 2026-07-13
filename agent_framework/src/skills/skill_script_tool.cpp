@@ -6,6 +6,7 @@
 #include <agent/skill_script_tool.hpp>
 
 #include <chrono>
+#include <algorithm>
 #include <cctype>
 #include <cstdlib>
 #include <filesystem>
@@ -27,7 +28,12 @@ namespace agent_framework {
 
 namespace {
 
-constexpr std::size_t kOutCap = 65536;
+std::size_t output_cap() {
+    const char* raw = std::getenv("AGENT_SKILL_SCRIPT_OUTPUT_MAX_BYTES");
+    if (!raw || !*raw) return 65536;
+    const long long value = std::atoll(raw);
+    return value > 0 ? static_cast<std::size_t>(value) : 65536;
+}
 
 std::vector<std::string> parse_allowlist() {
     std::vector<std::string> out;
@@ -107,6 +113,39 @@ void register_skill_script_tool(ToolBus& bus, const std::shared_ptr<SkillService
     if (!services || !services->registry || !services->loader) {
         return;
     }
+    constexpr const char* k_resource_name = "read_skill_resource";
+    if (!bus.get_tool_info(k_resource_name).has_value()) {
+        ToolMeta resource_meta;
+        resource_meta.name = k_resource_name;
+        resource_meta.description =
+            "Read a declared reference, script, or CLI resource from an indexed skill jail.";
+        resource_meta.schema = json::parse(R"({
+            "type":"object",
+            "properties":{
+                "skill_id":{"type":"string"},
+                "relative_path":{"type":"string"},
+                "kind":{"type":"string","enum":["reference","script","cli"]},
+                "max_bytes":{"type":"integer","minimum":1,"maximum":262144}
+            },
+            "required":["skill_id","relative_path","kind"]
+        })");
+        resource_meta.side_effect = ToolSideEffect::ReadOnly;
+        auto loader = services->loader;
+        bus.register_local_tool(k_resource_name, [loader](const json& args) {
+            const std::string kind = args.at("kind").get<std::string>();
+            SkillResourceKind resource_kind = SkillResourceKind::Reference;
+            if (kind == "script") resource_kind = SkillResourceKind::Script;
+            if (kind == "cli") resource_kind = SkillResourceKind::Cli;
+            const std::size_t max_bytes = args.value("max_bytes", 65536U);
+            std::string error;
+            auto content = loader->load_resource(args.at("skill_id").get<std::string>(),
+                                                 args.at("relative_path").get<std::string>(),
+                                                 resource_kind, max_bytes, &error);
+            if (!content) return tool_error("validation_failed", error);
+            return json{{"content", *content}, {"bytes", content->size()},
+                        {"truncated", false}};
+        }, resource_meta);
+    }
     constexpr const char* k_name = "run_skill_script";
     if (bus.get_tool_info(k_name).has_value()) {
         return;
@@ -122,7 +161,8 @@ void register_skill_script_tool(ToolBus& bus, const std::shared_ptr<SkillService
         "type": "object",
         "properties": {
             "skill_id": { "type": "string" },
-            "relative_path": { "type": "string" }
+            "relative_path": { "type": "string" },
+            "args": { "type": "array", "items": { "type": "string" }, "maxItems": 32 }
         },
         "required": ["skill_id", "relative_path"]
     })");
@@ -130,9 +170,9 @@ void register_skill_script_tool(ToolBus& bus, const std::shared_ptr<SkillService
 
     auto reg = services->registry;
 
-    bus.register_local_tool(
+    bus.register_cancellable_local_tool(
         k_name,
-        [reg](const json& args) -> json {
+        [reg](const json& args, const ToolCallControl& control) -> json {
             if (!args.contains("skill_id") || !args["skill_id"].is_string()) {
                 return tool_error("validation_failed", "skill_id required");
             }
@@ -147,6 +187,25 @@ void register_skill_script_tool(ToolBus& bus, const std::shared_ptr<SkillService
             const auto ent_opt = reg->get(skill_id);
             if (!ent_opt.has_value()) {
                 return tool_error("validation_failed", "unknown skill_id");
+            }
+            if (!ent_opt->scripts.empty() &&
+                std::find(ent_opt->scripts.begin(), ent_opt->scripts.end(), rel) == ent_opt->scripts.end()) {
+                return tool_error("validation_failed", "script is not declared in skill metadata");
+            }
+
+            std::vector<std::string> script_args;
+            std::size_t args_bytes = 0;
+            if (args.contains("args")) {
+                if (!args["args"].is_array() || args["args"].size() > 32) {
+                    return tool_error("validation_failed", "args must be an array with at most 32 strings");
+                }
+                for (const auto& value : args["args"]) {
+                    if (!value.is_string()) return tool_error("validation_failed", "every arg must be a string");
+                    std::string arg = value.get<std::string>();
+                    args_bytes += arg.size();
+                    if (args_bytes > 4096) return tool_error("validation_failed", "args exceed 4096 bytes");
+                    script_args.push_back(std::move(arg));
+                }
             }
 
             std::error_code ec;
@@ -217,12 +276,15 @@ void register_skill_script_tool(ToolBus& bus, const std::shared_ptr<SkillService
                     _exit(126);
                 }
                 const std::string script_str = target.string();
-                std::vector<char> argv0(interpreter.begin(), interpreter.end());
-                argv0.push_back('\0');
-                std::vector<char> argv1(script_str.begin(), script_str.end());
-                argv1.push_back('\0');
-                char* argv[] = {argv0.data(), argv1.data(), nullptr};
-                execve(argv0.data(), argv, environ);
+                std::vector<std::string> argv_store{interpreter, script_str};
+                argv_store.insert(argv_store.end(), script_args.begin(), script_args.end());
+                std::vector<char*> argv;
+                for (auto& value : argv_store) argv.push_back(value.data());
+                argv.push_back(nullptr);
+                std::string path_env = "PATH=/usr/bin:/bin";
+                std::string lang_env = "LANG=C.UTF-8";
+                char* child_env[] = {path_env.data(), lang_env.data(), nullptr};
+                execve(argv[0], argv.data(), child_env);
                 _exit(127);
             }
 
@@ -233,11 +295,12 @@ void register_skill_script_tool(ToolBus& bus, const std::shared_ptr<SkillService
 
             std::string stdout_acc;
             std::string stderr_acc;
-            auto append_cap = [](std::string& acc, const char* buf, std::size_t n) {
-                if (acc.size() >= kOutCap) {
+            const std::size_t out_cap = output_cap();
+            auto append_cap = [out_cap](std::string& acc, const char* buf, std::size_t n) {
+                if (acc.size() >= out_cap) {
                     return;
                 }
-                const std::size_t room = kOutCap - acc.size();
+                const std::size_t room = out_cap - acc.size();
                 acc.append(buf, n > room ? room : n);
             };
 
@@ -246,6 +309,7 @@ void register_skill_script_tool(ToolBus& bus, const std::shared_ptr<SkillService
                 std::chrono::steady_clock::now() + std::chrono::seconds(timeout);
             int status = 0;
             bool killed = false;
+            bool cancelled = false;
             bool child_done = false;
 
             auto try_read_both = [&]() {
@@ -292,6 +356,13 @@ void register_skill_script_tool(ToolBus& bus, const std::shared_ptr<SkillService
                     killed = true;
                     child_done = true;
                 }
+                if (control.should_stop() && !child_done) {
+                    kill(pid, SIGKILL);
+                    (void)waitpid(pid, &status, 0);
+                    killed = true;
+                    cancelled = true;
+                    child_done = true;
+                }
             }
 
             try_read_both();
@@ -302,10 +373,10 @@ void register_skill_script_tool(ToolBus& bus, const std::shared_ptr<SkillService
             json out;
             out["stdout"] = stdout_acc;
             out["stderr"] = stderr_acc;
-            out["truncated"] = (stdout_acc.size() >= kOutCap || stderr_acc.size() >= kOutCap);
+            out["truncated"] = (stdout_acc.size() >= out_cap || stderr_acc.size() >= out_cap);
             if (killed) {
                 out["exit_code"] = -1;
-                out["timed_out"] = true;
+                out[cancelled ? "cancelled" : "timed_out"] = true;
                 return out;
             }
             if (WIFEXITED(status)) {

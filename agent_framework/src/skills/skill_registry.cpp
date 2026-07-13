@@ -77,6 +77,22 @@ std::filesystem::path normalize_root(std::filesystem::path p) {
     return ec ? std::filesystem::absolute(p) : std::move(c);
 }
 
+bool safe_skill_id(std::string_view id) {
+    if (id.empty() || id.size() > 128) return false;
+    for (unsigned char c : id) {
+        if (!std::isalnum(c) && c != '-' && c != '_' && c != '.') return false;
+    }
+    return id != "." && id != "..";
+}
+
+bool safe_relative_resource(const std::string& value) {
+    if (value.empty()) return false;
+    const std::filesystem::path path(value);
+    if (path.is_absolute()) return false;
+    for (const auto& part : path) if (part == "..") return false;
+    return true;
+}
+
 } // namespace
 
 SkillRegistry::SkillRegistry(std::filesystem::path root_directory) {
@@ -132,6 +148,8 @@ void SkillRegistry::scan_one_root(const std::filesystem::path& scan_root,
 
         const internal::SplitFrontmatterResult sp = internal::split_skill_file_content(content);
         if (!sp.ok) {
+            diagnostics_.push_back({SkillDiagnosticSeverity::Warning, "missing_frontmatter",
+                                    skill_md, "SKILL.md has no YAML frontmatter"});
             std::clog << "[SkillRegistry] skip (no frontmatter): " << skill_md << '\n';
             continue;
         }
@@ -163,6 +181,15 @@ void SkillRegistry::scan_one_root(const std::filesystem::path& scan_root,
             canonical = folder_name;
         }
         e.id = std::move(canonical);
+        if (!safe_skill_id(e.id)) {
+            diagnostics_.push_back({SkillDiagnosticSeverity::Error, "invalid_skill_id", skill_md,
+                                    "canonical skill id must match [A-Za-z0-9_.-]{1,128}"});
+            continue;
+        }
+        if (e.description.empty()) {
+            diagnostics_.push_back({SkillDiagnosticSeverity::Warning, "missing_description",
+                                    skill_md, "skill description is empty"});
+        }
 
         std::error_code c_md;
         std::error_code c_dir;
@@ -176,10 +203,25 @@ void SkillRegistry::scan_one_root(const std::filesystem::path& scan_root,
         }
 
         if (seen_ids.count(e.id) != 0U) {
+            diagnostics_.push_back({SkillDiagnosticSeverity::Error, "duplicate_skill_id", skill_md,
+                                    "duplicate canonical skill id: " + e.id});
             std::clog << "[SkillRegistry] duplicate canonical id \"" << e.id << "\" skipped: " << skill_md
                       << '\n';
             continue;
         }
+
+        auto validate_resources = [&](const std::vector<std::string>& values, const char* kind) {
+            for (const auto& value : values) {
+                if (!safe_relative_resource(value)) {
+                    diagnostics_.push_back({SkillDiagnosticSeverity::Error,
+                                            "invalid_resource_path", skill_md,
+                                            std::string(kind) + " path is not jail-relative: " + value});
+                }
+            }
+        };
+        validate_resources(e.scripts, "script");
+        validate_resources(e.references, "reference");
+        validate_resources(e.cli_programs, "cli");
 
         seen_ids.insert(e.id);
         entries_.push_back(std::move(e));
@@ -188,6 +230,7 @@ void SkillRegistry::scan_one_root(const std::filesystem::path& scan_root,
 
 void SkillRegistry::scan_or_reload() {
     entries_.clear();
+    diagnostics_.clear();
     if (roots_.empty()) {
         return;
     }
@@ -199,6 +242,12 @@ void SkillRegistry::scan_or_reload() {
 
     std::sort(entries_.begin(), entries_.end(),
               [](const SkillIndexEntry& a, const SkillIndexEntry& b) { return a.id < b.id; });
+}
+
+bool SkillRegistry::valid() const {
+    return std::none_of(diagnostics_.begin(), diagnostics_.end(), [](const SkillDiagnostic& d) {
+        return d.severity == SkillDiagnosticSeverity::Error;
+    });
 }
 
 std::optional<SkillIndexEntry> SkillRegistry::get(std::string_view skill_id) const {

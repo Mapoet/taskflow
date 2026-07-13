@@ -22,6 +22,8 @@ struct SkillIndexEntry {
     /** @brief Frontmatter 中的展示名（通常与 Cursor `name` 一致；可与 id 相同） */
     std::string name;
     std::string description;
+    std::string version;
+    std::string license;
     std::vector<std::string> trigger_keywords;
     std::vector<std::string> tags;
     std::filesystem::path file_path;
@@ -36,7 +38,22 @@ struct SkillIndexEntry {
     std::string yaml_id;
     /** 可选；首版可为空对象或含 `raw` 字符串 */
     nlohmann::json resources = nlohmann::json::object();
+    std::vector<std::string> scripts;
+    std::vector<std::string> references;
+    std::vector<std::string> cli_programs;
+    std::vector<std::string> allowed_tools;
 };
+
+enum class SkillDiagnosticSeverity { Warning, Error };
+
+struct SkillDiagnostic {
+    SkillDiagnosticSeverity severity = SkillDiagnosticSeverity::Warning;
+    std::string code;
+    std::filesystem::path path;
+    std::string message;
+};
+
+enum class SkillResourceKind { Script, Reference, Cli, AnyDeclared };
 
 } // namespace agent_framework
 

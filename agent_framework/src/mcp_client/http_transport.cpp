@@ -114,7 +114,8 @@ void HttpMCPTransport::disconnect() {
     connected_ = false;
 }
 
-json HttpMCPTransport::post_json(const json& body) {
+json HttpMCPTransport::post_json(const json& body,
+                                 const std::function<bool()>& cancellation_requested) {
     ParsedHttpUrl u = parse_absolute_url(post_url_);
     httplib::Client cli(u.scheme_host_port.c_str());
     int sec = mcp_timeout_sec();
@@ -124,37 +125,64 @@ json HttpMCPTransport::post_json(const json& body) {
 
     std::string payload = body.dump();
     httplib::Headers h = to_httplib_headers(headers_);
-    auto res = cli.Post(u.path_and_query.c_str(), h, payload, "application/json");
-    if (!res) {
+    httplib::Request request;
+    request.method = "POST";
+    request.path = u.path_and_query;
+    request.headers = std::move(h);
+    request.headers.emplace("Content-Type", "application/json");
+    request.body = std::move(payload);
+    request.progress_ = [&](std::uint64_t, std::uint64_t) {
+        return !(cancellation_requested && cancellation_requested());
+    };
+    std::string response_body;
+    request.content_receiver_ = [&](const char* data, std::size_t size, std::uint64_t, std::uint64_t) {
+        if (cancellation_requested && cancellation_requested()) {
+            return false;
+        }
+        response_body.append(data, size);
+        return !(cancellation_requested && cancellation_requested());
+    };
+    httplib::Response response;
+    httplib::Error error = httplib::Error::Success;
+    if (!cli.send(request, response, error)) {
+        if (cancellation_requested && cancellation_requested()) {
+            throw std::runtime_error("MCP request cancelled");
+        }
         throw std::runtime_error("HttpMCPTransport: HTTP request failed (network)");
     }
-    if (res->status < 200 || res->status >= 300) {
-        throw std::runtime_error("HttpMCPTransport: HTTP status " + std::to_string(res->status) + " body: " +
-                                 res->body.substr(0, 512));
+    const std::string& body_text = response_body.empty() ? response.body : response_body;
+    if (response.status < 200 || response.status >= 300) {
+        throw std::runtime_error("HttpMCPTransport: HTTP status " + std::to_string(response.status) + " body: " +
+                                 body_text.substr(0, 512));
     }
-    if (res->has_header("Mcp-Session-Id")) {
-        headers_["Mcp-Session-Id"] = res->get_header_value("Mcp-Session-Id");
+    if (response.has_header("Mcp-Session-Id")) {
+        headers_["Mcp-Session-Id"] = response.get_header_value("Mcp-Session-Id");
     }
-    if (res->body.empty()) {
+    if (body_text.empty()) {
         return json::object();
     }
     std::string content_type;
-    if (res->has_header("Content-Type")) {
-        content_type = res->get_header_value("Content-Type");
+    if (response.has_header("Content-Type")) {
+        content_type = response.get_header_value("Content-Type");
     }
     if (internal::icontains(content_type, "text/event-stream")) {
-        const std::string json_text = internal::parse_sse_body_to_json_text(res->body);
+        const std::string json_text = internal::parse_sse_body_to_json_text(body_text);
         return json::parse(json_text);
     }
-    return json::parse(res->body);
+    return json::parse(body_text);
 }
 
 json HttpMCPTransport::transceive(const json& jsonrpc_request) {
+    return transceive_cancellable(jsonrpc_request, {});
+}
+
+json HttpMCPTransport::transceive_cancellable(
+    const json& jsonrpc_request, const std::function<bool()>& cancellation_requested) {
     std::lock_guard<std::mutex> lock(io_mutex_);
     if (!connected_) {
         throw std::runtime_error("HttpMCPTransport: not connected");
     }
-    return post_json(jsonrpc_request);
+    return post_json(jsonrpc_request, cancellation_requested);
 }
 
 void HttpMCPTransport::send_notification(const json& jsonrpc_notification) {

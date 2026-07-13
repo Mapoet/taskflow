@@ -159,6 +159,13 @@ AgentLoopNode::create(
                 // Observability must not alter agent execution semantics.
             }
         };
+        ToolCallControl tool_control;
+        if (task_control) {
+            tool_control.cancellation_requested = [task_control]() {
+                task_control->check_deadline_now();
+                return task_control->is_cancel_requested() || task_control->is_deadline_exceeded();
+            };
+        }
 
         auto incoming = std::any_cast<std::shared_ptr<internal::AgentThreadState>>(
             inps.at(std::string(internal::kAgentState)));
@@ -549,7 +556,7 @@ AgentLoopNode::create(
             }
             std::vector<json> part =
                 execute_tool_calls_sequenced(toolbus, sub, orch_opts, classify_side,
-                                              tool_execution_observer);
+                                              tool_execution_observer, tool_control);
             for (std::size_t t = 0; t < sub.size(); ++t) {
                 append_tool_message(sub[t], std::move(part[t]));
             }
@@ -605,7 +612,7 @@ AgentLoopNode::create(
                         }
                         notify_tool({ToolExecutionPhase::Started, c.name,
                                      c.tool_call_id.value_or(""), c.arguments, {}});
-                        futs.push_back(toolbus->call_tool(c.name, c.arguments));
+                        futs.push_back(toolbus->call_tool(c.name, c.arguments, tool_control));
                     }
                     for (std::size_t u = 0; u < futs.size(); ++u) {
                         const CallSpec& c = calls[i + chunk_start + u];
@@ -636,7 +643,7 @@ AgentLoopNode::create(
                 }
                 notify_tool({ToolExecutionPhase::Started, c.name, c.tool_call_id.value_or(""),
                              c.arguments, {}});
-                json result = toolbus->call_tool(c.name, c.arguments).get();
+                json result = toolbus->call_tool(c.name, c.arguments, tool_control).get();
                 notify_tool({ToolExecutionPhase::Completed, c.name, c.tool_call_id.value_or(""),
                              c.arguments, result});
                 append_tool_message(c, std::move(result));

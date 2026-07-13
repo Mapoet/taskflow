@@ -27,6 +27,11 @@ public:
                                                    std::size_t max_chars) const;
 
     std::filesystem::path skill_directory(const std::string& skill_id) const;
+    std::optional<std::string> load_resource(const std::string& skill_id,
+                                             const std::string& relative_path,
+                                             SkillResourceKind kind,
+                                             std::size_t max_bytes,
+                                             std::string* error_out = nullptr) const;
 
 private:
     const SkillRegistry& registry_;

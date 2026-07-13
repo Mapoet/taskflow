@@ -7,6 +7,17 @@
 > **措辞与可信度**  
 > 文中「国际标准」「前沿实践」「百万行验证」等指公开文章与大型工程中常见的**模式归纳**；**具体 API、字段与安全合规以各厂商与组织的当前文档为准**。其他设计文档引用本文时，勿将第三方营销表述理解为对本仓库实现状态的承诺。
 
+## 当前实现控制面（Phase 2）
+
+当前 C++ 实现已提供可执行的三层控制面，而不只是目录扫描：
+
+- L1 元数据解析 `name/id`、`description`、`version`、`license`、`tags`、`trigger_keywords`、`scripts`、`references`、`cli`/`cli_programs`、`allowed_tools`，并对非法 ID、重复 ID、空描述和不安全资源路径输出结构化诊断。
+- L2 的 `SkillLoader` 对指令设置字节预算；`load_resource` 只允许声明资源或兼容目录中的相对路径，执行 canonical jail、普通文件和大小上限检查。
+- L3 的 `run_skill_script` 使用解释器 allowlist、最小环境、超时、输出上限、参数数量/总长度上限和协作式取消；`read_skill_resource` 对 reference/script/cli 资源执行类型化读取。
+- `skillctl <root> list|validate|show|read` 支持 CI 校验、元数据检查和受控资源读取；`validate` 在存在 error 诊断时返回非零状态。
+
+运行时变量为 `AGENT_SKILL_SCRIPT_ALLOWLIST`、`AGENT_SKILL_SCRIPT_TIMEOUT_SEC` 和 `AGENT_SKILL_SCRIPT_OUTPUT_MAX_BYTES`。为兼容旧技能，未声明资源列表时仍允许对应 `scripts/`、`references/`、`cli/` 目录；新技能应显式声明资源。动态安装、签名/供应链验证、运行中热切换和版本解析属于 Phase 3，不属于当前完成范围。
+
 ---
 
 结合当前 AI 工程领域的常见实践，设计一个能够高效加载 Skills 的 AI Harness，核心在于解决一个根本矛盾：**既要让 Agent 拥有海量能力，又要保证其在有限且昂贵的上下文窗口中保持专注与高效**。  

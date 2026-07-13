@@ -25,6 +25,13 @@ public:
     virtual void disconnect() = 0;
     /** JSON-RPC 请求（含 id）；返回完整响应 JSON */
     virtual json transceive(const json& jsonrpc_request) = 0;
+    virtual json transceive_cancellable(const json& jsonrpc_request,
+                                        const std::function<bool()>& cancellation_requested) {
+        if (cancellation_requested && cancellation_requested()) {
+            throw std::runtime_error("MCP request cancelled");
+        }
+        return transceive(jsonrpc_request);
+    }
     /** JSON-RPC 通知（无 id）；不期待响应 */
     virtual void send_notification(const json& jsonrpc_notification) = 0;
     virtual bool is_connected() const = 0;
@@ -46,6 +53,8 @@ public:
     bool connect(const std::string& endpoint) override;
     void disconnect() override;
     json transceive(const json& jsonrpc_request) override;
+    json transceive_cancellable(const json& jsonrpc_request,
+                                const std::function<bool()>& cancellation_requested) override;
     void send_notification(const json& jsonrpc_notification) override;
     bool is_connected() const override;
     MCPTransport get_transport_type() const override;
@@ -62,6 +71,7 @@ private:
 
     void write_framed_message(const json& msg);
     json read_framed_message();
+    json read_framed_message(const std::function<bool()>& cancellation_requested);
 };
 
 /**
@@ -75,6 +85,8 @@ public:
     bool connect(const std::string& endpoint) override;
     void disconnect() override;
     json transceive(const json& jsonrpc_request) override;
+    json transceive_cancellable(const json& jsonrpc_request,
+                                const std::function<bool()>& cancellation_requested) override;
     void send_notification(const json& jsonrpc_notification) override;
     bool is_connected() const override;
     MCPTransport get_transport_type() const override;
@@ -85,7 +97,7 @@ private:
     bool connected_ = false;
     std::mutex io_mutex_;
 
-    json post_json(const json& body);
+    json post_json(const json& body, const std::function<bool()>& cancellation_requested = {});
 };
 
 class WebSocketMCPTransport : public MCPTransportInterface {
@@ -137,7 +149,8 @@ public:
     MCPClient& operator=(const MCPClient&) = delete;
 
     std::future<std::vector<ToolMeta>> list_tools();
-    std::future<json> call_tool(const std::string& name, const json& arguments);
+    std::future<json> call_tool(const std::string& name, const json& arguments,
+                                std::function<bool()> cancellation_requested = {});
     bool ping();
     void disconnect();
     bool is_connected() const;
@@ -149,7 +162,8 @@ private:
     explicit MCPClient(std::unique_ptr<MCPTransportInterface> transport);
     void handshake();
 
-    json send_jsonrpc_request(const std::string& method, const json& params);
+    json send_jsonrpc_request(const std::string& method, const json& params,
+                              const std::function<bool()>& cancellation_requested = {});
 
     std::unique_ptr<MCPTransportInterface> transport_;
     std::vector<ToolMeta> cached_tools_;

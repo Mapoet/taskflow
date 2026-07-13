@@ -25,6 +25,14 @@
 
 namespace agent_framework {
 
+struct ToolCallControl {
+    std::function<bool()> cancellation_requested;
+    bool should_stop() const noexcept {
+        if (!cancellation_requested) return false;
+        try { return cancellation_requested(); } catch (...) { return true; }
+    }
+};
+
 namespace detail {
 /** @brief 仅单测注入工具以覆盖 tool_not_allowed 路径；勿用于生产 */
 struct ToolBusCallHookTestPeer;
@@ -72,6 +80,15 @@ public:
      * @return 工具执行结果（JSON 格式，异步 future）
      */
     virtual std::future<json> call(const std::string& name, const json& arguments) = 0;
+    virtual std::future<json> call_cancellable(const std::string& name, const json& arguments,
+                                               const ToolCallControl& control) {
+        if (control.should_stop()) {
+            std::promise<json> promise;
+            promise.set_value(json{{"error", "tool call cancelled"}, {"code", "cancelled"}});
+            return promise.get_future();
+        }
+        return call(name, arguments);
+    }
     
     /**
      * @brief 获取工具元数据
@@ -116,8 +133,13 @@ public:
     LocalTool(const std::string& name, 
               std::function<json(const json&)> func,
               const ToolMeta& meta);
+    LocalTool(const std::string& name,
+              std::function<json(const json&, const ToolCallControl&)> func,
+              const ToolMeta& meta);
     
     std::future<json> call(const std::string& name, const json& arguments) override;
+    std::future<json> call_cancellable(const std::string& name, const json& arguments,
+                                       const ToolCallControl& control) override;
     ToolMeta get_tool_meta(const std::string& name) const override;
     std::vector<std::string> list_tools() const override;
     bool validate_arguments(const std::string& name, const json& arguments) const override;
@@ -126,6 +148,7 @@ public:
 private:
     std::string name_;
     std::function<json(const json&)> func_;
+    std::function<json(const json&, const ToolCallControl&)> cancellable_func_;
     ToolMeta meta_;
     ToolInfo info_;
 };
@@ -139,6 +162,8 @@ public:
                  ToolMeta meta);
 
     std::future<json> call(const std::string& name, const json& arguments) override;
+    std::future<json> call_cancellable(const std::string& name, const json& arguments,
+                                       const ToolCallControl& control) override;
     ToolMeta get_tool_meta(const std::string& name) const override;
     std::vector<std::string> list_tools() const override;
     bool validate_arguments(const std::string& name, const json& arguments) const override;
@@ -164,6 +189,8 @@ public:
     explicit MCPTool(std::shared_ptr<MCPClient> client);
     
     std::future<json> call(const std::string& name, const json& arguments) override;
+    std::future<json> call_cancellable(const std::string& name, const json& arguments,
+                                       const ToolCallControl& control) override;
     ToolMeta get_tool_meta(const std::string& name) const override;
     std::vector<std::string> list_tools() const override;
     bool validate_arguments(const std::string& name, const json& arguments) const override;
@@ -236,6 +263,10 @@ public:
     void register_local_tool(const std::string& name,
                             std::function<json(const json&)> func,
                             const ToolMeta& meta);
+    void register_cancellable_local_tool(
+        const std::string& name,
+        std::function<json(const json&, const ToolCallControl&)> func,
+        const ToolMeta& meta);
 
     /** Run default-tool registration exactly once per ToolBus, including under concurrent graph builds. */
     void ensure_default_tools_registered(const std::function<void()>& registrar);
@@ -270,7 +301,8 @@ public:
      * @param arguments 调用参数（JSON 格式）
      * @return 工具执行结果（JSON 格式，异步 future）
      */
-    std::future<json> call_tool(const std::string& name, const json& arguments);
+    std::future<json> call_tool(const std::string& name, const json& arguments,
+                                const ToolCallControl& control = {});
 
     /**
      * @brief 追加调用前 hook（链尾）；空函数抛 std::invalid_argument
@@ -390,7 +422,8 @@ std::vector<json> execute_tool_calls_sequenced(std::shared_ptr<ToolBus> bus,
                                                const std::vector<CallSpec>& calls,
                                                const ToolOrchestrationOptions& opts,
                                                ToolSideEffectResolver classify,
-                                               ToolExecutionObserver observer = {});
+                                               ToolExecutionObserver observer = {},
+                                               ToolCallControl control = {});
 
 } // namespace agent_framework
 
