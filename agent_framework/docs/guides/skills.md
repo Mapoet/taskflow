@@ -807,3 +807,61 @@ depends:
 - 资源路径相对于技能文件所在目录，保持自包含。
 
 这一设计已被多家前沿 AI 工程团队验证为最佳实践，能够同时满足人类可读性、机器可解析性以及高效上下文管理的需求。
+
+---
+
+## 9. Skill Workflow DSL v1
+
+Stage 4 使用 JSON Workflow descriptor，资源在 `SKILL.md` 的 `resources.workflows` 中声明。
+运行时只接受 `api-version: agent.taskflow/workflow/v1` 与 `kind: SkillWorkflow`。
+
+```json
+{
+  "api-version": "agent.taskflow/workflow/v1",
+  "kind": "SkillWorkflow",
+  "nodes": [
+    {
+      "id": "seed",
+      "type": "tool",
+      "resource": "increment",
+      "idempotency-key": "seed-write",
+      "input": {"value": {"from": "$input", "path": "/value"}}
+    },
+    {
+      "id": "repeat",
+      "type": "loop",
+      "max-iterations": 10,
+      "input": {"state": {"from": "seed"}},
+      "body": {
+        "type": "tool",
+        "resource": "increment",
+        "idempotency-key": "iteration-write"
+      },
+      "condition": {"path": "/value", "op": "gte", "value": 4}
+    }
+  ],
+  "outputs": {"value": {"from": "repeat", "path": "/value"}}
+}
+```
+
+### 9.1 节点和映射
+
+- `tool`：调用同包 capability；`skill` 字段可引用 manifest 中精确版本依赖。
+- `workflow`：调用 Workflow 资源，并通过 Taskflow subtask module 继承控制上下文。
+- `loop`：必须有且仅有一个状态输入，body 为 Tool 或 Workflow，condition 支持 `eq/ne/lt/lte/gt/gte`。
+- `child`：通过命名 backend 调用 Local 或 A2A child；可声明收窄后的 `permissions`。
+- `from` 只能引用 `$input` 或已声明的前置节点；`path` 是 RFC 6901 JSON Pointer。
+- 所有 Workflow 边界值必须是 JSON；不执行内联脚本或任意表达式。
+
+### 9.2 运行与恢复
+
+- 每次运行预加载根 Skill 与精确版本依赖的 Workflow descriptors，并使用 task-scoped capability bindings。
+- `Retry` 增加 attempt 并复用已提交边界；`Restart` 清普通进度但保留幂等账本；`Resume` 从兼容检查点继续。
+- 每个成功节点和循环迭代才提交检查点。失败或取消中的节点不提交完成边界，取消后不启动下一迭代。
+- `ReadOnly` capability 可重放；`Write`、`Unknown` 和 child 重放必须有 `idempotency-key`。
+- 子任务继承 trace、depth、attempt、deadline/cancel、权限和预算，权限只能按严格子集收窄。
+
+### 9.3 阶段边界
+
+Stage 4 的 dependency lock 和 checkpoint 是单次调用持有的运行期数据。持久化 `skills.lock`、
+content-addressed store、原子安装/更新和进程崩溃后的 in-flight reconciliation 属于 Stage 5。

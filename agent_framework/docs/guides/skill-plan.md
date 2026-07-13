@@ -318,6 +318,10 @@ Model、Test 必须走同一条相对路径、canonical jail、普通文件、�
 
 ## Stage 4：Workflow、循环与 Subtask 集成，P1
 
+**状态（2026-07-13）：已实现。** 实施记录见
+`docs/superpowers/plans/2026-07-13-skill-workflow-stage4.md`。Stage 4 固定的是单次运行的
+manifest、Workflow descriptor 和精确依赖版本；持久化 lockfile、内容寻址安装与崩溃恢复仍属于 Stage 5。
+
 ### 步骤
 
 1. 定义版本化 Skill Workflow DSL，映射现有 WorkflowBuilder/GraphExecutor。
@@ -333,6 +337,16 @@ Model、Test 必须走同一条相对路径、canonical jail、普通文件、�
 - Workflow 多次循环、重启、嵌套后结果和资源版本稳定。
 - Local subflow 与 Remote A2A child 使用统一结果、错误和事件协议。
 - Cancel 后不启动下一迭代，不提交失败 attempt 或重复副作用。
+
+### 完成证据
+
+- `SkillWorkflowRuntime` 支持 `agent.taskflow/workflow/v1` 的 `tool`、`workflow`、`loop` 和 `child` 节点。
+- `loop` 映射到 `GraphBuilder::create_loop`；嵌套 Workflow 映射到 `create_subtask_module`，输入输出只允许显式 JSON Pointer。
+- task-scoped capability binding 不发布全局 ToolBus 名称，同一 Skill 可并发绑定。
+- Start/Retry/Restart/Resume 使用兼容性检查点；Restart 保留幂等账本，Write/Unknown 与 child 重放缺少 idempotency key 时拒绝。
+- ChildTask metadata 和结果协议包含 mode、checkpoint、permissions、budget、usage、events 与稳定 error code；A2A resume 作为显式新任务发送给对端。
+- `skill_workflow_stage4` 覆盖多次循环、嵌套模块、循环边界恢复、重启、取消、权限收窄、副作用去重和运行中资源快照稳定性。
+- 功能、模块和集成标签测试全部通过；Stage 4 专项测试连续运行 20 次通过；全量构建成功且 CTest 3002/3002 通过（0 失败，228.94 秒）。
 
 ## Stage 5：生命周期、依赖和原子快照，P1
 

@@ -2,6 +2,7 @@
 #define AGENT_FRAMEWORK_CHILD_TASK_HPP
 
 #include <agent/types.hpp>
+#include <agent/skill_policy.hpp>
 
 #include <atomic>
 #include <chrono>
@@ -23,6 +24,8 @@ struct ChildTaskPolicy {
     std::chrono::milliseconds poll_interval{50};
     std::optional<std::chrono::steady_clock::time_point> deadline;
     std::shared_ptr<std::atomic_bool> cancel_requested;
+    std::size_t max_input_bytes = 1024U * 1024U;
+    std::size_t max_output_bytes = 1024U * 1024U;
 };
 
 struct ChildTaskUsage {
@@ -43,6 +46,8 @@ struct ChildTaskRequest {
     std::size_t iteration = 0;
     ChildTaskStartMode mode = ChildTaskStartMode::Start;
     json inputs = json::object();
+    json checkpoint = json::object();
+    SkillPermissionGrant grants;
     ChildTaskPolicy policy;
 };
 
@@ -53,10 +58,22 @@ struct ChildTaskResult {
     std::size_t attempt = 0;
     json outputs = json::object();
     std::optional<std::string> error;
+    std::string error_code;
     ChildTaskUsage usage;
+    json events = json::array();
+    json checkpoint = json::object();
 
     bool ok() const { return status == ChildTaskStatus::Completed; }
 };
+
+const char* child_task_start_mode_cstr(ChildTaskStartMode mode) noexcept;
+const char* child_task_status_cstr(ChildTaskStatus status) noexcept;
+json child_task_result_to_json(const ChildTaskResult& result);
+ChildTaskResult child_task_result_from_json(const json& value);
+json child_task_request_metadata(const ChildTaskRequest& request);
+bool child_task_grants_are_narrower(const SkillPermissionGrant& parent,
+                                    const SkillPermissionGrant& child,
+                                    std::string* reason = nullptr);
 
 class ChildTaskHandle {
 public:

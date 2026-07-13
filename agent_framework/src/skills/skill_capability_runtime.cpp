@@ -200,10 +200,12 @@ struct SkillCapabilityBinding::Capability {
     enum class Kind { Local, Mcp };
     Kind kind = Kind::Local;
     SkillResourceDescriptor resource;
+    std::string capability_id;
     std::string registered_name;
     std::string source_name;
     std::string remote_name;
     std::shared_ptr<McpSession> mcp_session;
+    ToolSideEffect side_effect = ToolSideEffect::Unknown;
 };
 
 std::string skill_capability_name(std::string_view skill_id,
@@ -243,13 +245,15 @@ void SkillCapabilityBinding::release_call() const noexcept {
 }
 
 void SkillCapabilityBinding::close(std::chrono::milliseconds timeout) noexcept {
+    bool cancel_active = false;
     {
         std::lock_guard<std::mutex> lock(state_mutex_);
         if (closed_) return;
         closed_ = true;
+        cancel_active = active_calls_ > 0;
     }
     toolbus_->unregister_tools(registered_tools_);
-    if (activated_ && context_.control) context_.control->request_cancel();
+    if (activated_ && cancel_active && context_.control) context_.control->request_cancel();
     {
         std::unique_lock<std::mutex> lock(state_mutex_);
         (void)state_cv_.wait_for(lock, timeout, [&] { return active_calls_ == 0; });
@@ -320,6 +324,32 @@ json SkillCapabilityBinding::invoke(std::size_t index, const json& arguments,
     }
     auto finished = runtime_->finish(*begun.ticket, output);
     return finished.ok ? output : finished.error;
+}
+
+json SkillCapabilityBinding::invoke_capability(
+    const std::string& capability_id, const json& arguments,
+    const ToolCallControl& control) {
+    const auto found = std::find_if(
+        capabilities_.begin(), capabilities_.end(),
+        [&](const std::shared_ptr<Capability>& capability) {
+            return capability->capability_id == capability_id;
+        });
+    if (found == capabilities_.end())
+        return failure(kSkillDependencyUnavailable, "skill capability is unavailable",
+                       {{"capability_id", capability_id}});
+    return invoke(static_cast<std::size_t>(std::distance(capabilities_.begin(), found)),
+                  arguments, control);
+}
+
+std::optional<ToolSideEffect> SkillCapabilityBinding::capability_side_effect(
+    const std::string& capability_id) const {
+    const auto found = std::find_if(
+        capabilities_.begin(), capabilities_.end(),
+        [&](const std::shared_ptr<Capability>& capability) {
+            return capability->capability_id == capability_id;
+        });
+    return found == capabilities_.end()
+        ? std::nullopt : std::optional<ToolSideEffect>((*found)->side_effect);
 }
 
 SkillPromptResult SkillCapabilityBinding::render_prompt(
@@ -409,7 +439,8 @@ SkillCapabilityRuntime::SkillCapabilityRuntime(
 }
 
 SkillCapabilityBindResult SkillCapabilityRuntime::bind(
-    const std::string& skill_id, SkillInvocationContext context) const {
+    const std::string& skill_id, SkillInvocationContext context,
+    SkillCapabilityBindOptions options) const {
     const auto entry = registry_->get(skill_id);
     const auto manifest = registry_->get_manifest(skill_id);
     if (!entry || !manifest)
@@ -439,9 +470,11 @@ SkillCapabilityBindResult SkillCapabilityRuntime::bind(
                 if (meta.name.empty()) throw std::runtime_error("imported Tool is unavailable: " + source);
                 auto capability = std::make_shared<SkillCapabilityBinding::Capability>();
                 capability->resource = resource;
+                capability->capability_id = resource.id;
                 capability->registered_name = skill_capability_name(skill_id, resource.id);
                 capability->source_name = source;
                 capability->kind = SkillCapabilityBinding::Capability::Kind::Local;
+                capability->side_effect = meta.side_effect;
                 meta.name = capability->registered_name;
                 meta.llm_visible = descriptor.value("export", false);
                 const std::size_t index = binding->capabilities_.size();
@@ -493,6 +526,7 @@ SkillCapabilityBindResult SkillCapabilityRuntime::bind(
                     else meta.schema = json{{"type", "object"}, {"properties", json::object()}};
                     auto capability = std::make_shared<SkillCapabilityBinding::Capability>();
                     capability->resource = resource;
+                    capability->capability_id = resource.id + "." + remote_name;
                     capability->registered_name = skill_capability_name(
                         skill_id, resource.id + "." + remote_name);
                     capability->remote_name = remote_name;
@@ -515,8 +549,10 @@ SkillCapabilityBindResult SkillCapabilityRuntime::bind(
         std::vector<std::string> published_names;
         for (const auto& registration : registrations)
             published_names.push_back(registration.name);
-        toolbus_->register_local_tools_atomic(std::move(registrations));
-        binding->registered_tools_ = std::move(published_names);
+        if (options.publish_to_toolbus) {
+            toolbus_->register_local_tools_atomic(std::move(registrations));
+            binding->registered_tools_ = std::move(published_names);
+        }
         binding->activated_ = true;
         return {std::move(binding), json::object()};
     } catch (const std::exception& error) {

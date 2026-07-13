@@ -15,6 +15,7 @@ using agent_framework::agent_task_status_cstr;
 using agent_framework::a2a::agent_task_status_from_a2a_state;
 using agent_framework::a2a::agent_task_status_to_a2a_state;
 using agent_framework::try_transition;
+using agent_framework::TaskControl;
 
 bool expect(bool cond, const char* msg) {
     if (!cond) {
@@ -78,6 +79,19 @@ int main() {
                 return 1;
             }
         }
+    }
+
+    // T-4: Workflow and child tasks inherit the same cancellation/deadline state.
+    {
+        TaskControl control;
+        auto token = control.cancellation_token();
+        if (!expect(token && !token->load(), "T-4 cancellation token initial state")) return 1;
+        control.request_cancel();
+        if (!expect(token->load(), "T-4 shared cancellation token")) return 1;
+        control.arm_working_deadline(1);
+        if (!expect(control.working_deadline().has_value(), "T-4 deadline getter")) return 1;
+        control.arm_working_deadline(0);
+        if (!expect(!control.working_deadline().has_value(), "T-4 deadline clear")) return 1;
     }
 
     (void)agent_task_status_cstr(AgentTaskStatus::PENDING);

@@ -27,6 +27,11 @@ void TaskControl::check_deadline_now() {
     }
 }
 
+std::optional<std::chrono::steady_clock::time_point> TaskControl::working_deadline() const {
+    std::lock_guard<std::mutex> lk(deadline_mu_);
+    return working_deadline_;
+}
+
 const char* agent_task_status_cstr(AgentTaskStatus s) {
     switch (s) {
     case AgentTaskStatus::PENDING:

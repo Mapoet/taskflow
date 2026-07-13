@@ -322,10 +322,11 @@ flowchart TD
 **范围**：WP2.agent2agent、WP2.agents、Workflow Subflow。
 
 - [x] 定义 `ChildTask*` 类型、handle 和 backend 接口。
-- [~] 实现 Local backend；与 `SubflowNode` ValueMap 的直接适配仍待完成。
-- [x] 实现 A2A remote backend，remote resume 明确返回 `unsupported_resume`。
-- [~] 已统一 depth、attempt、iteration、trace、idempotency、usage、deadline 和 cancel 字段；父子递归传播测试待补。
+- [x] Local backend 已接入 Skill Workflow child 节点；Workflow 的 JSON/ValueMap 边界由 `SkillWorkflowRuntime` 统一转换。
+- [x] A2A remote backend 发送 start/retry/restart/resume、checkpoint 和继承上下文；是否支持恢复由对端显式裁决，不再由本地硬编码拒绝。
+- [x] 已统一 depth、attempt、iteration、trace、idempotency、usage、deadline、cancel、permissions 和输入输出预算，并提供严格权限子集检查。
 - [x] 公共 backend 提供 submit/retry/restart/resume 语义。
+- [x] Local 与 A2A 使用同一 `ChildTaskResult` JSON envelope，包含 output/error/event/checkpoint/usage。
 
 **退出标准**：同一个父 Agent 可以在不改变上层控制代码的情况下调用本地或远程子任务。
 

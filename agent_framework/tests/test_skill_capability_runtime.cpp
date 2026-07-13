@@ -5,6 +5,7 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <future>
 #include <iostream>
 #include <mutex>
 #include <thread>
@@ -303,6 +304,28 @@ body
     assert(!contains(exported_names, "skill::stage3-skill::lazy.echo"));
     assert(!contains(exported_names, "skill::stage3-skill::lazy.slow"));
 
+    // Task-scoped bindings do not publish globally and can coexist for one Skill.
+    std::vector<SkillEvent> scoped_events_a;
+    std::vector<SkillEvent> scoped_events_b;
+    auto scoped_a = capabilities.bind(
+        "stage3-skill", make_context(package, scoped_events_a),
+        {.publish_to_toolbus = false});
+    auto scoped_b = capabilities.bind(
+        "stage3-skill", make_context(package, scoped_events_b),
+        {.publish_to_toolbus = false});
+    assert(scoped_a.ok() && scoped_b.ok());
+    assert(scoped_a.binding->registered_tools().empty());
+    auto scoped_call_a = std::async(std::launch::async, [&] {
+        return scoped_a.binding->invoke_capability("public", {{"x", 10}});
+    });
+    auto scoped_call_b = std::async(std::launch::async, [&] {
+        return scoped_b.binding->invoke_capability("public", {{"x", 11}});
+    });
+    assert(scoped_call_a.get().at("input").at("x") == 10);
+    assert(scoped_call_b.get().at("input").at("x") == 11);
+    scoped_a.binding->close();
+    scoped_b.binding->close();
+
     json local = bus->call_tool("skill::stage3-skill::public", {{"x", 7}}).get();
     assert(local.value("source", "") == "public");
     json private_call = bus->call_tool("skill::stage3-skill::private", {{"x", 8}}).get();
@@ -351,18 +374,18 @@ body
     assert(bound.binding->render_prompt("report", prompt_sources).ok);
 
     // Lazy MCP starts on first use; close cooperatively cancels the in-flight call.
-    assert(state->created == 2); // failed eager conflict constructed and cleaned up one client
+    assert(state->created == 4); // scoped binds plus failed eager conflict
     json lazy_echo = bus->call_tool(
         "skill::stage3-skill::lazy.echo", json::object()).get();
     assert(lazy_echo.at("content").at(0).at("text") == "echo");
-    assert(state->created == 3); // all tools in one MCP resource share the lazy session
+    assert(state->created == 5); // all tools in one MCP resource share the lazy session
     auto slow = bus->call_tool("skill::stage3-skill::lazy.slow", json::object());
     std::this_thread::sleep_for(std::chrono::milliseconds(30));
     bound.binding->close(std::chrono::milliseconds(1000));
     const json cancelled = slow.get();
     assert(cancelled.value("code", "") == kSkillCancelled);
-    assert(state->created == 3);
-    assert(state->disconnected == 3);
+    assert(state->created == 5);
+    assert(state->disconnected == 5);
     assert(bus->call_tool("skill::stage3-skill::public", json::object()).get().value("code", "") ==
            "unknown_tool");
     assert(std::any_of(events.begin(), events.end(), [](const SkillEvent& event) {

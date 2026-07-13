@@ -56,6 +56,11 @@ struct SkillPromptResult {
     nlohmann::json error = nlohmann::json::object();
 };
 
+struct SkillCapabilityBindOptions {
+    /** Publish names into the shared ToolBus. Workflow runs keep this disabled. */
+    bool publish_to_toolbus = true;
+};
+
 class SkillCapabilityBinding : public std::enable_shared_from_this<SkillCapabilityBinding> {
 public:
     ~SkillCapabilityBinding();
@@ -70,6 +75,11 @@ public:
 
     SkillPromptResult render_prompt(const std::string& resource_id,
                                     const SkillPromptSources& sources) const;
+    nlohmann::json invoke_capability(
+        const std::string& capability_id, const nlohmann::json& arguments,
+        const ToolCallControl& control = {});
+    std::optional<ToolSideEffect> capability_side_effect(
+        const std::string& capability_id) const;
 
 private:
     friend class SkillCapabilityRuntime;
@@ -120,7 +130,8 @@ public:
                            SkillMcpClientFactory mcp_factory = {});
 
     SkillCapabilityBindResult bind(const std::string& skill_id,
-                                   SkillInvocationContext context) const;
+                                   SkillInvocationContext context,
+                                   SkillCapabilityBindOptions options = {}) const;
 
 private:
     std::shared_ptr<SkillRegistry> registry_;

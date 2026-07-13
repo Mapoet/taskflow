@@ -14,6 +14,7 @@
 #include <atomic>
 #include <chrono>
 #include <mutex>
+#include <memory>
 #include <optional>
 #include <string>
 
@@ -32,10 +33,14 @@ public:
     TaskControl(const TaskControl&) = delete;
     TaskControl& operator=(const TaskControl&) = delete;
 
-    void request_cancel() { cancel_requested_.store(true, std::memory_order_release); }
+    void request_cancel() { cancel_requested_->store(true, std::memory_order_release); }
 
     bool is_cancel_requested() const {
-        return cancel_requested_.load(std::memory_order_acquire);
+        return cancel_requested_->load(std::memory_order_acquire);
+    }
+
+    std::shared_ptr<std::atomic_bool> cancellation_token() const noexcept {
+        return cancel_requested_;
     }
 
     void mark_deadline_exceeded() { deadline_exceeded_.store(true, std::memory_order_release); }
@@ -51,6 +56,7 @@ public:
 
     /** @brief If armed and now >= deadline, sets deadline_exceeded. */
     void check_deadline_now();
+    std::optional<std::chrono::steady_clock::time_point> working_deadline() const;
 
     /** @brief Effective timeout in seconds (0 = none), set before WORKING. */
     void set_effective_timeout_sec(int sec) { effective_timeout_sec_ = sec; }
@@ -58,7 +64,9 @@ public:
     int effective_timeout_sec() const { return effective_timeout_sec_; }
 
 private:
-    std::atomic<bool> cancel_requested_{false};
+    std::shared_ptr<std::atomic_bool> cancel_requested_ {
+        std::make_shared<std::atomic_bool>(false)
+    };
     std::atomic<bool> deadline_exceeded_{false};
     int effective_timeout_sec_{0};
 
