@@ -18,10 +18,48 @@
 - `SkillPolicyEngine` 对任务 grant 与 manifest permission 求交。Agent Loop 只向模型暴露授权工具，ToolBus 在 hooks 前后都重新授权；文件和网络工具通过运行时元数据校验实际路径或 origin，拒绝结果使用稳定失败码。
 - `run_skill_script` 和 `run_skill_cli` 在 Linux 上通过外层 user/network namespace 与内层 `bwrap` 运行，包目录默认只读，仅将获批写目录挂载为可写；宿主 HOME 不可见，网络不可用，环境变量按引用注入。
 - Secret 只由请求级 provider 按 manifest reference 解析，通过 `/run/secrets/*` 文件注入；manifest、Prompt、CLI JSON 和 Skill event 不包含 secret value，stdout/stderr 中的已解析值会被脱敏。
+- `SkillCapabilityRuntime` 将 Tool 与 MCP 发布到 `skill::<skill-id>::<capability-id>`；注册集合
+  原子发布且禁止覆盖。Tool descriptor 使用 `source` 导入现有 Tool，以 `export` 控制 LLM
+  可见性；未导出的私有 Tool 仍要求 manifest request 与 task grant 双重授权。
+- MCP descriptor 支持 `server`、`transport`、`args`/`url`、`tool-filters`、`tools`、
+  `secret-references` 和 `startup`。每个 MCP resource 共享一个 Eager/Lazy session；HTTP 在
+  连接前校验 network grant，binding 关闭会撤销注册、传播取消、有界等待并断开 session。
+- Prompt/Template descriptor 在绑定时固化，允许的变量来源仅为 `input`、`context`、`task`，
+  并支持 `path`、`required`、内联 `schema` 与 `max-bytes`。环境、Secret、未声明变量和超限
+  输出均确定性拒绝。
 - v1 的 `run_skill_script`、`run_skill_cli` 和 `read_skill_resource` 要求匹配的 Skill 请求上下文，并执行 resource declaration 与文件 read grant 双重校验；legacy v0 保留一个大版本兼容路径。
 - `skillctl <root> list|validate|show|read|inspect <id> --resolved` 支持 CI 校验、受控资源读取和规范化 manifest 检查；`validate` 在存在 error 诊断时返回非零状态。
 
-运行时变量为 `AGENT_SKILL_SCRIPT_ALLOWLIST`、`AGENT_SKILL_SCRIPT_TIMEOUT_SEC` 和 `AGENT_SKILL_SCRIPT_OUTPUT_MAX_BYTES`。Linux 进程执行需要 `/usr/bin/unshare` 与 `/usr/bin/bwrap`，任一缺失时 fail closed。Manifest 声明 SHA-256 时，OpenSSL 构建执行摘要校验；无 OpenSSL 构建返回 `resource_hash_unavailable`，不会静默跳过。MCP 生命周期与私有 Tool 绑定属于 Stage 3，Workflow DSL、循环、subflow/submodule 和 restart/resume 属于 Stage 4；动态安装、签名/供应链验证和运行中热切换仍属于后续阶段。
+运行时变量为 `AGENT_SKILL_SCRIPT_ALLOWLIST`、`AGENT_SKILL_SCRIPT_TIMEOUT_SEC` 和 `AGENT_SKILL_SCRIPT_OUTPUT_MAX_BYTES`。Linux 进程执行需要 `/usr/bin/unshare` 与 `/usr/bin/bwrap`，任一缺失时 fail closed。Manifest 声明 SHA-256 时，OpenSSL 构建执行摘要校验；无 OpenSSL 构建返回 `resource_hash_unavailable`，不会静默跳过。MCP 生命周期、私有 Tool 绑定和受控 Prompt/Template 已在 Stage 3 完成；Workflow DSL、循环、subflow/submodule 和 restart/resume 属于 Stage 4；动态安装、签名/供应链验证和运行中热切换仍属于后续阶段。
+
+### Stage 3 descriptor 最小示例
+
+```json
+{"source":"read_profile","export":false}
+```
+
+```json
+{
+  "server":"gnss-data",
+  "transport":"http",
+  "url":"https://mcp.example.org/rpc",
+  "startup":"lazy",
+  "tool-filters":["ro_*","!ro_delete"],
+  "tools":[{"name":"ro_profile","export":true}],
+  "secret-references":{"Authorization":"mcp-token"}
+}
+```
+
+```json
+{
+  "template":"Process {{profile}} for task {{task_id}}",
+  "max-bytes":4096,
+  "variables":{
+    "profile":{"source":"input","path":"/profile","schema":{"type":"string"}},
+    "task_id":{"source":"task","path":"/id"}
+  }
+}
+```
 
 ---
 

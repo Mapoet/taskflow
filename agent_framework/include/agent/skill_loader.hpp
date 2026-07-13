@@ -32,6 +32,11 @@ public:
                                              SkillResourceKind kind,
                                              std::size_t max_bytes,
                                              std::string* error_out = nullptr) const;
+    /** Load from a task-pinned entry/manifest without consulting the mutable Registry. */
+    std::optional<std::string> load_resource_snapshot(
+        const SkillIndexEntry& entry, std::shared_ptr<const SkillManifest> manifest,
+        const std::string& relative_path, SkillResourceKind kind, std::size_t max_bytes,
+        std::string* error_out = nullptr) const;
 
 private:
     const SkillRegistry& registry_;

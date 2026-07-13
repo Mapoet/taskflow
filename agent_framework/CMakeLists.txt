@@ -246,6 +246,9 @@ endif()
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/skills/skill_policy.cpp)
     list(APPEND AGENT_SOURCES src/skills/skill_policy.cpp src/skills/skill_runtime.cpp)
 endif()
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/skills/skill_capability_runtime.cpp)
+    list(APPEND AGENT_SOURCES src/skills/skill_capability_runtime.cpp)
+endif()
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/skills/skill_registry.cpp)
     list(APPEND AGENT_SOURCES src/skills/skill_registry.cpp)
 endif()
@@ -536,6 +539,7 @@ set(AGENT_HEADERS
     include/agent/skill_registry.hpp
     include/agent/skill_loader.hpp
     include/agent/skill_services.hpp
+    include/agent/skill_capability_runtime.hpp
     include/agent/skill_script_tool.hpp
     include/agent/internal/skill_frontmatter_parse.hpp
     include/agent/internal/task_dispatch_queue.hpp
@@ -1550,6 +1554,17 @@ if(BUILD_TESTING)
         add_test(NAME skill_agent_loop_policy_contract COMMAND test_skill_agent_loop_policy)
         set_tests_properties(skill_agent_loop_policy_contract PROPERTIES
             LABELS "skill-runtime-integration;skill-policy-security")
+    endif()
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_skill_capability_runtime.cpp)
+        add_executable(test_skill_capability_runtime tests/test_skill_capability_runtime.cpp)
+        target_link_libraries(test_skill_capability_runtime PRIVATE agent_framework)
+        if(Threads_FOUND)
+            target_link_libraries(test_skill_capability_runtime PRIVATE Threads::Threads)
+        endif()
+        add_test(NAME skill_capability_runtime_contract COMMAND test_skill_capability_runtime)
+        set_tests_properties(skill_capability_runtime_contract PROPERTIES
+            LABELS "skill-runtime-integration;skill-policy-security;skill-mcp-integration;skill-prompt-contract"
+            ENVIRONMENT "AGENT_TOOL_ALLOWLIST=")
     endif()
     if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_skill_cursor_bundle.cpp
        AND EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/data/skills-cursor)

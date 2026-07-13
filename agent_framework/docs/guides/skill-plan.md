@@ -276,6 +276,30 @@ Model、Test 必须走同一条相对路径、canonical jail、普通文件、�
 
 ## Stage 3：Tool、MCP、Prompt、Template 集成，P0/P1
 
+### 完成证据（2026-07-13）
+
+- 新增 `SkillCapabilityRuntime` 与 task-pinned `SkillCapabilityBinding`，所有能力使用
+  `skill::<skill-id>::<capability-id>` 命名空间；ToolBus 先验证完整注册集合，再在单锁内
+  原子发布，冲突返回 `skill_capability_conflict` 且不破坏已有 owner。
+- Tool descriptor 可导入现有 Tool，并以 `export` 明确控制是否进入 LLM Tool 列表；私有
+  Tool 仍可由已授权的 Skill 按完整名称调用。
+- MCP descriptor 支持 stdio/http/mock transport、Eager/Lazy startup、tool filters、显式
+  tools 与 secret references。每个 MCP resource 共享一个 session，关闭 binding 时先撤销
+  新调用，再传播 TaskControl cancel、有界等待并断开连接；HTTP 创建前强制 network grant。
+- Prompt/Template descriptor 在绑定时校验并固定快照，只允许 input/context/task 三类变量
+  来源，支持变量 schema、JSON Pointer、required 与输出字节上限；环境和 Secret 来源默认拒绝。
+- `SkillRuntime::begin_snapshot` 与 `SkillLoader::load_resource_snapshot` 使运行中任务在 Registry
+  disable/reload 后仍使用固定 entry、manifest、descriptor 和 schema；新绑定立即失败。
+- 新增 `skill_capability_runtime_contract`，直接覆盖 LocalTool/MCP、私有导出、过滤、Secret、
+  网络拒绝、Prompt 缺失/越权/超限/类型错误、原子冲突、Lazy session 复用、禁用后快照和取消。
+- 完整 Debug 构建成功；Stage 3 与关联 Skills/ToolBus/MCP/Prompt 测试 15/15 通过；最终全量
+  CTest 3001/3001 通过，0 失败，总耗时 280.30 秒。
+
+### 实施状态
+
+**已完成。** 本阶段不包含 Workflow DSL、循环、subflow/submodule、retry/restart/resume；
+这些能力仍严格属于 Stage 4。
+
 ### 步骤
 
 1. 定义命名空间 `skill::<skill-id>::<capability-id>`，禁止静默覆盖。

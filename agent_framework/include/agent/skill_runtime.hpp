@@ -66,6 +66,7 @@ struct SkillInvocationContext {
 
 struct SkillInvocationTicket {
     std::string skill_id;
+    SkillIndexEntry entry;
     std::shared_ptr<const SkillManifest> manifest;
     SkillResourceDescriptor resource;
     std::shared_ptr<const SkillPolicyEngine> policy;
@@ -85,6 +86,13 @@ public:
     SkillRuntimeResult begin(const std::string& skill_id, const std::string& resource_id,
                              SkillResourceType expected_kind, const nlohmann::json& input,
                              SkillInvocationContext context) const;
+    /** Begin against a task-pinned Registry snapshot rather than the mutable live Registry. */
+    SkillRuntimeResult begin_snapshot(const SkillIndexEntry& entry,
+                                      std::shared_ptr<const SkillManifest> manifest,
+                                      const std::string& resource_id,
+                                      SkillResourceType expected_kind,
+                                      const nlohmann::json& input,
+                                      SkillInvocationContext context) const;
     SkillRuntimeResult finish(const SkillInvocationTicket& ticket,
                               const nlohmann::json& output) const;
     void record_termination(const SkillInvocationTicket& ticket, bool timed_out) const noexcept;
@@ -98,6 +106,12 @@ private:
     SkillRuntimeResult validate_schema(const SkillInvocationTicket& ticket,
                                        const std::string& schema_id,
                                        const nlohmann::json& value, bool input) const;
+    SkillRuntimeResult begin_resolved(const SkillIndexEntry& entry,
+                                      std::shared_ptr<const SkillManifest> manifest,
+                                      const std::string& resource_id,
+                                      SkillResourceType expected_kind,
+                                      const nlohmann::json& input,
+                                      SkillInvocationContext context) const;
 };
 
 const char* skill_event_type_cstr(SkillEventType type) noexcept;

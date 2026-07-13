@@ -262,6 +262,12 @@ private:
  */
 class ToolBus {
 public:
+    struct AtomicLocalToolRegistration {
+        std::string name;
+        std::function<json(const json&, const ToolCallControl&)> function;
+        ToolMeta meta;
+    };
+
     /**
      * @brief 注册本地工具
      * @param name 工具名称
@@ -275,6 +281,10 @@ public:
         const std::string& name,
         std::function<json(const json&, const ToolCallControl&)> func,
         const ToolMeta& meta);
+    /** Validate every name first and publish the complete set under one lock. */
+    void register_local_tools_atomic(std::vector<AtomicLocalToolRegistration> registrations);
+    /** Remove exactly the supplied tools. Missing names are ignored. */
+    void unregister_tools(const std::vector<std::string>& names) noexcept;
 
     /** Run default-tool registration exactly once per ToolBus, including under concurrent graph builds. */
     void ensure_default_tools_registered(const std::function<void()>& registrar);

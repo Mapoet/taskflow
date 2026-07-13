@@ -127,12 +127,23 @@ std::optional<std::string> SkillLoader::load_resource(const std::string& skill_i
                                                       SkillResourceKind kind,
                                                       std::size_t max_bytes,
                                                       std::string* error_out) const {
+    const auto entry = registry_.get(skill_id);
+    if (!entry) {
+        if (error_out) *error_out = "unknown skill_id";
+        return std::nullopt;
+    }
+    return load_resource_snapshot(*entry, entry->manifest, relative_path, kind, max_bytes,
+                                  error_out);
+}
+
+std::optional<std::string> SkillLoader::load_resource_snapshot(
+    const SkillIndexEntry& entry, std::shared_ptr<const SkillManifest> manifest,
+    const std::string& relative_path, SkillResourceKind kind, std::size_t max_bytes,
+    std::string* error_out) const {
     auto fail = [&](const std::string& message) -> std::optional<std::string> {
         if (error_out) *error_out = message;
         return std::nullopt;
     };
-    const auto entry = registry_.get(skill_id);
-    if (!entry) return fail("unknown skill_id");
     if (relative_path.empty() || std::filesystem::path(relative_path).is_absolute()) {
         return fail("resource path must be relative");
     }
@@ -141,19 +152,19 @@ std::optional<std::string> SkillLoader::load_resource(const std::string& skill_i
     }
 
     bool authorized = false;
-    if (entry->manifest) {
+    if (manifest) {
         const SkillResourceType requested = manifest_kind(kind);
-        for (const auto& resource : entry->manifest->resources) {
+        for (const auto& resource : manifest->resources) {
             if (resource.path == relative_path &&
                 (kind == SkillResourceKind::AnyDeclared || resource.kind == requested)) {
                 authorized = true;
                 break;
             }
         }
-        if (!authorized && entry->manifest->legacy_v0 && kind != SkillResourceKind::AnyDeclared) {
+        if (!authorized && manifest->legacy_v0 && kind != SkillResourceKind::AnyDeclared) {
             const char* prefix = legacy_directory(kind);
             bool kind_declared = false;
-            for (const auto& resource : entry->manifest->resources)
+            for (const auto& resource : manifest->resources)
                 kind_declared = kind_declared || resource.kind == requested;
             authorized = !kind_declared && prefix && relative_path.rfind(prefix, 0) == 0;
         }
@@ -161,7 +172,8 @@ std::optional<std::string> SkillLoader::load_resource(const std::string& skill_i
     if (!authorized) return fail("resource is not declared for requested kind");
 
     std::error_code ec;
-    const auto base = std::filesystem::weakly_canonical(skill_directory(skill_id), ec);
+    const auto package = entry.script_jail.value_or(entry.file_path.parent_path());
+    const auto base = std::filesystem::weakly_canonical(package, ec);
     if (ec || base.empty()) return fail("skill directory resolution failed");
     const auto target = std::filesystem::weakly_canonical(base / relative_path, ec);
     if (ec || !std::filesystem::is_regular_file(target, ec)) return fail("resource is not a regular file");

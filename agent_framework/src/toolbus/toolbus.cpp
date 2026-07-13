@@ -284,6 +284,48 @@ void ToolBus::register_cancellable_local_tool(
     tools_.emplace(name, std::make_shared<LocalTool>(name, std::move(func), meta));
 }
 
+void ToolBus::register_local_tools_atomic(
+    std::vector<AtomicLocalToolRegistration> registrations) {
+    load_allowlist_once();
+    const auto& al = allowlist();
+    std::unordered_set<std::string> incoming;
+    for (const auto& registration : registrations) {
+        if (registration.name.empty() || !registration.function) {
+            throw std::invalid_argument("register_local_tools_atomic: invalid registration");
+        }
+        if (!incoming.insert(registration.name).second) {
+            throw std::invalid_argument("skill_capability_conflict: duplicate incoming tool: " +
+                                        registration.name);
+        }
+        if (al.has_value() && al->count(registration.name) == 0U) {
+            throw std::invalid_argument("tool name not in AGENT_TOOL_ALLOWLIST: " +
+                                        registration.name);
+        }
+    }
+    std::lock_guard<std::mutex> lock(tools_mutex_);
+    for (const auto& registration : registrations) {
+        if (tools_.count(registration.name) != 0U) {
+            throw std::invalid_argument("skill_capability_conflict: tool already registered: " +
+                                        registration.name);
+        }
+    }
+    for (auto& registration : registrations) {
+        tools_.emplace(registration.name,
+                       std::make_shared<LocalTool>(registration.name,
+                                                   std::move(registration.function),
+                                                   registration.meta));
+    }
+}
+
+void ToolBus::unregister_tools(const std::vector<std::string>& names) noexcept {
+    try {
+        std::lock_guard<std::mutex> lock(tools_mutex_);
+        for (const auto& name : names) tools_.erase(name);
+    } catch (...) {
+        // Lifecycle cleanup must not throw from destructors.
+    }
+}
+
 void ToolBus::ensure_default_tools_registered(const std::function<void()>& registrar) {
     if (!registrar) {
         throw std::invalid_argument("default tool registrar is empty");
@@ -431,7 +473,7 @@ std::vector<ToolMeta> ToolBus::export_as_llm_tools(
     for (const auto& kv : tools_) {
         if (filter && !filter(kv.first)) continue;
         ToolMeta m = kv.second->get_tool_meta(kv.first);
-        if (!m.name.empty()) {
+        if (!m.name.empty() && m.llm_visible) {
             out.push_back(std::move(m));
         }
     }

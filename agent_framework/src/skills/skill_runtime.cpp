@@ -46,18 +46,43 @@ SkillRuntimeResult SkillRuntime::begin(const std::string& skill_id,
                                        SkillResourceType expected_kind,
                                        const nlohmann::json& input,
                                        SkillInvocationContext context) const {
+    const auto entry = registry_->get(skill_id);
+    const auto manifest = registry_->get_manifest(skill_id);
+    if (!entry || !manifest) {
+        return {false, error_json(kSkillDependencyUnavailable, "skill is not available",
+                                  {{"skill_id", skill_id}}), std::nullopt};
+    }
+    return begin_resolved(*entry, manifest, resource_id, expected_kind, input,
+                          std::move(context));
+}
+
+SkillRuntimeResult SkillRuntime::begin_snapshot(const SkillIndexEntry& entry,
+                                                std::shared_ptr<const SkillManifest> manifest,
+                                                const std::string& resource_id,
+                                                SkillResourceType expected_kind,
+                                                const nlohmann::json& input,
+                                                SkillInvocationContext context) const {
+    if (!manifest) {
+        return {false, error_json(kSkillDependencyUnavailable, "skill snapshot is unavailable",
+                                  {{"skill_id", entry.id}}), std::nullopt};
+    }
+    return begin_resolved(entry, std::move(manifest), resource_id, expected_kind, input,
+                          std::move(context));
+}
+
+SkillRuntimeResult SkillRuntime::begin_resolved(const SkillIndexEntry& entry,
+                                                std::shared_ptr<const SkillManifest> manifest,
+                                                const std::string& resource_id,
+                                                SkillResourceType expected_kind,
+                                                const nlohmann::json& input,
+                                                SkillInvocationContext context) const {
+    const std::string& skill_id = entry.id;
     bool deadline = false;
     if (stopped(context, deadline)) {
         emit(context, deadline ? SkillEventType::TimedOut : SkillEventType::Cancelled,
              kSkillCancelled, skill_id, resource_id);
         return {false, error_json(kSkillCancelled, deadline ? "skill deadline exceeded"
                                                            : "skill invocation cancelled"), std::nullopt};
-    }
-    const auto entry = registry_->get(skill_id);
-    const auto manifest = registry_->get_manifest(skill_id);
-    if (!entry || !manifest) {
-        return {false, error_json(kSkillDependencyUnavailable, "skill is not available",
-                                  {{"skill_id", skill_id}}), std::nullopt};
     }
     const auto found = std::find_if(manifest->resources.begin(), manifest->resources.end(),
                                     [&](const SkillResourceDescriptor& resource) {
@@ -78,9 +103,10 @@ SkillRuntimeResult SkillRuntime::begin(const std::string& skill_id,
     }
     SkillInvocationTicket ticket;
     ticket.skill_id = skill_id;
+    ticket.entry = entry;
     ticket.manifest = manifest;
     ticket.resource = *found;
-    const auto package_root = entry->script_jail.value_or(entry->file_path.parent_path());
+    const auto package_root = entry.script_jail.value_or(entry.file_path.parent_path());
     ticket.policy = std::make_shared<SkillPolicyEngine>(manifest->permissions, context.grants,
                                                         package_root);
     ticket.context = std::move(context);
@@ -139,8 +165,9 @@ SkillRuntimeResult SkillRuntime::validate_schema(const SkillInvocationTicket& ti
                                   {{"schema_id", schema_id}}), std::nullopt};
     }
     std::string load_error;
-    auto content = loader_->load_resource(ticket.skill_id, schema_resource->path,
-                                          SkillResourceKind::Schema, 1024U * 1024U, &load_error);
+    auto content = loader_->load_resource_snapshot(
+        ticket.entry, ticket.manifest, schema_resource->path, SkillResourceKind::Schema,
+        1024U * 1024U, &load_error);
     if (!content) {
         return {false, error_json(kSkillDependencyUnavailable, "schema resource cannot be loaded",
                                   {{"schema_id", schema_id}, {"reason", load_error}}), std::nullopt};

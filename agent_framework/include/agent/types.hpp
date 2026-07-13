@@ -146,6 +146,8 @@ struct ToolMeta {
     };
     /** Runtime-only permission metadata; PromptRenderer deliberately does not export it. */
     std::vector<PermissionTarget> permission_targets;
+    /** Private Skill capabilities remain callable by name but are not advertised to the LLM. */
+    bool llm_visible = true;
 };
 
 /**
