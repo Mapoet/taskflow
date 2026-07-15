@@ -3,8 +3,25 @@
 #include <cassert>
 #include <filesystem>
 #include <fstream>
+#include <future>
 #include <iostream>
 #include <set>
+#include <thread>
+
+namespace {
+
+std::set<std::filesystem::path> test_jails() {
+    std::set<std::filesystem::path> result;
+    std::error_code ec;
+    for(const auto& entry : std::filesystem::directory_iterator(
+            std::filesystem::temp_directory_path(), ec)) {
+        if(entry.path().filename().string().starts_with("agent-skill-test-jail-"))
+            result.insert(entry.path());
+    }
+    return result;
+}
+
+} // namespace
 
 int main() {
     using namespace agent_framework;
@@ -33,6 +50,59 @@ int main() {
     assert(!too_large.descriptor);
     assert(too_large.diagnostics.front().location == "/input");
 
-    std::cout << "test_skill_test_runner: contracts ok\n";
+    auto registry = std::make_shared<SkillRegistry>(root);
+    registry->scan_or_reload();
+    assert(registry->get("stage6-valid"));
+    SkillTestRunner runner(registry);
+    const auto jails_before = test_jails();
+    auto run_one = [&](const std::string& filter,
+                       std::chrono::milliseconds timeout = std::chrono::milliseconds(5000)) {
+        SkillTestRunOptions options;
+        options.filter = filter;
+        options.timeout = timeout;
+        const auto suite = runner.run("stage6-valid", options);
+        if(!suite.ok) std::cerr << suite.to_json().dump(2) << '\n';
+        assert(suite.ok);
+        assert(suite.passed == 1U && suite.failed == 0U && suite.cases.size() == 1U);
+        return suite.cases.front();
+    };
+    assert(run_one("resource returns JSON").output.at("value") == 7);
+    assert(run_one("tool uses declared mock").events ==
+           std::vector<std::string>({"invocation_started", "invocation_completed"}));
+    assert(run_one("workflow returns normalized value").output.at("value") == 7);
+    assert(run_one("script runs in jail").exit_code == 0);
+    assert(run_one("CLI has empty secret environment").stdout_text == "cli:ok:unset\n");
+    assert(run_one("secrets are not inherited").to_json().dump().find("PRIVATE_TOKEN") ==
+           std::string::npos);
+    assert(run_one("undeclared mock is denied").passed);
+    assert(run_one("timeout terminates process", std::chrono::milliseconds(100)).passed);
+
+    SkillTestRunOptions active_cancel_options;
+    active_cancel_options.filter = "cancel terminates process";
+    active_cancel_options.control = std::make_shared<TaskControl>();
+    auto active_cancel = std::async(std::launch::async, [&] {
+        return runner.run("stage6-valid", active_cancel_options);
+    });
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    active_cancel_options.control->request_cancel();
+    const auto actively_cancelled = active_cancel.get();
+    assert(actively_cancelled.ok && actively_cancelled.passed == 1U);
+
+    SkillTestRunOptions mismatch_options;
+    mismatch_options.filter = "mismatch is detected";
+    const auto mismatches = runner.run("stage6-valid", mismatch_options);
+    assert(!mismatches.ok && mismatches.failed == 2U);
+    for(const auto& result : mismatches.cases)
+        assert(result.error.value("code", "") == "skill_test_expectation_failed");
+
+    SkillTestRunOptions cancelled_options;
+    cancelled_options.filter = "resource returns JSON";
+    cancelled_options.control = std::make_shared<TaskControl>();
+    cancelled_options.control->request_cancel();
+    const auto cancelled = runner.run("stage6-valid", cancelled_options);
+    assert(!cancelled.ok && cancelled.error.value("code", "") == "skill_cancelled");
+    assert(test_jails() == jails_before);
+
+    std::cout << "test_skill_test_runner: contracts and isolated execution ok\n";
     return 0;
 }

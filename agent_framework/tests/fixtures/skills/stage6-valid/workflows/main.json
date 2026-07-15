@@ -1,0 +1,8 @@
+{
+  "api-version": "agent.taskflow/workflow/v1",
+  "kind": "SkillWorkflow",
+  "nodes": [
+    {"id":"value","type":"tool","resource":"value","input":{"value":{"from":"$input","path":"/value"}}}
+  ],
+  "outputs": {"value":{"from":"value","path":"/value"}}
+}

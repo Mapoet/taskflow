@@ -1,0 +1,1 @@
+{"apiVersion":"agent.taskflow/skill-test/v1","kind":"SkillTest","name":"output mismatch is detected","target":{"kind":"resource","resource":"data"},"expect":{"ok":true,"output":{"value":8}}}

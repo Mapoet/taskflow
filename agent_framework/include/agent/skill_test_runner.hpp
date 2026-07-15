@@ -1,11 +1,15 @@
 #ifndef AGENT_SKILL_TEST_RUNNER_HPP
 #define AGENT_SKILL_TEST_RUNNER_HPP
 
-#include <agent/skill_types.hpp>
+#include <agent/skill_registry.hpp>
+#include <agent/task_state_machine.hpp>
 
 #include <nlohmann/json.hpp>
 
 #include <filesystem>
+#include <chrono>
+#include <map>
+#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
@@ -34,6 +38,50 @@ struct SkillTestParseResult {
 SkillTestParseResult parse_skill_test_descriptor(
     const nlohmann::json& value, const std::filesystem::path& source = {});
 SkillTestParseResult parse_skill_test_file(const std::filesystem::path& path);
+
+struct SkillTestRunOptions {
+    std::string filter;
+    std::size_t jobs = 1;
+    std::chrono::milliseconds timeout{5000};
+    std::shared_ptr<TaskControl> control;
+};
+
+struct SkillTestCaseResult {
+    std::string name;
+    bool passed = false;
+    nlohmann::json output = nullptr;
+    nlohmann::json error = nlohmann::json::object();
+    std::vector<std::string> events;
+    std::string stdout_text;
+    std::string stderr_text;
+    std::optional<int> exit_code;
+    std::map<std::string, std::string> resource_digests;
+    std::uint64_t duration_ms = 0;
+
+    nlohmann::json to_json() const;
+};
+
+struct SkillTestSuiteResult {
+    bool ok = false;
+    std::size_t passed = 0;
+    std::size_t failed = 0;
+    std::vector<SkillTestCaseResult> cases;
+    nlohmann::json error = nullptr;
+
+    nlohmann::json to_json() const;
+};
+
+class SkillTestRunner {
+public:
+    explicit SkillTestRunner(std::shared_ptr<SkillRegistry> registry)
+        : registry_(std::move(registry)) {}
+
+    SkillTestSuiteResult run(const std::string& skill_id,
+                             const SkillTestRunOptions& options = {}) const;
+
+private:
+    std::shared_ptr<SkillRegistry> registry_;
+};
 
 } // namespace agent_framework
 

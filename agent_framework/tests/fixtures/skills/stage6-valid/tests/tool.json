@@ -1,0 +1,1 @@
+{"apiVersion":"agent.taskflow/skill-test/v1","kind":"SkillTest","name":"tool uses declared mock","target":{"kind":"tool","resource":"value"},"input":{"value":7},"mocks":{"tools":{"base_value":{"output":{"value":7}}}},"expect":{"ok":true,"output":{"value":7},"events":[{"type":"invocation_started"},{"type":"invocation_completed"}]}}

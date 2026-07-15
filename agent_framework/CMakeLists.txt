@@ -1624,7 +1624,8 @@ if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_skill_cli_contract.cpp)
             "AGENT_STAGE6_FIXTURE_ROOT=\"${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/skills\"")
         add_test(NAME skill_test_runner_contract COMMAND test_skill_test_runner)
         set_tests_properties(skill_test_runner_contract PROPERTIES
-            LABELS "skill-unit;skill-test-runner;skill-security-negative")
+            LABELS "skill-unit;skill-test-runner;skill-security-negative"
+            ENVIRONMENT "AGENT_SKILL_SCRIPT_ALLOWLIST=/bin/sh")
     endif()
     if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_skill_cursor_bundle.cpp
        AND EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/data/skills-cursor)
