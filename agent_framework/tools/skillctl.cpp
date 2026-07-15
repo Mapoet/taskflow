@@ -69,6 +69,34 @@ int main(int argc, char** argv) {
         }
         return emit(service.read(operands[0], *kind, operands[2], max_bytes, raw));
     }
+    if(command == "lint") {
+        std::string skill_id;
+        bool warnings_as_errors = false;
+        for(const auto& operand : operands) {
+            if(operand == "--warnings-as-errors") warnings_as_errors = true;
+            else if(skill_id.empty() && !operand.starts_with("-")) skill_id = operand;
+            else return emit(usage_error(command, "invalid lint option: " + operand));
+        }
+        return emit(service.lint(skill_id, warnings_as_errors));
+    }
+    if(command == "graph" && operands.empty()) return emit(service.graph());
+    if(command == "permissions" && !operands.empty()) {
+        SkillPermissionGrant grant;
+        for(std::size_t index = 1; index < operands.size(); index += 2) {
+            if(index + 1 >= operands.size())
+                return emit(usage_error(command, "permission grant value is missing"));
+            const auto& option = operands[index];
+            const auto& value = operands[index + 1];
+            if(option == "--grant-tool") grant.tools.push_back(value);
+            else if(option == "--grant-network") grant.network.push_back(value);
+            else if(option == "--grant-env") grant.environment.push_back(value);
+            else if(option == "--grant-read") grant.filesystem_read.push_back(value);
+            else if(option == "--grant-write") grant.filesystem_write.push_back(value);
+            else if(option == "--grant-secret") grant.secrets.push_back(value);
+            else return emit(usage_error(command, "unknown permission option: " + option));
+        }
+        return emit(service.permissions(operands[0], grant));
+    }
 
     return emit(usage_error(command, "invalid command arguments"));
 }

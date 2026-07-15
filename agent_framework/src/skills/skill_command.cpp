@@ -1,4 +1,5 @@
 #include <agent/skill_command.hpp>
+#include <agent/skill_lifecycle.hpp>
 
 #include <algorithm>
 #include <array>
@@ -124,6 +125,82 @@ std::string inferred_media_type(const std::string& path, bool text) {
     if(extension == ".yaml" || extension == ".yml") return "application/yaml";
     if(extension == ".txt" || extension == ".sh" || text) return "text/plain";
     return "application/octet-stream";
+}
+
+void add_lint_warning(std::vector<SkillDiagnostic>& diagnostics, std::string code,
+                      const std::filesystem::path& path, std::string location,
+                      std::string message, std::string suggestion) {
+    SkillDiagnostic diagnostic;
+    diagnostic.severity = SkillDiagnosticSeverity::Warning;
+    diagnostic.code = std::move(code);
+    diagnostic.path = path;
+    diagnostic.location = std::move(location);
+    diagnostic.message = std::move(message);
+    diagnostic.suggestion = std::move(suggestion);
+    diagnostics.push_back(std::move(diagnostic));
+}
+
+std::vector<std::string> sorted_unique(std::vector<std::string> values) {
+    std::sort(values.begin(), values.end());
+    values.erase(std::unique(values.begin(), values.end()), values.end());
+    return values;
+}
+
+std::vector<std::string> intersection(const std::vector<std::string>& requested,
+                                      const std::vector<std::string>& granted) {
+    const auto left = sorted_unique(requested);
+    const auto right = sorted_unique(granted);
+    std::vector<std::string> result;
+    std::set_intersection(left.begin(), left.end(), right.begin(), right.end(),
+                          std::back_inserter(result));
+    return result;
+}
+
+std::vector<std::string> difference(const std::vector<std::string>& requested,
+                                    const std::vector<std::string>& granted) {
+    const auto left = sorted_unique(requested);
+    const auto right = sorted_unique(granted);
+    std::vector<std::string> result;
+    std::set_difference(left.begin(), left.end(), right.begin(), right.end(),
+                        std::back_inserter(result));
+    return result;
+}
+
+nlohmann::json permission_set_json(const SkillPermissionSet& permissions,
+                                   bool redact_secrets = true) {
+    return {{"tools", sorted_unique(permissions.tools)},
+            {"network", sorted_unique(permissions.network)},
+            {"environment", sorted_unique(permissions.environment)},
+            {"filesystemRead", sorted_unique(permissions.filesystem_read)},
+            {"filesystemWrite", sorted_unique(permissions.filesystem_write)},
+            {"secrets", permissions.secrets.empty() || !redact_secrets
+                ? sorted_unique(permissions.secrets)
+                : std::vector<std::string>{"<redacted>"}}};
+}
+
+SkillPermissionSet as_permission_set(const SkillPermissionGrant& grant) {
+    return {grant.tools, grant.network, grant.environment, grant.filesystem_read,
+            grant.filesystem_write, grant.secrets};
+}
+
+SkillPermissionSet effective_permissions(const SkillPermissionSet& requested,
+                                         const SkillPermissionGrant& granted) {
+    return {intersection(requested.tools, granted.tools),
+            intersection(requested.network, granted.network),
+            intersection(requested.environment, granted.environment),
+            intersection(requested.filesystem_read, granted.filesystem_read),
+            intersection(requested.filesystem_write, granted.filesystem_write),
+            intersection(requested.secrets, granted.secrets)};
+}
+
+SkillPermissionSet denied_permissions(const SkillPermissionSet& requested,
+                                      const SkillPermissionGrant& granted) {
+    return {difference(requested.tools, granted.tools),
+            difference(requested.network, granted.network),
+            difference(requested.environment, granted.environment),
+            difference(requested.filesystem_read, granted.filesystem_read),
+            difference(requested.filesystem_write, granted.filesystem_write),
+            difference(requested.secrets, granted.secrets)};
 }
 
 } // namespace
@@ -290,6 +367,148 @@ SkillCommandResponse SkillCommandService::read(const std::string& skill_id,
                      {"encoding", text ? "utf-8" : "base64"},
                      {"content", text ? *content : base64_encode(*content)}};
     if(raw) response.raw_output = *content;
+    return response;
+}
+
+SkillCommandResponse SkillCommandService::lint(const std::string& skill_id,
+                                                bool warnings_as_errors) const {
+    std::vector<SkillIndexEntry> entries;
+    if(skill_id.empty()) entries = registry_->entries();
+    else if(const auto entry = registry_->get(skill_id)) entries.push_back(*entry);
+    else return command_error(SkillCliExit::NotFound, "lint", "skill_not_found",
+                              "skill not found", {{"skill", skill_id}});
+
+    SkillCommandResponse response;
+    response.command = "lint";
+    for(const auto& entry : entries) {
+        const auto& path = entry.file_path;
+        const auto& manifest = entry.manifest;
+        if(!manifest) continue;
+        if(manifest->license.empty())
+            add_lint_warning(response.diagnostics, "skill_lint_missing_license", path,
+                             "/license", "license metadata is missing", "declare an SPDX license");
+        if(manifest->authors.empty())
+            add_lint_warning(response.diagnostics, "skill_lint_missing_authors", path,
+                             "/authors", "author metadata is missing", "declare at least one author");
+        if(!manifest->legacy_v0 && !SkillSemVersion::parse(manifest->version))
+            add_lint_warning(response.diagnostics, "skill_lint_invalid_version", path,
+                             "/version", "version is not valid SemVer", "use MAJOR.MINOR.PATCH");
+
+        std::vector<std::string> tool_resources;
+        for(std::size_t index = 0; index < manifest->resources.size(); ++index) {
+            const auto& resource = manifest->resources[index];
+            const std::string location = "/resources/" + std::to_string(index);
+            if(resource.kind == SkillResourceType::Tool) tool_resources.push_back(resource.id);
+            if(resource.media_type.empty())
+                add_lint_warning(response.diagnostics, "skill_lint_missing_media_type", path,
+                                 location + "/media-type", "resource media type is missing",
+                                 "declare media-type explicitly");
+            if((resource.kind == SkillResourceType::Script ||
+                resource.kind == SkillResourceType::Cli ||
+                resource.kind == SkillResourceType::Model) && resource.runtime.empty())
+                add_lint_warning(response.diagnostics, "skill_lint_missing_runtime", path,
+                                 location + "/runtime", "executable resource runtime is missing",
+                                 "declare the required runtime");
+            if((resource.kind == SkillResourceType::Script ||
+                resource.kind == SkillResourceType::Tool) &&
+               (resource.input_schema.empty() || resource.output_schema.empty()))
+                add_lint_warning(response.diagnostics, "skill_lint_missing_schema", path,
+                                 location, "callable resource schema is incomplete",
+                                 "declare input-schema and output-schema");
+            if(resource.sha256.empty())
+                add_lint_warning(response.diagnostics, "skill_lint_missing_digest", path,
+                                 location + "/sha256", "resource digest is missing",
+                                 "declare the lowercase SHA-256 digest");
+        }
+        for(std::size_t index = 0; index < manifest->dependencies.size(); ++index) {
+            const auto& dependency = manifest->dependencies[index];
+            if(dependency.version.empty() || dependency.version == "*" ||
+               !SkillSemVersionRange::parse(dependency.version))
+                add_lint_warning(response.diagnostics, "skill_lint_unbounded_dependency", path,
+                                 "/dependencies/" + std::to_string(index) + "/version",
+                                 "dependency range is unbounded or invalid",
+                                 "use a bounded SemVer range");
+        }
+        for(const auto& permission : manifest->permissions.tools) {
+            if(std::find(tool_resources.begin(), tool_resources.end(), permission) == tool_resources.end())
+                add_lint_warning(response.diagnostics, "skill_lint_unused_permission", path,
+                                 "/permissions/tools", "tool permission is not tied to a declared tool",
+                                 "remove the permission or declare the tool resource");
+        }
+    }
+    std::sort(response.diagnostics.begin(), response.diagnostics.end(),
+              [](const auto& left, const auto& right) {
+                  return std::tie(left.path, left.location, left.code) <
+                         std::tie(right.path, right.location, right.code);
+              });
+    response.data = {{"skills", entries.size()}, {"warnings", response.diagnostics.size()},
+                     {"warningsAsErrors", warnings_as_errors}};
+    if(warnings_as_errors && !response.diagnostics.empty()) {
+        response.exit = SkillCliExit::ContractFailed;
+        response.error = {{"code", "skill_lint_failed"},
+                          {"message", "lint warnings were promoted to errors"},
+                          {"details", {{"warnings", response.diagnostics.size()}}}};
+    }
+    return response;
+}
+
+SkillCommandResponse SkillCommandService::graph() const {
+    auto entries = registry_->entries();
+    std::sort(entries.begin(), entries.end(), [](const auto& left, const auto& right) {
+        return left.id < right.id;
+    });
+    auto packages = nlohmann::json::array();
+    auto edges = nlohmann::json::array();
+    nlohmann::json digests = nlohmann::json::object();
+    std::vector<std::string> depended;
+    for(const auto& entry : entries) {
+        packages.push_back({{"id", entry.id}, {"version", entry.version},
+                            {"digest", entry.package_digest}});
+        digests[entry.id] = entry.package_digest;
+        if(!entry.manifest) continue;
+        for(const auto& dependency : entry.manifest->dependencies) {
+            edges.push_back({{"from", entry.id}, {"to", dependency.name},
+                             {"range", dependency.version}, {"optional", dependency.optional}});
+            depended.push_back(dependency.name);
+        }
+    }
+    std::sort(edges.begin(), edges.end(), [](const auto& left, const auto& right) {
+        return std::tie(left.at("from"), left.at("to"), left.at("range")) <
+               std::tie(right.at("from"), right.at("to"), right.at("range"));
+    });
+    depended = sorted_unique(std::move(depended));
+    auto roots = nlohmann::json::array();
+    nlohmann::json root_ranges = nlohmann::json::object();
+    for(const auto& entry : entries) {
+        if(!std::binary_search(depended.begin(), depended.end(), entry.id)) {
+            roots.push_back(entry.id);
+            root_ranges[entry.id] = entry.version.empty() ? "*" : entry.version;
+        }
+    }
+    SkillCommandResponse response;
+    response.command = "graph";
+    response.data = {{"roots", std::move(roots)}, {"rootRanges", std::move(root_ranges)},
+                     {"packages", std::move(packages)}, {"edges", std::move(edges)},
+                     {"digests", std::move(digests)},
+                     {"generation", registry_->snapshot().generation()}};
+    return response;
+}
+
+SkillCommandResponse SkillCommandService::permissions(
+    const std::string& skill_id, const SkillPermissionGrant& granted) const {
+    const auto manifest = registry_->get_manifest(skill_id);
+    if(!manifest) return command_error(SkillCliExit::NotFound, "permissions",
+                                       "skill_not_found", "skill not found",
+                                       {{"skill", skill_id}});
+    const auto effective = effective_permissions(manifest->permissions, granted);
+    const auto denied = denied_permissions(manifest->permissions, granted);
+    SkillCommandResponse response;
+    response.command = "permissions";
+    response.data = {{"skill", skill_id},
+                     {"declared", permission_set_json(manifest->permissions)},
+                     {"granted", permission_set_json(as_permission_set(granted))},
+                     {"effective", permission_set_json(effective)},
+                     {"denied", permission_set_json(denied)}};
     return response;
 }
 

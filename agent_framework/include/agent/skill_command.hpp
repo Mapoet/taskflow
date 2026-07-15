@@ -2,6 +2,7 @@
 #define __AGENT_SKILL_COMMAND_H__
 
 #include <agent/skill_loader.hpp>
+#include <agent/skill_policy.hpp>
 #include <agent/skill_registry.hpp>
 
 #include <nlohmann/json.hpp>
@@ -66,6 +67,11 @@ public:
     SkillCommandResponse read(const std::string& skill_id, SkillResourceKind kind,
                               const std::string& relative_path, std::size_t max_bytes,
                               bool raw) const;
+    SkillCommandResponse lint(const std::string& skill_id = {},
+                              bool warnings_as_errors = false) const;
+    SkillCommandResponse graph() const;
+    SkillCommandResponse permissions(const std::string& skill_id,
+                                     const SkillPermissionGrant& granted = {}) const;
 
 private:
     std::shared_ptr<SkillRegistry> registry_;

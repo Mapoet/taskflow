@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <set>
 
 using namespace agent_framework;
 
@@ -85,13 +86,27 @@ int main() {
                "---\nname: zeta\ndescription: zeta skill\n---\nzeta\n");
     write_file(root / "alpha" / "references" / "guide.md", "guide-text");
     write_file(root / "alpha" / "assets" / "blob.bin", std::string("a\0b", 3));
+    write_file(root / "alpha" / "scripts" / "run.sh", "#!/bin/sh\nexit 0\n");
     write_file(root / "alpha" / "SKILL.md", R"(---
 api-version: agent.taskflow/v1
 kind: Skill
 name: alpha
 version: 1.2.3
 description: alpha skill
+dependencies:
+  - name: zeta
+    version: "*"
+permissions:
+  tools:
+    - unused_tool
+  network:
+    - data.example.org
+  secrets:
+    - TEST_TOKEN
 resources:
+  scripts:
+    - id: run
+      path: scripts/run.sh
   references:
     - id: guide
       path: references/guide.md
@@ -130,6 +145,50 @@ alpha
     const auto raw_read = service.read(
         "alpha", SkillResourceKind::Asset, "assets/blob.bin", 64, true);
     assert(raw_read.raw_output == std::optional<std::string>(std::string("a\0b", 3)));
+
+    const auto linted = service.lint("alpha", false);
+    assert(linted.ok());
+    const auto lint_codes = [&]() {
+        std::set<std::string> codes;
+        for(const auto& diagnostic : linted.diagnostics) codes.insert(diagnostic.code);
+        return codes;
+    }();
+    assert(lint_codes.contains("skill_lint_missing_license"));
+    assert(lint_codes.contains("skill_lint_missing_authors"));
+    assert(lint_codes.contains("skill_lint_missing_media_type"));
+    assert(lint_codes.contains("skill_lint_missing_runtime"));
+    assert(lint_codes.contains("skill_lint_missing_schema"));
+    assert(lint_codes.contains("skill_lint_missing_digest"));
+    assert(lint_codes.contains("skill_lint_unbounded_dependency"));
+    assert(lint_codes.contains("skill_lint_unused_permission"));
+    assert(service.lint("alpha", true).exit == SkillCliExit::ContractFailed);
+
+    const auto graph = service.graph();
+    assert(graph.ok());
+    assert(!graph.data.at("roots").empty());
+    assert(!graph.data.at("packages").empty());
+    assert(!graph.data.at("edges").empty());
+    assert(graph.data.at("roots").at(0) == "alpha");
+    assert(graph.data.at("packages").at(0).at("id") == "alpha");
+    assert(graph.data.at("edges").at(0).at("from") == "alpha");
+    assert(graph.data.at("edges").at(0).at("to") == "zeta");
+    assert(graph.data.contains("rootRanges"));
+    assert(graph.data.contains("digests"));
+    assert(graph.data.contains("generation"));
+
+    SkillPermissionGrant grant;
+    grant.tools = {"unused_tool"};
+    grant.network = {"other.example.org"};
+    grant.secrets = {"TEST_TOKEN"};
+    const auto permission_report = service.permissions("alpha", grant);
+    assert(permission_report.ok());
+    assert(!permission_report.data.at("effective").at("tools").empty());
+    assert(!permission_report.data.at("denied").at("network").empty());
+    assert(permission_report.data.at("effective").at("tools").at(0) == "unused_tool");
+    assert(permission_report.data.at("denied").at("network").at(0) ==
+           "data.example.org");
+    const auto permission_text = permission_report.to_json().dump();
+    assert(permission_text.find("TEST_TOKEN") == std::string::npos);
 
     write_file(root / "duplicate-a" / "SKILL.md", "---\nid: duplicate\n---\na\n");
     write_file(root / "duplicate-b" / "SKILL.md", "---\nid: duplicate\n---\nb\n");
