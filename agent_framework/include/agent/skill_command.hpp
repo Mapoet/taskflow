@@ -79,6 +79,7 @@ public:
     SkillCommandResponse test(const std::string& skill_id = {},
                               const std::string& filter = {},
                               std::size_t jobs = 1) const;
+    SkillCommandResponse package(const std::filesystem::path& package) const;
     SkillCommandResponse install(const std::filesystem::path& store,
                                  const std::filesystem::path& package,
                                  const std::string& source_uri = {},

@@ -160,6 +160,8 @@ private:
     mutable std::map<std::string, std::weak_ptr<const void>> leases_;
 };
 
+SkillLifecycleResult inspect_skill_package(const std::filesystem::path& package);
+
 class SkillLifecycleManager {
 public:
     SkillLifecycleManager(std::shared_ptr<SkillRegistry> registry,

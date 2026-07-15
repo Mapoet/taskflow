@@ -694,6 +694,47 @@ std::optional<std::string> skill_sha256_file(const fs::path& path, std::string* 
 #endif
 }
 
+SkillLifecycleResult inspect_skill_package(const fs::path& package) {
+    std::string error;
+    auto manifest = read_manifest(package, &error);
+    if (!manifest) {
+        const auto code = error.starts_with("resource_hash_mismatch:")
+            ? kSkillDigestMismatch : kSkillLifecycleInvalid;
+        return {false, failure(code, error)};
+    }
+    auto version = SkillSemVersion::parse(manifest->version, &error);
+    if (!version) return {false, failure(kSkillLifecycleInvalid, error)};
+    const auto files = package_files(package, &error);
+    if (files.empty() || std::find(files.begin(), files.end(), fs::path("SKILL.md")) == files.end())
+        return {false, failure(kSkillLifecycleInvalid,
+                               error.empty() ? "package has no files" : error)};
+    auto digest = package_digest(package, files, &error);
+    if (!digest) return {false, failure(kSkillLifecycleInvalid, error)};
+    std::map<std::string, std::string> resource_digests;
+    for (const auto& resource : manifest->resources) {
+        auto resource_digest = skill_sha256_file(package / resource.path, &error);
+        if (!resource_digest && !resource.optional)
+            return {false, failure(kSkillLifecycleInvalid, error,
+                                   {{"resource", resource.id}})};
+        if (!resource_digest) continue;
+        if (!resource.sha256.empty() && resource.sha256 != *resource_digest)
+            return {false, failure(kSkillDigestMismatch,
+                                   "declared resource digest does not match package content",
+                                   {{"resource", resource.id},
+                                    {"expected", resource.sha256},
+                                    {"actual", *resource_digest}})};
+        resource_digests[resource.id] = *resource_digest;
+    }
+    SkillPackageRecord record;
+    record.id = !manifest->name.empty() ? manifest->name : manifest->legacy_id;
+    record.version = *version;
+    record.package_digest = *digest;
+    record.resource_digests = std::move(resource_digests);
+    record.package_path = package;
+    record.manifest = std::make_shared<SkillManifest>(std::move(*manifest));
+    return {true, json::object(), std::move(record), std::nullopt};
+}
+
 SkillPackageStore::SkillPackageStore(fs::path root) : root_(std::move(root)) {
     std::error_code ec;
     fs::create_directories(root_ / "sha256", ec);
@@ -703,27 +744,15 @@ SkillPackageStore::SkillPackageStore(fs::path root) : root_(std::move(root)) {
 SkillLifecycleResult SkillPackageStore::import_package(
     const fs::path& package, const SkillInstallOptions& options) {
     std::string error;
-    auto manifest = read_manifest(package, &error);
-    if (!manifest) return {false, failure(kSkillLifecycleInvalid, error)};
-    auto version = SkillSemVersion::parse(manifest->version, &error);
-    if (!version) return {false, failure(kSkillLifecycleInvalid, error)};
+    auto inspected = inspect_skill_package(package);
+    if (!inspected.ok || !inspected.package) return inspected;
+    const auto& identity = *inspected.package;
     const auto files = package_files(package, &error);
-    if (files.empty() || std::find(files.begin(), files.end(), fs::path("SKILL.md")) == files.end())
-        return {false, failure(kSkillLifecycleInvalid, error.empty() ? "package has no files" : error)};
-    auto digest = package_digest(package, files, &error);
-    if (!digest) return {false, failure(kSkillLifecycleInvalid, error)};
-    std::map<std::string, std::string> resource_digests;
-    for (const auto& resource : manifest->resources) {
-        auto resource_digest = skill_sha256_file(package / resource.path, &error);
-        if (!resource_digest && !resource.optional)
-            return {false, failure(kSkillLifecycleInvalid, error,
-                                   {{"resource", resource.id}})};
-        if (resource_digest) resource_digests[resource.id] = *resource_digest;
-    }
-    const fs::path destination = root_ / "sha256" / *digest / "package";
+    if (files.empty()) return {false, failure(kSkillLifecycleInvalid, error)};
+    const fs::path destination = root_ / "sha256" / identity.package_digest / "package";
     std::error_code ec;
     if (!fs::exists(destination)) {
-        const fs::path temporary = root_ / "transactions" / (*digest + ".tmp");
+        const fs::path temporary = root_ / "transactions" / (identity.package_digest + ".tmp");
         fs::remove_all(temporary, ec);
         fs::create_directories(temporary, ec);
         if (ec) return {false, failure(kSkillLifecycleInvalid, "cannot create transaction directory")};
@@ -738,12 +767,13 @@ SkillLifecycleResult SkillPackageStore::import_package(
         }
         auto copied_files = package_files(temporary / "package", &error);
         auto copied_digest = package_digest(temporary / "package", copied_files, &error);
-        if (!copied_digest || *copied_digest != *digest) {
+        if (!copied_digest || *copied_digest != identity.package_digest) {
             fs::remove_all(temporary, ec);
             return {false, failure(kSkillDigestMismatch, "copied package digest changed")};
         }
-        json metadata = {{"id", manifest->name}, {"version", manifest->version},
-                         {"packageDigest", *digest}, {"resourceDigests", resource_digests},
+        json metadata = {{"id", identity.id}, {"version", identity.version.str()},
+                         {"packageDigest", identity.package_digest},
+                         {"resourceDigests", identity.resource_digests},
                          {"sourceUri", options.source_uri},
                          {"signatureIdentity", options.signature_identity}};
         if (!atomic_write(temporary / "metadata.json", metadata.dump(2) + "\n", &error)) {
@@ -757,7 +787,7 @@ SkillLifecycleResult SkillPackageStore::import_package(
             return {false, failure(kSkillLifecycleInvalid, "package publish failed")};
         }
     }
-    auto loaded = load(*digest, &error);
+    auto loaded = load(identity.package_digest, &error);
     return loaded ? SkillLifecycleResult{true, json::object(), loaded, std::nullopt}
                   : SkillLifecycleResult{false, failure(kSkillLifecycleInvalid, error)};
 }

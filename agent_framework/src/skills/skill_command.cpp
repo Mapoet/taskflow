@@ -1,5 +1,6 @@
 #include <agent/skill_command.hpp>
 #include <agent/skill_lifecycle.hpp>
+#include <agent/skill_package_gate.hpp>
 
 #include <algorithm>
 #include <array>
@@ -73,6 +74,26 @@ SkillCliExit lifecycle_exit(const std::string& command, const nlohmann::json& er
     if(command == "install" || command == "update")
         return SkillCliExit::IntegrityFailed;
     return SkillCliExit::NotFound;
+}
+
+SkillCommandResponse package_gate_error(const std::string& command,
+                                        const SkillPackageGateResult& gate) {
+    const auto code = gate.error.value("code", kSkillLifecycleInvalid);
+    const auto message = gate.error.value(
+        "message", gate.error.value("error", "package preflight failed"));
+    const auto exit = code == "skill_package_tests_failed" ||
+                      code == "skill_package_validation_failed" ||
+                      code == "skill_package_lint_failed"
+        ? SkillCliExit::ContractFailed : SkillCliExit::IntegrityFailed;
+    auto response = command_error(exit, command, code, message,
+                                  gate.error.value("details", nlohmann::json::object()));
+    auto preflight = gate.to_json();
+    preflight.erase("ok");
+    preflight.erase("error");
+    preflight.erase("diagnostics");
+    response.data = {{"preflight", std::move(preflight)}};
+    response.diagnostics = gate.diagnostics;
+    return response;
 }
 
 template <typename Operation>
@@ -673,17 +694,56 @@ SkillCommandResponse SkillCommandService::test(const std::string& skill_id,
 SkillCommandResponse SkillCommandService::install(
     const std::filesystem::path& store, const std::filesystem::path& package,
     const std::string& source_uri, const std::string& signature_identity) const {
-    return run_lifecycle(registry_, store, "install", [&](SkillLifecycleManager& manager) {
+    if(store.empty()) return command_error(SkillCliExit::Usage, "install", "skillctl_usage_error",
+                                           "lifecycle commands require --store");
+    const auto gate = SkillPackageGate{}.inspect(package);
+    if(!gate.ok) return package_gate_error("install", gate);
+    auto response = run_lifecycle(registry_, store, "install", [&](SkillLifecycleManager& manager) {
         return manager.install(package, {source_uri, signature_identity});
     });
+    if(response.ok()) {
+        auto preflight = gate.to_json();
+        preflight.erase("ok");
+        preflight.erase("error");
+        preflight.erase("diagnostics");
+        response.data["preflight"] = std::move(preflight);
+        response.diagnostics = gate.diagnostics;
+    }
+    return response;
 }
 
 SkillCommandResponse SkillCommandService::update(
     const std::filesystem::path& store, const std::filesystem::path& package,
     const std::string& source_uri, const std::string& signature_identity) const {
-    return run_lifecycle(registry_, store, "update", [&](SkillLifecycleManager& manager) {
+    if(store.empty()) return command_error(SkillCliExit::Usage, "update", "skillctl_usage_error",
+                                           "lifecycle commands require --store");
+    const auto gate = SkillPackageGate{}.inspect(package);
+    if(!gate.ok) return package_gate_error("update", gate);
+    auto response = run_lifecycle(registry_, store, "update", [&](SkillLifecycleManager& manager) {
         return manager.update(package, {source_uri, signature_identity});
     });
+    if(response.ok()) {
+        auto preflight = gate.to_json();
+        preflight.erase("ok");
+        preflight.erase("error");
+        preflight.erase("diagnostics");
+        response.data["preflight"] = std::move(preflight);
+        response.diagnostics = gate.diagnostics;
+    }
+    return response;
+}
+
+SkillCommandResponse SkillCommandService::package(const std::filesystem::path& package_path) const {
+    const auto gate = SkillPackageGate{}.inspect(package_path);
+    if(!gate.ok) return package_gate_error("package", gate);
+    SkillCommandResponse response;
+    response.command = "package";
+    response.data = gate.to_json();
+    response.data.erase("ok");
+    response.data.erase("error");
+    response.data.erase("diagnostics");
+    response.diagnostics = gate.diagnostics;
+    return response;
 }
 
 SkillCommandResponse SkillCommandService::enable(

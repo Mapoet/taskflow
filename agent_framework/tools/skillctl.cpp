@@ -127,6 +127,8 @@ int main(int argc, char** argv) {
         }
         return emit(service.test(skill_id, filter, jobs));
     }
+    if(command == "package" && operands.size() == 1)
+        return emit(service.package(operands[0]));
     if(command == "install" || command == "update") {
         if(operands.empty()) return emit(usage_error(command, "a package path is required"));
         std::string source_uri;
