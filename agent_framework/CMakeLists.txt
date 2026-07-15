@@ -1544,6 +1544,13 @@ if(BUILD_TESTING)
         set_tests_properties(skill_manifest_v1_contract PROPERTIES
             LABELS "skill-unit;skill-manifest-contract;skill-policy-security")
     endif()
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_skill_resource_contract.cpp)
+        add_executable(test_skill_resource_contract tests/test_skill_resource_contract.cpp)
+        target_link_libraries(test_skill_resource_contract PRIVATE agent_framework)
+        add_test(NAME skill_resource_contract COMMAND test_skill_resource_contract)
+        set_tests_properties(skill_resource_contract PROPERTIES
+            LABELS "skill-unit;skill-manifest-contract;skill-resource-management;skill-security-negative")
+    endif()
     if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_skill_policy_runtime.cpp)
         add_executable(test_skill_policy_runtime tests/test_skill_policy_runtime.cpp)
         target_link_libraries(test_skill_policy_runtime PRIVATE agent_framework)

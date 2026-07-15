@@ -48,30 +48,80 @@
       },
       "additionalProperties": false
     },
+    "citation": {
+      "type": "object",
+      "required": ["title"],
+      "properties": {
+        "title": {"type": "string", "minLength": 1},
+        "authors": {"$ref": "#/$defs/string-list"},
+        "published": {"type": "string"},
+        "url": {"type": "string"},
+        "locator": {"type": "string"}
+      },
+      "additionalProperties": false
+    },
+    "reference-index": {
+      "type": "object",
+      "required": ["kind"],
+      "properties": {"kind": {"const": "lexical-v1"}},
+      "additionalProperties": false
+    },
+    "model-requirements": {
+      "type": "object",
+      "required": ["devices", "precisions", "min-memory-bytes"],
+      "properties": {
+        "devices": {"$ref": "#/$defs/string-list", "minItems": 1},
+        "precisions": {"$ref": "#/$defs/string-list", "minItems": 1},
+        "min-memory-bytes": {"type": "integer", "minimum": 0}
+      },
+      "additionalProperties": false
+    },
+    "resource-object": {
+      "type": "object",
+      "required": ["path"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^[A-Za-z0-9_.-]{1,128}$"},
+        "path": {"type": "string", "minLength": 1},
+        "media-type": {"type": "string"},
+        "read-mode": {"enum": ["auto", "text", "binary", "stream", "mmap"]},
+        "sha256": {"type": "string", "pattern": "^[0-9A-Fa-f]{64}$"},
+        "size": {"type": "integer", "minimum": 0},
+        "size-limit": {"type": "integer", "minimum": 0},
+        "license": {"type": "string", "minLength": 1, "maxLength": 256},
+        "source": {"type": "string", "pattern": "^[A-Za-z][A-Za-z0-9+.-]*://\\S+$"},
+        "optional": {"type": "boolean", "default": false},
+        "executable": {"type": "boolean", "default": false},
+        "input-schema": {"type": "string"},
+        "output-schema": {"type": "string"},
+        "runtime": {"type": "string"},
+        "cache-policy": {"enum": ["no-store", "on-demand", "pin"]},
+        "citation": {"$ref": "#/$defs/citation"},
+        "index": {"$ref": "#/$defs/reference-index"},
+        "requirements": {"$ref": "#/$defs/model-requirements"}
+      },
+      "additionalProperties": false
+    },
     "resource": {
       "oneOf": [
         {"type": "string", "minLength": 1},
-        {
-          "type": "object",
-          "required": ["path"],
-          "properties": {
-            "id": {"type": "string", "pattern": "^[A-Za-z0-9_.-]{1,128}$"},
-            "path": {"type": "string", "minLength": 1},
-            "media-type": {"type": "string"},
-            "sha256": {"type": "string", "pattern": "^[0-9A-Fa-f]{64}$"},
-            "size-limit": {"type": "integer", "minimum": 0},
-            "optional": {"type": "boolean", "default": false},
-            "executable": {"type": "boolean", "default": false},
-            "input-schema": {"type": "string"},
-            "output-schema": {"type": "string"},
-            "runtime": {"type": "string"},
-            "cache-policy": {"type": "string"}
-          },
-          "additionalProperties": false
-        }
+        {"$ref": "#/$defs/resource-object"}
+      ]
+    },
+    "artifact-resource": {
+      "allOf": [
+        {"$ref": "#/$defs/resource-object"},
+        {"required": ["path", "sha256", "size", "license", "source"]}
+      ]
+    },
+    "model-resource": {
+      "allOf": [
+        {"$ref": "#/$defs/artifact-resource"},
+        {"required": ["runtime", "requirements"], "properties": {"executable": {"const": false}}}
       ]
     },
     "resource-list": {"type": "array", "items": {"$ref": "#/$defs/resource"}},
+    "artifact-resource-list": {"type": "array", "items": {"$ref": "#/$defs/artifact-resource"}},
+    "model-resource-list": {"type": "array", "items": {"$ref": "#/$defs/model-resource"}},
     "resources": {
       "type": "object",
       "properties": {
@@ -85,8 +135,8 @@
         "prompts": {"$ref": "#/$defs/resource-list"},
         "workflows": {"$ref": "#/$defs/resource-list"},
         "configs": {"$ref": "#/$defs/resource-list"},
-        "assets": {"$ref": "#/$defs/resource-list"},
-        "models": {"$ref": "#/$defs/resource-list"},
+        "assets": {"$ref": "#/$defs/artifact-resource-list"},
+        "models": {"$ref": "#/$defs/model-resource-list"},
         "tests": {"$ref": "#/$defs/resource-list"}
       },
       "additionalProperties": false

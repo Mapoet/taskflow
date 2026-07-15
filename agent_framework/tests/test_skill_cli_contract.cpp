@@ -125,6 +125,11 @@ resources:
     - id: blob
       path: assets/blob.bin
       media-type: application/octet-stream
+      read-mode: binary
+      sha256: 59b271ae1bbcb1d31d41929817f4b16fb439eb4f31520b5ad1d5ce98920a7138
+      size: 3
+      license: Apache-2.0
+      source: package://assets/blob.bin
   tests:
     - id: pass
       path: tests/pass.json

@@ -187,18 +187,47 @@ SkillResourceDescriptor descriptor(const json& value, SkillResourceType kind) {
         d.media_type = text(value, "media-type");
         if (d.media_type.empty()) d.media_type = text(value, "media_type");
         d.sha256 = text(value, "sha256");
+        d.license = text(value, "license");
+        d.source_uri = text(value, "source");
+        d.read_mode = skill_resource_read_mode_from_string(text(value, "read-mode"));
+        d.cache_policy = skill_cache_policy_from_string(text(value, "cache-policy"));
         d.input_schema = text(value, "input-schema");
         if (d.input_schema.empty()) d.input_schema = text(value, "input_schema");
         d.output_schema = text(value, "output-schema");
         if (d.output_schema.empty()) d.output_schema = text(value, "output_schema");
         d.runtime = text(value, "runtime");
-        d.cache_policy = text(value, "cache-policy");
         d.optional = boolean(value, "optional");
         d.executable = boolean(value, "executable", d.executable);
         if (value.contains("size-limit") && value["size-limit"].is_number_unsigned())
             d.size_limit = value["size-limit"].get<std::size_t>();
         if (value.contains("size_limit") && value["size_limit"].is_number_unsigned())
             d.size_limit = value["size_limit"].get<std::size_t>();
+        if (value.contains("size") && value["size"].is_number_unsigned())
+            d.declared_size = value["size"].get<std::uint64_t>();
+        if (value.contains("citation") && value["citation"].is_object()) {
+            SkillCitationMetadata citation;
+            citation.title = text(value["citation"], "title");
+            if (value["citation"].contains("authors"))
+                citation.authors = strings(value["citation"]["authors"]);
+            citation.published = text(value["citation"], "published");
+            citation.url = text(value["citation"], "url");
+            citation.locator = text(value["citation"], "locator");
+            d.citation = std::move(citation);
+        }
+        if (value.contains("index") && value["index"].is_object())
+            d.index = SkillReferenceIndexConfig{text(value["index"], "kind")};
+        if (value.contains("requirements") && value["requirements"].is_object()) {
+            SkillModelRequirements requirements;
+            if (value["requirements"].contains("devices"))
+                requirements.devices = strings(value["requirements"]["devices"]);
+            if (value["requirements"].contains("precisions"))
+                requirements.precisions = strings(value["requirements"]["precisions"]);
+            if (value["requirements"].contains("min-memory-bytes") &&
+                value["requirements"]["min-memory-bytes"].is_number_unsigned())
+                requirements.min_memory_bytes =
+                    value["requirements"]["min-memory-bytes"].get<std::uint64_t>();
+            d.model_requirements = std::move(requirements);
+        }
     }
     if (d.id.empty()) d.id = default_resource_id(d.path);
     return d;
@@ -226,6 +255,44 @@ SkillResourceType skill_resource_type_from_string(const std::string& raw) {
         if (to_string(kind) == v) return kind;
     }
     return SkillResourceType::Unknown;
+}
+
+std::string to_string(SkillResourceReadMode mode) {
+    switch(mode) {
+    case SkillResourceReadMode::Auto: return "auto";
+    case SkillResourceReadMode::Text: return "text";
+    case SkillResourceReadMode::Binary: return "binary";
+    case SkillResourceReadMode::Stream: return "stream";
+    case SkillResourceReadMode::MemoryMap: return "mmap";
+    case SkillResourceReadMode::Unknown: return "unknown";
+    }
+    return "unknown";
+}
+
+SkillResourceReadMode skill_resource_read_mode_from_string(const std::string& value) {
+    if(value.empty() || value == "auto") return SkillResourceReadMode::Auto;
+    if(value == "text") return SkillResourceReadMode::Text;
+    if(value == "binary") return SkillResourceReadMode::Binary;
+    if(value == "stream") return SkillResourceReadMode::Stream;
+    if(value == "mmap") return SkillResourceReadMode::MemoryMap;
+    return SkillResourceReadMode::Unknown;
+}
+
+std::string to_string(SkillCachePolicy policy) {
+    switch(policy) {
+    case SkillCachePolicy::NoStore: return "no-store";
+    case SkillCachePolicy::OnDemand: return "on-demand";
+    case SkillCachePolicy::Pin: return "pin";
+    case SkillCachePolicy::Unknown: return "unknown";
+    }
+    return "unknown";
+}
+
+SkillCachePolicy skill_cache_policy_from_string(const std::string& value) {
+    if(value.empty() || value == "no-store") return SkillCachePolicy::NoStore;
+    if(value == "on-demand") return SkillCachePolicy::OnDemand;
+    if(value == "pin") return SkillCachePolicy::Pin;
+    return SkillCachePolicy::Unknown;
 }
 
 SkillManifestParseResult parse_skill_manifest_yaml(const std::string& yaml) {
@@ -336,9 +403,27 @@ json skill_manifest_to_json(const SkillManifest& m, bool) {
                    {"optional",r.optional},{"executable",r.executable}};
         if (!r.media_type.empty()) value["media_type"] = r.media_type;
         if (!r.sha256.empty()) value["sha256"] = r.sha256;
+        if (r.declared_size) value["size"] = *r.declared_size;
         if (r.size_limit) value["size_limit"] = *r.size_limit;
         if (!r.input_schema.empty()) value["input_schema"] = r.input_schema;
         if (!r.output_schema.empty()) value["output_schema"] = r.output_schema;
+        if (!r.runtime.empty()) value["runtime"] = r.runtime;
+        if (!r.license.empty()) value["license"] = r.license;
+        if (!r.source_uri.empty()) value["source"] = r.source_uri;
+        value["read_mode"] = to_string(r.read_mode);
+        value["cache_policy"] = to_string(r.cache_policy);
+        if (r.citation) {
+            value["citation"] = {{"title",r.citation->title},{"authors",r.citation->authors},
+                                 {"published",r.citation->published},{"url",r.citation->url},
+                                 {"locator",r.citation->locator}};
+        }
+        if (r.index) value["index"] = {{"kind",r.index->kind}};
+        if (r.model_requirements) {
+            value["requirements"] = {
+                {"devices",r.model_requirements->devices},
+                {"precisions",r.model_requirements->precisions},
+                {"min_memory_bytes",r.model_requirements->min_memory_bytes}};
+        }
         resources[collection_name(r.kind)].push_back(std::move(value));
     }
     json dependencies = json::array();

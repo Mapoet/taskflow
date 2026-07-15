@@ -48,7 +48,19 @@ resources:
   models:
     - id: weights
       path: models/weights.bin
+      media-type: application/octet-stream
+      read-mode: mmap
+      sha256: 9372c470eeadd5ecd9c3c74c2b3cb633f8e2f2fad799250a0f70d652b6b825e4
+      size: 5
+      license: Apache-2.0
+      source: package://models/weights.bin
       runtime: missing-model-runtime
+      requirements:
+        devices:
+          - cpu
+        precisions:
+          - fp32
+        min-memory-bytes: 1
   mcp:
     - id: server
       path: mcp/server.json

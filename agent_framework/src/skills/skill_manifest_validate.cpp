@@ -43,6 +43,17 @@ bool valid_sha256(const std::string& value) {
     });
 }
 
+bool valid_source_uri(const std::string& value) {
+    static const std::regex pattern(R"(^[A-Za-z][A-Za-z0-9+.-]*://[^[:space:]]+$)");
+    return value.size() <= 2048U && std::regex_match(value, pattern);
+}
+
+bool textual_media_type(const std::string& value) {
+    return value.rfind("text/", 0) == 0 || value == "application/json" ||
+           value == "application/yaml" || value == "application/xml" ||
+           value == "application/markdown";
+}
+
 std::string file_sha256(const std::filesystem::path& path) {
 #if defined(CPPHTTPLIB_OPENSSL_SUPPORT)
     std::ifstream input(path, std::ios::binary);
@@ -102,6 +113,8 @@ std::vector<SkillManifestIssue> validate_skill_manifest(
     for (std::size_t i = 0; i < manifest.resources.size(); ++i) {
         const auto& resource = manifest.resources[i];
         const std::string location = "/resources/" + std::to_string(i);
+        const bool artifact = resource.kind == SkillResourceType::Asset ||
+                              resource.kind == SkillResourceType::Model;
         if (resource.kind == SkillResourceType::Unknown)
             issue(out, true, "unknown_resource_type", location + "/kind", "unknown resource type");
         if (!safe_id(resource.id))
@@ -109,6 +122,74 @@ std::vector<SkillManifestIssue> validate_skill_manifest(
         else if (!resource_ids.insert(resource.id).second)
             issue(out, true, "duplicate_resource_id", location + "/id", "resource id must be unique: " + resource.id);
         else resource_types.emplace(resource.id, resource.kind);
+        if(resource.read_mode == SkillResourceReadMode::Unknown)
+            issue(out, true, "invalid_resource_read_mode", location + "/read-mode",
+                  "read-mode must be auto, text, binary, stream or mmap");
+        if(resource.cache_policy == SkillCachePolicy::Unknown)
+            issue(out, true, "invalid_resource_cache_policy", location + "/cache-policy",
+                  "cache-policy must be no-store, on-demand or pin");
+        if(resource.read_mode == SkillResourceReadMode::Text &&
+           !resource.media_type.empty() && !textual_media_type(resource.media_type))
+            issue(out, true, "resource_read_mode_media_type_mismatch",
+                  location + "/read-mode", "text read-mode requires a textual media type");
+        if(!manifest.legacy_v0 && artifact) {
+            if(resource.sha256.empty())
+                issue(out, true, "resource_digest_required", location + "/sha256",
+                      "Manifest v1 Asset and Model resources require SHA-256");
+            if(!resource.declared_size)
+                issue(out, true, "resource_size_required", location + "/size",
+                      "Manifest v1 Asset and Model resources require exact size");
+            if(resource.license.empty())
+                issue(out, true, "resource_license_required", location + "/license",
+                      "Manifest v1 Asset and Model resources require license metadata");
+            if(resource.source_uri.empty())
+                issue(out, true, "resource_source_required", location + "/source",
+                      "Manifest v1 Asset and Model resources require source metadata");
+            else if(!valid_source_uri(resource.source_uri))
+                issue(out, true, "invalid_resource_source", location + "/source",
+                      "resource source must be an absolute URI with a scheme");
+        }
+        if(!resource.license.empty() &&
+           (resource.license.size() > 256U || resource.license.find_first_of("\r\n") != std::string::npos))
+            issue(out, true, "invalid_resource_license", location + "/license",
+                  "resource license must be a single line of at most 256 bytes");
+        if(resource.kind == SkillResourceType::Reference) {
+            if(resource.citation && resource.citation->title.empty())
+                issue(out, true, "reference_citation_title_required", location + "/citation/title",
+                      "citation title is required when citation metadata is declared");
+            if(resource.index && resource.index->kind != "lexical-v1")
+                issue(out, true, "unsupported_reference_index", location + "/index/kind",
+                      "Stage 7 supports only lexical-v1 indexes");
+        } else {
+            if(resource.citation)
+                issue(out, true, "resource_citation_kind_mismatch", location + "/citation",
+                      "citation metadata is valid only for Reference resources");
+            if(resource.index)
+                issue(out, true, "resource_index_kind_mismatch", location + "/index",
+                      "index metadata is valid only for Reference resources");
+        }
+        if(resource.kind == SkillResourceType::Model && !manifest.legacy_v0) {
+            if(resource.executable)
+                issue(out, true, "model_executable_forbidden", location + "/executable",
+                      "Model resources must not be executable");
+            if(resource.runtime.empty())
+                issue(out, true, "model_runtime_required", location + "/runtime",
+                      "Manifest v1 Model resources require a runtime identifier");
+            if(!resource.model_requirements)
+                issue(out, true, "model_requirements_required", location + "/requirements",
+                      "Manifest v1 Model resources require host requirements");
+            else {
+                if(resource.model_requirements->devices.empty())
+                    issue(out, true, "model_devices_required", location + "/requirements/devices",
+                          "Model resources require at least one device");
+                if(resource.model_requirements->precisions.empty())
+                    issue(out, true, "model_precisions_required", location + "/requirements/precisions",
+                          "Model resources require at least one precision");
+            }
+        } else if(resource.model_requirements) {
+            issue(out, true, "model_requirements_kind_mismatch", location + "/requirements",
+                  "model requirements are valid only for Model resources");
+        }
         if (!safe_relative(resource.path)) {
             issue(out, true, "invalid_resource_path", location + "/path", "resource path must be jail-relative without ..");
             continue;
@@ -130,6 +211,9 @@ std::vector<SkillManifestIssue> validate_skill_manifest(
             continue;
         }
         const auto size = std::filesystem::file_size(target, ec);
+        if(!ec && resource.declared_size && size != *resource.declared_size)
+            issue(out, true, "resource_size_mismatch", location + "/size",
+                  "resource size does not match the exact declared size");
         if (!ec && resource.size_limit && size > *resource.size_limit)
             issue(out, true, "resource_size_exceeded", location + "/size-limit", "resource exceeds declared size limit");
         if (!resource.sha256.empty()) {

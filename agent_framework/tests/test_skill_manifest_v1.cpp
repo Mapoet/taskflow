@@ -89,11 +89,29 @@ resources:
   assets:
     - id: tiny-asset
       path: assets/tiny.dat
+      media-type: application/octet-stream
+      read-mode: binary
       sha256: 2d711642b726b04401627ca9fbac32f5c8530fb1903cc4db02258717921a4881
+      size: 1
       size-limit: 16
+      license: Apache-2.0
+      source: package://assets/tiny.dat
   models:
     - id: tiny-model
       path: models/model.bin
+      media-type: application/octet-stream
+      read-mode: mmap
+      sha256: 44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a
+      size: 2
+      license: Apache-2.0
+      source: package://models/model.bin
+      runtime: test-runtime
+      requirements:
+        devices:
+          - cpu
+        precisions:
+          - fp32
+        min-memory-bytes: 0
 tests:
   - id: smoke
     path: tests/smoke.json
