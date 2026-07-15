@@ -5,6 +5,8 @@
 
 #include <nlohmann/json.hpp>
 
+#include <filesystem>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -31,6 +33,25 @@ struct SkillCommandResponse {
     bool ok() const noexcept;
     nlohmann::json to_json() const;
 };
+
+struct SkillCliArguments {
+    std::filesystem::path root;
+    std::filesystem::path store;
+    std::string format = "json";
+    std::string command;
+    std::vector<std::string> operands;
+    bool help = false;
+};
+
+struct SkillCliParseResult {
+    std::optional<SkillCliArguments> arguments;
+    SkillCommandResponse response;
+
+    explicit operator bool() const noexcept { return arguments.has_value(); }
+};
+
+SkillCliParseResult parse_skill_cli_arguments(const std::vector<std::string>& tokens);
+std::string skillctl_usage();
 
 } // namespace agent_framework
 

@@ -43,6 +43,28 @@ int main() {
     assert(success_value.at("ok").get<bool>());
     assert(success_value.at("error").is_null());
 
+    const auto legacy = parse_skill_cli_arguments({"/tmp/skills", "list"});
+    assert(legacy);
+    assert(legacy.arguments->root == "/tmp/skills");
+    assert(legacy.arguments->command == "list");
+
+    const auto modern = parse_skill_cli_arguments(
+        {"--root", "/tmp/skills", "--store", "/tmp/store", "show", "demo"});
+    assert(modern);
+    assert(modern.arguments->root == "/tmp/skills");
+    assert(modern.arguments->store == "/tmp/store");
+    assert(modern.arguments->command == "show");
+    assert(modern.arguments->operands == std::vector<std::string>({"demo"}));
+
+    const auto malformed = parse_skill_cli_arguments({"--root", "list"});
+    assert(!malformed);
+    assert(malformed.response.exit == SkillCliExit::Usage);
+    assert(malformed.response.error.at("code") == "skillctl_usage_error");
+
+    const auto unknown = parse_skill_cli_arguments({"--unknown", "value", "list"});
+    assert(!unknown);
+    assert(unknown.response.exit == SkillCliExit::Usage);
+
     std::cout << "test_skill_cli_contract: ok\n";
     return 0;
 }

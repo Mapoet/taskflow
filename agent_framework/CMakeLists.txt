@@ -545,6 +545,7 @@ set(AGENT_HEADERS
     include/node/ui_sink_node.hpp
     include/node/nodes.hpp
     include/agent/skill_types.hpp
+    include/agent/skill_command.hpp
     include/agent/skill_registry.hpp
     include/agent/skill_loader.hpp
     include/agent/skill_services.hpp
@@ -641,6 +642,21 @@ endif()
 
 # 示例程序：AGENT_BUILD_EXAMPLES=ON（默认 ON，或与根目录 TF_BUILD_EXAMPLES 一致）且源文件存在时注册目标
 set(_agent_framework_example_targets "")
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tools/skillctl.cpp)
+    add_executable(skillctl tools/skillctl.cpp)
+    target_link_libraries(skillctl PRIVATE agent_framework)
+    if(BUILD_TESTING AND EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/skills)
+        add_test(NAME skillctl_validate COMMAND skillctl
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/skills validate)
+        set_tests_properties(skillctl_validate PROPERTIES LABELS "phase2-cli-e2e")
+        add_test(NAME skillctl_inspect_resolved COMMAND skillctl
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/skills inspect managed --resolved)
+        set_tests_properties(skillctl_inspect_resolved PROPERTIES
+            PASS_REGULAR_EXPRESSION "agent.taskflow/v0"
+            LABELS "skill-manifest-contract;phase2-cli-e2e")
+    endif()
+endif()
+
 if(AGENT_BUILD_EXAMPLES)
     if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/examples/simple_agent.cpp)
         add_executable(simple_agent examples/simple_agent.cpp)
@@ -744,22 +760,6 @@ if(AGENT_BUILD_EXAMPLES)
             target_compile_options(tool_integration PRIVATE /std:c++20)
         endif()
         list(APPEND _agent_framework_example_targets tool_integration)
-    endif()
-
-    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/examples/skillctl.cpp)
-        add_executable(skillctl examples/skillctl.cpp)
-        target_link_libraries(skillctl PRIVATE agent_framework)
-        list(APPEND _agent_framework_example_targets skillctl)
-        if(BUILD_TESTING AND EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/skills)
-            add_test(NAME skillctl_validate COMMAND skillctl
-                ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/skills validate)
-            set_tests_properties(skillctl_validate PROPERTIES LABELS "phase2-cli-e2e")
-            add_test(NAME skillctl_inspect_resolved COMMAND skillctl
-                ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/skills inspect managed --resolved)
-            set_tests_properties(skillctl_inspect_resolved PROPERTIES
-                PASS_REGULAR_EXPRESSION "agent.taskflow/v0"
-                LABELS "skill-manifest-contract;phase2-cli-e2e")
-        endif()
     endif()
 
     if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/examples/workflow_custom.cpp)
@@ -1737,10 +1737,10 @@ if(BUILD_TESTING)
 endif()
 
 # 安装规则
-install(TARGETS agent_framework
+install(TARGETS agent_framework skillctl
     ARCHIVE DESTINATION lib
     LIBRARY DESTINATION lib
-    RUNTIME DESTINATION bin
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
 
 install(DIRECTORY include/agent
