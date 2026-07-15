@@ -97,6 +97,21 @@ int main(int argc, char** argv) {
         }
         return emit(service.permissions(operands[0], grant));
     }
+    if(command == "doctor" && !operands.empty()) {
+        SkillDoctorOptions options;
+        for(std::size_t index = 1; index < operands.size(); index += 2) {
+            if(index + 1 >= operands.size())
+                return emit(usage_error(command, "doctor option value is missing"));
+            const auto& option = operands[index];
+            const auto& value = operands[index + 1];
+            if(option == "--runtime") options.available_runtimes.push_back(value);
+            else if(option == "--model") options.available_models.push_back(value);
+            else if(option == "--grant-read") options.grants.filesystem_read.push_back(value);
+            else if(option == "--grant-write") options.grants.filesystem_write.push_back(value);
+            else return emit(usage_error(command, "unknown doctor option: " + option));
+        }
+        return emit(service.doctor(operands[0], options));
+    }
 
     return emit(usage_error(command, "invalid command arguments"));
 }

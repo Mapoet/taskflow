@@ -258,6 +258,9 @@ endif()
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/skills/skill_command.cpp)
     list(APPEND AGENT_SOURCES src/skills/skill_command.cpp)
 endif()
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/skills/skill_doctor.cpp)
+    list(APPEND AGENT_SOURCES src/skills/skill_doctor.cpp)
+endif()
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/skills/skill_registry.cpp)
     list(APPEND AGENT_SOURCES src/skills/skill_registry.cpp)
 endif()
@@ -546,6 +549,7 @@ set(AGENT_HEADERS
     include/node/nodes.hpp
     include/agent/skill_types.hpp
     include/agent/skill_command.hpp
+    include/agent/skill_doctor.hpp
     include/agent/skill_registry.hpp
     include/agent/skill_loader.hpp
     include/agent/skill_services.hpp
@@ -1595,12 +1599,19 @@ if(BUILD_TESTING)
         set_tests_properties(skill_lifecycle_stage5 PROPERTIES
             LABELS "skill-unit;skill-lifecycle-e2e;skill-runtime-integration;skill-policy-security")
     endif()
-    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_skill_cli_contract.cpp)
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_skill_cli_contract.cpp)
         add_executable(test_skill_cli_contract tests/test_skill_cli_contract.cpp)
         target_link_libraries(test_skill_cli_contract PRIVATE agent_framework)
         add_test(NAME skill_cli_contract COMMAND test_skill_cli_contract)
         set_tests_properties(skill_cli_contract PROPERTIES
             LABELS "skill-unit;skill-cli-contract")
+    endif()
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_skill_doctor.cpp)
+        add_executable(test_skill_doctor tests/test_skill_doctor.cpp)
+        target_link_libraries(test_skill_doctor PRIVATE agent_framework)
+        add_test(NAME skill_doctor_offline COMMAND test_skill_doctor)
+        set_tests_properties(skill_doctor_offline PROPERTIES
+            LABELS "skill-unit;skill-security-negative")
     endif()
     if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_skill_cursor_bundle.cpp
        AND EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/data/skills-cursor)

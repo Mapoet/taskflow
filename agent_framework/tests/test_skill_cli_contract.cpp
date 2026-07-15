@@ -189,6 +189,9 @@ alpha
            "data.example.org");
     const auto permission_text = permission_report.to_json().dump();
     assert(permission_text.find("TEST_TOKEN") == std::string::npos);
+    const auto doctor_report = service.doctor("alpha");
+    assert(doctor_report.exit == SkillCliExit::DependencyUnavailable);
+    assert(doctor_report.to_json().dump().find("TEST_TOKEN") == std::string::npos);
 
     write_file(root / "duplicate-a" / "SKILL.md", "---\nid: duplicate\n---\na\n");
     write_file(root / "duplicate-b" / "SKILL.md", "---\nid: duplicate\n---\nb\n");

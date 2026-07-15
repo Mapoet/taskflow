@@ -512,6 +512,33 @@ SkillCommandResponse SkillCommandService::permissions(
     return response;
 }
 
+SkillCommandResponse SkillCommandService::doctor(const std::string& skill_id,
+                                                  const SkillDoctorOptions& options) const {
+    if(!registry_->get(skill_id))
+        return command_error(SkillCliExit::NotFound, "doctor", "skill_not_found",
+                             "skill not found", {{"skill", skill_id}});
+    SkillDoctor doctor_service(registry_);
+    const auto report = doctor_service.inspect(skill_id, options);
+    SkillCommandResponse response;
+    response.command = "doctor";
+    response.diagnostics = report.diagnostics;
+    response.data = {{"skill", skill_id}, {"ready", report.ready}, {"checks", report.checks}};
+    if(!report.ready) {
+        const auto has = [&](const std::string& code) {
+            return std::any_of(report.diagnostics.begin(), report.diagnostics.end(),
+                               [&](const auto& diagnostic) { return diagnostic.code == code; });
+        };
+        if(has("skill_doctor_digest_mismatch")) response.exit = SkillCliExit::IntegrityFailed;
+        else if(has("skill_doctor_runtime_missing") || has("skill_doctor_model_unavailable"))
+            response.exit = SkillCliExit::DependencyUnavailable;
+        else response.exit = SkillCliExit::OperationFailed;
+        response.error = {{"code", "skill_doctor_failed"},
+                          {"message", "offline readiness checks failed"},
+                          {"details", {{"errors", report.diagnostics.size()}}}};
+    }
+    return response;
+}
+
 std::optional<SkillResourceKind> parse_skill_resource_kind(const std::string& value) {
     static const std::array<std::pair<const char*, SkillResourceKind>, 13> kinds = {{
         {"script", SkillResourceKind::Script}, {"cli", SkillResourceKind::Cli},

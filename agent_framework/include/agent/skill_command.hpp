@@ -2,6 +2,7 @@
 #define __AGENT_SKILL_COMMAND_H__
 
 #include <agent/skill_loader.hpp>
+#include <agent/skill_doctor.hpp>
 #include <agent/skill_policy.hpp>
 #include <agent/skill_registry.hpp>
 
@@ -72,6 +73,8 @@ public:
     SkillCommandResponse graph() const;
     SkillCommandResponse permissions(const std::string& skill_id,
                                      const SkillPermissionGrant& granted = {}) const;
+    SkillCommandResponse doctor(const std::string& skill_id,
+                                const SkillDoctorOptions& options = {}) const;
 
 private:
     std::shared_ptr<SkillRegistry> registry_;
