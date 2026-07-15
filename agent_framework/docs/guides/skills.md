@@ -28,9 +28,71 @@
   并支持 `path`、`required`、内联 `schema` 与 `max-bytes`。环境、Secret、未声明变量和超限
   输出均确定性拒绝。
 - v1 的 `run_skill_script`、`run_skill_cli` 和 `read_skill_resource` 要求匹配的 Skill 请求上下文，并执行 resource declaration 与文件 read grant 双重校验；legacy v0 保留一个大版本兼容路径。
-- `skillctl <root> list|validate|show|read|inspect <id> --resolved` 支持 CI 校验、受控资源读取和规范化 manifest 检查；`validate` 在存在 error 诊断时返回非零状态。
+- 正式安装的 `skillctl` 提供稳定 JSON envelope、退出码、离线 lint/doctor、隔离测试、依赖图、权限分析、确定性 package preflight，以及 Stage 5 lifecycle 操作。
 
-运行时变量为 `AGENT_SKILL_SCRIPT_ALLOWLIST`、`AGENT_SKILL_SCRIPT_TIMEOUT_SEC` 和 `AGENT_SKILL_SCRIPT_OUTPUT_MAX_BYTES`。Linux 进程执行需要 `/usr/bin/unshare` 与 `/usr/bin/bwrap`，任一缺失时 fail closed。Manifest 声明 SHA-256 时，OpenSSL 构建执行摘要校验；无 OpenSSL 构建返回 `resource_hash_unavailable`，不会静默跳过。MCP 生命周期、私有 Tool 绑定和受控 Prompt/Template 已在 Stage 3 完成；Workflow DSL、循环、subflow/submodule 和 restart/resume 属于 Stage 4；动态安装、签名/供应链验证和运行中热切换仍属于后续阶段。
+运行时变量为 `AGENT_SKILL_SCRIPT_ALLOWLIST`、`AGENT_SKILL_SCRIPT_TIMEOUT_SEC` 和 `AGENT_SKILL_SCRIPT_OUTPUT_MAX_BYTES`。Linux 进程执行需要 `/usr/bin/unshare` 与 `/usr/bin/bwrap`，任一缺失时 fail closed。Manifest 声明 SHA-256 时，OpenSSL 构建执行摘要校验；无 OpenSSL 构建返回 `resource_hash_unavailable`，不会静默跳过。MCP 生命周期、私有 Tool 绑定和受控 Prompt/Template 已在 Stage 3 完成；Workflow DSL、循环、subflow/submodule 和 restart/resume 已在 Stage 4 完成；内容寻址 lifecycle 已在 Stage 5 完成；正式 CLI、包内测试与 CI gate 已在 Stage 6 完成。
+
+## Stage 6 操作参考
+
+推荐调用形式如下；`ROOT` 是包含各 Skill 子目录的扫描根，lifecycle 命令还必须提供 `--store`：
+
+```bash
+skillctl --root ROOT list
+skillctl --root ROOT validate
+skillctl --root ROOT show ID
+skillctl --root ROOT inspect ID --resolved
+skillctl --root ROOT read ID KIND PATH [--max-bytes N] [--raw]
+skillctl --root ROOT lint [ID] [--warnings-as-errors]
+skillctl --root ROOT graph
+skillctl --root ROOT permissions ID [--grant-tool NAME ...]
+skillctl --root ROOT doctor ID [--runtime NAME] [--model NAME]
+skillctl --root ROOT test [ID] [--filter NAME] [--jobs 1..64]
+skillctl --root ROOT package PACKAGE
+
+skillctl --root ROOT --store STORE install PACKAGE [--source URI] [--signature IDENTITY]
+skillctl --root ROOT --store STORE update PACKAGE [--source URI] [--signature IDENTITY]
+skillctl --root ROOT --store STORE enable ID [--range RANGE]
+skillctl --root ROOT --store STORE disable ID
+skillctl --root ROOT --store STORE rollback ID
+skillctl --root ROOT --store STORE remove PACKAGE_DIGEST
+```
+
+除 `read --raw` 外，所有命令输出 `agent.taskflow/skillctl-output/v1`：
+
+```json
+{
+  "apiVersion": "agent.taskflow/skillctl-output/v1",
+  "command": "validate",
+  "ok": true,
+  "data": {},
+  "diagnostics": [],
+  "error": null
+}
+```
+
+稳定退出码为：`0` 成功、`2` contract/test 失败、`3` 未找到、`4` 冲突或 in-use、`5` 完整性/source/lock 失败、`6` runtime/dependency 不可用、`64` 用法错误、`70` 内部错误。调用方应读取 `error.code`，不要解析自然语言 message。
+
+### Skill Test v1
+
+Test 资源使用 `agent.taskflow/skill-test/v1`，并必须在 Manifest 的 `resources.tests` 中声明。最小资源测试为：
+
+```json
+{
+  "apiVersion": "agent.taskflow/skill-test/v1",
+  "kind": "SkillTest",
+  "name": "resource returns expected data",
+  "target": {"kind": "resource", "resource": "data"},
+  "expect": {"ok": true, "output": {"value": 7}}
+}
+```
+
+`target.kind` 支持 `resource`、`tool`、`workflow`、`script`、`cli`。可选 `input`、`mocks.tools` 和 `expect` 可比较 `ok`、`output`、`error.code`、有序事件子序列、stdout/stderr、exitCode 与 resourceDigests。Runner 固定 Registry snapshot，将包复制到临时 jail，使用空环境、无 secret provider、显式声明 mock、deadline 与主动取消，并在所有退出路径清理进程和 jail。
+
+### Package preflight 与阶段边界
+
+`package` 是只读 preflight，不生成归档：它执行 Manifest/资源验证、lint、包内测试和双次 package/resource digest 检查。`install` 与 `update` 复用同一 gate；任一失败发生在 store、lock/history 和 Registry generation 变更之前。包目录中的 symlink、特殊文件、路径穿越、缺失资源或声明摘要不匹配均 fail closed。
+
+Stage 6 只计算确定性目录身份并管理本地内容寻址 store。确定性归档格式、签名验证、可信发布者、SBOM 与远程 Registry 协议仍属于 Stage 8，当前 `--signature` 仅记录由上层可信流程提供的身份元数据，不构成密码学验证。
 
 ### Stage 3 descriptor 最小示例
 

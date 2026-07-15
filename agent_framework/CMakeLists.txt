@@ -1790,4 +1790,6 @@ install(DIRECTORY include/agent
     FILES_MATCHING PATTERN "*.hpp"
 )
 install(FILES schemas/skill-manifest-v1.schema.json
+              schemas/skill-test-v1.schema.json
+              schemas/skillctl-output-v1.schema.json
     DESTINATION ${CMAKE_INSTALL_DATADIR}/agent_framework/schemas)

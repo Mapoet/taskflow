@@ -386,6 +386,8 @@ SkillDependencyResolver::resolve
 
 ## Stage 6：正式 CLI、测试运行器和 CI，P1
 
+**状态（2026-07-15）：已完成。**
+
 ### CLI 范围
 
 ```text
@@ -409,6 +411,18 @@ skillctl package/install/update/enable/disable/remove
 - 不启动 Agent Server 即可完成 lint、validate、test 和 doctor。
 - CLI 行为、JSON schema 和退出码有 contract tests。
 - CI 包含 unit、integration、security-negative 和 package reproducibility。
+
+### 完成证据
+
+- `skillctl` 已成为正式安装目标；除 `read --raw` 外统一输出 `agent.taskflow/skillctl-output/v1`，退出码 0/2/3/4/5/6/64/70 有直接契约测试。
+- 已实现 list/show/validate/inspect/read、lint/test/graph/permissions/doctor、package/install/update/enable/disable/rollback/remove；lifecycle 输出 roots、rootRanges、精确 packages、package/resource digests 与 Registry generation。
+- `SkillTestRunner` 覆盖 resource/tool/workflow/script/CLI，比较 output/error/events/stdio/exit/digests，并以固定 snapshot、临时 jail、空环境、无 Secret、声明 mock、timeout/cancel 隔离运行；专项测试连续 20 次通过。
+- `SkillPackageGate` 在写入前执行验证、lint、包内测试与重复身份检查；测试证明失败前后 store 文件、lock/history 和 Registry generation 不变，并拒绝 traversal、symlink、FIFO、缺失资源与摘要不匹配。
+- Ubuntu CI 新增无凭据、无网络变量的 `skill-stage6-offline` job；全新 `build-stage6-ci` 本地复现中四标签并集 5/5 通过。
+- `skill-*` 标签集 16/16 通过，并逐项连续运行 20 次（共 320 次执行）无失败；完整 Debug 目标集构建到 100%。
+- 安装到隔离前缀后，`skillctl` 可直接完成 validate/package；Manifest、Test 与 CLI output 三个 v1 schema 均随安装产物发布。
+- 沙箱内全量 CTest 为 2992/3008 通过；其余 16 项中 15 项为既有 HTTP/A2A 测试无法绑定本地监听端口，1 项为在线模型 HTTP 传输不可用，Stage 6 新增测试无失败。
+- Stage 6 不定义归档、签名验证或远程 Registry；这些供应链协议仍保留给 Stage 8。
 
 ## Stage 7：Reference、Asset 与 Model 管理，P1/P2
 
@@ -516,14 +530,14 @@ P0/P1 工作不得仅增加文档或 happy-path 测试。
 
 ## 7. 完成定义
 
-- [ ] `skills-complete.md` 的 13 类资源均有类型化 descriptor 和验证器。
-- [ ] 可执行资源共用 TaskControl、Policy、预算、event sink 和 audit context。
-- [ ] Tool、network、filesystem、env、secret 默认拒绝并强制执行。
-- [ ] Skill、Script、CLI、Tool、Workflow 输入输出均支持 schema。
-- [ ] Workflow 循环、迭代、subflow/submodule、重启、嵌套使用固定版本快照。
-- [ ] Install/update/rollback/remove、SemVer dependency 和 lockfile 闭环通过。
-- [ ] CLI 覆盖 validate/lint/test/package/install/doctor，JSON 和退出码稳定。
-- [ ] 包内测试、框架集成、安全负向和综合测试进入 CI。
+- [x] `skills-complete.md` 的 13 类资源均有类型化 descriptor 和验证器。
+- [x] 可执行资源共用 TaskControl、Policy、预算、event sink 和 audit context。
+- [x] Tool、network、filesystem、env、secret 默认拒绝并强制执行。
+- [x] Skill、Script、CLI、Tool、Workflow 输入输出均支持 schema。
+- [x] Workflow 循环、迭代、subflow/submodule、重启、嵌套使用固定版本快照。
+- [x] Install/update/rollback/remove、SemVer dependency 和 lockfile 闭环通过。
+- [x] CLI 覆盖 validate/lint/test/package/install/doctor，JSON 和退出码稳定。
+- [x] 包内测试、框架集成、安全负向和综合测试进入 CI。
 - [ ] Digest、签名、来源、license、SBOM 和 Registry 策略可审计。
 - [ ] 1000 次循环/取消/重启压力测试无资源泄漏或重复副作用。
 
