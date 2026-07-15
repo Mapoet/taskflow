@@ -1,0 +1,13 @@
+{
+  "apiVersion": "agent.taskflow/skill-test/v1",
+  "kind": "SkillTest",
+  "name": "workflow returns normalized value",
+  "target": {"kind": "workflow", "resource": "main"},
+  "input": {"value": 7},
+  "mocks": {"tools": {"base_value": {"output": {"value": 7}}}},
+  "expect": {
+    "ok": true,
+    "output": {"value": 7},
+    "events": [{"type": "invocation_started"}, {"type": "invocation_completed"}]
+  }
+}

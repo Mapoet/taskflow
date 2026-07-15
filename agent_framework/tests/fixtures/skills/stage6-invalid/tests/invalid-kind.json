@@ -1,0 +1,1 @@
+{"apiVersion":"agent.taskflow/skill-test/v1","kind":"Other","name":"bad","target":{"kind":"workflow","resource":"main"},"expect":{"ok":true}}

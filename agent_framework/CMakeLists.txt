@@ -261,6 +261,9 @@ endif()
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/skills/skill_doctor.cpp)
     list(APPEND AGENT_SOURCES src/skills/skill_doctor.cpp)
 endif()
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/skills/skill_test_runner.cpp)
+    list(APPEND AGENT_SOURCES src/skills/skill_test_runner.cpp)
+endif()
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/skills/skill_registry.cpp)
     list(APPEND AGENT_SOURCES src/skills/skill_registry.cpp)
 endif()
@@ -550,6 +553,7 @@ set(AGENT_HEADERS
     include/agent/skill_types.hpp
     include/agent/skill_command.hpp
     include/agent/skill_doctor.hpp
+    include/agent/skill_test_runner.hpp
     include/agent/skill_registry.hpp
     include/agent/skill_loader.hpp
     include/agent/skill_services.hpp
@@ -1612,6 +1616,15 @@ if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_skill_cli_contract.cpp)
         add_test(NAME skill_doctor_offline COMMAND test_skill_doctor)
         set_tests_properties(skill_doctor_offline PROPERTIES
             LABELS "skill-unit;skill-security-negative")
+    endif()
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_skill_test_runner.cpp)
+        add_executable(test_skill_test_runner tests/test_skill_test_runner.cpp)
+        target_link_libraries(test_skill_test_runner PRIVATE agent_framework)
+        target_compile_definitions(test_skill_test_runner PRIVATE
+            "AGENT_STAGE6_FIXTURE_ROOT=\"${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/skills\"")
+        add_test(NAME skill_test_runner_contract COMMAND test_skill_test_runner)
+        set_tests_properties(skill_test_runner_contract PROPERTIES
+            LABELS "skill-unit;skill-test-runner;skill-security-negative")
     endif()
     if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_skill_cursor_bundle.cpp
        AND EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/data/skills-cursor)
