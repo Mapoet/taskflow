@@ -1618,7 +1618,7 @@ if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_skill_cli_contract.cpp)
         target_link_libraries(test_skill_doctor PRIVATE agent_framework)
         add_test(NAME skill_doctor_offline COMMAND test_skill_doctor)
         set_tests_properties(skill_doctor_offline PROPERTIES
-            LABELS "skill-unit;skill-security-negative")
+            LABELS "skill-unit;skill-cli-contract;skill-security-negative")
     endif()
     if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_skill_test_runner.cpp)
         add_executable(test_skill_test_runner tests/test_skill_test_runner.cpp)
