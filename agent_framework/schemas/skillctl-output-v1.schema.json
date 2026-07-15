@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://taskflow.github.io/agent-framework/schemas/skillctl-output-v1.schema.json",
+  "title": "skillctl output v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["apiVersion", "command", "ok", "data", "diagnostics", "error"],
+  "properties": {
+    "apiVersion": {
+      "const": "agent.taskflow/skillctl-output/v1"
+    },
+    "command": {
+      "type": "string",
+      "minLength": 1
+    },
+    "ok": {
+      "type": "boolean"
+    },
+    "data": {
+      "type": "object"
+    },
+    "diagnostics": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["severity", "code", "path", "location", "message", "suggestion"],
+        "properties": {
+          "severity": {"enum": ["warning", "error"]},
+          "code": {"type": "string"},
+          "path": {"type": "string"},
+          "location": {"type": "string"},
+          "message": {"type": "string"},
+          "suggestion": {"type": "string"}
+        }
+      }
+    },
+    "error": {
+      "oneOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["code", "message", "details"],
+          "properties": {
+            "code": {"type": "string", "minLength": 1},
+            "message": {"type": "string"},
+            "details": {"type": "object"}
+          }
+        }
+      ]
+    }
+  }
+}
