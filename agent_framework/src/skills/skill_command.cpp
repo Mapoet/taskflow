@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <array>
+#include <functional>
 
 namespace agent_framework {
 
@@ -49,6 +50,64 @@ SkillCommandResponse command_error(SkillCliExit exit, std::string command,
     response.error = {{"code", std::move(code)}, {"message", std::move(message)},
                       {"details", std::move(details)}};
     return response;
+}
+
+nlohmann::json package_record_to_json(const SkillPackageRecord& package) {
+    return {{"id", package.id}, {"version", package.version.str()},
+            {"packageDigest", package.package_digest},
+            {"resourceDigests", package.resource_digests},
+            {"sourceUri", package.source_uri},
+            {"signatureIdentity", package.signature_identity}};
+}
+
+SkillCliExit lifecycle_exit(const std::string& command, const nlohmann::json& error) {
+    const auto code = error.value("code", "");
+    const auto message = error.value("message", error.value("error", ""));
+    if(message.find("digest is invalid") != std::string::npos)
+        return SkillCliExit::IntegrityFailed;
+    if(code == kSkillDependencyConflict || code == kSkillPackageInUse)
+        return message.find("unavailable") != std::string::npos
+            ? SkillCliExit::NotFound : SkillCliExit::OperationFailed;
+    if(code == kSkillDigestMismatch || code == kSkillLockInvalid)
+        return SkillCliExit::IntegrityFailed;
+    if(command == "install" || command == "update")
+        return SkillCliExit::IntegrityFailed;
+    return SkillCliExit::NotFound;
+}
+
+template <typename Operation>
+SkillCommandResponse run_lifecycle(const std::shared_ptr<SkillRegistry>& registry,
+                                   const std::filesystem::path& store,
+                                   const std::string& command,
+                                   Operation&& operation) {
+    if(store.empty())
+        return command_error(SkillCliExit::Usage, command, "skillctl_usage_error",
+                             "lifecycle commands require --store");
+    try {
+        SkillLifecycleManager manager(registry, store);
+        auto result = std::invoke(std::forward<Operation>(operation), manager);
+        if(!result.ok) {
+            const auto code = result.error.value("code", kSkillLifecycleInvalid);
+            const auto message = result.error.value(
+                "message", result.error.value("error", "lifecycle operation failed"));
+            return command_error(lifecycle_exit(command, result.error), command, code,
+                                 message,
+                                 result.error.value("details", nlohmann::json::object()));
+        }
+        const auto lock = result.lockfile.value_or(manager.lockfile()).to_json();
+        SkillCommandResponse response;
+        response.command = command;
+        response.data = {{"roots", lock.at("roots")},
+                         {"rootRanges", lock.at("rootRanges")},
+                         {"packages", lock.at("packages")},
+                         {"edges", lock.at("edges")},
+                         {"generation", registry->snapshot().generation()}};
+        if(result.package) response.data["package"] = package_record_to_json(*result.package);
+        return response;
+    } catch(const std::exception& exception) {
+        return command_error(SkillCliExit::IntegrityFailed, command, kSkillLockInvalid,
+                             exception.what());
+    }
 }
 
 SkillResourceType resource_type(SkillResourceKind kind) {
@@ -609,6 +668,51 @@ SkillCommandResponse SkillCommandService::test(const std::string& skill_id,
                           {"details", {{"failed", failed}}}};
     }
     return response;
+}
+
+SkillCommandResponse SkillCommandService::install(
+    const std::filesystem::path& store, const std::filesystem::path& package,
+    const std::string& source_uri, const std::string& signature_identity) const {
+    return run_lifecycle(registry_, store, "install", [&](SkillLifecycleManager& manager) {
+        return manager.install(package, {source_uri, signature_identity});
+    });
+}
+
+SkillCommandResponse SkillCommandService::update(
+    const std::filesystem::path& store, const std::filesystem::path& package,
+    const std::string& source_uri, const std::string& signature_identity) const {
+    return run_lifecycle(registry_, store, "update", [&](SkillLifecycleManager& manager) {
+        return manager.update(package, {source_uri, signature_identity});
+    });
+}
+
+SkillCommandResponse SkillCommandService::enable(
+    const std::filesystem::path& store, const std::string& skill_id,
+    const std::string& range) const {
+    return run_lifecycle(registry_, store, "enable", [&](SkillLifecycleManager& manager) {
+        return manager.enable(skill_id, range);
+    });
+}
+
+SkillCommandResponse SkillCommandService::disable(
+    const std::filesystem::path& store, const std::string& skill_id) const {
+    return run_lifecycle(registry_, store, "disable", [&](SkillLifecycleManager& manager) {
+        return manager.disable(skill_id);
+    });
+}
+
+SkillCommandResponse SkillCommandService::remove(
+    const std::filesystem::path& store, const std::string& package_digest) const {
+    return run_lifecycle(registry_, store, "remove", [&](SkillLifecycleManager& manager) {
+        return manager.remove(package_digest);
+    });
+}
+
+SkillCommandResponse SkillCommandService::rollback(
+    const std::filesystem::path& store, const std::string& skill_id) const {
+    return run_lifecycle(registry_, store, "rollback", [&](SkillLifecycleManager& manager) {
+        return manager.rollback(skill_id);
+    });
 }
 
 std::optional<SkillResourceKind> parse_skill_resource_kind(const std::string& value) {

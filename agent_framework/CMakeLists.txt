@@ -1627,6 +1627,13 @@ if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_skill_cli_contract.cpp)
             LABELS "skill-unit;skill-test-runner;skill-security-negative"
             ENVIRONMENT "AGENT_SKILL_SCRIPT_ALLOWLIST=/bin/sh")
     endif()
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_skill_cli_lifecycle.cpp)
+        add_executable(test_skill_cli_lifecycle tests/test_skill_cli_lifecycle.cpp)
+        target_link_libraries(test_skill_cli_lifecycle PRIVATE agent_framework)
+        add_test(NAME skill_cli_lifecycle COMMAND test_skill_cli_lifecycle)
+        set_tests_properties(skill_cli_lifecycle PROPERTIES
+            LABELS "skill-unit;skill-cli-contract;skill-lifecycle-e2e;skill-security-negative")
+    endif()
     if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_skill_cursor_bundle.cpp
        AND EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/data/skills-cursor)
         add_executable(test_skill_cursor_bundle tests/test_skill_cursor_bundle.cpp)

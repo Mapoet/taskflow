@@ -127,6 +127,34 @@ int main(int argc, char** argv) {
         }
         return emit(service.test(skill_id, filter, jobs));
     }
+    if(command == "install" || command == "update") {
+        if(operands.empty()) return emit(usage_error(command, "a package path is required"));
+        std::string source_uri;
+        std::string signature_identity;
+        for(std::size_t index = 1; index < operands.size(); ++index) {
+            if(operands[index] == "--source" && index + 1 < operands.size())
+                source_uri = operands[++index];
+            else if(operands[index] == "--signature" && index + 1 < operands.size())
+                signature_identity = operands[++index];
+            else return emit(usage_error(command, "invalid lifecycle option: " + operands[index]));
+        }
+        return emit(command == "install"
+            ? service.install(invocation.store, operands[0], source_uri, signature_identity)
+            : service.update(invocation.store, operands[0], source_uri, signature_identity));
+    }
+    if(command == "enable" && !operands.empty() && operands.size() <= 3) {
+        std::string range = "*";
+        if(operands.size() == 2) range = operands[1];
+        else if(operands.size() == 3 && operands[1] == "--range") range = operands[2];
+        else if(operands.size() == 3) return emit(usage_error(command, "enable accepts --range RANGE"));
+        return emit(service.enable(invocation.store, operands[0], range));
+    }
+    if(command == "disable" && operands.size() == 1)
+        return emit(service.disable(invocation.store, operands[0]));
+    if(command == "remove" && operands.size() == 1)
+        return emit(service.remove(invocation.store, operands[0]));
+    if(command == "rollback" && operands.size() == 1)
+        return emit(service.rollback(invocation.store, operands[0]));
 
     return emit(usage_error(command, "invalid command arguments"));
 }

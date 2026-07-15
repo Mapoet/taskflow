@@ -79,6 +79,23 @@ public:
     SkillCommandResponse test(const std::string& skill_id = {},
                               const std::string& filter = {},
                               std::size_t jobs = 1) const;
+    SkillCommandResponse install(const std::filesystem::path& store,
+                                 const std::filesystem::path& package,
+                                 const std::string& source_uri = {},
+                                 const std::string& signature_identity = {}) const;
+    SkillCommandResponse update(const std::filesystem::path& store,
+                                const std::filesystem::path& package,
+                                const std::string& source_uri = {},
+                                const std::string& signature_identity = {}) const;
+    SkillCommandResponse enable(const std::filesystem::path& store,
+                                const std::string& skill_id,
+                                const std::string& range = "*") const;
+    SkillCommandResponse disable(const std::filesystem::path& store,
+                                 const std::string& skill_id) const;
+    SkillCommandResponse remove(const std::filesystem::path& store,
+                                const std::string& package_digest) const;
+    SkillCommandResponse rollback(const std::filesystem::path& store,
+                                  const std::string& skill_id) const;
 
 private:
     std::shared_ptr<SkillRegistry> registry_;
