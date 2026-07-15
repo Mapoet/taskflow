@@ -1,4 +1,5 @@
 #include <agent/skill_resource_cache.hpp>
+#include <agent/skill_lifecycle.hpp>
 
 #include <cassert>
 #include <filesystem>
@@ -37,6 +38,17 @@ SkillResourceHandle handle_for(const fs::path& path, const std::string& digest,
     handle.package_digest = "package-digest";
     handle.descriptor.id = "fixture";
     handle.descriptor.media_type = "application/octet-stream";
+    return handle;
+}
+
+SkillResourceHandle write_handle(const fs::path& path, const std::string& content,
+                                 const std::string& id) {
+    write_file(path, content);
+    std::string error;
+    const auto digest = skill_sha256_file(path, &error);
+    assert(digest);
+    auto handle = handle_for(path, *digest, content.size());
+    handle.descriptor.id = id;
     return handle;
 }
 } // namespace
@@ -129,6 +141,61 @@ int main() {
         assert(!special.ok && code_is(special.error, "skill_cache_source_invalid"));
     }
 #endif
+
+    const fs::path policy_base = base / "policy";
+    SkillCacheLimits policy_limits;
+    policy_limits.max_object_bytes = 16;
+    policy_limits.max_total_bytes = 12;
+    SkillResourceCache policy_cache(policy_base / "cache", policy_limits);
+    const auto handle_a = write_handle(policy_base / "a.bin", "aaaaaa", "a");
+    const auto handle_b = write_handle(policy_base / "b.bin", "bbbbbb", "b");
+    const auto handle_c = write_handle(policy_base / "c.bin", "cccccc", "c");
+    const auto handle_d = write_handle(policy_base / "d.bin", "dddddd", "d");
+    const auto handle_e = write_handle(policy_base / "e.bin", "eeeeee", "e");
+
+    auto acquired_a = policy_cache.acquire(handle_a);
+    auto acquired_b = policy_cache.acquire(handle_b);
+    assert(acquired_a.ok && acquired_b.ok);
+    acquired_b.lease.reset();
+    auto acquired_c = policy_cache.acquire(handle_c);
+    assert(acquired_c.ok);
+    assert(fs::exists(acquired_a.object->path));
+    assert(!fs::exists(acquired_b.object->path));
+
+    assert(policy_cache.pin(acquired_a.object->digest).ok);
+    acquired_a.lease.reset();
+    acquired_c.lease.reset();
+    auto acquired_d = policy_cache.acquire(handle_d);
+    assert(acquired_d.ok);
+    assert(fs::exists(acquired_a.object->path));
+    assert(!fs::exists(acquired_c.object->path));
+    assert(policy_cache.pin(acquired_d.object->digest).ok);
+    acquired_d.lease.reset();
+    const auto quota_failure = policy_cache.acquire(handle_e);
+    assert(!quota_failure.ok &&
+           code_is(quota_failure.error, "skill_cache_quota_exceeded"));
+
+    const auto report = policy_cache.inspect();
+    assert(report.ok && report.object_count == 2U && report.total_bytes == 12U);
+    assert(report.pinned_bytes == 12U && report.entries.size() == 2U);
+    assert(policy_cache.unpin(acquired_a.object->digest).ok);
+    assert(policy_cache.collect().ok);
+
+    const fs::path stale = policy_base / "cache/transactions/stale";
+    write_file(stale / "partial", "partial");
+    fs::remove(acquired_d.object->metadata_path, ec);
+    const auto recovered = policy_cache.verify();
+    assert(recovered.ok);
+    assert(!fs::exists(stale));
+    assert(fs::is_regular_file(acquired_d.object->metadata_path));
+
+    write_file(acquired_d.object->path, "broken");
+    const auto quarantined = policy_cache.verify();
+    assert(quarantined.ok);
+    assert(!fs::exists(acquired_d.object->path));
+    assert(fs::is_directory(policy_base / "cache/quarantine"));
+    assert(fs::directory_iterator(policy_base / "cache/quarantine") !=
+           fs::directory_iterator{});
 
     fs::remove_all(base, ec);
     std::cout << "test_skill_resource_cache: ok\n";

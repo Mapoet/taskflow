@@ -10,6 +10,7 @@
 #include <mutex>
 #include <optional>
 #include <string>
+#include <vector>
 
 namespace agent_framework {
 
@@ -26,6 +27,9 @@ struct SkillCacheObject {
     std::string media_type;
     std::string source_package_digest;
     std::string source_resource_id;
+    std::uint64_t last_access = 0;
+    bool pinned = false;
+    bool leased = false;
 };
 
 class SkillCacheLease {
@@ -45,17 +49,36 @@ struct SkillCacheResult {
     std::shared_ptr<SkillCacheLease> lease;
 };
 
+struct SkillCacheReport {
+    bool ok = false;
+    nlohmann::json error = nlohmann::json::object();
+    std::uint64_t total_bytes = 0;
+    std::uint64_t pinned_bytes = 0;
+    std::size_t object_count = 0;
+    std::size_t leased_objects = 0;
+    std::vector<SkillCacheObject> entries;
+};
+
 class SkillResourceCache {
 public:
     explicit SkillResourceCache(std::filesystem::path root,
                                 SkillCacheLimits limits = {});
 
     SkillCacheResult acquire(const SkillResourceHandle& handle);
+    SkillCacheReport inspect() const;
+    SkillCacheResult pin(const std::string& digest);
+    SkillCacheResult unpin(const std::string& digest);
+    SkillCacheResult collect();
+    SkillCacheResult verify();
     const std::filesystem::path& root() const noexcept { return root_; }
     const SkillCacheLimits& limits() const noexcept { return limits_; }
 
 private:
     SkillCacheResult acquire_locked(const SkillResourceHandle& handle);
+    SkillCacheReport inspect_locked() const;
+    SkillCacheResult set_pin_locked(const std::string& digest, bool pinned);
+    SkillCacheResult collect_locked(std::uint64_t required_bytes = 0,
+                                    const std::string& protected_digest = {});
     std::filesystem::path root_;
     SkillCacheLimits limits_;
     mutable std::mutex mutex_;
