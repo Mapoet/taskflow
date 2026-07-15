@@ -87,6 +87,16 @@ int main() {
     write_file(root / "alpha" / "references" / "guide.md", "guide-text");
     write_file(root / "alpha" / "assets" / "blob.bin", std::string("a\0b", 3));
     write_file(root / "alpha" / "scripts" / "run.sh", "#!/bin/sh\nexit 0\n");
+    write_file(root / "alpha" / "tests" / "pass.json", R"({
+      "apiVersion":"agent.taskflow/skill-test/v1","kind":"SkillTest",
+      "name":"CLI contract pass","target":{"kind":"resource","resource":"guide"},
+      "expect":{"ok":true,"output":"guide-text"}
+    })");
+    write_file(root / "alpha" / "tests" / "fail.json", R"({
+      "apiVersion":"agent.taskflow/skill-test/v1","kind":"SkillTest",
+      "name":"CLI contract fail","target":{"kind":"resource","resource":"guide"},
+      "expect":{"ok":true,"output":"wrong"}
+    })");
     write_file(root / "alpha" / "SKILL.md", R"(---
 api-version: agent.taskflow/v1
 kind: Skill
@@ -115,6 +125,11 @@ resources:
     - id: blob
       path: assets/blob.bin
       media-type: application/octet-stream
+  tests:
+    - id: pass
+      path: tests/pass.json
+    - id: fail
+      path: tests/fail.json
 ---
 alpha
 )");
@@ -192,6 +207,19 @@ alpha
     const auto doctor_report = service.doctor("alpha");
     assert(doctor_report.exit == SkillCliExit::DependencyUnavailable);
     assert(doctor_report.to_json().dump().find("TEST_TOKEN") == std::string::npos);
+    const auto tests_passed = service.test("alpha", "CLI contract pass", 1);
+    assert(tests_passed.ok());
+    assert(tests_passed.data.at("passed") == 1);
+    assert(tests_passed.data.at("failed") == 0);
+    assert(tests_passed.data.at("cases").size() == 1);
+    const auto tests_failed = service.test("alpha", "CLI contract fail", 1);
+    assert(tests_failed.exit == SkillCliExit::ContractFailed);
+    assert(tests_failed.error.at("code") == "skill_tests_failed");
+    assert(tests_failed.data.at("failed") == 1);
+    assert(service.test("alpha", "unmatched", 1).exit == SkillCliExit::Usage);
+    assert(service.test("alpha", {}, 0).exit == SkillCliExit::Usage);
+    assert(service.test("alpha", {}, 65).exit == SkillCliExit::Usage);
+    assert(tests_failed.to_json().dump().find("TEST_TOKEN") == std::string::npos);
 
     write_file(root / "duplicate-a" / "SKILL.md", "---\nid: duplicate\n---\na\n");
     write_file(root / "duplicate-b" / "SKILL.md", "---\nid: duplicate\n---\nb\n");

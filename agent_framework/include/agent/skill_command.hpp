@@ -5,6 +5,7 @@
 #include <agent/skill_doctor.hpp>
 #include <agent/skill_policy.hpp>
 #include <agent/skill_registry.hpp>
+#include <agent/skill_test_runner.hpp>
 
 #include <nlohmann/json.hpp>
 
@@ -75,6 +76,9 @@ public:
                                      const SkillPermissionGrant& granted = {}) const;
     SkillCommandResponse doctor(const std::string& skill_id,
                                 const SkillDoctorOptions& options = {}) const;
+    SkillCommandResponse test(const std::string& skill_id = {},
+                              const std::string& filter = {},
+                              std::size_t jobs = 1) const;
 
 private:
     std::shared_ptr<SkillRegistry> registry_;

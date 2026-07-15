@@ -112,6 +112,21 @@ int main(int argc, char** argv) {
         }
         return emit(service.doctor(operands[0], options));
     }
+    if(command == "test") {
+        std::string skill_id;
+        std::string filter;
+        std::size_t jobs = 1;
+        for(std::size_t index = 0; index < operands.size(); ++index) {
+            if(operands[index] == "--filter" && index + 1 < operands.size())
+                filter = operands[++index];
+            else if(operands[index] == "--jobs" && index + 1 < operands.size())
+                jobs = std::strtoull(operands[++index].c_str(), nullptr, 10);
+            else if(skill_id.empty() && !operands[index].starts_with("-"))
+                skill_id = operands[index];
+            else return emit(usage_error(command, "invalid test option: " + operands[index]));
+        }
+        return emit(service.test(skill_id, filter, jobs));
+    }
 
     return emit(usage_error(command, "invalid command arguments"));
 }

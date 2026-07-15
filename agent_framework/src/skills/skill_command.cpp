@@ -539,6 +539,78 @@ SkillCommandResponse SkillCommandService::doctor(const std::string& skill_id,
     return response;
 }
 
+SkillCommandResponse SkillCommandService::test(const std::string& skill_id,
+                                                const std::string& filter,
+                                                std::size_t jobs) const {
+    if(jobs == 0 || jobs > 64)
+        return command_error(SkillCliExit::Usage, "test", "skillctl_usage_error",
+                             "jobs must be in the range 1..64", {{"jobs", jobs}});
+
+    std::vector<std::string> skill_ids;
+    if(!skill_id.empty()) {
+        if(!registry_->get(skill_id))
+            return command_error(SkillCliExit::NotFound, "test", "skill_not_found",
+                                 "skill not found", {{"skill", skill_id}});
+        skill_ids.push_back(skill_id);
+    } else {
+        for(const auto& entry : registry_->entries()) {
+            if(entry.manifest && std::any_of(
+                   entry.manifest->resources.begin(), entry.manifest->resources.end(),
+                   [](const auto& resource) { return resource.kind == SkillResourceType::Test; }))
+                skill_ids.push_back(entry.id);
+        }
+        std::sort(skill_ids.begin(), skill_ids.end());
+    }
+
+    SkillTestRunner runner(registry_);
+    auto cases = nlohmann::json::array();
+    std::size_t passed = 0;
+    std::size_t failed = 0;
+    bool matched = false;
+    for(const auto& id : skill_ids) {
+        SkillTestRunOptions options;
+        options.filter = filter;
+        options.jobs = jobs;
+        const auto suite = runner.run(id, options);
+        const auto code = suite.error.is_object() ? suite.error.value("code", "") : "";
+        if(code == "skill_test_filter_unmatched") continue;
+        if(code == "skill_test_options_invalid")
+            return command_error(SkillCliExit::Usage, "test", "skillctl_usage_error",
+                                 suite.error.value("message", "invalid test options"));
+        if(!suite.error.is_null() && code != "skill_tests_failed")
+            return command_error(SkillCliExit::ContractFailed, "test",
+                                 code.empty() ? "skill_test_execution_failed" : code,
+                                 suite.error.value("message", "test execution failed"),
+                                 suite.error.value("details", nlohmann::json::object()));
+        matched = matched || !suite.cases.empty();
+        passed += suite.passed;
+        failed += suite.failed;
+        for(const auto& test_case : suite.cases) {
+            auto serialized = test_case.to_json();
+            serialized["skill"] = id;
+            cases.push_back(std::move(serialized));
+        }
+    }
+    if(!matched)
+        return command_error(SkillCliExit::Usage, "test", "skill_test_filter_unmatched",
+                             "no tests matched the requested filter", {{"filter", filter}});
+
+    std::sort(cases.begin(), cases.end(), [](const auto& left, const auto& right) {
+        return std::tie(left.at("skill"), left.at("name")) <
+               std::tie(right.at("skill"), right.at("name"));
+    });
+    SkillCommandResponse response;
+    response.command = "test";
+    response.data = {{"passed", passed}, {"failed", failed}, {"cases", std::move(cases)}};
+    if(failed != 0) {
+        response.exit = SkillCliExit::ContractFailed;
+        response.error = {{"code", "skill_tests_failed"},
+                          {"message", "one or more skill tests failed"},
+                          {"details", {{"failed", failed}}}};
+    }
+    return response;
+}
+
 std::optional<SkillResourceKind> parse_skill_resource_kind(const std::string& value) {
     static const std::array<std::pair<const char*, SkillResourceKind>, 13> kinds = {{
         {"script", SkillResourceKind::Script}, {"cli", SkillResourceKind::Cli},
