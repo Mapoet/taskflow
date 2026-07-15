@@ -273,6 +273,9 @@ endif()
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/skills/skill_loader.cpp)
     list(APPEND AGENT_SOURCES src/skills/skill_loader.cpp)
 endif()
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/skills/skill_resource_access.cpp)
+    list(APPEND AGENT_SOURCES src/skills/skill_resource_access.cpp)
+endif()
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/skills/skill_services.cpp)
     list(APPEND AGENT_SOURCES src/skills/skill_services.cpp)
 endif()
@@ -559,6 +562,7 @@ set(AGENT_HEADERS
     include/agent/skill_test_runner.hpp
     include/agent/skill_registry.hpp
     include/agent/skill_loader.hpp
+    include/agent/skill_resource_access.hpp
     include/agent/skill_services.hpp
     include/agent/skill_capability_runtime.hpp
     include/agent/skill_script_tool.hpp
@@ -1550,6 +1554,13 @@ if(BUILD_TESTING)
         add_test(NAME skill_resource_contract COMMAND test_skill_resource_contract)
         set_tests_properties(skill_resource_contract PROPERTIES
             LABELS "skill-unit;skill-manifest-contract;skill-resource-management;skill-security-negative")
+    endif()
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_skill_resource_access.cpp)
+        add_executable(test_skill_resource_access tests/test_skill_resource_access.cpp)
+        target_link_libraries(test_skill_resource_access PRIVATE agent_framework)
+        add_test(NAME skill_resource_access COMMAND test_skill_resource_access)
+        set_tests_properties(skill_resource_access PROPERTIES
+            LABELS "skill-unit;skill-resource-management;skill-runtime-integration;skill-security-negative")
     endif()
     if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_skill_policy_runtime.cpp)
         add_executable(test_skill_policy_runtime tests/test_skill_policy_runtime.cpp)

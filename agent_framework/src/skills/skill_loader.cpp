@@ -161,6 +161,7 @@ std::optional<std::string> SkillLoader::load_resource_snapshot(
 
     bool authorized = false;
     std::string resource_id;
+    SkillResourceType resource_type = SkillResourceType::Unknown;
     if (manifest) {
         const SkillResourceType requested = manifest_kind(kind);
         for (const auto& resource : manifest->resources) {
@@ -168,6 +169,7 @@ std::optional<std::string> SkillLoader::load_resource_snapshot(
                 (kind == SkillResourceKind::AnyDeclared || resource.kind == requested)) {
                 authorized = true;
                 resource_id = resource.id;
+                resource_type = resource.kind;
                 break;
             }
         }
@@ -177,6 +179,7 @@ std::optional<std::string> SkillLoader::load_resource_snapshot(
             for (const auto& resource : manifest->resources)
                 kind_declared = kind_declared || resource.kind == requested;
             authorized = !kind_declared && prefix && relative_path.rfind(prefix, 0) == 0;
+            if(authorized) resource_type = requested;
         }
     }
     if (!authorized) return fail("resource is not declared for requested kind");
@@ -197,7 +200,9 @@ std::optional<std::string> SkillLoader::load_resource_snapshot(
         : std::to_string(file_time_stamp(target));
     const std::string cache_key = "resource:" + entry.id + ":" + relative_path + "@" +
                                   resource_identity;
-    {
+    const bool cacheable = resource_type != SkillResourceType::Asset &&
+                           resource_type != SkillResourceType::Model;
+    if(cacheable) {
         std::lock_guard<std::mutex> lock(cache_mutex_);
         const auto cached = cache_.find(cache_key);
         if (cached != cache_.end() && cached->second.second == resource_identity)
@@ -208,7 +213,7 @@ std::optional<std::string> SkillLoader::load_resource_snapshot(
     std::string content(static_cast<std::size_t>(size), '\0');
     input.read(content.data(), static_cast<std::streamsize>(content.size()));
     if (!input && !input.eof()) return fail("resource read failed");
-    {
+    if(cacheable) {
         std::lock_guard<std::mutex> lock(cache_mutex_);
         cache_[cache_key] = {content, resource_identity};
     }
