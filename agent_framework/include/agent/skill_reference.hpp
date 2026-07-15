@@ -8,6 +8,7 @@
 #include <mutex>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace agent_framework {
@@ -15,6 +16,10 @@ namespace agent_framework {
 struct SkillReferenceLimits {
     std::size_t max_page_bytes = 64U * 1024U;
     std::uint64_t max_total_bytes = 1024U * 1024U;
+    std::uint64_t max_index_source_bytes = 8U * 1024U * 1024U;
+    std::uint64_t max_derived_index_bytes = 16U * 1024U * 1024U;
+    std::size_t max_search_hits = 32U;
+    std::size_t snippet_bytes = 512U;
 };
 
 struct SkillCitation {
@@ -45,17 +50,40 @@ struct SkillReferenceResult {
     std::optional<SkillReferencePage> page;
 };
 
+struct SkillReferenceSearchHit {
+    double score = 0.0;
+    std::uint64_t match_start = 0;
+    std::uint64_t match_end = 0;
+    std::uint64_t snippet_start = 0;
+    std::uint64_t snippet_end = 0;
+    std::string snippet;
+    SkillCitation citation;
+};
+
+struct SkillReferenceSearchResult {
+    bool ok = false;
+    nlohmann::json error = nlohmann::json::object();
+    std::filesystem::path index_path;
+    std::vector<SkillReferenceSearchHit> hits;
+};
+
 class SkillReferenceService {
 public:
-    explicit SkillReferenceService(SkillReferenceLimits limits = {}) : limits_(limits) {}
+    explicit SkillReferenceService(SkillReferenceLimits limits = {},
+                                   std::filesystem::path derived_root = {})
+        : limits_(limits), derived_root_(std::move(derived_root)) {}
 
     SkillReferenceResult read_page(const SkillResourceHandle& handle,
                                    std::uint64_t offset,
                                    std::size_t max_bytes) const;
+    SkillReferenceSearchResult search(const SkillResourceHandle& handle,
+                                      const std::string& query,
+                                      std::size_t max_hits) const;
     std::uint64_t bytes_read() const;
 
 private:
     SkillReferenceLimits limits_;
+    std::filesystem::path derived_root_;
     mutable std::mutex mutex_;
     mutable std::uint64_t bytes_read_ = 0;
 };
