@@ -12,6 +12,7 @@
 #include <filesystem>
 #include <optional>
 #include <string>
+#include <mutex>
 #include <unordered_map>
 
 namespace agent_framework {
@@ -40,7 +41,8 @@ public:
 
 private:
     const SkillRegistry& registry_;
-    mutable std::unordered_map<std::string, std::pair<std::string, std::uintmax_t>> cache_;
+    mutable std::mutex cache_mutex_;
+    mutable std::unordered_map<std::string, std::pair<std::string, std::string>> cache_;
 };
 
 } // namespace agent_framework

@@ -1,4 +1,5 @@
 #include <agent/skill_workflow.hpp>
+#include <agent/skill_lifecycle.hpp>
 
 #include <workflow/nodeflow.hpp>
 
@@ -613,36 +614,41 @@ SkillWorkflowResult SkillWorkflowRuntime::run(
     SkillWorkflowResult result;
     auto run_state = std::make_shared<ExecutionState>();
     try {
-        const auto root_entry = registry_->get(skill_id);
-        const auto root_manifest = registry_->get_manifest(skill_id);
+        const auto registry_snapshot = registry_->snapshot();
+        const auto root_entry = registry_snapshot.get(skill_id);
+        const auto root_manifest = registry_snapshot.get_manifest(skill_id);
         if (!root_entry || !root_manifest)
             throw WorkflowError(failure(kSkillDependencyUnavailable,
                                         "workflow skill is unavailable"));
         Execution execution{{}, std::move(options), run_state, skill_id};
         std::function<void(const std::string&, const std::string&)> pin;
-        pin = [&](const std::string& id, const std::string& expected_version) {
+        pin = [&](const std::string& id, const std::string& expected_range) {
             const auto existing = execution.skills.find(id);
             if (existing != execution.skills.end()) {
-                if (!expected_version.empty() &&
-                    existing->second.manifest->version != expected_version)
+                auto version = SkillSemVersion::parse(existing->second.manifest->version);
+                auto range = SkillSemVersionRange::parse(expected_range.empty() ? "*" : expected_range);
+                if (!version || !range || !range->contains(*version))
                     throw WorkflowError(failure(kSkillWorkflowDependencyMismatch,
-                        "workflow dependency has conflicting exact versions",
-                        {{"skill", id}, {"expected", expected_version},
+                        "workflow dependency does not satisfy the pinned range",
+                        {{"skill", id}, {"expected", expected_range},
                          {"actual", existing->second.manifest->version}}));
                 return;
             }
-            const auto entry = registry_->get(id);
-            const auto manifest = registry_->get_manifest(id);
+            const auto entry = registry_snapshot.get(id);
+            const auto manifest = registry_snapshot.get_manifest(id);
             if (!entry || !manifest)
                 throw WorkflowError(failure(kSkillDependencyUnavailable,
                     "workflow dependency is unavailable", {{"skill", id}}));
-            if (!expected_version.empty() && manifest->version != expected_version)
+            auto version = SkillSemVersion::parse(manifest->version);
+            auto range = SkillSemVersionRange::parse(expected_range.empty() ? "*" : expected_range);
+            if (!version || !range || !range->contains(*version))
                 throw WorkflowError(failure(kSkillWorkflowDependencyMismatch,
-                    "workflow dependency version does not match the exact lock",
-                    {{"skill", id}, {"expected", expected_version},
+                    "workflow dependency version does not satisfy the snapshot lock",
+                    {{"skill", id}, {"expected", expected_range},
                      {"actual", manifest->version}}));
-            auto bound = capabilities_->bind(id, execution.options.context,
-                                             {.publish_to_toolbus = false});
+            auto bound = capabilities_->bind_snapshot(
+                *entry, manifest, execution.options.context,
+                {.publish_to_toolbus = false});
             if (!bound.ok()) throw WorkflowError(bound.error);
             PinnedSkill pinned{*entry, manifest, bound.binding, {}};
             for (const auto& resource : manifest->resources) {
@@ -672,12 +678,7 @@ SkillWorkflowResult SkillWorkflowRuntime::run(
             execution.skills.emplace(id, std::move(pinned));
             result.dependency_lock[id] = manifest->version;
             for (const auto& dependency : manifest->dependencies) {
-                if (dependency.version.empty() ||
-                    dependency.version.find_first_of("<>=^~*") != std::string::npos)
-                    throw WorkflowError(failure(kSkillWorkflowDependencyMismatch,
-                        "Stage 4 workflows require exact dependency versions",
-                        {{"skill", dependency.name}, {"version", dependency.version}}));
-                if (dependency.optional && !registry_->get(dependency.name)) continue;
+                if (dependency.optional && !registry_snapshot.get(dependency.name)) continue;
                 pin(dependency.name, dependency.version);
             }
         };

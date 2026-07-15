@@ -11,6 +11,7 @@
 #include <optional>
 #include <memory>
 #include <string>
+#include <map>
 #include <vector>
 
 namespace agent_framework {
@@ -46,6 +47,13 @@ struct SkillIndexEntry {
     std::vector<std::string> cli_programs;
     std::vector<std::string> allowed_tools;
     std::shared_ptr<const SkillManifest> manifest;
+    /** Immutable package identity used by Stage 5 snapshots and loader caches. */
+    std::string package_digest;
+    std::map<std::string, std::string> resource_digests;
+    std::string source_uri;
+    std::string signature_identity;
+    /** Keeps content-addressed package content alive while a snapshot is pinned. */
+    std::shared_ptr<const void> package_lease;
 };
 
 enum class SkillDiagnosticSeverity { Warning, Error };

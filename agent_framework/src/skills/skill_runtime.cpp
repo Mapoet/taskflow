@@ -46,8 +46,9 @@ SkillRuntimeResult SkillRuntime::begin(const std::string& skill_id,
                                        SkillResourceType expected_kind,
                                        const nlohmann::json& input,
                                        SkillInvocationContext context) const {
-    const auto entry = registry_->get(skill_id);
-    const auto manifest = registry_->get_manifest(skill_id);
+    const auto registry_snapshot = registry_->snapshot();
+    const auto entry = registry_snapshot.get(skill_id);
+    const auto manifest = registry_snapshot.get_manifest(skill_id);
     if (!entry || !manifest) {
         return {false, error_json(kSkillDependencyUnavailable, "skill is not available",
                                   {{"skill_id", skill_id}}), std::nullopt};

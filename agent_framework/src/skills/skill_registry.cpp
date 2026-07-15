@@ -99,12 +99,14 @@ bool safe_relative_resource(const std::string& value) {
 SkillRegistry::SkillRegistry(std::filesystem::path root_directory) {
     roots_ = {normalize_root(std::move(root_directory))};
     primary_root_ = roots_.front();
+    std::atomic_store(&state_, std::make_shared<const SkillRegistryState>());
 }
 
 SkillRegistry::SkillRegistry(std::vector<std::filesystem::path> root_directories) {
     roots_.clear();
     if (root_directories.empty()) {
         primary_root_.clear();
+        std::atomic_store(&state_, std::make_shared<const SkillRegistryState>());
         return;
     }
     roots_.reserve(root_directories.size());
@@ -112,10 +114,13 @@ SkillRegistry::SkillRegistry(std::vector<std::filesystem::path> root_directories
         roots_.push_back(normalize_root(std::move(p)));
     }
     primary_root_ = roots_.front();
+    std::atomic_store(&state_, std::make_shared<const SkillRegistryState>());
 }
 
 void SkillRegistry::scan_one_root(const std::filesystem::path& scan_root,
-                                  std::unordered_set<std::string>& seen_ids) {
+                                  std::unordered_set<std::string>& seen_ids,
+                                  std::vector<SkillIndexEntry>& entries,
+                                  std::vector<SkillDiagnostic>& diagnostics) const {
     if (!std::filesystem::exists(scan_root) || !std::filesystem::is_directory(scan_root)) {
         return;
     }
@@ -149,7 +154,7 @@ void SkillRegistry::scan_one_root(const std::filesystem::path& scan_root,
 
         const internal::SplitFrontmatterResult sp = internal::split_skill_file_content(content);
         if (!sp.ok) {
-            diagnostics_.push_back({SkillDiagnosticSeverity::Warning, "missing_frontmatter",
+            diagnostics.push_back({SkillDiagnosticSeverity::Warning, "missing_frontmatter",
                                     skill_md, "SKILL.md has no YAML frontmatter", "/", "add YAML frontmatter"});
             std::clog << "[SkillRegistry] skip (no frontmatter): " << skill_md << '\n';
             continue;
@@ -165,7 +170,7 @@ void SkillRegistry::scan_one_root(const std::filesystem::path& scan_root,
         parsed_manifest.issues.insert(parsed_manifest.issues.end(), validation.begin(), validation.end());
         bool manifest_error = false;
         for (const auto& issue : parsed_manifest.issues) {
-            diagnostics_.push_back({issue.error ? SkillDiagnosticSeverity::Error : SkillDiagnosticSeverity::Warning,
+            diagnostics.push_back({issue.error ? SkillDiagnosticSeverity::Error : SkillDiagnosticSeverity::Warning,
                                     issue.code, skill_md, issue.message, issue.location, issue.suggestion});
             manifest_error = manifest_error || issue.error;
         }
@@ -208,12 +213,12 @@ void SkillRegistry::scan_one_root(const std::filesystem::path& scan_root,
         }
         e.id = std::move(canonical);
         if (!safe_skill_id(e.id)) {
-            diagnostics_.push_back({SkillDiagnosticSeverity::Error, "invalid_skill_id", skill_md,
+            diagnostics.push_back({SkillDiagnosticSeverity::Error, "invalid_skill_id", skill_md,
                                     "canonical skill id must match [A-Za-z0-9_.-]{1,128}", "/name", {}});
             continue;
         }
         if (e.description.empty()) {
-            diagnostics_.push_back({SkillDiagnosticSeverity::Warning, "missing_description",
+            diagnostics.push_back({SkillDiagnosticSeverity::Warning, "missing_description",
                                     skill_md, "skill description is empty", "/description", {}});
         }
 
@@ -229,7 +234,7 @@ void SkillRegistry::scan_one_root(const std::filesystem::path& scan_root,
         }
 
         if (seen_ids.count(e.id) != 0U) {
-            diagnostics_.push_back({SkillDiagnosticSeverity::Error, "duplicate_skill_id", skill_md,
+            diagnostics.push_back({SkillDiagnosticSeverity::Error, "duplicate_skill_id", skill_md,
                                     "duplicate canonical skill id: " + e.id, "/name", {}});
             std::clog << "[SkillRegistry] duplicate canonical id \"" << e.id << "\" skipped: " << skill_md
                       << '\n';
@@ -239,7 +244,7 @@ void SkillRegistry::scan_one_root(const std::filesystem::path& scan_root,
         auto validate_resources = [&](const std::vector<std::string>& values, const char* kind) {
             for (const auto& value : values) {
                 if (!safe_relative_resource(value)) {
-                    diagnostics_.push_back({SkillDiagnosticSeverity::Error,
+                    diagnostics.push_back({SkillDiagnosticSeverity::Error,
                                             "invalid_resource_path", skill_md,
                                             std::string(kind) + " path is not jail-relative: " + value,
                                             "/resources", {}});
@@ -251,48 +256,118 @@ void SkillRegistry::scan_one_root(const std::filesystem::path& scan_root,
         validate_resources(e.cli_programs, "cli");
 
         seen_ids.insert(e.id);
-        entries_.push_back(std::move(e));
+        entries.push_back(std::move(e));
     }
 }
 
 void SkillRegistry::scan_or_reload() {
-    entries_.clear();
-    diagnostics_.clear();
+    std::vector<SkillIndexEntry> entries;
+    std::vector<SkillDiagnostic> diagnostics;
     if (roots_.empty()) {
+        publish({}, {});
         return;
     }
 
     std::unordered_set<std::string> seen_ids;
     for (const std::filesystem::path& r : roots_) {
-        scan_one_root(r, seen_ids);
+        scan_one_root(r, seen_ids, entries, diagnostics);
     }
 
-    std::sort(entries_.begin(), entries_.end(),
+    std::sort(entries.begin(), entries.end(),
               [](const SkillIndexEntry& a, const SkillIndexEntry& b) { return a.id < b.id; });
+    const bool candidate_valid = std::none_of(
+        diagnostics.begin(), diagnostics.end(), [](const SkillDiagnostic& diagnostic) {
+            return diagnostic.severity == SkillDiagnosticSeverity::Error;
+        });
+    if (candidate_valid) {
+        publish(std::move(entries), std::move(diagnostics));
+        return;
+    }
+    std::lock_guard<std::mutex> lock(reload_mutex_);
+    const auto current = snapshot();
+    auto next = std::make_shared<SkillRegistryState>();
+    next->entries = current.generation() == 0
+        ? std::move(entries) : std::vector<SkillIndexEntry>(current.entries());
+    next->diagnostics = std::move(diagnostics);
+    next->generation = current.generation() == 0 ? 1 : current.generation();
+    std::atomic_store_explicit(
+        &state_, std::shared_ptr<const SkillRegistryState>(std::move(next)),
+        std::memory_order_release);
 }
 
 bool SkillRegistry::valid() const {
-    return std::none_of(diagnostics_.begin(), diagnostics_.end(), [](const SkillDiagnostic& d) {
+    return snapshot().valid();
+}
+
+std::optional<SkillIndexEntry> SkillRegistry::get(std::string_view skill_id) const {
+    return snapshot().get(skill_id);
+}
+
+std::shared_ptr<const SkillManifest> SkillRegistry::get_manifest(std::string_view skill_id) const {
+    return snapshot().get_manifest(skill_id);
+}
+
+std::optional<std::string> SkillRegistry::match(std::string_view user_text) const {
+    return snapshot().match(user_text);
+}
+
+SkillRegistrySnapshot SkillRegistry::snapshot() const {
+    return SkillRegistrySnapshot(std::atomic_load_explicit(&state_, std::memory_order_acquire));
+}
+
+void SkillRegistry::publish(std::vector<SkillIndexEntry> entries,
+                            std::vector<SkillDiagnostic> diagnostics) {
+    std::lock_guard<std::mutex> lock(reload_mutex_);
+    std::sort(entries.begin(), entries.end(),
+              [](const SkillIndexEntry& lhs, const SkillIndexEntry& rhs) {
+                  return lhs.id < rhs.id;
+              });
+    auto current = std::atomic_load_explicit(&state_, std::memory_order_acquire);
+    auto next = std::make_shared<SkillRegistryState>();
+    next->entries = std::move(entries);
+    next->diagnostics = std::move(diagnostics);
+    next->generation = current ? current->generation + 1 : 1;
+    std::atomic_store_explicit(
+        &state_, std::shared_ptr<const SkillRegistryState>(std::move(next)),
+        std::memory_order_release);
+}
+
+const std::vector<SkillIndexEntry>& SkillRegistrySnapshot::entries() const {
+    static const std::vector<SkillIndexEntry> empty;
+    return state_ ? state_->entries : empty;
+}
+
+const std::vector<SkillDiagnostic>& SkillRegistrySnapshot::diagnostics() const {
+    static const std::vector<SkillDiagnostic> empty;
+    return state_ ? state_->diagnostics : empty;
+}
+
+std::uint64_t SkillRegistrySnapshot::generation() const noexcept {
+    return state_ ? state_->generation : 0;
+}
+
+bool SkillRegistrySnapshot::valid() const {
+    return std::none_of(diagnostics().begin(), diagnostics().end(), [](const SkillDiagnostic& d) {
         return d.severity == SkillDiagnosticSeverity::Error;
     });
 }
 
-std::optional<SkillIndexEntry> SkillRegistry::get(std::string_view skill_id) const {
-    for (const auto& e : entries_) {
-        if (e.id == skill_id) {
-            return e;
-        }
-    }
-    return std::nullopt;
+std::optional<SkillIndexEntry> SkillRegistrySnapshot::get(std::string_view skill_id) const {
+    const auto found = std::lower_bound(
+        entries().begin(), entries().end(), skill_id,
+        [](const SkillIndexEntry& entry, std::string_view id) { return entry.id < id; });
+    return found != entries().end() && found->id == skill_id
+        ? std::optional<SkillIndexEntry>(*found) : std::nullopt;
 }
 
-std::shared_ptr<const SkillManifest> SkillRegistry::get_manifest(std::string_view skill_id) const {
+std::shared_ptr<const SkillManifest> SkillRegistrySnapshot::get_manifest(
+    std::string_view skill_id) const {
     const auto entry = get(skill_id);
     return entry ? entry->manifest : nullptr;
 }
 
-std::optional<std::string> SkillRegistry::match(std::string_view user_text) const {
-    if (env_skill_router_off() || entries_.empty()) {
+std::optional<std::string> SkillRegistrySnapshot::match(std::string_view user_text) const {
+    if (env_skill_router_off() || entries().empty()) {
         return std::nullopt;
     }
 
@@ -300,7 +375,7 @@ std::optional<std::string> SkillRegistry::match(std::string_view user_text) cons
     int best = -1;
     std::optional<std::string> best_id;
 
-    for (const auto& e : entries_) {
+    for (const auto& e : entries()) {
         if (e.disable_model_invocation) {
             continue;
         }

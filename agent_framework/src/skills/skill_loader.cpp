@@ -83,7 +83,8 @@ std::filesystem::path SkillLoader::skill_directory(const std::string& skill_id) 
 
 std::optional<std::string> SkillLoader::load_instructions(const std::string& skill_id,
                                                           std::size_t max_chars) const {
-    const auto ent = registry_.get(skill_id);
+    const auto registry_snapshot = registry_.snapshot();
+    const auto ent = registry_snapshot.get(skill_id);
     if (!ent.has_value()) {
         return std::nullopt;
     }
@@ -94,14 +95,17 @@ std::optional<std::string> SkillLoader::load_instructions(const std::string& ski
         return std::nullopt;
     }
 
-    const std::uintmax_t ts = file_time_stamp(fp);
-    const auto cit = cache_.find(skill_id);
-    if (cit != cache_.end() && cit->second.second == ts) {
-        std::string out = cit->second.first;
-        if (out.size() > max_chars) {
-            out.resize(max_chars);
+    const std::string identity = ent->package_digest.empty()
+        ? std::to_string(file_time_stamp(fp)) : ent->package_digest;
+    const std::string cache_key = skill_id + "@" + identity;
+    {
+        std::lock_guard<std::mutex> lock(cache_mutex_);
+        const auto cit = cache_.find(cache_key);
+        if (cit != cache_.end() && cit->second.second == identity) {
+            std::string out = cit->second.first;
+            if (out.size() > max_chars) out.resize(max_chars);
+            return out;
         }
-        return out;
     }
 
     std::ifstream f(fp);
@@ -115,7 +119,10 @@ std::optional<std::string> SkillLoader::load_instructions(const std::string& ski
         return std::nullopt;
     }
     std::string full_body = sp.body;
-    cache_[skill_id] = {full_body, ts};
+    {
+        std::lock_guard<std::mutex> lock(cache_mutex_);
+        cache_[cache_key] = {full_body, identity};
+    }
     if (full_body.size() > max_chars) {
         full_body.resize(max_chars);
     }
@@ -127,7 +134,8 @@ std::optional<std::string> SkillLoader::load_resource(const std::string& skill_i
                                                       SkillResourceKind kind,
                                                       std::size_t max_bytes,
                                                       std::string* error_out) const {
-    const auto entry = registry_.get(skill_id);
+    const auto registry_snapshot = registry_.snapshot();
+    const auto entry = registry_snapshot.get(skill_id);
     if (!entry) {
         if (error_out) *error_out = "unknown skill_id";
         return std::nullopt;
@@ -152,12 +160,14 @@ std::optional<std::string> SkillLoader::load_resource_snapshot(
     }
 
     bool authorized = false;
+    std::string resource_id;
     if (manifest) {
         const SkillResourceType requested = manifest_kind(kind);
         for (const auto& resource : manifest->resources) {
             if (resource.path == relative_path &&
                 (kind == SkillResourceKind::AnyDeclared || resource.kind == requested)) {
                 authorized = true;
+                resource_id = resource.id;
                 break;
             }
         }
@@ -181,11 +191,27 @@ std::optional<std::string> SkillLoader::load_resource_snapshot(
     if (ec || relative.empty() || *relative.begin() == "..") return fail("resource escapes skill jail");
     const auto size = std::filesystem::file_size(target, ec);
     if (ec || size > max_bytes) return fail("resource exceeds byte limit");
+    const auto digest = entry.resource_digests.find(resource_id);
+    const std::string resource_identity = digest != entry.resource_digests.end()
+        ? entry.package_digest + ":" + digest->second
+        : std::to_string(file_time_stamp(target));
+    const std::string cache_key = "resource:" + entry.id + ":" + relative_path + "@" +
+                                  resource_identity;
+    {
+        std::lock_guard<std::mutex> lock(cache_mutex_);
+        const auto cached = cache_.find(cache_key);
+        if (cached != cache_.end() && cached->second.second == resource_identity)
+            return cached->second.first;
+    }
     std::ifstream input(target, std::ios::binary);
     if (!input) return fail("resource open failed");
     std::string content(static_cast<std::size_t>(size), '\0');
     input.read(content.data(), static_cast<std::streamsize>(content.size()));
     if (!input && !input.eof()) return fail("resource read failed");
+    {
+        std::lock_guard<std::mutex> lock(cache_mutex_);
+        cache_[cache_key] = {content, resource_identity};
+    }
     return content;
 }
 

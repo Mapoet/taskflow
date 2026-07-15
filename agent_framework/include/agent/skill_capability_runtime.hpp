@@ -132,6 +132,9 @@ public:
     SkillCapabilityBindResult bind(const std::string& skill_id,
                                    SkillInvocationContext context,
                                    SkillCapabilityBindOptions options = {}) const;
+    SkillCapabilityBindResult bind_snapshot(
+        const SkillIndexEntry& entry, std::shared_ptr<const SkillManifest> manifest,
+        SkillInvocationContext context, SkillCapabilityBindOptions options = {}) const;
 
 private:
     std::shared_ptr<SkillRegistry> registry_;

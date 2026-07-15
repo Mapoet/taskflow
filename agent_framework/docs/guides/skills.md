@@ -861,7 +861,16 @@ Stage 4 使用 JSON Workflow descriptor，资源在 `SKILL.md` 的 `resources.wo
 - `ReadOnly` capability 可重放；`Write`、`Unknown` 和 child 重放必须有 `idempotency-key`。
 - 子任务继承 trace、depth、attempt、deadline/cancel、权限和预算，权限只能按严格子集收窄。
 
-### 9.3 阶段边界
+### 9.3 生命周期与任务快照
 
-Stage 4 的 dependency lock 和 checkpoint 是单次调用持有的运行期数据。持久化 `skills.lock`、
-content-addressed store、原子安装/更新和进程崩溃后的 in-flight reconciliation 属于 Stage 5。
+Stage 5 由 `SkillLifecycleManager` 管理 install、enable、disable、update、rollback、reload 和 remove。
+包内容按 SHA-256 写入 content-addressed store；`skills.lock` 固化精确版本、来源、package/resource
+digest、签名身份和依赖边。启动恢复会清理未完成 transaction，并对锁定包重新验证内容与来源身份。
+
+`SkillRegistry::snapshot()` 返回不可变 generation。Workflow 在任务开始时固定完整依赖快照和
+task-scoped capability binding；普通 runtime ticket 同样持有 entry、manifest 与 package lease。
+因此更新或 Disable 只影响后续任务，旧任务可继续读取原版本；仍有 snapshot 引用时 Remove 会拒绝。
+Registry reload 或状态持久化失败不会发布候选 generation。
+
+依赖采用 SemVer 范围解析，并由 resolver 选择确定性精确版本。受管资源的 Loader 缓存身份为
+package digest + resource digest；非生命周期目录扫描模式才回退到文件时间戳。

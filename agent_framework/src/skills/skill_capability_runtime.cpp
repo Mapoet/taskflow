@@ -441,28 +441,38 @@ SkillCapabilityRuntime::SkillCapabilityRuntime(
 SkillCapabilityBindResult SkillCapabilityRuntime::bind(
     const std::string& skill_id, SkillInvocationContext context,
     SkillCapabilityBindOptions options) const {
-    const auto entry = registry_->get(skill_id);
-    const auto manifest = registry_->get_manifest(skill_id);
+    const auto registry_snapshot = registry_->snapshot();
+    const auto entry = registry_snapshot.get(skill_id);
+    const auto manifest = registry_snapshot.get_manifest(skill_id);
     if (!entry || !manifest)
         return {nullptr, failure(kSkillDependencyUnavailable, "skill is not available",
                                  {{"skill_id", skill_id}})};
+    return bind_snapshot(*entry, manifest, std::move(context), options);
+}
+
+SkillCapabilityBindResult SkillCapabilityRuntime::bind_snapshot(
+    const SkillIndexEntry& entry, std::shared_ptr<const SkillManifest> manifest,
+    SkillInvocationContext context, SkillCapabilityBindOptions options) const {
+    if (!manifest || entry.id.empty())
+        return {nullptr, failure(kSkillDependencyUnavailable, "skill snapshot is unavailable")};
+    const std::string& skill_id = entry.id;
     auto binding = std::shared_ptr<SkillCapabilityBinding>(new SkillCapabilityBinding(
-        *entry, manifest, runtime_, toolbus_, std::move(context), mcp_factory_));
+        entry, manifest, runtime_, toolbus_, std::move(context), mcp_factory_));
     std::vector<ToolBus::AtomicLocalToolRegistration> registrations;
     try {
         SkillPolicyEngine policy(manifest->permissions, binding->context_.grants,
-                                 entry->script_jail.value_or(entry->file_path.parent_path()));
+                                 entry.script_jail.value_or(entry.file_path.parent_path()));
         for (const auto& resource : manifest->resources) {
             if (resource.kind == SkillResourceType::Prompt ||
                 resource.kind == SkillResourceType::Template) {
-                json prompt_descriptor = load_descriptor(*entry, resource, loader_);
+                json prompt_descriptor = load_descriptor(entry, resource, loader_);
                 validate_prompt_descriptor(prompt_descriptor);
                 binding->prompt_descriptors_.emplace(resource.id, std::move(prompt_descriptor));
                 continue;
             }
             if (resource.kind != SkillResourceType::Tool && resource.kind != SkillResourceType::Mcp)
                 continue;
-            const json descriptor = load_descriptor(*entry, resource, loader_);
+            const json descriptor = load_descriptor(entry, resource, loader_);
             if (resource.kind == SkillResourceType::Tool) {
                 const std::string source = descriptor.value("source", std::string{});
                 if (source.empty()) throw std::runtime_error("Tool descriptor source is required");

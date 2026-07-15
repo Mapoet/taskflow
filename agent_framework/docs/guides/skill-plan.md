@@ -374,6 +374,16 @@ SkillDependencyResolver::resolve
 - 依赖冲突输出最小冲突集和可操作建议。
 - Lockfile 可重现相同依赖图和资源 digest。
 
+### 完成证据
+
+- `SkillLifecycleManager` 已实现 install、enable、disable、update、remove、rollback 和 reload；安装包进入 SHA-256 content-addressed store，残留 transaction 在恢复时清理。
+- SemVer 与范围解析不使用字符串排序；依赖解析按版本优先、package digest 次序确定性选包，并返回最小冲突约束与修复建议。
+- `agent.taskflow/skills-lock/v1` 固化 roots、精确版本、来源 URI、package/resource digest、签名身份和依赖边；恢复时逐项复核内容、manifest、资源摘要与来源身份。
+- Registry 使用不可变 generation snapshot 原子发布；失败 reload/持久化提交保留旧 generation。Workflow、capability 与 runtime ticket 均固定任务启动时的 entry、manifest 和 package lease。
+- Disable 仅发布给新任务；旧 snapshot 持有 lease 时 Remove 返回 `skill_package_in_use`。Loader 的受管资源缓存键使用 package digest + resource digest。
+- `skill_lifecycle_stage5` 覆盖 SemVer 负向契约、确定性解析、最小冲突集、循环依赖、锁文件损坏/来源篡改、失败提交、并发读更新、运行中升级、回滚、引用保护和崩溃恢复；连续运行 20 次通过。
+- Stage 1-5 技能标签回归 10/10 通过，完整 Debug 目标集构建成功。沙箱内全量 CTest 为 2985/3001 通过；其余 16 项均是既有 HTTP/A2A/在线模型测试无法绑定本地端口或发起传输，沙箱外复跑未获授权。
+
 ## Stage 6：正式 CLI、测试运行器和 CI，P1
 
 ### CLI 范围
