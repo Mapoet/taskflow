@@ -1,5 +1,6 @@
 #include <agent/skill_manifest.hpp>
 #include <agent/skill_resource_access.hpp>
+#include <agent/skill_resource_cache.hpp>
 #include <agent/task_state_machine.hpp>
 
 #include <algorithm>
@@ -65,6 +66,7 @@ resources:
       size: 10
       license: Apache-2.0
       source: package://assets/blob.bin
+      cache-policy: on-demand
 )YAML");
     assert(parsed.manifest);
     const auto issues = validate_skill_manifest(*parsed.manifest, package);
@@ -91,7 +93,8 @@ int main() {
     auto entry = make_entry(package, manifest, lease_owner);
     lease_owner.reset();
 
-    SkillResourceAccess access;
+    auto cache = std::make_shared<SkillResourceCache>(base / "cache");
+    SkillResourceAccess access(cache);
     SkillResourceOpenOptions range_options;
     range_options.mode = SkillResourceReadMode::Stream;
     range_options.offset = 2;
@@ -135,6 +138,8 @@ int main() {
     map_options.max_bytes = 4;
     auto blob = access.open_snapshot(entry, manifest, "blob", map_options);
     assert(blob.ok && blob.handle);
+    assert(blob.handle->cache_lease);
+    assert(blob.handle->path.parent_path().filename() == "sha256");
     const auto mapped = access.map(*blob.handle);
 #if defined(__linux__)
     assert(mapped.ok && mapped.mapping);

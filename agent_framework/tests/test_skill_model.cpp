@@ -30,6 +30,7 @@ SkillResourceHandle model_handle(const fs::path& path, std::shared_ptr<const voi
     handle.descriptor.media_type = "application/onnx";
     handle.descriptor.runtime = "onnxruntime";
     handle.descriptor.read_mode = SkillResourceReadMode::MemoryMap;
+    handle.descriptor.cache_policy = SkillCachePolicy::OnDemand;
     handle.descriptor.model_requirements = SkillModelRequirements{
         {"cpu", "cuda"}, {"fp32", "fp16"}, 1024};
     return handle;
@@ -104,6 +105,17 @@ int main() {
     SkillModelService no_cache(nullptr);
     assert(has(no_cache.check(model_handle(base / "m9", nullptr), host),
                "skill_model_cache_unavailable"));
+    auto no_store_model = model_handle(base / "m10", nullptr);
+    no_store_model.descriptor.cache_policy = SkillCachePolicy::NoStore;
+    assert(no_cache.check(no_store_model, host).compatible);
+    const auto no_store_open = no_cache.open(no_store_model, host);
+    assert(no_store_open.ok && no_store_open.handle && !no_store_open.handle->cache_lease);
+    assert(no_store_open.handle->cache_object.path == no_store_model.path);
+
+    auto pinned_model = model_handle(base / "m11", nullptr);
+    pinned_model.descriptor.cache_policy = SkillCachePolicy::Pin;
+    const auto pinned_open = service.open(pinned_model, host);
+    assert(pinned_open.ok && pinned_open.handle->cache_object.pinned);
 
     fs::remove_all(base, ec);
     std::cout << "test_skill_model: ok\n";

@@ -202,6 +202,26 @@ SkillCacheResult SkillResourceCache::acquire(const SkillResourceHandle& handle) 
     return acquire_locked(handle);
 }
 
+SkillCacheResult SkillResourceCache::acquire_policy(const SkillResourceHandle& handle) {
+    if(handle.descriptor.cache_policy == SkillCachePolicy::NoStore) {
+        SkillCacheObject object;
+        object.digest = lowercase(handle.resource_digest);
+        object.path = handle.path;
+        object.size = handle.size;
+        object.media_type = handle.descriptor.media_type;
+        object.source_package_digest = handle.package_digest;
+        object.source_resource_id = handle.descriptor.id;
+        return succeeded(std::move(object));
+    }
+    auto result = acquire(handle);
+    if(!result.ok || handle.descriptor.cache_policy != SkillCachePolicy::Pin) return result;
+    auto pinned = pin(handle.resource_digest);
+    if(!pinned.ok) return pinned;
+    pinned.lease = std::move(result.lease);
+    if(pinned.object) pinned.object->leased = static_cast<bool>(pinned.lease);
+    return pinned;
+}
+
 SkillCacheReport SkillResourceCache::inspect() const {
     std::lock_guard<std::mutex> lock(mutex_);
     return inspect_locked();

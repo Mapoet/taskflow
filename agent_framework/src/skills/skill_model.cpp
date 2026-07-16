@@ -32,7 +32,7 @@ SkillModelAdmissionResult SkillModelService::check(
     if(handle.descriptor.executable)
         diagnostic(result, "skill_model_executable_forbidden",
                    "Model resources cannot request executable behavior");
-    if(!cache_)
+    if(handle.descriptor.cache_policy != SkillCachePolicy::NoStore && !cache_)
         diagnostic(result, "skill_model_cache_unavailable",
                    "content-addressed cache is unavailable");
     if(handle.descriptor.runtime.empty() ||
@@ -72,7 +72,19 @@ SkillModelOpenResult SkillModelService::open(
                         {"diagnostics", result.admission.diagnostics}};
         return result;
     }
-    auto cached = cache_->acquire(handle);
+    SkillCacheResult cached;
+    if(cache_) cached = cache_->acquire_policy(handle);
+    else {
+        cached.ok = true;
+        SkillCacheObject object;
+        object.digest = handle.resource_digest;
+        object.path = handle.path;
+        object.size = handle.size;
+        object.media_type = handle.descriptor.media_type;
+        object.source_package_digest = handle.package_digest;
+        object.source_resource_id = handle.descriptor.id;
+        cached.object = std::move(object);
+    }
     if(!cached.ok) {
         result.error = cached.error;
         return result;

@@ -67,7 +67,16 @@ int main() {
     SkillResourceCache cache(base / "cache", limits);
     const auto source_handle = handle_for(source, digest, 10);
 
-    const auto first = cache.acquire(source_handle);
+    auto no_store_handle = source_handle;
+    no_store_handle.descriptor.cache_policy = SkillCachePolicy::NoStore;
+    const auto no_store = cache.acquire_policy(no_store_handle);
+    assert(no_store.ok && no_store.object && !no_store.lease);
+    assert(no_store.object->path == source);
+    assert(!fs::exists(base / "cache/objects/sha256" / digest));
+
+    auto on_demand_handle = source_handle;
+    on_demand_handle.descriptor.cache_policy = SkillCachePolicy::OnDemand;
+    const auto first = cache.acquire_policy(on_demand_handle);
     assert(first.ok && first.object && first.lease);
     assert(first.object->digest == digest);
     assert(first.object->size == 10U);
@@ -180,6 +189,12 @@ int main() {
     assert(report.pinned_bytes == 12U && report.entries.size() == 2U);
     assert(policy_cache.unpin(acquired_a.object->digest).ok);
     assert(policy_cache.collect().ok);
+
+    auto pinned_by_policy = handle_e;
+    pinned_by_policy.descriptor.cache_policy = SkillCachePolicy::Pin;
+    assert(policy_cache.unpin(acquired_d.object->digest).ok);
+    const auto policy_pin = policy_cache.acquire_policy(pinned_by_policy);
+    assert(policy_pin.ok && policy_pin.object && policy_pin.object->pinned && policy_pin.lease);
 
     const fs::path stale = policy_base / "cache/transactions/stale";
     write_file(stale / "partial", "partial");

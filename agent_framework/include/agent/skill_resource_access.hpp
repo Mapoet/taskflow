@@ -11,10 +11,13 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 
 namespace agent_framework {
 
 class TaskControl;
+class SkillResourceCache;
+class SkillCacheLease;
 
 inline constexpr const char* kSkillResourceNotFound = "skill_resource_not_found";
 inline constexpr const char* kSkillResourceCancelled = "skill_resource_cancelled";
@@ -36,6 +39,7 @@ struct SkillResourceHandle {
     std::uint64_t view_size = 0;
     SkillResourceReadMode mode = SkillResourceReadMode::Auto;
     std::shared_ptr<const void> package_lease;
+    std::shared_ptr<SkillCacheLease> cache_lease;
 };
 
 struct SkillResourceResult {
@@ -90,6 +94,9 @@ using SkillResourceChunkConsumer =
 
 class SkillResourceAccess {
 public:
+    explicit SkillResourceAccess(std::shared_ptr<SkillResourceCache> cache = nullptr)
+        : cache_(std::move(cache)) {}
+
     SkillResourceResult open_snapshot(
         const SkillIndexEntry& entry, std::shared_ptr<const SkillManifest> manifest,
         const std::string& resource_id,
@@ -101,6 +108,9 @@ public:
                                      const SkillResourceChunkConsumer& consumer,
                                      TaskControl* control = nullptr) const;
     SkillMappedResourceResult map(const SkillResourceHandle& handle) const;
+
+private:
+    std::shared_ptr<SkillResourceCache> cache_;
 };
 
 } // namespace agent_framework

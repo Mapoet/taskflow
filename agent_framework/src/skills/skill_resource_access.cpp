@@ -1,6 +1,7 @@
 #include <agent/skill_resource_access.hpp>
 
 #include <agent/skill_lifecycle.hpp>
+#include <agent/skill_resource_cache.hpp>
 #include <agent/task_state_machine.hpp>
 
 #include <algorithm>
@@ -188,6 +189,16 @@ SkillResourceResult SkillResourceAccess::open_snapshot(
     handle.view_size = view_size;
     handle.mode = mode;
     handle.package_lease = entry.package_lease;
+    if(descriptor->cache_policy != SkillCachePolicy::NoStore) {
+        if(!cache_)
+            return open_failure("skill_cache_unavailable",
+                                "resource cache is required by the declared cache policy");
+        auto cached = cache_->acquire_policy(handle);
+        if(!cached.ok || !cached.object)
+            return {false, cached.error, std::nullopt};
+        handle.path = cached.object->path;
+        handle.cache_lease = std::move(cached.lease);
+    }
     return {true, nlohmann::json::object(), std::move(handle)};
 }
 

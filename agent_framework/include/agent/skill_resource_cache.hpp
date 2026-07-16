@@ -65,6 +65,8 @@ public:
                                 SkillCacheLimits limits = {});
 
     SkillCacheResult acquire(const SkillResourceHandle& handle);
+    /** Apply the descriptor policy: no-store, on-demand, or pin. */
+    SkillCacheResult acquire_policy(const SkillResourceHandle& handle);
     SkillCacheReport inspect() const;
     SkillCacheResult pin(const std::string& digest);
     SkillCacheResult unpin(const std::string& digest);
