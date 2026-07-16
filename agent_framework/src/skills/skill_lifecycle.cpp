@@ -597,7 +597,11 @@ json SkillLockfile::to_json() const {
     for (const auto& package : sorted_packages)
         output["packages"].push_back({{"id", package.id}, {"version", package.version},
             {"packageDigest", package.package_digest}, {"resourceDigests", package.resource_digests},
-            {"sourceUri", package.source_uri}, {"signatureIdentity", package.signature_identity}});
+            {"sourceUri", package.source_uri}, {"signatureIdentity", package.signature_identity},
+            {"archiveDigest", package.archive_digest}, {"publisher", package.publisher},
+            {"keyId", package.key_id}, {"signatureDigest", package.signature_digest},
+            {"sbomDigest", package.sbom_digest}, {"provenanceDigest", package.provenance_digest},
+            {"registryDigest", package.registry_digest}, {"legacyUnsigned", package.legacy_unsigned}});
     for (const auto& edge : sorted_edges)
         output["edges"].push_back({{"from", edge.from}, {"to", edge.to},
                                    {"range", edge.range}, {"optional", edge.optional}});
@@ -621,12 +625,29 @@ std::optional<SkillLockfile> SkillLockfile::from_json(const json& value, std::st
             package.resource_digests = item.value("resourceDigests", std::map<std::string, std::string>{});
             package.source_uri = item.value("sourceUri", "");
             package.signature_identity = item.value("signatureIdentity", "");
+            package.archive_digest = item.value("archiveDigest", "");
+            package.publisher = item.value("publisher", "");
+            package.key_id = item.value("keyId", "");
+            package.signature_digest = item.value("signatureDigest", "");
+            package.sbom_digest = item.value("sbomDigest", "");
+            package.provenance_digest = item.value("provenanceDigest", "");
+            package.registry_digest = item.value("registryDigest", "");
+            package.legacy_unsigned = item.value("legacyUnsigned", package.key_id.empty());
             if (package.id.empty() || !package_ids.insert(package.id).second ||
                 !SkillSemVersion::parse(package.version) || !sha256_identity(package.package_digest))
                 throw std::runtime_error("lockfile package identity is invalid");
             for (const auto& [resource, digest] : package.resource_digests)
                 if (resource.empty() || !sha256_identity(digest))
                     throw std::runtime_error("lockfile resource digest is invalid");
+            for(const auto* digest : {&package.archive_digest, &package.signature_digest,
+                                      &package.sbom_digest, &package.provenance_digest,
+                                      &package.registry_digest})
+                if(!digest->empty() && !sha256_identity(*digest))
+                    throw std::runtime_error("lockfile supply-chain digest is invalid");
+            if(!package.legacy_unsigned && (package.archive_digest.empty() || package.publisher.empty() ||
+               package.key_id.empty() || package.signature_digest.empty() ||
+               package.sbom_digest.empty() || package.provenance_digest.empty()))
+                throw std::runtime_error("verified lockfile identity is incomplete");
             lock.packages.push_back(std::move(package));
         }
         std::set<std::string> roots;
@@ -774,11 +795,33 @@ SkillLifecycleResult SkillPackageStore::import_package(
             fs::remove_all(temporary, ec);
             return {false, failure(kSkillDigestMismatch, "copied package digest changed")};
         }
+        if(!options.archive_path.empty()) {
+            auto archive = inspect_skill_archive(options.archive_path);
+            if(!archive.ok || archive.archive_digest != options.archive_digest) {
+                fs::remove_all(temporary, ec);
+                return {false, failure(kSkillDigestMismatch, "source archive identity changed")};
+            }
+            fs::copy_file(options.archive_path, temporary / "archive.tfskill",
+                          fs::copy_options::overwrite_existing, ec);
+            if(ec) {
+                fs::remove_all(temporary, ec);
+                return {false, failure(kSkillLifecycleInvalid, "archive copy failed")};
+            }
+        }
         json metadata = {{"id", identity.id}, {"version", identity.version.str()},
                          {"packageDigest", identity.package_digest},
                          {"resourceDigests", identity.resource_digests},
                          {"sourceUri", options.source_uri},
-                         {"signatureIdentity", options.signature_identity}};
+                         {"signatureIdentity", options.signature_identity},
+                         {"archiveDigest", options.archive_digest},
+                         {"publisher", options.publisher}, {"keyId", options.key_id},
+                         {"signatureDigest", options.signature_digest},
+                         {"sbomDigest", options.sbom_digest},
+                         {"provenanceDigest", options.provenance_digest},
+                         {"registryDigest", options.registry_digest},
+                         {"legacyUnsigned", options.legacy_unsigned},
+                         {"signatureEnvelope", options.signature
+                            ? options.signature->to_json() : json(nullptr)}};
         if (!atomic_write(temporary / "metadata.json", metadata.dump(2) + "\n", &error)) {
             fs::remove_all(temporary, ec);
             return {false, failure(kSkillLifecycleInvalid, error)};
@@ -791,6 +834,11 @@ SkillLifecycleResult SkillPackageStore::import_package(
         }
     }
     auto loaded = load(identity.package_digest, &error);
+    if(loaded && !options.archive_digest.empty() &&
+       (loaded->archive_digest != options.archive_digest || loaded->key_id != options.key_id ||
+        loaded->signature_digest != options.signature_digest))
+        return {false, failure(kSkillDigestMismatch,
+                               "existing store identity differs from verified import")};
     return loaded ? SkillLifecycleResult{true, json::object(), loaded, std::nullopt}
                   : SkillLifecycleResult{false, failure(kSkillLifecycleInvalid, error)};
 }
@@ -816,6 +864,44 @@ std::optional<SkillPackageRecord> SkillPackageStore::load(
         const std::string id = !manifest->name.empty() ? manifest->name : manifest->legacy_id;
         if (metadata.value("id", "") != id || metadata.value("version", "") != manifest->version)
             throw std::runtime_error("package metadata does not match its manifest");
+        const auto archive_digest = metadata.value("archiveDigest", "");
+        const auto signature_digest = metadata.value("signatureDigest", "");
+        const auto sbom_digest = metadata.value("sbomDigest", "");
+        const auto provenance_digest = metadata.value("provenanceDigest", "");
+        const auto registry_digest = metadata.value("registryDigest", "");
+        const bool legacy_unsigned = metadata.value("legacyUnsigned", true);
+        for(const auto* supply_digest : {&archive_digest, &signature_digest, &sbom_digest,
+                                         &provenance_digest, &registry_digest})
+            if(!supply_digest->empty() && !sha256_identity(*supply_digest))
+                throw std::runtime_error("stored supply-chain digest is invalid");
+        SkillArchiveResult stored_archive;
+        if(!archive_digest.empty()) {
+            stored_archive = inspect_skill_archive(directory / "archive.tfskill");
+            if(!stored_archive.ok || stored_archive.archive_digest != archive_digest)
+                throw std::runtime_error("stored archive digest does not match metadata");
+        }
+        if(!legacy_unsigned) {
+            if(!metadata.contains("signatureEnvelope") || !metadata.at("signatureEnvelope").is_object())
+                throw std::runtime_error("verified package signature envelope is unavailable");
+            std::string signature_error;
+            auto envelope = SkillSignatureEnvelope::from_json(metadata.at("signatureEnvelope"),
+                                                               &signature_error);
+            auto actual_signature_digest = skill_sha256_bytes(
+                metadata.at("signatureEnvelope").dump(), &signature_error);
+            if(!envelope || !actual_signature_digest || *actual_signature_digest != signature_digest ||
+               envelope->subject_digest != archive_digest || envelope->sbom_digest != sbom_digest ||
+               envelope->provenance_digest != provenance_digest ||
+               envelope->key_id != metadata.value("keyId", "") ||
+               envelope->publisher != metadata.value("publisher", ""))
+                throw std::runtime_error("stored signature identity does not match metadata");
+            SkillPackageMetadata expected;
+            expected.archive_digest = archive_digest;
+            expected.sbom_digest = sbom_digest;
+            expected.provenance_digest = provenance_digest;
+            expected.entry_count = stored_archive.entries.size();
+            auto audited = inspect_audited_skill_archive(directory / "archive.tfskill", expected);
+            if(!audited.ok) throw std::runtime_error("stored archive audit metadata is invalid");
+        }
         const auto recorded_resource_digests = metadata.value(
             "resourceDigests", std::map<std::string, std::string>{});
         std::map<std::string, std::string> actual_resource_digests;
@@ -847,6 +933,14 @@ std::optional<SkillPackageRecord> SkillPackageStore::load(
         record.resource_digests = std::move(actual_resource_digests);
         record.source_uri = metadata.value("sourceUri", "");
         record.signature_identity = metadata.value("signatureIdentity", "");
+        record.archive_digest = archive_digest;
+        record.publisher = metadata.value("publisher", "");
+        record.key_id = metadata.value("keyId", "");
+        record.signature_digest = signature_digest;
+        record.sbom_digest = sbom_digest;
+        record.provenance_digest = provenance_digest;
+        record.registry_digest = registry_digest;
+        record.legacy_unsigned = legacy_unsigned;
         record.package_path = package;
         record.manifest = std::make_shared<SkillManifest>(std::move(*manifest));
         record.lease = std::move(lease);
@@ -965,6 +1059,19 @@ SkillLifecycleResult SkillLifecycleManager::install(
     auto verified_options = options;
     verified_options.source_uri = options.signature ? options.signature->source_uri : "local://unsigned";
     verified_options.signature_identity = options.signature ? options.signature->key_id : "legacyUnsigned";
+    verified_options.archive_path = package;
+    verified_options.archive_digest = extracted.archive_digest;
+    verified_options.legacy_unsigned = !options.signature.has_value();
+    if(options.signature) {
+        verified_options.publisher = options.signature->publisher;
+        verified_options.key_id = options.signature->key_id;
+        verified_options.sbom_digest = options.signature->sbom_digest;
+        verified_options.provenance_digest = options.signature->provenance_digest;
+        auto digest = skill_sha256_bytes(options.signature->to_json().dump());
+        if(!digest) { fs::remove_all(temporary); return {false, failure(kSkillSignatureInvalid,
+            "cannot digest verified signature envelope")}; }
+        verified_options.signature_digest = *digest;
+    }
     auto result = store_.import_package(temporary, verified_options);
     std::error_code ec;
     fs::remove_all(temporary, ec);
@@ -1020,6 +1127,19 @@ SkillLifecycleResult SkillLifecycleManager::update(
         auto verified_options = options;
         verified_options.source_uri = options.signature ? options.signature->source_uri : "local://unsigned";
         verified_options.signature_identity = options.signature ? options.signature->key_id : "legacyUnsigned";
+        verified_options.archive_path = package;
+        verified_options.archive_digest = extracted.archive_digest;
+        verified_options.legacy_unsigned = !options.signature.has_value();
+        if(options.signature) {
+            verified_options.publisher = options.signature->publisher;
+            verified_options.key_id = options.signature->key_id;
+            verified_options.sbom_digest = options.signature->sbom_digest;
+            verified_options.provenance_digest = options.signature->provenance_digest;
+            auto digest = skill_sha256_bytes(options.signature->to_json().dump());
+            if(!digest) { fs::remove_all(temporary); return {false, failure(kSkillSignatureInvalid,
+                "cannot digest verified signature envelope")}; }
+            verified_options.signature_digest = *digest;
+        }
         installed = store_.import_package(temporary, verified_options);
         std::error_code ec;
         fs::remove_all(temporary, ec);
@@ -1105,8 +1225,22 @@ SkillLifecycleResult SkillLifecycleManager::publish_resolved() {
     }
     std::vector<SkillIndexEntry> entries;
     for (const auto& [id, package] : resolution.packages) {
-        next.packages.push_back({id, package.version.str(), package.package_digest,
-            package.resource_digests, package.source_uri, package.signature_identity});
+        SkillLockPackage locked;
+        locked.id = id;
+        locked.version = package.version.str();
+        locked.package_digest = package.package_digest;
+        locked.resource_digests = package.resource_digests;
+        locked.source_uri = package.source_uri;
+        locked.signature_identity = package.signature_identity;
+        locked.archive_digest = package.archive_digest;
+        locked.publisher = package.publisher;
+        locked.key_id = package.key_id;
+        locked.signature_digest = package.signature_digest;
+        locked.sbom_digest = package.sbom_digest;
+        locked.provenance_digest = package.provenance_digest;
+        locked.registry_digest = package.registry_digest;
+        locked.legacy_unsigned = package.legacy_unsigned;
+        next.packages.push_back(std::move(locked));
         entries.push_back(package_entry(package));
         for (const auto& dependency : package.manifest->dependencies)
             next.edges.push_back({id, dependency.name, dependency.version, dependency.optional});
@@ -1134,7 +1268,14 @@ SkillLifecycleResult SkillLifecycleManager::publish_lock(const SkillLockfile& lo
         if (!package || package->id != locked.id || package->version.str() != locked.version ||
             package->resource_digests != locked.resource_digests ||
             package->source_uri != locked.source_uri ||
-            package->signature_identity != locked.signature_identity)
+            package->signature_identity != locked.signature_identity ||
+            package->archive_digest != locked.archive_digest ||
+            package->publisher != locked.publisher || package->key_id != locked.key_id ||
+            package->signature_digest != locked.signature_digest ||
+            package->sbom_digest != locked.sbom_digest ||
+            package->provenance_digest != locked.provenance_digest ||
+            package->registry_digest != locked.registry_digest ||
+            package->legacy_unsigned != locked.legacy_unsigned)
             return {false, failure(kSkillDigestMismatch,
                 error.empty() ? "lockfile package identity does not match the store" : error,
                 {{"skill", locked.id}, {"digest", locked.package_digest}})};

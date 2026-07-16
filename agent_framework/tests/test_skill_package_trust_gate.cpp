@@ -115,6 +115,31 @@ body
     auto installed = manager.install(archive_path, install_options);
     assert(installed.ok && installed.package);
     assert(installed.package->signature_identity == signed_package.envelope.key_id);
+    assert(installed.package->archive_digest == archive.metadata.archive_digest);
+    assert(installed.package->publisher == "org.example");
+    assert(!installed.package->legacy_unsigned);
+    assert(fs::exists(root / "store" / "sha256" / installed.package->package_digest /
+                      "archive.tfskill"));
+    auto enabled = manager.enable("trusted-package");
+    assert(enabled.ok && enabled.lockfile && enabled.lockfile->packages.size() == 1);
+    const auto& locked = enabled.lockfile->packages.front();
+    assert(locked.archive_digest == archive.metadata.archive_digest);
+    assert(locked.key_id == signed_package.envelope.key_id && !locked.legacy_unsigned);
+
+    auto legacy_json = enabled.lockfile->to_json();
+    for(const auto* field : {"archiveDigest", "publisher", "keyId", "signatureDigest",
+                             "sbomDigest", "provenanceDigest", "registryDigest", "legacyUnsigned"})
+        legacy_json["packages"][0].erase(field);
+    auto legacy = SkillLockfile::from_json(legacy_json, &error);
+    assert(legacy && legacy->packages.front().legacy_unsigned);
+
+    const auto stored_archive = root / "store" / "sha256" /
+        installed.package->package_digest / "archive.tfskill";
+    std::fstream corrupt(stored_archive, std::ios::binary | std::ios::in | std::ios::out);
+    corrupt.seekp(40);
+    corrupt.put('X');
+    corrupt.close();
+    assert(!SkillPackageStore(root / "store").load(installed.package->package_digest, &error));
 
     fs::remove_all(root);
     std::cout << "skill package trust gate tests passed\n";

@@ -12,6 +12,7 @@
 #include <optional>
 #include <set>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace agent_framework {
@@ -64,6 +65,14 @@ struct SkillPackageRecord {
     std::map<std::string, std::string> resource_digests;
     std::string source_uri;
     std::string signature_identity;
+    std::string archive_digest;
+    std::string publisher;
+    std::string key_id;
+    std::string signature_digest;
+    std::string sbom_digest;
+    std::string provenance_digest;
+    std::string registry_digest;
+    bool legacy_unsigned = true;
     std::filesystem::path package_path;
     std::shared_ptr<const SkillManifest> manifest;
     std::shared_ptr<const void> lease;
@@ -101,6 +110,25 @@ struct SkillLockPackage {
     std::map<std::string, std::string> resource_digests;
     std::string source_uri;
     std::string signature_identity;
+    std::string archive_digest;
+    std::string publisher;
+    std::string key_id;
+    std::string signature_digest;
+    std::string sbom_digest;
+    std::string provenance_digest;
+    std::string registry_digest;
+    bool legacy_unsigned = true;
+
+    SkillLockPackage() = default;
+    SkillLockPackage(std::string id_value, std::string version_value,
+                     std::string package_digest_value,
+                     std::map<std::string, std::string> resource_digests_value,
+                     std::string source_uri_value, std::string signature_identity_value)
+        : id(std::move(id_value)), version(std::move(version_value)),
+          package_digest(std::move(package_digest_value)),
+          resource_digests(std::move(resource_digests_value)),
+          source_uri(std::move(source_uri_value)),
+          signature_identity(std::move(signature_identity_value)) {}
 };
 
 struct SkillLockEdge {
@@ -147,6 +175,20 @@ struct SkillInstallOptions {
     bool remote = false;
     bool allow_unsigned_local = false;
     std::int64_t verification_time = 0;
+    std::filesystem::path archive_path;
+    std::string archive_digest;
+    std::string publisher;
+    std::string key_id;
+    std::string signature_digest;
+    std::string sbom_digest;
+    std::string provenance_digest;
+    std::string registry_digest;
+    bool legacy_unsigned = true;
+
+    SkillInstallOptions() = default;
+    SkillInstallOptions(std::string source_uri_value, std::string signature_identity_value)
+        : source_uri(std::move(source_uri_value)),
+          signature_identity(std::move(signature_identity_value)) {}
 };
 
 class SkillPackageStore {
