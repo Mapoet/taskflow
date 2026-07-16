@@ -55,6 +55,12 @@ struct SkillSignatureEnvelope {
                                                            std::string* error = nullptr);
 };
 
+struct SkillSignatureResult {
+    bool ok = false;
+    std::string error;
+    SkillSignatureEnvelope envelope;
+};
+
 struct SkillTrustedKey {
     std::string key_id;
     std::string publisher;
@@ -76,6 +82,16 @@ struct SkillTrustStore {
     static std::optional<SkillTrustStore> from_json(const nlohmann::json& value,
                                                     std::string* error = nullptr);
 };
+
+std::string skill_signature_preimage(const SkillSignatureEnvelope& envelope);
+std::optional<std::string> skill_public_key_id(const std::string& public_key_pem,
+                                               std::string* error = nullptr);
+SkillSignatureResult sign_skill_subject(SkillSignatureEnvelope envelope,
+                                        const std::string& private_key_pem);
+SkillSignatureResult verify_skill_signature(const SkillSignatureEnvelope& envelope,
+                                            const SkillTrustStore& trust,
+                                            SkillTrustRole required_role,
+                                            std::int64_t now);
 
 struct SkillRegistryArtifact {
     std::string package_id;

@@ -1629,6 +1629,13 @@ if(BUILD_TESTING)
         set_tests_properties(skill_sbom_provenance PROPERTIES
             LABELS "skill-unit;skill-sbom-contract;skill-package-archive")
     endif()
+    if(OpenSSL_FOUND AND EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_skill_signature.cpp)
+        add_executable(test_skill_signature tests/test_skill_signature.cpp)
+        target_link_libraries(test_skill_signature PRIVATE agent_framework OpenSSL::Crypto)
+        add_test(NAME skill_signature_security COMMAND test_skill_signature)
+        set_tests_properties(skill_signature_security PROPERTIES
+            LABELS "skill-unit;skill-signature-security;skill-security-negative")
+    endif()
     if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_skill_model.cpp)
         add_executable(test_skill_model tests/test_skill_model.cpp)
         target_link_libraries(test_skill_model PRIVATE agent_framework)
