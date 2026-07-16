@@ -721,7 +721,10 @@ SkillCommandResponse SkillCommandService::install(
     const auto gate = SkillPackageGate{}.inspect(package);
     if(!gate.ok) return package_gate_error("install", gate);
     auto response = run_lifecycle(registry_, store, "install", [&](SkillLifecycleManager& manager) {
-        return manager.install(package, {source_uri, signature_identity});
+        SkillInstallOptions options;
+        options.source_uri = source_uri;
+        options.signature_identity = signature_identity;
+        return manager.install(package, options);
     });
     if(response.ok()) {
         auto preflight = gate.to_json();
@@ -742,7 +745,10 @@ SkillCommandResponse SkillCommandService::update(
     const auto gate = SkillPackageGate{}.inspect(package);
     if(!gate.ok) return package_gate_error("update", gate);
     auto response = run_lifecycle(registry_, store, "update", [&](SkillLifecycleManager& manager) {
-        return manager.update(package, {source_uri, signature_identity});
+        SkillInstallOptions options;
+        options.source_uri = source_uri;
+        options.signature_identity = signature_identity;
+        return manager.update(package, options);
     });
     if(response.ok()) {
         auto preflight = gate.to_json();

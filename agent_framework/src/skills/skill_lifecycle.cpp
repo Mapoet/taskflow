@@ -1,6 +1,8 @@
 #include <agent/skill_lifecycle.hpp>
 
 #include <agent/internal/skill_frontmatter_parse.hpp>
+#include <agent/skill_archive.hpp>
+#include <agent/skill_package_gate.hpp>
 
 #if defined(CPPHTTPLIB_OPENSSL_SUPPORT)
 #include <openssl/evp.h>
@@ -9,6 +11,7 @@
 #include <algorithm>
 #include <cctype>
 #include <charconv>
+#include <chrono>
 #include <functional>
 #include <fstream>
 #include <iomanip>
@@ -946,7 +949,26 @@ bool SkillLifecycleManager::recover(std::string* error) {
 SkillLifecycleResult SkillLifecycleManager::install(
     const fs::path& package, const SkillInstallOptions& options) {
     std::lock_guard<std::mutex> lock(mutex_);
-    return store_.import_package(package, options);
+    if(fs::is_directory(package)) return store_.import_package(package, options);
+    SkillPackageGate::TrustOptions trust_options;
+    trust_options.trust = options.trust;
+    trust_options.signature = options.signature;
+    trust_options.remote = options.remote;
+    trust_options.allow_unsigned_local = options.allow_unsigned_local;
+    trust_options.now = options.verification_time;
+    auto admitted = SkillPackageGate{}.inspect_archive(package, trust_options);
+    if(!admitted.ok) return {false, admitted.error};
+    const auto temporary = store_.root() / "transactions" /
+        ("admit-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    auto extracted = extract_skill_archive(package, temporary);
+    if(!extracted.ok) return {false, failure(kSkillArchiveInvalid, extracted.error)};
+    auto verified_options = options;
+    verified_options.source_uri = options.signature ? options.signature->source_uri : "local://unsigned";
+    verified_options.signature_identity = options.signature ? options.signature->key_id : "legacyUnsigned";
+    auto result = store_.import_package(temporary, verified_options);
+    std::error_code ec;
+    fs::remove_all(temporary, ec);
+    return result;
 }
 
 SkillLifecycleResult SkillLifecycleManager::enable(
@@ -979,7 +1001,29 @@ SkillLifecycleResult SkillLifecycleManager::disable(const std::string& skill_id)
 SkillLifecycleResult SkillLifecycleManager::update(
     const fs::path& package, const SkillInstallOptions& options) {
     std::lock_guard<std::mutex> lock(mutex_);
-    auto installed = store_.import_package(package, options);
+    SkillLifecycleResult installed;
+    if(fs::is_directory(package)) {
+        installed = store_.import_package(package, options);
+    } else {
+        SkillPackageGate::TrustOptions trust_options;
+        trust_options.trust = options.trust;
+        trust_options.signature = options.signature;
+        trust_options.remote = options.remote;
+        trust_options.allow_unsigned_local = options.allow_unsigned_local;
+        trust_options.now = options.verification_time;
+        auto admitted = SkillPackageGate{}.inspect_archive(package, trust_options);
+        if(!admitted.ok) return {false, admitted.error};
+        const auto temporary = store_.root() / "transactions" /
+            ("admit-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+        auto extracted = extract_skill_archive(package, temporary);
+        if(!extracted.ok) return {false, failure(kSkillArchiveInvalid, extracted.error)};
+        auto verified_options = options;
+        verified_options.source_uri = options.signature ? options.signature->source_uri : "local://unsigned";
+        verified_options.signature_identity = options.signature ? options.signature->key_id : "legacyUnsigned";
+        installed = store_.import_package(temporary, verified_options);
+        std::error_code ec;
+        fs::remove_all(temporary, ec);
+    }
     if (!installed.ok || !installed.package) return installed;
     if (requested_roots_.empty()) return installed;
     auto result = publish_resolved();

@@ -2,6 +2,7 @@
 #define AGENT_SKILL_PACKAGE_GATE_HPP
 
 #include <agent/skill_lifecycle.hpp>
+#include <agent/skill_sbom.hpp>
 #include <agent/skill_test_runner.hpp>
 
 namespace agent_framework {
@@ -19,6 +20,17 @@ struct SkillPackageGateResult {
 class SkillPackageGate {
 public:
     SkillPackageGateResult inspect(const std::filesystem::path& package) const;
+
+    struct TrustOptions {
+        SkillTrustStore trust;
+        std::optional<SkillSignatureEnvelope> signature;
+        bool remote = false;
+        bool allow_unsigned_local = false;
+        std::int64_t now = 0;
+    };
+
+    SkillPackageGateResult inspect_archive(const std::filesystem::path& archive,
+                                           const TrustOptions& options) const;
 };
 
 } // namespace agent_framework

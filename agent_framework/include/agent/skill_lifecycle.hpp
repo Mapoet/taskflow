@@ -2,6 +2,7 @@
 #define AGENT_SKILL_LIFECYCLE_HPP
 
 #include "skill_registry.hpp"
+#include "skill_supply_chain.hpp"
 
 #include <filesystem>
 #include <cstdint>
@@ -141,6 +142,11 @@ struct SkillLifecycleResult {
 struct SkillInstallOptions {
     std::string source_uri;
     std::string signature_identity;
+    std::optional<SkillSignatureEnvelope> signature;
+    SkillTrustStore trust;
+    bool remote = false;
+    bool allow_unsigned_local = false;
+    std::int64_t verification_time = 0;
 };
 
 class SkillPackageStore {

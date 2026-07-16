@@ -2,6 +2,7 @@
 #include <agent/skill_command.hpp>
 
 #include <algorithm>
+#include <chrono>
 
 namespace agent_framework {
 namespace {
@@ -115,6 +116,54 @@ SkillPackageGateResult SkillPackageGate::inspect(const std::filesystem::path& pa
     result.ok = true;
     result.error = nullptr;
     result.package = second.package;
+    return result;
+}
+
+SkillPackageGateResult SkillPackageGate::inspect_archive(
+    const std::filesystem::path& archive, const TrustOptions& options) const {
+    const auto first = inspect_skill_archive(archive);
+    if(!first.ok) return failed({{"code", kSkillArchiveInvalid}, {"message", first.error}});
+    if(!options.signature) {
+        if(options.remote || !options.allow_unsigned_local)
+            return failed({{"code", kSkillTrustDenied},
+                           {"message", "archive signature is required"}});
+    } else {
+        if(options.signature->subject_digest != first.archive_digest)
+            return failed({{"code", kSkillDigestMismatch},
+                           {"message", "signature subject does not match archive"}});
+        auto verified = verify_skill_signature(*options.signature, options.trust,
+                                               SkillTrustRole::Package, options.now);
+        if(!verified.ok)
+            return failed({{"code", kSkillTrustDenied}, {"message", verified.error}});
+        SkillPackageMetadata expected;
+        expected.archive_digest = first.archive_digest;
+        expected.sbom_digest = options.signature->sbom_digest;
+        expected.provenance_digest = options.signature->provenance_digest;
+        expected.entry_count = first.entries.size();
+        auto audited = inspect_audited_skill_archive(archive, expected);
+        if(!audited.ok)
+            return failed({{"code", kSkillSupplyChainInvalid}, {"message", audited.error}});
+    }
+    const auto temporary = std::filesystem::temp_directory_path() /
+        ("taskflow-package-gate-" + std::to_string(
+            std::chrono::steady_clock::now().time_since_epoch().count()));
+    auto extracted = extract_skill_archive(archive, temporary);
+    if(!extracted.ok)
+        return failed({{"code", kSkillArchiveInvalid}, {"message", extracted.error}});
+    auto result = inspect(temporary);
+    const auto second = inspect_skill_archive(archive);
+    std::error_code ec;
+    std::filesystem::remove_all(temporary, ec);
+    if(!result.ok) return result;
+    if(!second.ok || second.archive_digest != first.archive_digest ||
+       second.entries.size() != first.entries.size())
+        return failed({{"code", kSkillDigestMismatch},
+                       {"message", "archive identity changed during admission"}});
+    if(result.package) {
+        result.package->package_path.clear();
+        result.package->source_uri = options.signature ? options.signature->source_uri : "local://unsigned";
+        result.package->signature_identity = options.signature ? options.signature->key_id : "legacyUnsigned";
+    }
     return result;
 }
 
