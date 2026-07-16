@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://taskflow.dev/schemas/skill-trust-store-v1.schema.json",
+  "type": "object",
+  "required": ["apiVersion", "keys", "revokedPublishers", "revokedKeys", "revokedPackages"],
+  "properties": {
+    "apiVersion": {"const": "agent.taskflow/skill-trust-store/v1"},
+    "keys": {"type": "array", "items": {"type": "object", "required": ["keyId", "publisher", "publicKeyPem", "roles", "sourcePrefixes", "notBefore", "notAfter"], "properties": {"keyId": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "publisher": {"type": "string", "minLength": 1}, "publicKeyPem": {"type": "string", "minLength": 1}, "roles": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"enum": ["package", "registry"]}}, "sourcePrefixes": {"type": "array", "items": {"type": "string", "minLength": 1}}, "notBefore": {"type": "integer", "minimum": 0}, "notAfter": {"type": "integer", "minimum": 0}}, "additionalProperties": false}},
+    "revokedPublishers": {"type": "array", "uniqueItems": true, "items": {"type": "string"}},
+    "revokedKeys": {"type": "array", "uniqueItems": true, "items": {"type": "string", "pattern": "^[0-9a-f]{64}$"}},
+    "revokedPackages": {"type": "array", "uniqueItems": true, "items": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}
+  },
+  "additionalProperties": false
+}

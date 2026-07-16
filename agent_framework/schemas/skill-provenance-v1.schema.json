@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://taskflow.dev/schemas/skill-provenance-v1.schema.json",
+  "type": "object",
+  "required": ["apiVersion", "builder", "source", "materials"],
+  "properties": {
+    "apiVersion": {"const": "agent.taskflow/skill-provenance/v1"},
+    "builder": {"type": "object", "required": ["id"], "properties": {"id": {"type": "string", "minLength": 1}}, "additionalProperties": false},
+    "source": {"type": "object", "required": ["uri", "revision"], "properties": {"uri": {"type": "string", "minLength": 1}, "revision": {"type": "string", "minLength": 1}}, "additionalProperties": false},
+    "materials": {"type": "array", "items": {"type": "object", "required": ["path", "sha256"], "properties": {"path": {"type": "string", "minLength": 1}, "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}, "additionalProperties": false}}
+  },
+  "additionalProperties": false
+}

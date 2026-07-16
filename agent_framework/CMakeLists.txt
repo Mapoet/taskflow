@@ -285,6 +285,9 @@ endif()
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/skills/skill_artifact_import.cpp)
     list(APPEND AGENT_SOURCES src/skills/skill_artifact_import.cpp)
 endif()
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/skills/skill_supply_chain.cpp)
+    list(APPEND AGENT_SOURCES src/skills/skill_supply_chain.cpp)
+endif()
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/skills/skill_model.cpp)
     list(APPEND AGENT_SOURCES src/skills/skill_model.cpp)
 endif()
@@ -1599,6 +1602,13 @@ if(BUILD_TESTING)
         set_tests_properties(skill_artifact_import PROPERTIES
             LABELS "skill-unit;skill-resource-management;skill-cache-security;skill-security-negative")
     endif()
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_skill_supply_chain_contract.cpp)
+        add_executable(test_skill_supply_chain_contract tests/test_skill_supply_chain_contract.cpp)
+        target_link_libraries(test_skill_supply_chain_contract PRIVATE agent_framework)
+        add_test(NAME skill_supply_chain_contract COMMAND test_skill_supply_chain_contract)
+        set_tests_properties(skill_supply_chain_contract PROPERTIES
+            LABELS "skill-unit;skill-schema-contract;skill-package-archive;skill-signature-security;skill-registry-supply-chain")
+    endif()
     if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_skill_model.cpp)
         add_executable(test_skill_model tests/test_skill_model.cpp)
         target_link_libraries(test_skill_model PRIVATE agent_framework)
@@ -1861,4 +1871,9 @@ install(DIRECTORY include/agent
 install(FILES schemas/skill-manifest-v1.schema.json
               schemas/skill-test-v1.schema.json
               schemas/skillctl-output-v1.schema.json
+              schemas/skill-package-v1.schema.json
+              schemas/skill-signature-v1.schema.json
+              schemas/skill-provenance-v1.schema.json
+              schemas/skill-trust-store-v1.schema.json
+              schemas/skill-registry-v1.schema.json
     DESTINATION ${CMAKE_INSTALL_DATADIR}/agent_framework/schemas)
