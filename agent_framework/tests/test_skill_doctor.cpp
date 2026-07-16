@@ -27,6 +27,17 @@ int main() {
     write_file(package / "cli" / "helper", "#!/bin/sh\nexit 0\n");
     write_file(package / "models" / "weights.bin", "model");
     write_file(package / "mcp" / "server.json", "{not-json");
+    write_file(package / "mcp" / "stdio.json", R"({
+  "server": "local-helper",
+  "transport": "stdio",
+  "command": "missing-mcp-server",
+  "secret-references": {"TOKEN": "PRIVATE_TOKEN"}
+})");
+    write_file(package / "mcp" / "http.json", R"({
+  "server": "remote-helper",
+  "transport": "http",
+  "url": "https://api.example.test/mcp"
+})");
     write_file(package / "SKILL.md", R"(---
 api-version: agent.taskflow/v1
 kind: Skill
@@ -34,6 +45,11 @@ name: doctor-fixture
 version: 1.0.0
 description: offline doctor fixture
 permissions:
+  tools:
+    - declared.tool
+  network: ["https://api.example.test"]
+  environment:
+    - DOCTOR_MODE
   filesystem:
     read:
       - data/
@@ -65,13 +81,19 @@ resources:
     - id: server
       path: mcp/server.json
       sha256: f1dec6e9ee608550bd1c39ff2b90134059bac5d02e4e78f6410aed2fbd870bd0
+    - id: stdio-server
+      path: mcp/stdio.json
+    - id: http-server
+      path: mcp/http.json
 ---
 doctor
 )");
 
     auto registry = std::make_shared<SkillRegistry>(root);
     registry->scan_or_reload();
-    assert(registry->get("doctor-fixture"));
+    const auto entry = registry->get("doctor-fixture");
+    assert(entry && entry->manifest);
+    assert(entry->manifest->permissions.network.size() == 1);
     write_file(package / "mcp" / "server.json", "{changed");
     SkillDoctor doctor(registry);
     SkillDoctorOptions options;
@@ -84,7 +106,12 @@ doctor
     assert(codes.contains("skill_doctor_model_unavailable"));
     assert(codes.contains("skill_doctor_mcp_malformed"));
     assert(codes.contains("skill_doctor_digest_mismatch"));
+    assert(codes.contains("skill_doctor_tool_grant_insufficient"));
+    assert(codes.contains("skill_doctor_network_grant_insufficient"));
+    assert(codes.contains("skill_doctor_environment_grant_insufficient"));
     assert(codes.contains("skill_doctor_filesystem_grant_insufficient"));
+    assert(codes.contains("skill_doctor_secret_grant_insufficient"));
+    assert(codes.contains("skill_doctor_mcp_command_unavailable"));
     assert(report.to_json().dump().find("PRIVATE_TOKEN") == std::string::npos);
 
     fs::remove_all(root, ec);

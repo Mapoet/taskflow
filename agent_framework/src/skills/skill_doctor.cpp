@@ -1,5 +1,6 @@
 #include <agent/skill_doctor.hpp>
 
+#include <agent/skill_capability_runtime.hpp>
 #include <agent/skill_lifecycle.hpp>
 
 #include <algorithm>
@@ -35,6 +36,12 @@ bool executable(const std::filesystem::path& path) {
            perms::none;
 }
 
+bool command_available(const std::string& command, const SkillDoctorOptions& options) {
+    if(contains(options.available_executables, command)) return true;
+    const std::filesystem::path path(command);
+    return path.is_absolute() && std::filesystem::is_regular_file(path) && executable(path);
+}
+
 nlohmann::json diagnostic_json(const SkillDiagnostic& diagnostic) {
     return {{"severity", diagnostic.severity == SkillDiagnosticSeverity::Error ? "error" : "warning"},
             {"code", diagnostic.code}, {"path", diagnostic.path.generic_string()},
@@ -61,6 +68,7 @@ SkillDoctorReport SkillDoctor::inspect(const std::string& skill_id,
     }
     const auto package = entry->script_jail.value_or(entry->file_path.parent_path());
     const auto& manifest = *entry->manifest;
+    const SkillPolicyEngine policy(manifest.permissions, options.grants, package);
     std::size_t audit_complete = 0;
     for(std::size_t index = 0; index < manifest.resources.size(); ++index) {
         const auto& resource = manifest.resources[index];
@@ -112,7 +120,25 @@ SkillDoctorReport SkillDoctor::inspect(const std::string& skill_id,
             try {
                 std::ifstream input(path);
                 const auto value = nlohmann::json::parse(input);
-                if(!value.is_object()) throw std::runtime_error("MCP descriptor is not an object");
+                const auto descriptor = skill_parse_mcp_descriptor(value);
+                if(descriptor.transport == "stdio" &&
+                   !command_available(descriptor.command, options))
+                    add_error(report, "skill_doctor_mcp_command_unavailable", path,
+                              location + "/command", "MCP stdio command is unavailable",
+                              "provision the declared command or executable");
+                if(descriptor.transport == "http" &&
+                   !policy.authorize_network(descriptor.url).allowed)
+                    add_error(report, "skill_doctor_mcp_network_unauthorized", path,
+                              location + "/url", "MCP HTTP origin is not authorized",
+                              "request and grant the descriptor origin");
+                for(const auto& [target, reference] : descriptor.secret_references) {
+                    (void)target;
+                    if(!policy.authorize_secret(reference).allowed)
+                        add_error(report, "skill_doctor_mcp_secret_unauthorized", path,
+                                  location + "/secret-references",
+                                  "MCP secret reference is not authorized",
+                                  "request and grant the referenced secret");
+                }
             } catch(const std::exception&) {
                 add_error(report, "skill_doctor_mcp_malformed", path, location,
                           "MCP descriptor is malformed", "provide a valid JSON object descriptor");
@@ -126,17 +152,41 @@ SkillDoctorReport SkillDoctor::inspect(const std::string& skill_id,
                           "resource digest does not match", "recompute or restore the declared resource");
         }
     }
+    for(const auto& requested : manifest.permissions.tools) {
+        if(!policy.authorize_tool(requested).allowed)
+            add_error(report, "skill_doctor_tool_grant_insufficient", entry->file_path,
+                      "/permissions/tools", "tool grant is insufficient",
+                      "grant the declared tool");
+    }
+    for(const auto& requested : manifest.permissions.network) {
+        if(!policy.authorize_network(requested).allowed)
+            add_error(report, "skill_doctor_network_grant_insufficient", entry->file_path,
+                      "/permissions/network", "network grant is insufficient",
+                      "grant the declared network origin");
+    }
+    for(const auto& requested : manifest.permissions.environment) {
+        if(!policy.authorize_environment(requested).allowed)
+            add_error(report, "skill_doctor_environment_grant_insufficient", entry->file_path,
+                      "/permissions/environment", "environment grant is insufficient",
+                      "grant the declared environment variable");
+    }
     for(const auto& requested : manifest.permissions.filesystem_read) {
-        if(!contains(options.grants.filesystem_read, requested))
+        if(!policy.authorize_filesystem(requested, false).allowed)
             add_error(report, "skill_doctor_filesystem_grant_insufficient", entry->file_path,
                       "/permissions/filesystem/read", "filesystem read grant is insufficient",
                       "grant the declared filesystem scope");
     }
     for(const auto& requested : manifest.permissions.filesystem_write) {
-        if(!contains(options.grants.filesystem_write, requested))
+        if(!policy.authorize_filesystem(requested, true).allowed)
             add_error(report, "skill_doctor_filesystem_grant_insufficient", entry->file_path,
                       "/permissions/filesystem/write", "filesystem write grant is insufficient",
                       "grant the declared filesystem scope");
+    }
+    for(const auto& requested : manifest.permissions.secrets) {
+        if(!policy.authorize_secret(requested).allowed)
+            add_error(report, "skill_doctor_secret_grant_insufficient", entry->file_path,
+                      "/permissions/secrets", "secret grant is insufficient",
+                      "grant the declared secret reference");
     }
     bool cache_integrity = false;
     std::size_t cache_objects = 0;

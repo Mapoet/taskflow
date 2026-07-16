@@ -18,6 +18,7 @@ struct SkillDoctorOptions {
     std::vector<std::string> available_models;
     std::vector<std::string> available_devices;
     std::vector<std::string> available_precisions;
+    std::vector<std::string> available_executables;
     std::uint64_t available_memory_bytes = 0;
     SkillPermissionGrant grants;
 };

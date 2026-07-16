@@ -41,6 +41,8 @@ struct SkillMcpDescriptor {
     std::string startup = "eager";
 };
 
+SkillMcpDescriptor skill_parse_mcp_descriptor(const nlohmann::json& value);
+
 using SkillMcpClientFactory = std::function<std::shared_ptr<MCPClient>(
     const SkillMcpDescriptor&, const SkillInvocationContext&)>;
 

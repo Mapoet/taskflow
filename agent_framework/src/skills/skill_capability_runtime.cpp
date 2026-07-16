@@ -87,7 +87,9 @@ std::vector<std::string> string_array(const json& object, const char* key) {
     return out;
 }
 
-SkillMcpDescriptor parse_mcp(const json& value) {
+} // namespace
+
+SkillMcpDescriptor skill_parse_mcp_descriptor(const nlohmann::json& value) {
     SkillMcpDescriptor out;
     out.server = value.value("server", std::string{});
     out.transport = value.value("transport", std::string{});
@@ -129,6 +131,8 @@ SkillMcpDescriptor parse_mcp(const json& value) {
         throw std::runtime_error("lazy MCP startup requires an explicit tools list");
     return out;
 }
+
+namespace {
 
 std::shared_ptr<MCPClient> default_mcp_factory(const SkillMcpDescriptor& descriptor,
                                                const SkillInvocationContext& context) {
@@ -497,7 +501,7 @@ SkillCapabilityBindResult SkillCapabilityRuntime::bind_snapshot(
                                       : failure(kSkillDependencyUnavailable, "skill binding expired");
                     }, meta});
             } else {
-                const SkillMcpDescriptor mcp = parse_mcp(descriptor);
+                const SkillMcpDescriptor mcp = skill_parse_mcp_descriptor(descriptor);
                 if (mcp.transport == "http") {
                     const auto decision = policy.authorize_network(mcp.url);
                     if (!decision.allowed)
