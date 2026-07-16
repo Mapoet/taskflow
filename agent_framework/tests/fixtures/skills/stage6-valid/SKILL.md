@@ -58,5 +58,7 @@ resources:
       path: tests/parallel-alpha.json
     - id: parallel-beta
       path: tests/parallel-beta.json
+    - id: parallel-mixed-failure
+      path: tests/parallel-mixed-failure.json
 ---
 Stage 6 test package.

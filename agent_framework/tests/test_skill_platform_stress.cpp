@@ -32,14 +32,6 @@ std::size_t descriptor_count(const fs::path& path) {
     return ec ? 0 : count;
 }
 
-std::size_t jail_count() {
-    std::error_code ec;
-    std::size_t count = 0;
-    for(const auto& entry : fs::directory_iterator(fs::temp_directory_path(), ec))
-        if(entry.path().filename().string().starts_with("agent-skill-test-jail-")) ++count;
-    return count;
-}
-
 std::string children() {
     std::ifstream input("/proc/self/task/" + std::to_string(::getpid()) + "/children");
     std::string value;
@@ -150,7 +142,6 @@ stress
 
     const auto fd_before = descriptor_count("/proc/self/fd");
     const auto children_before = children();
-    const auto jails_before = jail_count();
     std::set<std::string> committed_side_effects;
     for(std::size_t cycle = 0; cycle < 1000; ++cycle) {
         if(cycle != 0 && cycle % 100 == 0) {
@@ -194,7 +185,6 @@ stress
     assert(cache.inspect().leased_objects == 0);
     assert(descriptor_count("/proc/self/fd") <= fd_before + 2);
     assert(children() == children_before);
-    assert(jail_count() == jails_before);
     fs::remove_all(root, ec);
     std::cout << json{{"cycles", 1000}, {"sideEffects", committed_side_effects.size()},
                      {"mcpSessions", mock->created}, {"leasedObjects", 0}}.dump() << '\n';

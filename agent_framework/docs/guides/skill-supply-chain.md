@@ -19,8 +19,10 @@ skillctl --root ROOT package sbom SKILL_DIR
 ```
 
 经过审计的归档包含 `META-INF/sbom.cdx.json` 和 `META-INF/provenance.json`。SBOM 使用
-CycloneDX 1.6；provenance 记录 source URI、revision、builder 和输入资源摘要。验证时会重新生成
-并比较这两份材料，不能仅依赖归档内声明值。
+CycloneDX 1.6，除资源摘要和许可证外，还记录 runtime、source URI、media type、cache policy、
+executable、Model 设备/精度/内存要求、资源依赖，以及依赖 Skill 的 required/optional scope；
+provenance 记录 source URI、revision、builder 和输入资源摘要。验证时会重新生成并比较这两份
+材料，不能仅依赖归档内声明值。
 
 ## 签名与信任库
 

@@ -81,7 +81,7 @@ int main() {
     std::atomic<int> active_cases{0};
     std::atomic<int> maximum_active{0};
     SkillTestRunOptions parallel_options;
-    parallel_options.filter = "parallel ";
+    parallel_options.filter = "parallel pass";
     parallel_options.jobs = 2;
     parallel_options.case_state_observer = [&](const std::string&, bool started) {
         if(!started) {
@@ -99,16 +99,35 @@ int main() {
     const auto parallel = runner.run("stage6-valid", parallel_options);
     assert(parallel.ok && parallel.passed == 2U && parallel.cases.size() == 2U);
     assert(maximum_active.load() == 2);
-    assert(parallel.cases[0].name == "parallel alpha");
-    assert(parallel.cases[1].name == "parallel beta");
+    assert(parallel.cases[0].name == "parallel pass alpha");
+    assert(parallel.cases[1].name == "parallel pass beta");
+
+    SkillTestRunOptions jobs_eight_options;
+    jobs_eight_options.filter = "parallel ";
+    jobs_eight_options.jobs = 8;
+    const auto jobs_eight = runner.run("stage6-valid", jobs_eight_options);
+    assert(!jobs_eight.ok && jobs_eight.passed == 2U && jobs_eight.failed == 1U);
+    assert(jobs_eight.cases.size() == 3U);
+    assert(jobs_eight.cases[0].name == "parallel mixed failure");
+    assert(jobs_eight.cases[1].name == "parallel pass alpha");
+    assert(jobs_eight.cases[2].name == "parallel pass beta");
 
     SkillTestRunOptions active_cancel_options;
     active_cancel_options.filter = "cancel terminates process";
     active_cancel_options.control = std::make_shared<TaskControl>();
+    std::atomic<bool> cancel_case_started{false};
+    active_cancel_options.case_state_observer = [&](const std::string&, bool started) {
+        if(started) cancel_case_started.store(true);
+    };
     auto active_cancel = std::async(std::launch::async, [&] {
         return runner.run("stage6-valid", active_cancel_options);
     });
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    const auto cancel_start_deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while(!cancel_case_started.load() && std::chrono::steady_clock::now() < cancel_start_deadline)
+        std::this_thread::yield();
+    assert(cancel_case_started.load());
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
     active_cancel_options.control->request_cancel();
     const auto actively_cancelled = active_cancel.get();
     assert(actively_cancelled.ok && actively_cancelled.passed == 1U);

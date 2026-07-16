@@ -22,29 +22,29 @@ Tool、Prompt 或 Workflow。
 
 | 能力 | 状态 | 当前实现 | 主要缺口 |
 | --- | --- | --- | --- |
-| Metadata | 部分集成 | `SkillIndexEntry`、Frontmatter parser、diagnostics | 无正式 schema、作者、来源、依赖、兼容范围和权限模型 |
-| Registry | 基础集成 | 多根扫描、重复 ID 检查、关键词路由 | 无版本解析、启停、安装、升级、快照和来源追踪 |
-| Instructions | 已集成 | 正文按需读取、字符预算、时间戳缓存 | 无内容哈希、版本隔离和原子缓存失效 |
-| Reference | 部分集成 | 类型化读取、jail、大小限制 | 无 MIME、分页、索引、检索和 citation |
-| Script | 基础集成 | allowlist、参数、最小环境、超时、输出限制、取消 | 无每脚本 schema、CPU/内存配额、进程组清理 |
-| CLI resource | 部分集成 | 可声明和受控读取 | 无独立执行契约、可执行发现和参数/结果 schema |
-| Tool | 框架已有但未集成 | `ToolBus` | `allowed_tools` 仅解析，未运行时强制；无私有/导出 Tool |
-| MCP | 框架已有但未集成 | `MCPClient`、`MCPTool` | 无 Skill 服务声明、凭据引用、过滤、生命周期和授权 |
-| Template | 框架已有但未集成 | Prompt/Workflow template API | 无类型化资源、变量 schema 和 Skill 作用域 |
-| Schema | 通用能力有限 | Tool 参数 schema validation | 无 Skill 输入输出及资源间 schema 契约 |
-| Prompt | 框架已有但未集成 | `PromptRenderer` | 无角色 Prompt 声明、变量授权、组合和版本绑定 |
-| Workflow | 框架已有但未集成 | WorkflowBuilder、GraphExecutor | 无 Skill DAG 声明、输入输出映射、循环和子任务契约 |
-| Config | 缺失 | 零散环境变量 | 无类型配置、默认值、覆盖层和 secret reference |
-| Asset | 缺失 | 无 Skill 专用管理 | 无 MIME、哈希、配额、只读映射和流式加载 |
-| Model | 框架部分已有但未集成 | LLM/model adapters | 无本地模型资源、设备、内存、runtime 和校验策略 |
-| Tests | 缺失 Skill 契约 | 框架自身有 CTest | 包内测试不可发现、隔离执行和报告 |
-| Lifecycle | 缺失 | `scan_or_reload` | 无 install/enable/disable/update/remove/pin/rollback |
-| Supply chain | 已集成 | 确定性 `.tfskill`、Ed25519、SBOM/provenance、trust store、签名 Registry | 暂无透明日志、阈值签名、TUF/Sigstore 兼容和自动密钥轮换 |
-| CLI management | 部分集成 | `skillctl list/validate/show/read` | 无 lint/test/package/install/doctor/permissions/graph |
-| Observability | 未统一 | 零散日志和 Agent event | 无 Skill 资源、权限、依赖和调用审计事件 |
+| Metadata | 已集成 | Manifest v0/v1、正式 schema、作者/来源/依赖/兼容性、规范化 diagnostics | 无平台内缺口 |
+| Registry | 已集成 | 多根扫描、确定性路由、SemVer、生命周期、原子 generation snapshot、来源身份 | 无平台内缺口 |
+| Instructions | 已集成 | 固定 package snapshot、摘要、预算读取与版本隔离 | 无平台内缺口 |
+| Reference | 已集成 | MIME、分页、citation、索引/检索、stream/mmap、cache lease | 无平台内缺口 |
+| Script | 已集成 | schema、allowlist、最小环境、bwrap/unshare、进程组、deadline、CPU/AS/output budget | 无平台内缺口 |
+| CLI resource | 已集成 | 可执行发现、参数/结果 schema、隔离执行与稳定诊断 | 无平台内缺口 |
+| Tool | 已集成 | 私有/导出 Tool、命名空间、原子 ToolBus 发布和运行时授权 | 无平台内缺口 |
+| MCP | 已集成 | stdio/http/mock、secret reference、过滤、eager/lazy、取消和有界断连 | 无平台内缺口 |
+| Template | 已集成 | 类型化 descriptor、变量 schema、来源授权和 Skill snapshot | 无平台内缺口 |
+| Schema | 已集成 | Skill 输入/输出、资源引用及稳定 JSON-path diagnostics | 无平台内缺口 |
+| Prompt | 已集成 | 变量授权、组合、输出预算和版本绑定 | 无平台内缺口 |
+| Workflow | 已集成 | DAG、映射、循环、subflow/submodule、retry、restart/resume | 无平台内缺口 |
+| Config | 已集成 | JSON Merge Patch、schema、JSON Pointer secret binding 与权限求交 | 无平台内缺口 |
+| Asset | 已集成 | MIME、摘要、来源、license、quota、stream/mmap 与 cache policy | 无平台内缺口 |
+| Model | 已集成 | runtime/device/precision/memory admission、只读加载与 cache policy | 无平台内缺口 |
+| Tests | 已集成 | 包内发现、独立 jail、有界并发、timeout/cancel 和确定性报告 | 无平台内缺口 |
+| Lifecycle | 已集成 | install/enable/disable/update/remove/pin/rollback、lock 与 lease | 无平台内缺口 |
+| Supply chain | 已集成 | 确定性 `.tfskill`、Ed25519、完整 SBOM/provenance、trust store、签名 Registry | 透明日志、阈值签名和 TUF/Sigstore 为明确非目标 |
+| CLI management | 已集成 | list/show/validate/inspect/read/lint/test/package/install/doctor/permissions/graph | 无平台内缺口 |
+| Observability | 已集成 | 统一 runtime identity、event 与 secret-free audit sink | 无平台内缺口 |
 
-当前状态应定义为 **core-supported / resource-incomplete**：L1 元数据、L2 指令和部分 L3
-执行已可用，但尚不是完整的 Skill 平台。
+当前状态（Stage 9，2026-07-17）为 **platform-complete**。该结论表示本文定义的 Skill
+平台契约与门禁已经闭环，不扩展到第 8 节列出的非目标。
 
 ## 3. 目标架构
 
@@ -472,8 +472,9 @@ skillctl package/install/update/enable/disable/remove
 - 全新 Debug/C++20/OpenSSL 构建完成；安装前缀验证 `skillctl`、4 个公共头和 5 个 schema；最终
   离线 fixture + loopback 全量 CTest 为 3022/3022 通过，总耗时 206.24 秒。
 
-**实施状态：已完成。** 当前状态达到 `platform-complete`；下列透明日志、多方签名等仍是明确
-非目标，不影响 Stage 8 退出标准。
+**实施状态：已完成。** Stage 8 完成供应链功能范围；`platform-complete` 的最终判定仍须通过
+Stage 9 的运行时契约和压力/资源泄漏门禁。下列透明日志、多方签名等仍是明确非目标，不影响
+Stage 8 退出标准。
 
 ### 步骤
 
@@ -488,6 +489,36 @@ skillctl package/install/update/enable/disable/remove
 
 - 篡改包、未知签名、digest 不符和撤销发布者均被拒绝。
 - 相同 lockfile 在受支持平台解析为相同 Skill 图。
+
+## Stage 9：平台契约与稳定性收口，P0
+
+### 完成证据（2026-07-17）
+
+- 资源 descriptor 增加资源级权限和依赖；权限只能收窄 manifest，依赖的缺失、自依赖和重复
+  均在 Registry 发布前失败。
+- `no-store`、`on-demand`、`pin` 驱动真实 cache 行为；Config 支持 Merge Patch、schema 与
+  授权后的 JSON Pointer secret binding。
+- Runtime identity 统一 skill/version/package/generation 与 task/session/trace/depth；runtime、
+  resource、cache 和 lifecycle 操作写入非干扰、无 secret 值的结构化 audit。
+- 隔离进程执行在 wall-clock deadline 外执行 `RLIMIT_CPU` 和 `RLIMIT_AS`；Doctor 离线检查
+  六类权限、MCP transport/command/origin/secret、Model requirements 和 cache integrity。
+- `skillctl test --jobs` 使用有界 worker pool，每个 case 拥有独立 jail/Registry/runtime；输出
+  与完成顺序无关，取消停止分发并回收 worker/jail。
+- CycloneDX 1.6 补齐 runtime/source/media/cache/model/executable/resource dependency 与可选依赖
+  scope，保持归档可复现。
+- 1000-cycle 门禁完成 1000 次取消后恢复、Registry restart、runtime/MCP/cache 操作：1000 个
+  唯一副作用、1000 个 MCP session 全部断开、0 cache lease 残留，FD/child 无增长；并行 runner
+  的重复门禁逐次确认其独立 jail 全部回收。
+- 规模门禁实测 1/100/1000/10000 Skills；本机 Debug 的 scan 为 2/39/393/4296 ms，10k route
+  31 ms、publish 282 ms。时间只作环境内基线，正确性断言固定数量、排序、路由和 generation。
+- `skill-*` 标签 34/34 通过；8 个 Stage 9 关键契约分别连续运行 20 次，首次并发复跑发现并
+  修正两个测试自身的启动时序/全局临时目录耦合后，修正版 runner 与 stress 再各 20/20 通过。
+- 完整 Debug 构建到 100%，隔离安装验证 `skillctl`、`skill_config.hpp`、`skill_audit.hpp` 和
+  Manifest schema。全量 CTest 在受限沙箱内 3010/3026 通过；16 个 loopback bind 用例在沙箱外
+  复跑 16/16 通过，合并验收为 3026/3026，Stage 9 Skill 测试无失败。
+
+**实施状态：已完成。** Stage 9 关闭 Stage 1–8 留下的运行时语义、审计与稳定性门禁，
+`platform-complete` 不再依赖未执行的压力测试。
 
 ## 5. 测试矩阵
 
@@ -564,6 +595,9 @@ install signed package
 - `skill-cache-security`
 - `skill-reference-retrieval`
 - `skill-model-admission`
+- `skill-platform-stress`
+- `skill-resource-leak`
+- `skill-registry-scale`
 
 每项权限和资源控制至少有一个拒绝测试；每项生命周期操作至少有一个并发或失败恢复测试。
 P0/P1 工作不得仅增加文档或 happy-path 测试。
@@ -580,7 +614,7 @@ P0/P1 工作不得仅增加文档或 happy-path 测试。
 - [x] 包内测试、框架集成、安全负向和综合测试进入 CI。
 - [x] 本地资源的 digest、来源、license、cache 状态和模型 admission 可审计。
 - [x] 签名、可信发布者、SBOM 和远程 Registry 策略可审计。
-- [ ] 1000 次循环/取消/重启压力测试无资源泄漏或重复副作用。
+- [x] 1000 次循环/取消/重启压力测试无资源泄漏或重复副作用。
 
 状态门槛：
 
