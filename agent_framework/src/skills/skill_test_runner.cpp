@@ -385,7 +385,10 @@ SkillTestSuiteResult SkillTestRunner::run(const std::string& skill_id,
                                        ? "" : parsed.diagnostics.front().location}});
             return suite;
         }
-        if(options.filter.empty() || parsed.descriptor->name.find(options.filter) != std::string::npos)
+        const bool matched = options.filter.empty() ||
+            (options.exact_filter ? parsed.descriptor->name == options.filter
+                                  : parsed.descriptor->name.find(options.filter) != std::string::npos);
+        if(matched)
             descriptors.push_back(*parsed.descriptor);
     }
     std::sort(descriptors.begin(), descriptors.end(), [](const auto& left, const auto& right) {
@@ -396,12 +399,56 @@ SkillTestSuiteResult SkillTestRunner::run(const std::string& skill_id,
         return suite;
     }
 
+    if(options.jobs > 1 && descriptors.size() > 1) {
+        std::vector<std::optional<SkillTestSuiteResult>> completed(descriptors.size());
+        std::atomic<std::size_t> next{0};
+        const auto worker_count = std::min(options.jobs, descriptors.size());
+        std::vector<std::thread> workers;
+        workers.reserve(worker_count);
+        for(std::size_t worker = 0; worker < worker_count; ++worker) {
+            workers.emplace_back([&] {
+                while(true) {
+                    if(options.control && options.control->is_cancel_requested()) return;
+                    const auto index = next.fetch_add(1);
+                    if(index >= descriptors.size()) return;
+                    auto child = options;
+                    child.jobs = 1;
+                    child.filter = descriptors[index].name;
+                    child.exact_filter = true;
+                    completed[index] = run(skill_id, child);
+                }
+            });
+        }
+        for(auto& worker : workers) worker.join();
+        for(auto& child : completed) {
+            if(!child) continue;
+            if(child->cases.empty() && !child->error.is_null() && suite.error.is_null())
+                suite.error = child->error;
+            for(auto& result : child->cases) suite.cases.push_back(std::move(result));
+        }
+        if(options.control && options.control->is_cancel_requested() && suite.error.is_null())
+            suite.error = failure(kSkillCancelled, "test run was cancelled");
+        for(const auto& result : suite.cases) {
+            if(result.passed) ++suite.passed;
+            else ++suite.failed;
+        }
+        suite.ok = suite.error.is_null() && suite.failed == 0 &&
+                   suite.cases.size() == descriptors.size();
+        if(suite.error.is_null() && suite.failed != 0)
+            suite.error = failure("skill_tests_failed", "one or more skill tests failed",
+                                  {{"failed", suite.failed}});
+        else if(suite.error.is_null() && suite.cases.size() != descriptors.size())
+            suite.error = failure(kSkillCancelled, "test run did not complete all cases");
+        return suite;
+    }
+
     for(const auto& descriptor : descriptors) {
         if(options.control && options.control->is_cancel_requested()) {
             suite.error = failure(kSkillCancelled, "test run was cancelled");
             break;
         }
         const auto started = std::chrono::steady_clock::now();
+        if(options.case_state_observer) options.case_state_observer(descriptor.name, true);
         SkillTestCaseResult result;
         result.name = descriptor.name;
         result.resource_digests = digests;
@@ -544,6 +591,7 @@ SkillTestSuiteResult SkillTestRunner::run(const std::string& skill_id,
         result.duration_ms = static_cast<std::uint64_t>(
             std::chrono::duration_cast<std::chrono::milliseconds>(
                 std::chrono::steady_clock::now() - started).count());
+        if(options.case_state_observer) options.case_state_observer(descriptor.name, false);
         suite.cases.push_back(std::move(result));
     }
     for(const auto& result : suite.cases) {

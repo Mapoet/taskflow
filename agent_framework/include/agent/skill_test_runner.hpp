@@ -8,6 +8,7 @@
 
 #include <filesystem>
 #include <chrono>
+#include <functional>
 #include <map>
 #include <memory>
 #include <optional>
@@ -44,6 +45,8 @@ struct SkillTestRunOptions {
     std::size_t jobs = 1;
     std::chrono::milliseconds timeout{5000};
     std::shared_ptr<TaskControl> control;
+    std::function<void(const std::string&, bool)> case_state_observer;
+    bool exact_filter = false;
 };
 
 struct SkillTestCaseResult {

@@ -1,0 +1,7 @@
+{
+  "apiVersion": "agent.taskflow/skill-test/v1",
+  "kind": "SkillTest",
+  "name": "parallel alpha",
+  "target": {"kind": "resource", "resource": "data"},
+  "expect": {"ok": true, "output": {"value": 7}}
+}

@@ -1,6 +1,7 @@
 #include <agent/skill_test_runner.hpp>
 
 #include <cassert>
+#include <atomic>
 #include <filesystem>
 #include <fstream>
 #include <future>
@@ -76,6 +77,30 @@ int main() {
            std::string::npos);
     assert(run_one("undeclared mock is denied").passed);
     assert(run_one("timeout terminates process", std::chrono::milliseconds(100)).passed);
+
+    std::atomic<int> active_cases{0};
+    std::atomic<int> maximum_active{0};
+    SkillTestRunOptions parallel_options;
+    parallel_options.filter = "parallel ";
+    parallel_options.jobs = 2;
+    parallel_options.case_state_observer = [&](const std::string&, bool started) {
+        if(!started) {
+            active_cases.fetch_sub(1);
+            return;
+        }
+        const auto active = active_cases.fetch_add(1) + 1;
+        auto observed = maximum_active.load();
+        while(observed < active &&
+              !maximum_active.compare_exchange_weak(observed, active)) {}
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+        while(maximum_active.load() < 2 && std::chrono::steady_clock::now() < deadline)
+            std::this_thread::yield();
+    };
+    const auto parallel = runner.run("stage6-valid", parallel_options);
+    assert(parallel.ok && parallel.passed == 2U && parallel.cases.size() == 2U);
+    assert(maximum_active.load() == 2);
+    assert(parallel.cases[0].name == "parallel alpha");
+    assert(parallel.cases[1].name == "parallel beta");
 
     SkillTestRunOptions active_cancel_options;
     active_cancel_options.filter = "cancel terminates process";

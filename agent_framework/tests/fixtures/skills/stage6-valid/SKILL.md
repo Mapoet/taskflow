@@ -54,5 +54,9 @@ resources:
       path: tests/undeclared-negative.json
     - id: secret-negative
       path: tests/secret-negative.json
+    - id: parallel-alpha
+      path: tests/parallel-alpha.json
+    - id: parallel-beta
+      path: tests/parallel-beta.json
 ---
 Stage 6 test package.
