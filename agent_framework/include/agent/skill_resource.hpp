@@ -1,6 +1,8 @@
 #ifndef AGENT_SKILL_RESOURCE_HPP
 #define AGENT_SKILL_RESOURCE_HPP
 
+#include "skill_permissions.hpp"
+
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -55,6 +57,8 @@ struct SkillResourceDescriptor {
     std::optional<SkillCitationMetadata> citation;
     std::optional<SkillReferenceIndexConfig> index;
     std::optional<SkillModelRequirements> model_requirements;
+    SkillPermissionSet permissions;
+    std::vector<std::string> depends_on;
 };
 
 std::string to_string(SkillResourceType kind);

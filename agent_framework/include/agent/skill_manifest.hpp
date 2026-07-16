@@ -18,15 +18,6 @@ struct SkillDependency {
     bool optional = false;
 };
 
-struct SkillPermissionSet {
-    std::vector<std::string> tools;
-    std::vector<std::string> network;
-    std::vector<std::string> environment;
-    std::vector<std::string> filesystem_read;
-    std::vector<std::string> filesystem_write;
-    std::vector<std::string> secrets;
-};
-
 struct SkillCompatibility {
     std::string agent_framework;
 };

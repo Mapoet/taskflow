@@ -5,6 +5,17 @@
 #include <system_error>
 
 namespace agent_framework {
+
+bool skill_permissions_empty(const SkillPermissionSet& permissions) noexcept {
+    return permissions.tools.empty() && permissions.network.empty() &&
+           permissions.environment.empty() && permissions.filesystem_read.empty() &&
+           permissions.filesystem_write.empty() && permissions.secrets.empty();
+}
+
+SkillPermissionSet skill_permissions_effective(const SkillPermissionSet& manifest,
+                                               const SkillPermissionSet& resource) {
+    return skill_permissions_empty(resource) ? manifest : resource;
+}
 namespace {
 
 bool exact_or_all(const std::vector<std::string>& values, std::string_view target) {

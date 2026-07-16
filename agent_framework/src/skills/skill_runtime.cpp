@@ -108,8 +108,9 @@ SkillRuntimeResult SkillRuntime::begin_resolved(const SkillIndexEntry& entry,
     ticket.manifest = manifest;
     ticket.resource = *found;
     const auto package_root = entry.script_jail.value_or(entry.file_path.parent_path());
-    ticket.policy = std::make_shared<SkillPolicyEngine>(manifest->permissions, context.grants,
-                                                        package_root);
+    ticket.policy = std::make_shared<SkillPolicyEngine>(
+        skill_permissions_effective(manifest->permissions, found->permissions),
+        context.grants, package_root);
     ticket.context = std::move(context);
     if (!ticket.resource.input_schema.empty()) {
         auto validation = validate_schema(ticket, ticket.resource.input_schema, input, true);

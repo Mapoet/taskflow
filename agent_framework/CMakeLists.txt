@@ -581,6 +581,7 @@ set(AGENT_HEADERS
     include/node/ui_sink_node.hpp
     include/node/nodes.hpp
     include/agent/skill_types.hpp
+    include/agent/skill_permissions.hpp
     include/agent/skill_command.hpp
     include/agent/skill_doctor.hpp
     include/agent/skill_test_runner.hpp

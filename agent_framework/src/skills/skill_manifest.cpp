@@ -158,6 +158,29 @@ std::vector<std::string> strings(const json& value) {
     return out;
 }
 
+SkillPermissionSet permission_set(const json& value) {
+    SkillPermissionSet out;
+    if (!value.is_object()) return out;
+    if (value.contains("tools")) out.tools = strings(value["tools"]);
+    if (value.contains("network")) out.network = strings(value["network"]);
+    if (value.contains("env")) out.environment = strings(value["env"]);
+    if (value.contains("environment")) out.environment = strings(value["environment"]);
+    if (value.contains("secrets")) out.secrets = strings(value["secrets"]);
+    if (value.contains("filesystem") && value["filesystem"].is_object()) {
+        if (value["filesystem"].contains("read"))
+            out.filesystem_read = strings(value["filesystem"]["read"]);
+        if (value["filesystem"].contains("write"))
+            out.filesystem_write = strings(value["filesystem"]["write"]);
+    }
+    return out;
+}
+
+json permission_json(const SkillPermissionSet& value) {
+    return {{"tools",value.tools},{"network",value.network},
+            {"environment",value.environment},{"secrets",value.secrets},
+            {"filesystem",{{"read",value.filesystem_read},{"write",value.filesystem_write}}}};
+}
+
 std::string text(const json& object, const char* key) {
     if (object.contains(key) && object[key].is_string()) return object[key].get<std::string>();
     return {};
@@ -196,6 +219,10 @@ SkillResourceDescriptor descriptor(const json& value, SkillResourceType kind) {
         d.output_schema = text(value, "output-schema");
         if (d.output_schema.empty()) d.output_schema = text(value, "output_schema");
         d.runtime = text(value, "runtime");
+        if (value.contains("permissions")) d.permissions = permission_set(value["permissions"]);
+        if (value.contains("depends-on")) d.depends_on = strings(value["depends-on"]);
+        if (d.depends_on.empty() && value.contains("depends_on"))
+            d.depends_on = strings(value["depends_on"]);
         d.optional = boolean(value, "optional");
         d.executable = boolean(value, "executable", d.executable);
         if (value.contains("size-limit") && value["size-limit"].is_number_unsigned())
@@ -329,19 +356,7 @@ SkillManifestParseResult parse_skill_manifest_yaml(const std::string& yaml) {
         for (const auto& d : root["dependencies"]) if (d.is_object())
             m.dependencies.push_back({text(d,"name"), text(d,"version"), boolean(d,"optional")});
     }
-    if (root.contains("permissions") && root["permissions"].is_object()) {
-        const auto& p = root["permissions"];
-        if (p.contains("tools")) m.permissions.tools = strings(p["tools"]);
-        if (p.contains("network")) m.permissions.network = strings(p["network"]);
-        if (p.contains("env")) m.permissions.environment = strings(p["env"]);
-        if (p.contains("secrets")) m.permissions.secrets = strings(p["secrets"]);
-        if (p.contains("filesystem") && p["filesystem"].is_object()) {
-            if (p["filesystem"].contains("read"))
-                m.permissions.filesystem_read = strings(p["filesystem"]["read"]);
-            if (p["filesystem"].contains("write"))
-                m.permissions.filesystem_write = strings(p["filesystem"]["write"]);
-        }
-    }
+    if (root.contains("permissions")) m.permissions = permission_set(root["permissions"]);
 
     const std::map<std::string, SkillResourceType> resource_types = {
         {"scripts",SkillResourceType::Script},{"cli",SkillResourceType::Cli},
@@ -410,6 +425,8 @@ json skill_manifest_to_json(const SkillManifest& m, bool) {
         if (!r.runtime.empty()) value["runtime"] = r.runtime;
         if (!r.license.empty()) value["license"] = r.license;
         if (!r.source_uri.empty()) value["source"] = r.source_uri;
+        if (!skill_permissions_empty(r.permissions)) value["permissions"] = permission_json(r.permissions);
+        if (!r.depends_on.empty()) value["depends_on"] = r.depends_on;
         value["read_mode"] = to_string(r.read_mode);
         value["cache_policy"] = to_string(r.cache_policy);
         if (r.citation) {
@@ -433,10 +450,7 @@ json skill_manifest_to_json(const SkillManifest& m, bool) {
             {"authors",m.authors},{"tags",m.tags},{"trigger_keywords",m.trigger_keywords},
             {"compatibility",{{"agent_framework",m.compatibility.agent_framework}}},
             {"dependencies",dependencies},
-            {"permissions",{{"tools",m.permissions.tools},{"network",m.permissions.network},
-                            {"environment",m.permissions.environment},{"secrets",m.permissions.secrets},
-                            {"filesystem",{{"read",m.permissions.filesystem_read},
-                                           {"write",m.permissions.filesystem_write}}}}},
+            {"permissions",permission_json(m.permissions)},
             {"resources",resources},{"extensions",m.extensions},{"legacy_v0",m.legacy_v0}};
 }
 

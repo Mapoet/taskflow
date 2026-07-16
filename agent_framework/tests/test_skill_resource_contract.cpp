@@ -35,6 +35,10 @@ kind: Skill
 name: stage7-contract
 version: 1.0.0
 description: Stage 7 contract fixture
+permissions:
+  filesystem:
+    read: [.]
+  secrets: [api-token]
 resources:
   references:
     - id: guide
@@ -42,6 +46,10 @@ resources:
       media-type: text/markdown
       read-mode: text
       cache-policy: on-demand
+      depends-on: [asset]
+      permissions:
+        filesystem:
+          read: [.]
       citation:
         title: GNSS Guide
         authors:
@@ -104,6 +112,8 @@ int main() {
     assert(reference.citation->authors.size() == 1U);
     assert(reference.index.has_value());
     assert(reference.index->kind == "lexical-v1");
+    assert(reference.depends_on == std::vector<std::string>({"asset"}));
+    assert(reference.permissions.filesystem_read == std::vector<std::string>({"."}));
 
     const auto& asset = find_resource(*parsed.manifest, SkillResourceType::Asset);
     assert(asset.declared_size == 5U);
@@ -127,6 +137,22 @@ int main() {
     assert(model_json.at("cache_policy") == "pin");
     assert(model_json.at("size") == 5U);
     assert(model_json.at("requirements").at("min_memory_bytes") == 2147483648ULL);
+    const auto& reference_json = normalized.at("resources").at("references").at(0);
+    assert(reference_json.at("depends_on").at(0) == "asset");
+    assert(reference_json.at("permissions").at("filesystem").at("read").at(0) == ".");
+
+    auto excessive_permission = *parsed.manifest;
+    excessive_permission.resources.front().permissions.secrets = {"undeclared-token"};
+    assert(has_issue(validate_skill_manifest(excessive_permission, base),
+                     "resource_permission_exceeds_manifest"));
+
+    auto invalid_dependencies = *parsed.manifest;
+    invalid_dependencies.resources.front().depends_on = {
+        invalid_dependencies.resources.front().id, "missing", "missing"};
+    const auto dependency_issues = validate_skill_manifest(invalid_dependencies, base);
+    assert(has_issue(dependency_issues, "resource_dependency_self_reference"));
+    assert(has_issue(dependency_issues, "resource_dependency_missing"));
+    assert(has_issue(dependency_issues, "duplicate_resource_dependency"));
 
     auto missing_audit = *parsed.manifest;
     for(auto& resource : missing_audit.resources) {

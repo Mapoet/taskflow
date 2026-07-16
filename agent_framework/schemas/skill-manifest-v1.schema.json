@@ -94,6 +94,8 @@
         "input-schema": {"type": "string"},
         "output-schema": {"type": "string"},
         "runtime": {"type": "string"},
+        "permissions": {"$ref": "#/$defs/permissions"},
+        "depends-on": {"$ref": "#/$defs/string-list"},
         "cache-policy": {"enum": ["no-store", "on-demand", "pin"]},
         "citation": {"$ref": "#/$defs/citation"},
         "index": {"$ref": "#/$defs/reference-index"},

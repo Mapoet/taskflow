@@ -243,6 +243,50 @@ std::vector<SkillManifestIssue> validate_skill_manifest(
         validate_schema_ref(manifest.resources[i].input_schema, "/resources/" + std::to_string(i) + "/input-schema");
         validate_schema_ref(manifest.resources[i].output_schema, "/resources/" + std::to_string(i) + "/output-schema");
     }
+    const auto validate_permission_subset = [&](const std::vector<std::string>& requested,
+                                                const std::vector<std::string>& package,
+                                                const std::string& location) {
+        std::unordered_set<std::string> seen;
+        for (const auto& value : requested) {
+            if (!seen.insert(value).second)
+                issue(out, true, "duplicate_resource_permission", location,
+                      "resource permission is duplicated: " + value);
+            if (std::find(package.begin(), package.end(), value) == package.end())
+                issue(out, true, "resource_permission_exceeds_manifest", location,
+                      "resource permission is not declared by the manifest: " + value,
+                      "declare it at package level or remove it from the resource");
+        }
+    };
+    for (std::size_t i = 0; i < manifest.resources.size(); ++i) {
+        const auto& resource = manifest.resources[i];
+        const auto base_location = "/resources/" + std::to_string(i);
+        validate_permission_subset(resource.permissions.tools, manifest.permissions.tools,
+                                   base_location + "/permissions/tools");
+        validate_permission_subset(resource.permissions.network, manifest.permissions.network,
+                                   base_location + "/permissions/network");
+        validate_permission_subset(resource.permissions.environment, manifest.permissions.environment,
+                                   base_location + "/permissions/env");
+        validate_permission_subset(resource.permissions.filesystem_read,
+                                   manifest.permissions.filesystem_read,
+                                   base_location + "/permissions/filesystem/read");
+        validate_permission_subset(resource.permissions.filesystem_write,
+                                   manifest.permissions.filesystem_write,
+                                   base_location + "/permissions/filesystem/write");
+        validate_permission_subset(resource.permissions.secrets, manifest.permissions.secrets,
+                                   base_location + "/permissions/secrets");
+        std::unordered_set<std::string> dependencies;
+        for (const auto& dependency : resource.depends_on) {
+            if (!dependencies.insert(dependency).second)
+                issue(out, true, "duplicate_resource_dependency", base_location + "/depends-on",
+                      "resource dependency is duplicated: " + dependency);
+            else if (dependency == resource.id)
+                issue(out, true, "resource_dependency_self_reference", base_location + "/depends-on",
+                      "resource cannot depend on itself: " + dependency);
+            else if (resource_types.find(dependency) == resource_types.end())
+                issue(out, true, "resource_dependency_missing", base_location + "/depends-on",
+                      "resource dependency does not exist: " + dependency);
+        }
+    }
     for (std::size_t i = 0; i < manifest.dependencies.size(); ++i) {
         if (!safe_id(manifest.dependencies[i].name))
             issue(out, true, "invalid_dependency_name", "/dependencies/" + std::to_string(i) + "/name", "dependency name is invalid");
