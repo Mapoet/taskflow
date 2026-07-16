@@ -21,6 +21,8 @@ enum class SkillTrustRole { Package, Registry };
 
 std::string skill_trust_role_name(SkillTrustRole role);
 std::optional<SkillTrustRole> skill_trust_role_from_name(const std::string& value);
+std::optional<std::string> skill_sha256_bytes(const std::string& value,
+                                              std::string* error = nullptr);
 
 struct SkillPackageMetadata {
     std::string api_version = "agent.taskflow/skill-package/v1";

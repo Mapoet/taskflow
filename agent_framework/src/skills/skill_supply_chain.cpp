@@ -1,6 +1,12 @@
 #include "agent/skill_supply_chain.hpp"
 
 #include <algorithm>
+#include <iomanip>
+#include <sstream>
+
+#if defined(CPPHTTPLIB_OPENSSL_SUPPORT)
+#include <openssl/evp.h>
+#endif
 
 namespace agent_framework {
 namespace {
@@ -47,6 +53,28 @@ std::optional<SkillTrustRole> skill_trust_role_from_name(const std::string& valu
     if(value == "package") return SkillTrustRole::Package;
     if(value == "registry") return SkillTrustRole::Registry;
     return std::nullopt;
+}
+
+std::optional<std::string> skill_sha256_bytes(const std::string& value, std::string* error) {
+#if defined(CPPHTTPLIB_OPENSSL_SUPPORT)
+    auto* context = EVP_MD_CTX_new();
+    if(!context) { fail(error, "SHA-256 context allocation failed"); return std::nullopt; }
+    unsigned char digest[EVP_MAX_MD_SIZE];
+    unsigned int size = 0;
+    const bool ok = EVP_DigestInit_ex(context, EVP_sha256(), nullptr) == 1 &&
+                    EVP_DigestUpdate(context, value.data(), value.size()) == 1 &&
+                    EVP_DigestFinal_ex(context, digest, &size) == 1;
+    EVP_MD_CTX_free(context);
+    if(!ok) { fail(error, "SHA-256 operation failed"); return std::nullopt; }
+    std::ostringstream output;
+    output << std::hex << std::setfill('0');
+    for(unsigned int i = 0; i < size; ++i) output << std::setw(2) << static_cast<unsigned int>(digest[i]);
+    return output.str();
+#else
+    (void)value;
+    fail(error, "SHA-256 unavailable because OpenSSL was not found");
+    return std::nullopt;
+#endif
 }
 
 json SkillPackageMetadata::to_json() const {
