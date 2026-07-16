@@ -5,8 +5,10 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <vector>
@@ -32,6 +34,8 @@ public:
     std::vector<std::string> requests;
     SkillRegistryFetchResult fetch(const std::string& uri,
                                    std::uint64_t max_bytes) override;
+private:
+    std::mutex mutex_;
 };
 
 class SkillCurlRegistryTransport final : public SkillRegistryTransport {
@@ -45,6 +49,14 @@ struct SkillRemoteRegistryResult {
     std::string error;
     std::string index_digest;
     SkillRegistryIndex index;
+    SkillSignatureEnvelope signature;
+};
+
+struct SkillPinnedPackageResult {
+    bool ok = false;
+    std::string error;
+    std::string digest;
+    std::string selected_uri;
     SkillSignatureEnvelope signature;
 };
 
@@ -64,6 +76,13 @@ public:
                                                  const std::string& package_id,
                                                  const std::string& version,
                                                  std::string* error = nullptr) const;
+    SkillPinnedPackageResult fetch_pinned(const SkillRegistryArtifact& artifact,
+                                          const std::filesystem::path& destination,
+                                          std::int64_t now) const;
+    SkillPinnedPackageResult verify_offline(const std::filesystem::path& archive,
+                                            const std::filesystem::path& signature,
+                                            const std::string& expected_digest,
+                                            std::int64_t now) const;
 
 private:
     SkillTrustStore trust_;

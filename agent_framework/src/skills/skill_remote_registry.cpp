@@ -1,11 +1,49 @@
 #include "agent/skill_remote_registry.hpp"
 
 #include <algorithm>
+#include <atomic>
+#include <fstream>
 #include <set>
 
 #if defined(HAVE_CURL)
 #include <curl/curl.h>
 #endif
+
+namespace {
+
+std::atomic<std::uint64_t> package_temp_counter{0};
+
+bool atomic_package_write(const std::filesystem::path& destination,
+                          const std::string& bytes, std::string& error) {
+    std::error_code ec;
+    std::filesystem::create_directories(destination.parent_path(), ec);
+    if(ec) { error = ec.message(); return false; }
+    const auto temporary = destination.parent_path() /
+        (destination.filename().string() + ".tmp." + std::to_string(++package_temp_counter));
+    std::ofstream output(temporary, std::ios::binary | std::ios::trunc);
+    output.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+    output.close();
+    if(!output) { std::filesystem::remove(temporary, ec); error = "package write failed"; return false; }
+    std::filesystem::rename(temporary, destination, ec);
+    if(ec) { std::filesystem::remove(temporary, ec); error = "package publish failed"; return false; }
+    return true;
+}
+
+std::optional<std::string> read_bounded_file(const std::filesystem::path& path,
+                                             std::uint64_t limit, std::string& error) {
+    std::error_code ec;
+    const auto size = std::filesystem::file_size(path, ec);
+    if(ec || size > limit) { error = "offline file is unavailable or oversized"; return std::nullopt; }
+    std::string bytes(static_cast<std::size_t>(size), '\0');
+    std::ifstream input(path, std::ios::binary);
+    if(!input || (size && !input.read(bytes.data(), static_cast<std::streamsize>(size)))) {
+        error = "offline file read failed";
+        return std::nullopt;
+    }
+    return bytes;
+}
+
+} // namespace
 
 namespace agent_framework {
 namespace {
@@ -42,6 +80,7 @@ std::size_t curl_write(char* data, std::size_t size, std::size_t count, void* co
 
 SkillRegistryFetchResult SkillMemoryRegistryTransport::fetch(const std::string& uri,
                                                              std::uint64_t max_bytes) {
+    std::lock_guard<std::mutex> lock(mutex_);
     requests.push_back(uri);
     const auto found = responses.find(uri);
     if(found == responses.end()) return failed("fixture URI is unavailable");
@@ -136,6 +175,80 @@ std::optional<SkillRegistryArtifact> SkillRemoteRegistryClient::resolve(
         if(artifact.package_id == package_id && artifact.version == version) return artifact;
     if(error) *error = std::string(kSkillRegistryInvalid) + ": immutable package version was not found";
     return std::nullopt;
+}
+
+SkillPinnedPackageResult SkillRemoteRegistryClient::fetch_pinned(
+    const SkillRegistryArtifact& artifact, const std::filesystem::path& destination,
+    std::int64_t now) const {
+    SkillPinnedPackageResult result;
+    if(!transport_ || artifact.size == 0 || artifact.size > kMaxPackageBytes ||
+       artifact.mirrors.empty() || !https_uri(artifact.signature_uri)) {
+        result.error = std::string(kSkillRegistryInvalid) + ": invalid pinned artifact";
+        return result;
+    }
+    auto signature_response = transport_->fetch(artifact.signature_uri, kMaxSignatureBytes);
+    if(!signature_response.ok) { result.error = signature_response.error; return result; }
+    std::string error;
+    std::optional<SkillSignatureEnvelope> envelope;
+    try {
+        envelope = SkillSignatureEnvelope::from_json(
+            nlohmann::json::parse(signature_response.bytes), &error);
+    } catch(const std::exception& ex) { error = ex.what(); }
+    if(!envelope || envelope->subject_kind != "package" ||
+       envelope->subject_digest != artifact.digest) {
+        result.error = std::string(kSkillRegistryInvalid) + ": package signature identity mismatch";
+        return result;
+    }
+    auto verified = verify_skill_signature(*envelope, trust_, SkillTrustRole::Package, now);
+    if(!verified.ok) { result.error = verified.error; return result; }
+    for(const auto& mirror : artifact.mirrors) {
+        if(!https_uri(mirror)) continue;
+        auto response = transport_->fetch(mirror, std::min<std::uint64_t>(artifact.size, kMaxPackageBytes));
+        if(!response.ok || response.bytes.size() != artifact.size) continue;
+        auto digest = skill_sha256_bytes(response.bytes, &error);
+        if(!digest || *digest != artifact.digest) continue;
+        if(!atomic_package_write(destination, response.bytes, error)) {
+            result.error = std::string(kSkillRegistryInvalid) + ": " + error;
+            return result;
+        }
+        result.ok = true;
+        result.digest = *digest;
+        result.selected_uri = mirror;
+        result.signature = *envelope;
+        return result;
+    }
+    result.error = std::string(kSkillRegistryInvalid) + ": all mirrors failed exact digest verification";
+    return result;
+}
+
+SkillPinnedPackageResult SkillRemoteRegistryClient::verify_offline(
+    const std::filesystem::path& archive, const std::filesystem::path& signature_path,
+    const std::string& expected_digest, std::int64_t now) const {
+    SkillPinnedPackageResult result;
+    std::string error;
+    auto archive_bytes = read_bounded_file(archive, kMaxPackageBytes, error);
+    auto signature_bytes = read_bounded_file(signature_path, kMaxSignatureBytes, error);
+    if(!archive_bytes || !signature_bytes) {
+        result.error = std::string(kSkillRegistryInvalid) + ": " + error;
+        return result;
+    }
+    auto digest = skill_sha256_bytes(*archive_bytes, &error);
+    std::optional<SkillSignatureEnvelope> envelope;
+    try {
+        envelope = SkillSignatureEnvelope::from_json(nlohmann::json::parse(*signature_bytes), &error);
+    } catch(const std::exception& ex) { error = ex.what(); }
+    if(!digest || *digest != expected_digest || !envelope ||
+       envelope->subject_kind != "package" || envelope->subject_digest != expected_digest) {
+        result.error = "skill_digest_mismatch: offline package identity mismatch";
+        return result;
+    }
+    auto verified = verify_skill_signature(*envelope, trust_, SkillTrustRole::Package, now);
+    if(!verified.ok) { result.error = verified.error; return result; }
+    result.ok = true;
+    result.digest = *digest;
+    result.selected_uri = archive.string();
+    result.signature = *envelope;
+    return result;
 }
 
 } // namespace agent_framework

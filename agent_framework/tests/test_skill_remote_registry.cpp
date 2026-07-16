@@ -4,9 +4,14 @@
 #include <openssl/pem.h>
 
 #include <cassert>
+#include <chrono>
+#include <filesystem>
+#include <fstream>
+#include <future>
 #include <iostream>
 
 using namespace agent_framework;
+namespace fs = std::filesystem;
 
 namespace {
 std::string bio_string(BIO* bio) {
@@ -26,6 +31,12 @@ std::pair<std::string, std::string> keypair() {
     auto result = std::make_pair(bio_string(private_bio), bio_string(public_bio));
     BIO_free(private_bio); BIO_free(public_bio); EVP_PKEY_free(key);
     return result;
+}
+void write(const fs::path& path, const std::string& bytes) {
+    fs::create_directories(path.parent_path());
+    std::ofstream output(path, std::ios::binary);
+    output.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+    assert(output.good());
 }
 }
 
@@ -53,7 +64,8 @@ int main() {
     assert(signature.ok);
     SkillTrustStore trust;
     trust.keys.push_back({signature.envelope.key_id, "registry.example", public_key,
-                          {SkillTrustRole::Registry}, {"https://registry.example/"}, 1, 200});
+                          {SkillTrustRole::Registry, SkillTrustRole::Package},
+                          {"https://registry.example/"}, 1, 200});
     auto transport = std::make_shared<SkillMemoryRegistryTransport>();
     transport->responses[index_uri] = index_bytes;
     transport->responses[signature_uri] = signature.envelope.to_json().dump();
@@ -82,6 +94,57 @@ int main() {
     transport->responses[index_uri] = insecure_bytes;
     transport->responses[signature_uri] = insecure_signature.envelope.to_json().dump();
     assert(!client.sync(index_uri, signature_uri, 100).ok);
+
+    const std::string package_bytes = "pinned tfskill bytes";
+    const auto package_digest = *skill_sha256_bytes(package_bytes);
+    SkillSignatureEnvelope package_envelope;
+    package_envelope.subject_digest = package_digest;
+    package_envelope.publisher = "registry.example";
+    package_envelope.source_uri = "https://registry.example/packages/demo";
+    package_envelope.sbom_digest = std::string(64, 'b');
+    package_envelope.provenance_digest = std::string(64, 'c');
+    auto package_signature = sign_skill_subject(package_envelope, private_key);
+    assert(package_signature.ok);
+    SkillRegistryArtifact pinned{"org.example.demo", "1.0.0", package_digest,
+        package_bytes.size(), {"https://mirror-1.example/demo.tfskill",
+                               "https://mirror-2.example/demo.tfskill"},
+        "https://registry.example/v1/demo.tfskill.sig"};
+    transport->responses[pinned.signature_uri] = package_signature.envelope.to_json().dump();
+    transport->responses[pinned.mirrors[0]] = std::string(package_bytes.size(), 'x');
+    transport->responses[pinned.mirrors[1]] = package_bytes;
+    const auto root = fs::temp_directory_path() /
+        ("taskflow-registry-import-" + std::to_string(
+            std::chrono::steady_clock::now().time_since_epoch().count()));
+    auto fetched = client.fetch_pinned(pinned, root / "demo.tfskill", 100);
+    assert(fetched.ok && fetched.selected_uri == pinned.mirrors[1]);
+    assert(fs::file_size(root / "demo.tfskill") == package_bytes.size());
+
+    write(root / "demo.tfskill.sig", package_signature.envelope.to_json().dump());
+    assert(client.verify_offline(root / "demo.tfskill", root / "demo.tfskill.sig",
+                                 package_digest, 100).ok);
+    assert(!client.verify_offline(root / "demo.tfskill", root / "demo.tfskill.sig",
+                                  std::string(64, '0'), 100).ok);
+
+    transport->responses[pinned.mirrors[0]] = package_bytes;
+    const auto concurrent_path = root / "concurrent.tfskill";
+    auto first_import = std::async(std::launch::async, [&] {
+        return client.fetch_pinned(pinned, concurrent_path, 100);
+    });
+    auto second_import = std::async(std::launch::async, [&] {
+        return client.fetch_pinned(pinned, concurrent_path, 100);
+    });
+    assert(first_import.get().ok && second_import.get().ok);
+    assert(fs::file_size(concurrent_path) == package_bytes.size());
+
+    auto unavailable = pinned;
+    unavailable.mirrors = {"https://missing-1.example/demo.tfskill",
+                           "https://missing-2.example/demo.tfskill"};
+    const auto failed_path = root / "failed.tfskill";
+    assert(!client.fetch_pinned(unavailable, failed_path, 100).ok);
+    assert(!fs::exists(failed_path));
+    for(const auto& item : fs::directory_iterator(root))
+        assert(item.path().filename().string().find("failed.tfskill.tmp") == std::string::npos);
+    fs::remove_all(root);
 
     std::cout << "signed remote Registry tests passed\n";
 }
