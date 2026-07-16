@@ -90,6 +90,17 @@ printf 'cli:%s:%s\n' "$1" "${HOST_ONLY-unset}"
     write_file(package / "scripts/wait.sh", R"SH(#!/bin/sh
 sleep 10
 )SH");
+    write_file(package / "scripts/busy.sh", R"SH(#!/bin/sh
+while :; do :; done
+)SH");
+    write_file(package / "scripts/memory.py", R"PY(import json
+try:
+    bytearray(512 * 1024 * 1024)
+except MemoryError:
+    print(json.dumps({"memory_limited": True}))
+    raise SystemExit(0)
+raise SystemExit(44)
+)PY");
     fs::permissions(package / "cli/echo",
                     fs::perms::owner_read | fs::perms::owner_write | fs::perms::owner_exec);
     write_file(package / "SKILL.md", R"(---
@@ -119,6 +130,12 @@ resources:
       output-schema: output
     - id: wait
       path: scripts/wait.sh
+      executable: true
+    - id: busy
+      path: scripts/busy.sh
+      executable: true
+    - id: memory
+      path: scripts/memory.py
       executable: true
   cli:
     - id: echo
@@ -188,6 +205,31 @@ body
     assert(cancellation_events.size() == 2U);
     assert(cancellation_events.front().type == SkillEventType::InvocationStarted);
     assert(cancellation_events.back().type == SkillEventType::Cancelled);
+
+    std::vector<SkillEvent> cpu_events;
+    ToolCallControl cpu_control = control_for(package, cpu_events);
+    auto cpu_context = *cpu_control.skill_context;
+    cpu_context.limits.max_cpu_time = std::chrono::milliseconds(200);
+    cpu_control.skill_context = std::make_shared<SkillInvocationContext>(std::move(cpu_context));
+    const json cpu_limited = bus.call_tool(
+        "run_skill_script",
+        {{"skill_id", "sandbox-skill"}, {"relative_path", "scripts/busy.sh"}},
+        cpu_control).get();
+    assert(cpu_limited.value("code", "") == kSkillResourceBudgetExceeded);
+    assert(cpu_limited.value("budget_exceeded", "") == "cpu");
+    assert(cpu_events.back().type == SkillEventType::BudgetExceeded);
+
+    std::vector<SkillEvent> memory_events;
+    ToolCallControl memory_control = control_for(package, memory_events);
+    auto memory_context = *memory_control.skill_context;
+    memory_context.limits.max_memory_bytes = 128U * 1024U * 1024U;
+    memory_control.skill_context = std::make_shared<SkillInvocationContext>(std::move(memory_context));
+    const json memory_limited = bus.call_tool(
+        "run_skill_script",
+        {{"skill_id", "sandbox-skill"}, {"relative_path", "scripts/memory.py"}},
+        memory_control).get();
+    assert(memory_limited.value("exit_code", -1) == 0);
+    assert(memory_limited.value("stdout", "").find("memory_limited") != std::string::npos);
 
     auto denied_context = *control.skill_context;
     denied_context.grants.filesystem_write.clear();

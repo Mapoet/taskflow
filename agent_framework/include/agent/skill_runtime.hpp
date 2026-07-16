@@ -7,6 +7,8 @@
 #include "task_state_machine.hpp"
 
 #include <functional>
+#include <chrono>
+#include <cstdint>
 #include <map>
 #include <memory>
 #include <optional>
@@ -49,6 +51,9 @@ using SkillEventSink = std::function<void(const SkillEvent&)>;
 struct SkillRuntimeLimits {
     std::size_t max_input_bytes = 1024U * 1024U;
     std::size_t max_output_bytes = 1024U * 1024U;
+    std::uint64_t max_resource_bytes = 64U * 1024U * 1024U;
+    std::chrono::milliseconds max_cpu_time{0};
+    std::uint64_t max_memory_bytes = 0;
 };
 
 struct SkillInvocationContext {
@@ -105,6 +110,8 @@ public:
     SkillRuntimeResult finish(const SkillInvocationTicket& ticket,
                               const nlohmann::json& output) const;
     void record_termination(const SkillInvocationTicket& ticket, bool timed_out) const noexcept;
+    void record_budget_exceeded(const SkillInvocationTicket& ticket,
+                                std::string dimension) const noexcept;
 
     static nlohmann::json permission_error(const SkillPolicyDecision& decision);
 

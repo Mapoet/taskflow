@@ -3,6 +3,7 @@
 #include <agent/schema_validate.hpp>
 
 #include <algorithm>
+#include <limits>
 
 namespace agent_framework {
 namespace {
@@ -39,7 +40,8 @@ SkillConfigResult SkillConfigService::resolve(
 
     SkillResourceOpenOptions open_options;
     open_options.mode = SkillResourceReadMode::Text;
-    open_options.max_bytes = context.limits.max_input_bytes;
+    open_options.max_bytes = static_cast<std::size_t>(std::min<std::uint64_t>(
+        context.limits.max_resource_bytes, std::numeric_limits<std::size_t>::max()));
     auto opened = access_.open_snapshot(entry, manifest, resource_id, open_options);
     if(!opened.ok || !opened.handle) return {false, opened.error, nlohmann::json::object()};
     if(opened.handle->view_size != opened.handle->size)
@@ -93,7 +95,8 @@ SkillConfigResult SkillConfigService::resolve(
             return failed(kSkillDependencyUnavailable, "Config schema resource is unavailable");
         SkillResourceOpenOptions schema_options;
         schema_options.mode = SkillResourceReadMode::Text;
-        schema_options.max_bytes = context.limits.max_input_bytes;
+        schema_options.max_bytes = static_cast<std::size_t>(std::min<std::uint64_t>(
+            context.limits.max_resource_bytes, std::numeric_limits<std::size_t>::max()));
         auto schema_opened = access_.open_snapshot(
             entry, manifest, schema_descriptor->id, schema_options);
         if(!schema_opened.ok || !schema_opened.handle)

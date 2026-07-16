@@ -186,6 +186,14 @@ void SkillRuntime::record_termination(const SkillInvocationTicket& ticket,
           timed_out ? "timed_out" : "cancelled", kSkillCancelled);
 }
 
+void SkillRuntime::record_budget_exceeded(const SkillInvocationTicket& ticket,
+                                          std::string dimension) const noexcept {
+    emit(ticket.context, SkillEventType::BudgetExceeded, kSkillResourceBudgetExceeded,
+         ticket.skill_id, ticket.resource.id, {{"dimension", dimension}});
+    audit(ticket.context, "budget", ticket.resource.id, "denied",
+          kSkillResourceBudgetExceeded, {{"dimension", std::move(dimension)}});
+}
+
 SkillRuntimeResult SkillRuntime::validate_schema(const SkillInvocationTicket& ticket,
                                                  const std::string& schema_id,
                                                  const nlohmann::json& value,

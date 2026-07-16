@@ -21,6 +21,7 @@
 #include <poll.h>
 #include <signal.h>
 #include <sys/wait.h>
+#include <sys/resource.h>
 #include <unistd.h>
 #endif
 
@@ -230,6 +231,18 @@ json run_sandboxed_process(const SkillInvocationTicket& ticket,
     if (pid < 0) return tool_error("tool_internal_error", "fork failed");
     if (pid == 0) {
         (void)::setpgid(0, 0);
+        if(ticket.context.limits.max_cpu_time > std::chrono::milliseconds::zero()) {
+            const auto milliseconds = ticket.context.limits.max_cpu_time.count();
+            const rlim_t seconds = static_cast<rlim_t>(std::max<std::int64_t>(
+                1, (milliseconds + 999) / 1000));
+            const struct rlimit limit{seconds, seconds + 1};
+            if(::setrlimit(RLIMIT_CPU, &limit) != 0) _exit(126);
+        }
+        if(ticket.context.limits.max_memory_bytes > 0) {
+            const auto bytes = static_cast<rlim_t>(ticket.context.limits.max_memory_bytes);
+            const struct rlimit limit{bytes, bytes};
+            if(::setrlimit(RLIMIT_AS, &limit) != 0) _exit(126);
+        }
         ::close(input_pipe[1]);
         ::close(output_pipe[0]);
         ::close(error_pipe[0]);
@@ -266,7 +279,7 @@ json run_sandboxed_process(const SkillInvocationTicket& ticket,
 
     std::string stdout_text;
     std::string stderr_text;
-    const std::size_t cap = output_cap();
+    const std::size_t cap = std::min(output_cap(), ticket.context.limits.max_output_bytes);
     auto drain = [&](int fd, std::string& output) {
         char buffer[4096];
         for (;;) {
@@ -319,7 +332,28 @@ json run_sandboxed_process(const SkillInvocationTicket& ticket,
         result["exit_code"] = -1;
         result[cancelled ? "cancelled" : "timed_out"] = true;
         result["code"] = kSkillCancelled;
-    } else if (WIFEXITED(status)) result["exit_code"] = WEXITSTATUS(status);
+    } else if (WIFSIGNALED(status) &&
+               ticket.context.limits.max_cpu_time > std::chrono::milliseconds::zero() &&
+               (WTERMSIG(status) == SIGXCPU || WTERMSIG(status) == SIGKILL)) {
+        result["exit_code"] = -1;
+        result["signaled"] = true;
+        result["signal"] = WTERMSIG(status);
+        result["budget_exceeded"] = "cpu";
+        result["code"] = kSkillResourceBudgetExceeded;
+    } else if (WIFEXITED(status)) {
+        result["exit_code"] = WEXITSTATUS(status);
+        if(ticket.context.limits.max_cpu_time > std::chrono::milliseconds::zero() &&
+           (WEXITSTATUS(status) == 128 + SIGXCPU ||
+            WEXITSTATUS(status) == 128 + SIGKILL)) {
+            result["code"] = kSkillResourceBudgetExceeded;
+            result["budget_exceeded"] = "cpu";
+        } else if(WEXITSTATUS(status) == 126 &&
+           (ticket.context.limits.max_cpu_time > std::chrono::milliseconds::zero() ||
+            ticket.context.limits.max_memory_bytes > 0)) {
+            result["code"] = kSkillResourceBudgetExceeded;
+            result["budget_exceeded"] = "limit_setup";
+        }
+    }
     else {
         result["exit_code"] = -1;
         result["signaled"] = true;
@@ -370,6 +404,11 @@ json execute_skill_process(const std::shared_ptr<SkillServices>& services,
     json result = run_sandboxed_process(*begun.ticket, package, process_arguments, input, control);
     if (result.value("code", std::string{}) == kSkillCancelled) {
         runtime->record_termination(*begun.ticket, result.value("timed_out", false));
+        return result;
+    }
+    if (result.value("code", std::string{}) == kSkillResourceBudgetExceeded) {
+        runtime->record_budget_exceeded(
+            *begun.ticket, result.value("budget_exceeded", std::string("process")));
         return result;
     }
     json contract_output = result;

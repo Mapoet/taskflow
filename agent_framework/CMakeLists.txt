@@ -1719,7 +1719,7 @@ if(BUILD_TESTING)
         add_test(NAME skill_process_sandbox_contract COMMAND test_skill_process_sandbox)
         set_tests_properties(skill_process_sandbox_contract PROPERTIES
             LABELS "skill-runtime-integration;skill-policy-security;skill-schema-contract"
-            ENVIRONMENT "AGENT_SKILL_SCRIPT_ALLOWLIST=/bin/sh")
+            ENVIRONMENT "AGENT_SKILL_SCRIPT_ALLOWLIST=/bin/sh,/usr/bin/python3")
     endif()
     if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_skill_agent_loop_policy.cpp)
         add_executable(test_skill_agent_loop_policy tests/test_skill_agent_loop_policy.cpp)
