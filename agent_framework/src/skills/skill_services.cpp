@@ -16,6 +16,19 @@ namespace agent_framework {
 
 namespace {
 
+void wire_resource_services(const std::shared_ptr<SkillServices>& services,
+                            const std::filesystem::path& fallback_root) {
+    const char* configured = std::getenv("AGENT_SKILL_CACHE_DIR");
+    const auto cache_root = configured && *configured
+        ? std::filesystem::path(configured) : fallback_root / ".skill-cache";
+    services->resource_access = std::make_shared<SkillResourceAccess>();
+    services->resource_cache = std::make_shared<SkillResourceCache>(cache_root);
+    SkillReferenceLimits reference_limits;
+    services->references = std::make_shared<SkillReferenceService>(
+        reference_limits, cache_root / "derived");
+    services->models = std::make_shared<SkillModelService>(services->resource_cache);
+}
+
 std::filesystem::path user_home_directory() {
 #if defined(_WIN32)
     const char* h = std::getenv("USERPROFILE");
@@ -43,6 +56,7 @@ std::shared_ptr<SkillServices> SkillServices::from_env() {
         svc->registry = std::move(reg);
         svc->loader = std::move(loader);
         svc->runtime = std::make_shared<SkillRuntime>(svc->registry, svc->loader);
+        wire_resource_services(svc, std::filesystem::path(d));
         return svc;
     } catch (...) {
         return nullptr;
@@ -75,6 +89,7 @@ std::shared_ptr<SkillServices> SkillServices::from_cursor_default_skill_roots() 
         svc->registry = std::move(reg);
         svc->loader = std::move(loader);
         svc->runtime = std::make_shared<SkillRuntime>(svc->registry, svc->loader);
+        wire_resource_services(svc, home / ".cursor");
         return svc;
     } catch (...) {
         return nullptr;

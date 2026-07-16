@@ -6,6 +6,10 @@
 #include <agent/skill_policy.hpp>
 #include <agent/skill_registry.hpp>
 #include <agent/skill_test_runner.hpp>
+#include <agent/skill_resource_access.hpp>
+#include <agent/skill_resource_cache.hpp>
+#include <agent/skill_reference.hpp>
+#include <agent/skill_model.hpp>
 
 #include <nlohmann/json.hpp>
 
@@ -60,7 +64,8 @@ std::string skillctl_usage();
 
 class SkillCommandService {
 public:
-    explicit SkillCommandService(std::shared_ptr<SkillRegistry> registry);
+    explicit SkillCommandService(std::shared_ptr<SkillRegistry> registry,
+                                 std::filesystem::path cache_root = {});
 
     SkillCommandResponse list() const;
     SkillCommandResponse validate() const;
@@ -97,10 +102,29 @@ public:
                                 const std::string& package_digest) const;
     SkillCommandResponse rollback(const std::filesystem::path& store,
                                   const std::string& skill_id) const;
+    SkillCommandResponse reference_page(const std::string& skill_id,
+                                        const std::string& resource_id,
+                                        std::uint64_t offset,
+                                        std::size_t max_bytes) const;
+    SkillCommandResponse reference_search(const std::string& skill_id,
+                                          const std::string& resource_id,
+                                          const std::string& query,
+                                          std::size_t limit) const;
+    SkillCommandResponse cache_status() const;
+    SkillCommandResponse cache_verify() const;
+    SkillCommandResponse cache_gc() const;
+    SkillCommandResponse cache_pin(const std::string& digest, bool pinned) const;
+    SkillCommandResponse model_check(const std::string& skill_id,
+                                     const std::string& resource_id,
+                                     const SkillModelHostCapabilities& host) const;
 
 private:
     std::shared_ptr<SkillRegistry> registry_;
     SkillLoader loader_;
+    std::shared_ptr<SkillResourceAccess> resource_access_;
+    std::shared_ptr<SkillResourceCache> resource_cache_;
+    std::shared_ptr<SkillReferenceService> references_;
+    std::shared_ptr<SkillModelService> models_;
 };
 
 std::optional<SkillResourceKind> parse_skill_resource_kind(const std::string& value);

@@ -42,7 +42,7 @@ int main(int argc, char** argv) {
     const auto& invocation = *parsed.arguments;
     auto registry = std::make_shared<SkillRegistry>(invocation.root);
     registry->scan_or_reload();
-    SkillCommandService service(registry);
+    SkillCommandService service(registry, invocation.root / ".skill-cache");
     const auto& command = invocation.command;
     const auto& operands = invocation.operands;
     if(command == "list" && operands.empty()) return emit(service.list());
@@ -106,11 +106,69 @@ int main(int argc, char** argv) {
             const auto& value = operands[index + 1];
             if(option == "--runtime") options.available_runtimes.push_back(value);
             else if(option == "--model") options.available_models.push_back(value);
+            else if(option == "--device") options.available_devices.push_back(value);
+            else if(option == "--precision") options.available_precisions.push_back(value);
+            else if(option == "--memory")
+                options.available_memory_bytes = std::strtoull(value.c_str(), nullptr, 10);
             else if(option == "--grant-read") options.grants.filesystem_read.push_back(value);
             else if(option == "--grant-write") options.grants.filesystem_write.push_back(value);
             else return emit(usage_error(command, "unknown doctor option: " + option));
         }
         return emit(service.doctor(operands[0], options));
+    }
+    if(command == "reference" && operands.size() >= 3) {
+        const auto& operation = operands[0];
+        if(operation == "page") {
+            std::uint64_t offset = 0;
+            std::size_t max_bytes = 65536;
+            for(std::size_t index = 3; index < operands.size(); ++index) {
+                if(operands[index] == "--offset" && index + 1 < operands.size())
+                    offset = std::strtoull(operands[++index].c_str(), nullptr, 10);
+                else if(operands[index] == "--max-bytes" && index + 1 < operands.size())
+                    max_bytes = std::strtoull(operands[++index].c_str(), nullptr, 10);
+                else return emit(usage_error("reference page", "invalid reference page option"));
+            }
+            return emit(service.reference_page(operands[1], operands[2], offset, max_bytes));
+        }
+        if(operation == "search" && operands.size() >= 4) {
+            std::size_t limit = 10;
+            for(std::size_t index = 4; index < operands.size(); ++index) {
+                if(operands[index] == "--limit" && index + 1 < operands.size())
+                    limit = std::strtoull(operands[++index].c_str(), nullptr, 10);
+                else return emit(usage_error("reference search", "invalid reference search option"));
+            }
+            return emit(service.reference_search(operands[1], operands[2], operands[3], limit));
+        }
+        return emit(usage_error("reference", "expected reference page or reference search"));
+    }
+    if(command == "cache" && !operands.empty()) {
+        if(operands[0] == "status" && operands.size() == 1) return emit(service.cache_status());
+        if(operands[0] == "verify" && operands.size() == 1) return emit(service.cache_verify());
+        if(operands[0] == "gc" && operands.size() == 1) return emit(service.cache_gc());
+        if(operands[0] == "pin" && operands.size() == 2)
+            return emit(service.cache_pin(operands[1], true));
+        if(operands[0] == "unpin" && operands.size() == 2)
+            return emit(service.cache_pin(operands[1], false));
+        return emit(usage_error("cache", "invalid cache operation"));
+    }
+    if(command == "model" && operands.size() >= 3 && operands[0] == "check") {
+        SkillModelHostCapabilities host;
+#if defined(__linux__)
+        host.mmap_supported = true;
+#endif
+        for(std::size_t index = 3; index < operands.size(); ++index) {
+            if(operands[index] == "--runtime" && index + 1 < operands.size())
+                host.runtimes.push_back(operands[++index]);
+            else if(operands[index] == "--device" && index + 1 < operands.size())
+                host.devices.push_back(operands[++index]);
+            else if(operands[index] == "--precision" && index + 1 < operands.size())
+                host.precisions.push_back(operands[++index]);
+            else if(operands[index] == "--memory" && index + 1 < operands.size())
+                host.available_memory_bytes = std::strtoull(operands[++index].c_str(), nullptr, 10);
+            else return emit(usage_error("model check", "invalid model check option"));
+        }
+        host.max_readonly_bytes = host.available_memory_bytes;
+        return emit(service.model_check(operands[1], operands[2], host));
     }
     if(command == "test") {
         std::string skill_id;

@@ -7,6 +7,10 @@
 
 #include "skill_loader.hpp"
 #include "skill_registry.hpp"
+#include "skill_resource_access.hpp"
+#include "skill_resource_cache.hpp"
+#include "skill_reference.hpp"
+#include "skill_model.hpp"
 
 #include <memory>
 
@@ -18,6 +22,10 @@ struct SkillServices {
     std::shared_ptr<SkillRegistry> registry;
     std::shared_ptr<SkillLoader> loader;
     std::shared_ptr<SkillRuntime> runtime;
+    std::shared_ptr<SkillResourceAccess> resource_access;
+    std::shared_ptr<SkillResourceCache> resource_cache;
+    std::shared_ptr<SkillReferenceService> references;
+    std::shared_ptr<SkillModelService> models;
 
     /** `AGENT_SKILLS_DIR` 未设置或为空则返回 nullptr */
     static std::shared_ptr<SkillServices> from_env();

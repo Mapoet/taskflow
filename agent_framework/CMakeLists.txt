@@ -1606,6 +1606,13 @@ if(BUILD_TESTING)
         set_tests_properties(skill_model PROPERTIES
             LABELS "skill-unit;skill-resource-management;skill-model-admission;skill-security-negative")
     endif()
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_skill_cli_resources.cpp)
+        add_executable(test_skill_cli_resources tests/test_skill_cli_resources.cpp)
+        target_link_libraries(test_skill_cli_resources PRIVATE agent_framework)
+        add_test(NAME skill_cli_resources COMMAND test_skill_cli_resources)
+        set_tests_properties(skill_cli_resources PROPERTIES
+            LABELS "skill-cli-contract;skill-resource-management;skill-model-admission;skill-reference-retrieval")
+    endif()
     if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_skill_policy_runtime.cpp)
         add_executable(test_skill_policy_runtime tests/test_skill_policy_runtime.cpp)
         target_link_libraries(test_skill_policy_runtime PRIVATE agent_framework)

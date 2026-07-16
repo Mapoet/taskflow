@@ -4,7 +4,9 @@
 
 #include <algorithm>
 #include <array>
+#include <cstdlib>
 #include <functional>
+#include <limits>
 
 namespace agent_framework {
 
@@ -356,11 +358,28 @@ SkillCliParseResult parse_skill_cli_arguments(const std::vector<std::string>& to
 
 std::string skillctl_usage() {
     return "usage: skillctl [--root ROOT] [--store STORE] [--format json] COMMAND [ARGS...]\n"
-           "       skillctl ROOT COMMAND [ARGS...]";
+           "       skillctl ROOT COMMAND [ARGS...]\n"
+           "       skillctl ROOT reference page ID RESOURCE --offset N --max-bytes N\n"
+           "       skillctl ROOT reference search ID RESOURCE QUERY --limit N\n"
+           "       skillctl ROOT cache status|verify|gc\n"
+           "       skillctl ROOT cache pin|unpin DIGEST\n"
+           "       skillctl ROOT model check ID RESOURCE --runtime R --device D --precision P --memory N";
 }
 
-SkillCommandService::SkillCommandService(std::shared_ptr<SkillRegistry> registry)
-    : registry_(std::move(registry)), loader_(*registry_) {}
+SkillCommandService::SkillCommandService(std::shared_ptr<SkillRegistry> registry,
+                                         std::filesystem::path cache_root)
+    : registry_(std::move(registry)), loader_(*registry_) {
+    if(cache_root.empty()) {
+        const char* configured = std::getenv("AGENT_SKILL_CACHE_DIR");
+        cache_root = configured && *configured ? std::filesystem::path(configured)
+            : std::filesystem::temp_directory_path() / "taskflow-skill-cache";
+    }
+    resource_access_ = std::make_shared<SkillResourceAccess>();
+    resource_cache_ = std::make_shared<SkillResourceCache>(cache_root);
+    references_ = std::make_shared<SkillReferenceService>(
+        SkillReferenceLimits{}, cache_root / "derived");
+    models_ = std::make_shared<SkillModelService>(resource_cache_);
+}
 
 SkillCommandResponse SkillCommandService::list() const {
     auto entries = registry_->entries();
@@ -597,7 +616,7 @@ SkillCommandResponse SkillCommandService::doctor(const std::string& skill_id,
     if(!registry_->get(skill_id))
         return command_error(SkillCliExit::NotFound, "doctor", "skill_not_found",
                              "skill not found", {{"skill", skill_id}});
-    SkillDoctor doctor_service(registry_);
+    SkillDoctor doctor_service(registry_, resource_cache_);
     const auto report = doctor_service.inspect(skill_id, options);
     SkillCommandResponse response;
     response.command = "doctor";
@@ -609,7 +628,10 @@ SkillCommandResponse SkillCommandService::doctor(const std::string& skill_id,
                                [&](const auto& diagnostic) { return diagnostic.code == code; });
         };
         if(has("skill_doctor_digest_mismatch")) response.exit = SkillCliExit::IntegrityFailed;
-        else if(has("skill_doctor_runtime_missing") || has("skill_doctor_model_unavailable"))
+        else if(has("skill_doctor_runtime_missing") || has("skill_doctor_model_unavailable") ||
+                has("skill_doctor_model_device_incompatible") ||
+                has("skill_doctor_model_precision_incompatible") ||
+                has("skill_doctor_model_memory_insufficient"))
             response.exit = SkillCliExit::DependencyUnavailable;
         else response.exit = SkillCliExit::OperationFailed;
         response.error = {{"code", "skill_doctor_failed"},
@@ -773,6 +795,156 @@ SkillCommandResponse SkillCommandService::rollback(
     return run_lifecycle(registry_, store, "rollback", [&](SkillLifecycleManager& manager) {
         return manager.rollback(skill_id);
     });
+}
+
+SkillCommandResponse SkillCommandService::reference_page(
+    const std::string& skill_id, const std::string& resource_id,
+    std::uint64_t offset, std::size_t max_bytes) const {
+    const auto entry = registry_->get(skill_id);
+    if(!entry || !entry->manifest)
+        return command_error(SkillCliExit::NotFound, "reference page", "skill_not_found",
+                             "skill not found", {{"skill", skill_id}});
+    SkillResourceOpenOptions options;
+    options.mode = SkillResourceReadMode::Stream;
+    options.max_bytes = max_bytes;
+    auto opened = resource_access_->open_snapshot(*entry, entry->manifest, resource_id, options);
+    if(!opened.ok)
+        return command_error(SkillCliExit::OperationFailed, "reference page",
+                             opened.error.value("code", "skill_resource_open_failed"),
+                             opened.error.value("message", "resource open failed"));
+    auto page = references_->read_page(*opened.handle, offset, max_bytes);
+    if(!page.ok)
+        return command_error(SkillCliExit::OperationFailed, "reference page",
+                             page.error.value("code", "skill_reference_failed"),
+                             page.error.value("message", "reference paging failed"));
+    const auto& value = *page.page;
+    SkillCommandResponse response;
+    response.command = "reference page";
+    response.data = {{"text", value.text}, {"nextOffset", value.next_offset},
+                     {"eof", value.eof},
+                     {"citation", {{"resourceId", value.citation.resource_id},
+                         {"resourceDigest", value.citation.resource_digest},
+                         {"packageDigest", value.citation.package_digest},
+                         {"source", value.citation.source_uri},
+                         {"license", value.citation.license},
+                         {"byteStart", value.citation.byte_start},
+                         {"byteEnd", value.citation.byte_end}}}};
+    return response;
+}
+
+SkillCommandResponse SkillCommandService::reference_search(
+    const std::string& skill_id, const std::string& resource_id,
+    const std::string& query, std::size_t limit) const {
+    const auto entry = registry_->get(skill_id);
+    if(!entry || !entry->manifest)
+        return command_error(SkillCliExit::NotFound, "reference search", "skill_not_found",
+                             "skill not found", {{"skill", skill_id}});
+    auto opened = resource_access_->open_snapshot(*entry, entry->manifest, resource_id);
+    if(!opened.ok)
+        return command_error(SkillCliExit::OperationFailed, "reference search",
+                             opened.error.value("code", "skill_resource_open_failed"),
+                             opened.error.value("message", "resource open failed"));
+    auto searched = references_->search(*opened.handle, query, limit);
+    if(!searched.ok)
+        return command_error(SkillCliExit::OperationFailed, "reference search",
+                             searched.error.value("code", "skill_reference_search_failed"),
+                             searched.error.value("message", "reference search failed"));
+    auto hits = nlohmann::json::array();
+    for(const auto& hit : searched.hits)
+        hits.push_back({{"score", hit.score}, {"matchStart", hit.match_start},
+                        {"matchEnd", hit.match_end}, {"snippet", hit.snippet},
+                        {"snippetStart", hit.snippet_start}, {"snippetEnd", hit.snippet_end},
+                        {"citation", {{"resourceDigest", hit.citation.resource_digest},
+                                      {"byteStart", hit.citation.byte_start},
+                                      {"byteEnd", hit.citation.byte_end}}}});
+    SkillCommandResponse response;
+    response.command = "reference search";
+    response.data = {{"hits", std::move(hits)},
+                     {"indexPath", searched.index_path.generic_string()}};
+    return response;
+}
+
+SkillCommandResponse SkillCommandService::cache_status() const {
+    const auto report = resource_cache_->inspect();
+    if(!report.ok)
+        return command_error(SkillCliExit::IntegrityFailed, "cache status",
+                             report.error.value("code", "skill_cache_failed"),
+                             report.error.value("message", "cache inspection failed"));
+    SkillCommandResponse response;
+    response.command = "cache status";
+    response.data = {{"objects", report.object_count}, {"bytes", report.total_bytes},
+                     {"pinnedBytes", report.pinned_bytes},
+                     {"leasedObjects", report.leased_objects}};
+    return response;
+}
+
+SkillCommandResponse SkillCommandService::cache_verify() const {
+    const auto result = resource_cache_->verify();
+    if(!result.ok)
+        return command_error(SkillCliExit::IntegrityFailed, "cache verify",
+                             result.error.value("code", "skill_cache_verify_failed"),
+                             result.error.value("message", "cache verification failed"));
+    auto response = cache_status();
+    response.command = "cache verify";
+    return response;
+}
+
+SkillCommandResponse SkillCommandService::cache_gc() const {
+    const auto result = resource_cache_->collect();
+    if(!result.ok)
+        return command_error(SkillCliExit::OperationFailed, "cache gc",
+                             result.error.value("code", "skill_cache_gc_failed"),
+                             result.error.value("message", "cache collection failed"));
+    auto response = cache_status();
+    response.command = "cache gc";
+    return response;
+}
+
+SkillCommandResponse SkillCommandService::cache_pin(const std::string& digest,
+                                                     bool pinned) const {
+    const auto result = pinned ? resource_cache_->pin(digest) : resource_cache_->unpin(digest);
+    const std::string command = pinned ? "cache pin" : "cache unpin";
+    if(!result.ok)
+        return command_error(SkillCliExit::OperationFailed, command,
+                             result.error.value("code", "skill_cache_pin_failed"),
+                             result.error.value("message", "cache pin operation failed"));
+    SkillCommandResponse response;
+    response.command = command;
+    response.data = {{"digest", digest}, {"pinned", pinned}};
+    return response;
+}
+
+SkillCommandResponse SkillCommandService::model_check(
+    const std::string& skill_id, const std::string& resource_id,
+    const SkillModelHostCapabilities& host) const {
+    const auto entry = registry_->get(skill_id);
+    if(!entry || !entry->manifest)
+        return command_error(SkillCliExit::NotFound, "model check", "skill_not_found",
+                             "skill not found", {{"skill", skill_id}});
+    SkillResourceOpenOptions options;
+    options.mode = SkillResourceReadMode::MemoryMap;
+    options.max_bytes = static_cast<std::size_t>(
+        std::min<std::uint64_t>(host.max_readonly_bytes,
+                               std::numeric_limits<std::size_t>::max()));
+    auto opened = resource_access_->open_snapshot(*entry, entry->manifest, resource_id, options);
+    if(!opened.ok)
+        return command_error(SkillCliExit::OperationFailed, "model check",
+                             opened.error.value("code", "skill_resource_open_failed"),
+                             opened.error.value("message", "resource open failed"));
+    const auto admission = models_->check(*opened.handle, host);
+    SkillCommandResponse response;
+    response.command = "model check";
+    response.data = {{"compatible", admission.compatible},
+                     {"codes", admission.codes},
+                     {"diagnostics", admission.diagnostics},
+                     {"automaticExecution", false}};
+    if(!admission.compatible) {
+        response.exit = SkillCliExit::DependencyUnavailable;
+        response.error = {{"code", "skill_model_incompatible"},
+                          {"message", "model is not compatible with the declared host"},
+                          {"details", admission.diagnostics}};
+    }
+    return response;
 }
 
 std::optional<SkillResourceKind> parse_skill_resource_kind(const std::string& value) {

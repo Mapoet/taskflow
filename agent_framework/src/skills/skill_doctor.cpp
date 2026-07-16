@@ -61,6 +61,7 @@ SkillDoctorReport SkillDoctor::inspect(const std::string& skill_id,
     }
     const auto package = entry->script_jail.value_or(entry->file_path.parent_path());
     const auto& manifest = *entry->manifest;
+    std::size_t audit_complete = 0;
     for(std::size_t index = 0; index < manifest.resources.size(); ++index) {
         const auto& resource = manifest.resources[index];
         const auto path = package / resource.path;
@@ -68,6 +69,14 @@ SkillDoctorReport SkillDoctor::inspect(const std::string& skill_id,
         const bool runtime_required = resource.kind == SkillResourceType::Script ||
                                       resource.kind == SkillResourceType::Cli ||
                                       resource.kind == SkillResourceType::Model;
+        if(resource.kind == SkillResourceType::Asset || resource.kind == SkillResourceType::Model) {
+            if(resource.sha256.empty() || !resource.declared_size || resource.license.empty() ||
+               resource.source_uri.empty())
+                add_error(report, "skill_doctor_audit_metadata_incomplete", path, location,
+                          "resource audit metadata is incomplete",
+                          "declare sha256, size, license and source");
+            else ++audit_complete;
+        }
         if(runtime_required &&
            (resource.runtime.empty() || !contains(options.available_runtimes, resource.runtime)))
             add_error(report, "skill_doctor_runtime_missing", path, location + "/runtime",
@@ -80,6 +89,25 @@ SkillDoctorReport SkillDoctor::inspect(const std::string& skill_id,
            (!std::filesystem::is_regular_file(path) || !contains(options.available_models, resource.id)))
             add_error(report, "skill_doctor_model_unavailable", path, location,
                       "model resource is unavailable", "provision the declared model resource");
+        if(resource.kind == SkillResourceType::Model && resource.model_requirements) {
+            const auto& requirements = *resource.model_requirements;
+            const auto intersects = [](const auto& left, const auto& right) {
+                return std::any_of(left.begin(), left.end(), [&](const auto& value) {
+                    return std::find(right.begin(), right.end(), value) != right.end();
+                });
+            };
+            if(!requirements.devices.empty() &&
+               !intersects(requirements.devices, options.available_devices))
+                add_error(report, "skill_doctor_model_device_incompatible", path, location,
+                          "model device requirement is incompatible", "declare an available device");
+            if(!requirements.precisions.empty() &&
+               !intersects(requirements.precisions, options.available_precisions))
+                add_error(report, "skill_doctor_model_precision_incompatible", path, location,
+                          "model precision requirement is incompatible", "declare an available precision");
+            if(requirements.min_memory_bytes > options.available_memory_bytes)
+                add_error(report, "skill_doctor_model_memory_insufficient", path, location,
+                          "model memory requirement is incompatible", "declare sufficient memory");
+        }
         if(resource.kind == SkillResourceType::Mcp && std::filesystem::is_regular_file(path)) {
             try {
                 std::ifstream input(path);
@@ -110,13 +138,27 @@ SkillDoctorReport SkillDoctor::inspect(const std::string& skill_id,
                       "/permissions/filesystem/write", "filesystem write grant is insufficient",
                       "grant the declared filesystem scope");
     }
+    bool cache_integrity = false;
+    std::size_t cache_objects = 0;
+    if(cache_) {
+        const auto cache_report = cache_->inspect();
+        cache_integrity = cache_report.ok;
+        cache_objects = cache_report.object_count;
+        if(!cache_report.ok)
+            add_error(report, "skill_doctor_cache_corrupt", cache_->root(), "/cache",
+                      "resource cache integrity check failed", "run skillctl cache verify");
+    }
     std::sort(report.diagnostics.begin(), report.diagnostics.end(), [](const auto& left, const auto& right) {
         return std::tie(left.path, left.location, left.code) < std::tie(right.path, right.location, right.code);
     });
     report.ready = report.diagnostics.empty();
     report.checks = {{"offline", true}, {"resources", manifest.resources.size()},
                      {"errors", report.diagnostics.size()},
-                     {"secretsDeclared", manifest.permissions.secrets.size()}};
+                     {"secretsDeclared", manifest.permissions.secrets.size()},
+                     {"auditMetadataComplete", audit_complete},
+                     {"cachePresent", static_cast<bool>(cache_)},
+                     {"cacheIntegrity", cache_integrity}, {"cacheObjects", cache_objects},
+                     {"automaticExecution", false}};
     return report;
 }
 
