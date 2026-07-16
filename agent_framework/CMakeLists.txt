@@ -826,6 +826,23 @@ if(AGENT_BUILD_EXAMPLES)
         list(APPEND _agent_framework_example_targets workflow_custom)
     endif()
 
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/examples/skill_platform_demo.cpp)
+        add_executable(skill_platform_demo examples/skill_platform_demo.cpp)
+        target_link_libraries(skill_platform_demo PRIVATE agent_framework)
+        if(CMAKE_USE_PTHREADS_INIT)
+            target_link_libraries(skill_platform_demo PRIVATE Threads::Threads)
+        endif()
+        list(APPEND _agent_framework_example_targets skill_platform_demo)
+        if(BUILD_TESTING AND EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/skills/stage6-valid)
+            add_test(NAME skill_platform_demo_smoke COMMAND skill_platform_demo
+                ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/skills stage6-valid --jobs 2)
+            set_tests_properties(skill_platform_demo_smoke PROPERTIES
+                PASS_REGULAR_EXPRESSION "agent.taskflow/skill-platform-demo/v1"
+                ENVIRONMENT "AGENT_TEST_OFFLINE=1"
+                LABELS "stage10-examples;skill-platform-e2e")
+        endif()
+    endif()
+
     if(_agent_framework_example_targets)
         add_custom_target(agent_framework_examples DEPENDS ${_agent_framework_example_targets})
         string(REPLACE ";" " " _agent_ex_label "${_agent_framework_example_targets}")
