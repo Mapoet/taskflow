@@ -211,14 +211,30 @@ SkillCacheResult SkillResourceCache::acquire_policy(const SkillResourceHandle& h
         object.media_type = handle.descriptor.media_type;
         object.source_package_digest = handle.package_digest;
         object.source_resource_id = handle.descriptor.id;
-        return succeeded(std::move(object));
+        auto result = succeeded(std::move(object));
+        emit_skill_audit(handle.audit_sink,
+            {handle.audit_identity, "cache", "no-store", handle.descriptor.id,
+             "completed", "", {{"digest", handle.resource_digest}, {"bytes", handle.size}}});
+        return result;
     }
     auto result = acquire(handle);
-    if(!result.ok || handle.descriptor.cache_policy != SkillCachePolicy::Pin) return result;
+    if(!result.ok || handle.descriptor.cache_policy != SkillCachePolicy::Pin) {
+        emit_skill_audit(handle.audit_sink,
+            {handle.audit_identity, "cache", "acquire", handle.descriptor.id,
+             result.ok ? "completed" : "failed",
+             result.ok ? "" : result.error.value("code", ""),
+             {{"digest", handle.resource_digest}, {"bytes", handle.size}}});
+        return result;
+    }
     auto pinned = pin(handle.resource_digest);
     if(!pinned.ok) return pinned;
     pinned.lease = std::move(result.lease);
     if(pinned.object) pinned.object->leased = static_cast<bool>(pinned.lease);
+    emit_skill_audit(handle.audit_sink,
+        {handle.audit_identity, "cache", "pin", handle.descriptor.id,
+         pinned.ok ? "completed" : "failed",
+         pinned.ok ? "" : pinned.error.value("code", ""),
+         {{"digest", handle.resource_digest}, {"bytes", handle.size}}});
     return pinned;
 }
 

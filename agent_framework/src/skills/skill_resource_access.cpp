@@ -189,6 +189,11 @@ SkillResourceResult SkillResourceAccess::open_snapshot(
     handle.view_size = view_size;
     handle.mode = mode;
     handle.package_lease = entry.package_lease;
+    handle.audit_sink = options.audit_sink;
+    handle.audit_identity = options.audit_identity;
+    handle.audit_identity.skill_id = entry.id;
+    handle.audit_identity.skill_version = manifest->version;
+    handle.audit_identity.package_digest = entry.package_digest;
     if(descriptor->cache_policy != SkillCachePolicy::NoStore) {
         if(!cache_)
             return open_failure("skill_cache_unavailable",
@@ -199,6 +204,10 @@ SkillResourceResult SkillResourceAccess::open_snapshot(
         handle.path = cached.object->path;
         handle.cache_lease = std::move(cached.lease);
     }
+    emit_skill_audit(handle.audit_sink,
+        {handle.audit_identity, "resource", "open", descriptor->id, "completed", "",
+         {{"bytes", handle.view_size}, {"mode", to_string(handle.mode)},
+          {"cachePolicy", to_string(descriptor->cache_policy)}}});
     return {true, nlohmann::json::object(), std::move(handle)};
 }
 

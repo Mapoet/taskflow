@@ -992,12 +992,26 @@ bool SkillPackageStore::remove(const std::string& digest, std::string* error) {
 }
 
 SkillLifecycleManager::SkillLifecycleManager(
-    std::shared_ptr<SkillRegistry> registry, fs::path store_root)
+    std::shared_ptr<SkillRegistry> registry, fs::path store_root,
+    SkillAuditSink audit_sink)
     : registry_(std::move(registry)), store_(std::move(store_root)),
-      state_directory_(store_.root() / "state") {
+      state_directory_(store_.root() / "state"), audit_sink_(std::move(audit_sink)) {
     if (!registry_) throw std::invalid_argument("SkillLifecycleManager requires a Registry");
     std::string error;
     if (!recover(&error)) throw std::runtime_error(error);
+}
+
+SkillLifecycleResult SkillLifecycleManager::audited(
+    std::string action, std::string target, SkillLifecycleResult result) const {
+    SkillAuditIdentity identity;
+    identity.skill_id = target;
+    identity.registry_generation = registry_->snapshot().generation();
+    const auto code = result.ok || !result.error.is_object()
+        ? std::string{} : result.error.value("code", "");
+    emit_skill_audit(audit_sink_,
+        {std::move(identity), "lifecycle", std::move(action), {},
+         result.ok ? "completed" : "failed", code, {{"target", std::move(target)}}});
+    return result;
 }
 
 bool SkillLifecycleManager::recover(std::string* error) {
@@ -1043,7 +1057,8 @@ bool SkillLifecycleManager::recover(std::string* error) {
 SkillLifecycleResult SkillLifecycleManager::install(
     const fs::path& package, const SkillInstallOptions& options) {
     std::lock_guard<std::mutex> lock(mutex_);
-    if(fs::is_directory(package)) return store_.import_package(package, options);
+    if(fs::is_directory(package))
+        return audited("install", package.filename().string(), store_.import_package(package, options));
     SkillPackageGate::TrustOptions trust_options;
     trust_options.trust = options.trust;
     trust_options.signature = options.signature;
@@ -1075,7 +1090,7 @@ SkillLifecycleResult SkillLifecycleManager::install(
     auto result = store_.import_package(temporary, verified_options);
     std::error_code ec;
     fs::remove_all(temporary, ec);
-    return result;
+    return audited("install", package.filename().string(), std::move(result));
 }
 
 SkillLifecycleResult SkillLifecycleManager::enable(
@@ -1090,7 +1105,7 @@ SkillLifecycleResult SkillLifecycleManager::enable(
         if (previous_range) requested_roots_[skill_id] = *previous_range;
         else requested_roots_.erase(skill_id);
     }
-    return result;
+    return audited("enable", skill_id, std::move(result));
 }
 
 SkillLifecycleResult SkillLifecycleManager::disable(const std::string& skill_id) {
@@ -1102,7 +1117,7 @@ SkillLifecycleResult SkillLifecycleManager::disable(const std::string& skill_id)
     requested_roots_.erase(found);
     auto result = publish_resolved();
     if (!result.ok) requested_roots_[skill_id] = previous;
-    return result;
+    return audited("disable", skill_id, std::move(result));
 }
 
 SkillLifecycleResult SkillLifecycleManager::update(
@@ -1147,7 +1162,7 @@ SkillLifecycleResult SkillLifecycleManager::update(
     if (!installed.ok || !installed.package) return installed;
     if (requested_roots_.empty()) return installed;
     auto result = publish_resolved();
-    return result;
+    return audited("update", package.filename().string(), std::move(result));
 }
 
 SkillLifecycleResult SkillLifecycleManager::rollback(const std::string& skill_id) {
@@ -1181,7 +1196,7 @@ SkillLifecycleResult SkillLifecycleManager::rollback(const std::string& skill_id
             if (root_package != target.packages.end())
                 requested_roots_[root] = "=" + root_package->version;
         }
-        return result;
+        return audited("rollback", skill_id, std::move(result));
     }
     return {false, failure(kSkillLifecycleInvalid, "No rollback generation is available")};
 }
@@ -1192,14 +1207,15 @@ SkillLifecycleResult SkillLifecycleManager::remove(const std::string& digest) {
         if (package.package_digest == digest)
             return {false, failure(kSkillPackageInUse, "Package is selected by the active lockfile")};
     std::string error;
-    return store_.remove(digest, &error)
+    auto result = store_.remove(digest, &error)
         ? SkillLifecycleResult{true, json::object()}
         : SkillLifecycleResult{false, failure(kSkillPackageInUse, error)};
+    return audited("remove", digest, std::move(result));
 }
 
 SkillLifecycleResult SkillLifecycleManager::reload() {
     std::lock_guard<std::mutex> lock(mutex_);
-    return publish_resolved();
+    return audited("reload", {}, publish_resolved());
 }
 
 SkillLockfile SkillLifecycleManager::lockfile() const {

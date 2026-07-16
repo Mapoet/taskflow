@@ -2,6 +2,7 @@
 #define AGENT_SKILL_RESOURCE_ACCESS_HPP
 
 #include "skill_registry.hpp"
+#include "skill_audit.hpp"
 
 #include <nlohmann/json.hpp>
 
@@ -27,6 +28,8 @@ struct SkillResourceOpenOptions {
     SkillResourceReadMode mode = SkillResourceReadMode::Auto;
     std::uint64_t offset = 0;
     std::size_t max_bytes = 65536U;
+    SkillAuditSink audit_sink;
+    SkillAuditIdentity audit_identity;
 };
 
 struct SkillResourceHandle {
@@ -40,6 +43,8 @@ struct SkillResourceHandle {
     SkillResourceReadMode mode = SkillResourceReadMode::Auto;
     std::shared_ptr<const void> package_lease;
     std::shared_ptr<SkillCacheLease> cache_lease;
+    SkillAuditSink audit_sink;
+    SkillAuditIdentity audit_identity;
 };
 
 struct SkillResourceResult {

@@ -2,6 +2,7 @@
 #define AGENT_SKILL_RUNTIME_HPP
 
 #include "skill_loader.hpp"
+#include "skill_audit.hpp"
 #include "skill_policy.hpp"
 #include "task_state_machine.hpp"
 
@@ -54,12 +55,20 @@ struct SkillInvocationContext {
     std::shared_ptr<TaskControl> control;
     SkillPermissionGrant grants;
     SkillEventSink event_sink;
+    SkillAuditSink audit_sink;
     SkillRuntimeLimits limits;
     /** Values are request data and are never copied into events or normalized manifests. */
     std::map<std::string, std::string> environment;
     std::function<std::optional<std::string>(std::string_view)> secret_provider;
     std::string task_id;
     std::string run_id;
+    std::string skill_id;
+    std::string skill_version;
+    std::string package_digest;
+    std::uint64_t registry_generation = 0;
+    std::string session_id;
+    std::string trace_id;
+    int depth = 0;
     int attempt = 0;
     int iteration = 0;
 };
@@ -111,7 +120,8 @@ private:
                                       const std::string& resource_id,
                                       SkillResourceType expected_kind,
                                       const nlohmann::json& input,
-                                      SkillInvocationContext context) const;
+                                      SkillInvocationContext context,
+                                      std::uint64_t registry_generation) const;
 };
 
 const char* skill_event_type_cstr(SkillEventType type) noexcept;

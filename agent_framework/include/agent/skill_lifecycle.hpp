@@ -1,6 +1,8 @@
 #ifndef AGENT_SKILL_LIFECYCLE_HPP
 #define AGENT_SKILL_LIFECYCLE_HPP
 
+#include "skill_audit.hpp"
+
 #include "skill_registry.hpp"
 #include "skill_supply_chain.hpp"
 
@@ -213,7 +215,8 @@ SkillLifecycleResult inspect_skill_package(const std::filesystem::path& package)
 class SkillLifecycleManager {
 public:
     SkillLifecycleManager(std::shared_ptr<SkillRegistry> registry,
-                          std::filesystem::path store_root);
+                          std::filesystem::path store_root,
+                          SkillAuditSink audit_sink = {});
 
     SkillLifecycleResult install(const std::filesystem::path& package,
                                  const SkillInstallOptions& options = {});
@@ -235,10 +238,13 @@ private:
     std::vector<SkillLockfile> history_;
     std::map<std::string, std::string> requested_roots_;
     mutable std::mutex mutex_;
+    SkillAuditSink audit_sink_;
 
     SkillLifecycleResult publish_resolved();
     SkillLifecycleResult publish_lock(const SkillLockfile& lock);
     bool recover(std::string* error);
+    SkillLifecycleResult audited(std::string action, std::string target,
+                                 SkillLifecycleResult result) const;
 };
 
 std::optional<std::string> skill_sha256_file(const std::filesystem::path& path,

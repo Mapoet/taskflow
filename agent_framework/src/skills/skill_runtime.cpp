@@ -25,6 +25,20 @@ void emit(const SkillInvocationContext& context, SkillEventType type, const char
     }
 }
 
+SkillAuditIdentity audit_identity(const SkillInvocationContext& context) {
+    return {context.skill_id, context.skill_version, context.package_digest,
+            context.registry_generation, context.task_id, context.session_id,
+            context.trace_id, context.run_id, context.attempt, context.iteration,
+            context.depth};
+}
+
+void audit(const SkillInvocationContext& context, const std::string& action,
+           const std::string& resource_id, const std::string& outcome,
+           const std::string& code = {}, nlohmann::json details = nlohmann::json::object()) {
+    emit_skill_audit(context.audit_sink,
+        {audit_identity(context), "runtime", action, resource_id, outcome, code, std::move(details)});
+}
+
 bool stopped(const SkillInvocationContext& context, bool& deadline) {
     deadline = false;
     if (!context.control) return false;
@@ -54,7 +68,7 @@ SkillRuntimeResult SkillRuntime::begin(const std::string& skill_id,
                                   {{"skill_id", skill_id}}), std::nullopt};
     }
     return begin_resolved(*entry, manifest, resource_id, expected_kind, input,
-                          std::move(context));
+                          std::move(context), registry_snapshot.generation());
 }
 
 SkillRuntimeResult SkillRuntime::begin_snapshot(const SkillIndexEntry& entry,
@@ -67,8 +81,9 @@ SkillRuntimeResult SkillRuntime::begin_snapshot(const SkillIndexEntry& entry,
         return {false, error_json(kSkillDependencyUnavailable, "skill snapshot is unavailable",
                                   {{"skill_id", entry.id}}), std::nullopt};
     }
+    const auto generation = context.registry_generation;
     return begin_resolved(entry, std::move(manifest), resource_id, expected_kind, input,
-                          std::move(context));
+                          std::move(context), generation);
 }
 
 SkillRuntimeResult SkillRuntime::begin_resolved(const SkillIndexEntry& entry,
@@ -76,12 +91,18 @@ SkillRuntimeResult SkillRuntime::begin_resolved(const SkillIndexEntry& entry,
                                                 const std::string& resource_id,
                                                 SkillResourceType expected_kind,
                                                 const nlohmann::json& input,
-                                                SkillInvocationContext context) const {
+                                                SkillInvocationContext context,
+                                                std::uint64_t registry_generation) const {
     const std::string& skill_id = entry.id;
+    context.skill_id = entry.id;
+    context.skill_version = manifest->version;
+    context.package_digest = entry.package_digest;
+    context.registry_generation = registry_generation;
     bool deadline = false;
     if (stopped(context, deadline)) {
         emit(context, deadline ? SkillEventType::TimedOut : SkillEventType::Cancelled,
              kSkillCancelled, skill_id, resource_id);
+        audit(context, "begin", resource_id, "denied", kSkillCancelled);
         return {false, error_json(kSkillCancelled, deadline ? "skill deadline exceeded"
                                                            : "skill invocation cancelled"), std::nullopt};
     }
@@ -90,6 +111,7 @@ SkillRuntimeResult SkillRuntime::begin_resolved(const SkillIndexEntry& entry,
         return resource.id == resource_id && resource.kind == expected_kind;
     });
     if (found == manifest->resources.end()) {
+        audit(context, "begin", resource_id, "denied", kSkillDependencyUnavailable);
         return {false, error_json(kSkillDependencyUnavailable, "skill resource is not available",
                                   {{"skill_id", skill_id}, {"resource_id", resource_id},
                                    {"kind", to_string(expected_kind)}}), std::nullopt};
@@ -98,6 +120,8 @@ SkillRuntimeResult SkillRuntime::begin_resolved(const SkillIndexEntry& entry,
     if (input_bytes > context.limits.max_input_bytes) {
         emit(context, SkillEventType::BudgetExceeded, kSkillResourceBudgetExceeded,
              skill_id, resource_id, {{"direction", "input"}, {"bytes", input_bytes}});
+        audit(context, "begin", resource_id, "denied", kSkillResourceBudgetExceeded,
+              {{"direction", "input"}, {"bytes", input_bytes}});
         return {false, error_json(kSkillResourceBudgetExceeded, "skill input exceeds byte budget",
                                   {{"direction", "input"}, {"bytes", input_bytes},
                                    {"limit", context.limits.max_input_bytes}}), std::nullopt};
@@ -118,6 +142,8 @@ SkillRuntimeResult SkillRuntime::begin_resolved(const SkillIndexEntry& entry,
     }
     emit(ticket.context, SkillEventType::InvocationStarted, "", skill_id, resource_id,
          {{"input_bytes", input_bytes}, {"kind", to_string(expected_kind)}});
+    audit(ticket.context, "begin", resource_id, "started", "",
+          {{"inputBytes", input_bytes}, {"kind", to_string(expected_kind)}});
     return {true, nlohmann::json::object(), std::move(ticket)};
 }
 
@@ -127,6 +153,7 @@ SkillRuntimeResult SkillRuntime::finish(const SkillInvocationTicket& ticket,
     if (stopped(ticket.context, deadline)) {
         emit(ticket.context, deadline ? SkillEventType::TimedOut : SkillEventType::Cancelled,
              kSkillCancelled, ticket.skill_id, ticket.resource.id);
+        audit(ticket.context, "finish", ticket.resource.id, "denied", kSkillCancelled);
         return {false, error_json(kSkillCancelled, deadline ? "skill deadline exceeded"
                                                            : "skill invocation cancelled"), std::nullopt};
     }
@@ -134,6 +161,8 @@ SkillRuntimeResult SkillRuntime::finish(const SkillInvocationTicket& ticket,
     if (bytes > ticket.context.limits.max_output_bytes) {
         emit(ticket.context, SkillEventType::BudgetExceeded, kSkillResourceBudgetExceeded,
              ticket.skill_id, ticket.resource.id, {{"direction", "output"}, {"bytes", bytes}});
+        audit(ticket.context, "finish", ticket.resource.id, "denied",
+              kSkillResourceBudgetExceeded, {{"direction", "output"}, {"bytes", bytes}});
         return {false, error_json(kSkillResourceBudgetExceeded, "skill output exceeds byte budget",
                                   {{"direction", "output"}, {"bytes", bytes},
                                    {"limit", ticket.context.limits.max_output_bytes}}), std::nullopt};
@@ -144,6 +173,8 @@ SkillRuntimeResult SkillRuntime::finish(const SkillInvocationTicket& ticket,
     }
     emit(ticket.context, SkillEventType::InvocationCompleted, "", ticket.skill_id,
          ticket.resource.id, {{"output_bytes", bytes}});
+    audit(ticket.context, "finish", ticket.resource.id, "completed", "",
+          {{"outputBytes", bytes}});
     return {true, nlohmann::json::object(), ticket};
 }
 
@@ -151,6 +182,8 @@ void SkillRuntime::record_termination(const SkillInvocationTicket& ticket,
                                       bool timed_out) const noexcept {
     emit(ticket.context, timed_out ? SkillEventType::TimedOut : SkillEventType::Cancelled,
          kSkillCancelled, ticket.skill_id, ticket.resource.id);
+    audit(ticket.context, "terminate", ticket.resource.id,
+          timed_out ? "timed_out" : "cancelled", kSkillCancelled);
 }
 
 SkillRuntimeResult SkillRuntime::validate_schema(const SkillInvocationTicket& ticket,
