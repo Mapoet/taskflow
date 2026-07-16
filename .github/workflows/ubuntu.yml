@@ -3,7 +3,7 @@ name: Ubuntu
 on: [push, pull_request]
 
 jobs:
-  skill-stage7-offline:
+  skill-stage8-offline:
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -19,17 +19,17 @@ jobs:
     - uses: actions/checkout@v3
       with:
         persist-credentials: false
-    - name: Configure Stage 7 Skill gates
+    - name: Configure Stage 8 Skill gates
       run: >-
-        cmake -S . -B build-stage7-ci
+        cmake -S . -B build-stage8-ci
         -DCMAKE_BUILD_TYPE=Debug
         -DCMAKE_CXX_STANDARD=20
         -DTF_BUILD_AGENT_FRAMEWORK=ON
         -DTF_BUILD_TESTS=ON
         -DAGENT_BUILD_EXAMPLES=OFF
-    - name: Build Stage 1-7 Skill targets
+    - name: Build Stage 1-8 Skill targets
       run: |
-        cmake --build build-stage7-ci --parallel 10 --target \
+        cmake --build build-stage8-ci --parallel 10 --target \
           skillctl \
           test_skill_registry \
           test_skill_manifest_v1 \
@@ -50,11 +50,18 @@ jobs:
           test_skill_reference \
           test_skill_artifact_import \
           test_skill_model \
-          test_skill_cli_resources
-    - name: Run offline Stage 7 Skill quality gates
+          test_skill_cli_resources \
+          test_skill_supply_chain_contract \
+          test_skill_archive \
+          test_skill_sbom \
+          test_skill_signature \
+          test_skill_package_trust_gate \
+          test_skill_remote_registry \
+          test_skill_cli_supply_chain
+    - name: Run offline Stage 8 Skill quality gates
       run: >-
-        ctest --test-dir build-stage7-ci
-        -L 'skill-(cli-contract|test-runner|package-reproducibility|security-negative|resource-management|cache-security|reference-retrieval|model-admission)'
+        ctest --test-dir build-stage8-ci
+        -L 'skill-(cli-contract|test-runner|package-reproducibility|security-negative|resource-management|cache-security|reference-retrieval|model-admission|package-archive|signature-security|sbom-contract|registry-supply-chain|supply-chain-e2e)'
         --output-on-failure
 
   debug-test-cpp20-extended:

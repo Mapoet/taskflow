@@ -33,7 +33,7 @@ struct PendingEntry {
 };
 
 struct ParsedEntry {
-    SkillArchiveEntry public_entry;
+    SkillArchiveMember public_entry;
     std::uint32_t data_offset = 0;
 };
 

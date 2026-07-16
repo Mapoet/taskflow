@@ -30,6 +30,7 @@
 - v1 的 `run_skill_script`、`run_skill_cli` 和 `read_skill_resource` 要求匹配的 Skill 请求上下文，并执行 resource declaration 与文件 read grant 双重校验；legacy v0 保留一个大版本兼容路径。
 - 正式安装的 `skillctl` 提供稳定 JSON envelope、退出码、离线 lint/doctor、隔离测试、依赖图、权限分析、确定性 package preflight，以及 Stage 5 lifecycle 操作。
 - Stage 7 资源面提供 snapshot 固定的有界 read/stream/mmap、UTF-8 Reference 分页与 citation/search、内容寻址 cache、受限 Artifact 导入，以及只读且不执行模型代码的 Model admission。
+- Stage 8 供应链面提供确定性 `.tfskill`、CycloneDX SBOM、来源证明、Ed25519 包/Registry 签名、发布者信任与撤销、固定摘要镜像/离线导入，以及安装前 fail-closed 门禁。完整操作与安全边界见 [Skill Supply Chain](skill-supply-chain.md)。
 
 运行时变量为 `AGENT_SKILL_SCRIPT_ALLOWLIST`、`AGENT_SKILL_SCRIPT_TIMEOUT_SEC` 和 `AGENT_SKILL_SCRIPT_OUTPUT_MAX_BYTES`。Linux 进程执行需要 `/usr/bin/unshare` 与 `/usr/bin/bwrap`，任一缺失时 fail closed。Manifest 声明 SHA-256 时，OpenSSL 构建执行摘要校验；无 OpenSSL 构建返回 `resource_hash_unavailable`，不会静默跳过。MCP 生命周期、私有 Tool 绑定和受控 Prompt/Template 已在 Stage 3 完成；Workflow DSL、循环、subflow/submodule 和 restart/resume 已在 Stage 4 完成；内容寻址 lifecycle 已在 Stage 5 完成；正式 CLI、包内测试与 CI gate 已在 Stage 6 完成；Reference、Asset、Artifact 与 Model 的有界资源管理已在 Stage 7 完成。
 
@@ -93,7 +94,9 @@ Test 资源使用 `agent.taskflow/skill-test/v1`，并必须在 Manifest 的 `re
 
 `package` 是只读 preflight，不生成归档：它执行 Manifest/资源验证、lint、包内测试和双次 package/resource digest 检查。`install` 与 `update` 复用同一 gate；任一失败发生在 store、lock/history 和 Registry generation 变更之前。包目录中的 symlink、特殊文件、路径穿越、缺失资源或声明摘要不匹配均 fail closed。
 
-Stage 6 只计算确定性目录身份并管理本地内容寻址 store。确定性归档格式、签名验证、可信发布者、SBOM 与远程 Registry 协议仍属于 Stage 8，当前 `--signature` 仅记录由上层可信流程提供的身份元数据，不构成密码学验证。
+Stage 6 的目录入口仍只计算确定性目录身份并管理本地内容寻址 store；其 legacy
+`--signature IDENTITY` 只是上层元数据。Stage 8 新增的归档入口使用 detached signature 与
+`--trust` 执行密码学验证，两种参数语义不要混用。远程归档必须通过 Stage 8 门禁。
 
 ## Stage 7 资源操作参考
 
@@ -123,9 +126,9 @@ Artifact 导入为 provider-neutral pull reader：下载、归档展开、单文
 部分 cache 对象。Model admission 只验证 runtime/device/precision/memory、digest、cache 和只读打开
 能力，`automaticExecution` 固定为 `false`，不会导入模型包代码或启动推理 runtime。
 
-Stage 7 不定义远程下载 transport、确定性归档、签名验证、可信发布者、SBOM 或远程 Registry。
-这些仍是 Stage 8 的供应链职责；离线 Stage 7 只依据 Manifest、lock/store 和本地 cache 判断资源
-是否齐备，不能把 `source` 或 `signature` 元数据解释成真实性证明。
+Stage 7 的资源服务本身不下载或认证远程对象；Stage 8 已在其外层实现确定性归档、签名验证、
+可信发布者、SBOM 和签名 Registry。离线资源就绪判断仍依据 Manifest、lock/store 和本地 cache；
+只有 Stage 8 验证结果可作为归档真实性证明。
 
 ### Stage 3 descriptor 最小示例
 

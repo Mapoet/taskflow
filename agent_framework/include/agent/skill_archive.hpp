@@ -16,7 +16,7 @@ struct SkillArchiveLimits {
     std::uint32_t max_entries = 4096;
 };
 
-struct SkillArchiveEntry {
+struct SkillArchiveMember {
     std::string path;
     std::uint64_t size = 0;
     std::uint32_t crc32 = 0;
@@ -27,7 +27,7 @@ struct SkillArchiveResult {
     bool ok = false;
     std::string error;
     std::string archive_digest;
-    std::vector<SkillArchiveEntry> entries;
+    std::vector<SkillArchiveMember> entries;
 };
 
 SkillArchiveResult build_skill_archive(

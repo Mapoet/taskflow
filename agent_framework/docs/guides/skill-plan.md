@@ -39,7 +39,7 @@ Tool、Prompt 或 Workflow。
 | Model | 框架部分已有但未集成 | LLM/model adapters | 无本地模型资源、设备、内存、runtime 和校验策略 |
 | Tests | 缺失 Skill 契约 | 框架自身有 CTest | 包内测试不可发现、隔离执行和报告 |
 | Lifecycle | 缺失 | `scan_or_reload` | 无 install/enable/disable/update/remove/pin/rollback |
-| Supply chain | 缺失 | 无 | 无包、锁文件、签名、来源、SBOM 和可信策略 |
+| Supply chain | 已集成 | 确定性 `.tfskill`、Ed25519、SBOM/provenance、trust store、签名 Registry | 暂无透明日志、阈值签名、TUF/Sigstore 兼容和自动密钥轮换 |
 | CLI management | 部分集成 | `skillctl list/validate/show/read` | 无 lint/test/package/install/doctor/permissions/graph |
 | Observability | 未统一 | 零散日志和 Agent event | 无 Skill 资源、权限、依赖和调用审计事件 |
 
@@ -455,6 +455,26 @@ skillctl package/install/update/enable/disable/remove
 
 ## Stage 8：包、签名与远程 Registry，P2
 
+### 完成证据（2026-07-16）
+
+- `.tfskill` 使用规范化 ZIP32，固定排序、时间戳、压缩/权限和元数据；拒绝 traversal、链接、
+  特殊文件、重复/大小写冲突与资源预算越界，相同输入逐字节一致。
+- 包内嵌 CycloneDX 1.6 SBOM 与来源证明；Ed25519 detached signature 覆盖 package/Registry
+  subject、发布者、source scope、SBOM/provenance digest，并执行 key role、有效期和撤销检查。
+- 签名 Registry v1 只解析精确版本；镜像和离线导入都固定 size、SHA-256 与包签名，失败先于
+  store/lock/history/Registry generation 变更。
+- store 与 lock 持久化 archive、publisher、key、signature、SBOM、provenance、Registry identity；
+  远程包禁止 unsigned，本地 unsigned 仅显式 opt-in 并标记 `legacyUnsigned`。
+- `skillctl package build/inspect/sbom/sign/verify`、`registry sync/resolve` 和 verified archive
+  install/update 已进入稳定 JSON/退出码契约；[供应链操作指南](skill-supply-chain.md)记录完整流程。
+- 新增五个 Stage 8 CI 标签和无凭据/无真实网络 Ubuntu gate；7 个专项测试各连续运行 20 次，
+  ODR 跨模块回归及 Stage 7 Artifact importer 也连续运行 20 次。
+- 全新 Debug/C++20/OpenSSL 构建完成；安装前缀验证 `skillctl`、4 个公共头和 5 个 schema；最终
+  离线 fixture + loopback 全量 CTest 为 3022/3022 通过，总耗时 206.24 秒。
+
+**实施状态：已完成。** 当前状态达到 `platform-complete`；下列透明日志、多方签名等仍是明确
+非目标，不影响 Stage 8 退出标准。
+
 ### 步骤
 
 1. 定义确定性包格式：路径排序、时间戳归一化、禁止链接和设备文件。
@@ -536,6 +556,10 @@ install signed package
 - `skill-lifecycle-e2e`
 - `skill-package-reproducibility`
 - `skill-registry-supply-chain`
+- `skill-package-archive`
+- `skill-signature-security`
+- `skill-sbom-contract`
+- `skill-supply-chain-e2e`
 - `skill-resource-management`
 - `skill-cache-security`
 - `skill-reference-retrieval`
@@ -555,7 +579,7 @@ P0/P1 工作不得仅增加文档或 happy-path 测试。
 - [x] CLI 覆盖 validate/lint/test/package/install/doctor，JSON 和退出码稳定。
 - [x] 包内测试、框架集成、安全负向和综合测试进入 CI。
 - [x] 本地资源的 digest、来源、license、cache 状态和模型 admission 可审计。
-- [ ] 签名、可信发布者、SBOM 和远程 Registry 策略可审计。
+- [x] 签名、可信发布者、SBOM 和远程 Registry 策略可审计。
 - [ ] 1000 次循环/取消/重启压力测试无资源泄漏或重复副作用。
 
 状态门槛：
