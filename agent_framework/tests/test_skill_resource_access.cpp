@@ -2,6 +2,7 @@
 #include <agent/skill_resource_access.hpp>
 #include <agent/task_state_machine.hpp>
 
+#include <algorithm>
 #include <cassert>
 #include <filesystem>
 #include <fstream>
@@ -18,6 +19,16 @@ void write_file(const fs::path& path, const std::string& content) {
     std::ofstream output(path, std::ios::binary);
     assert(output.good());
     output << content;
+}
+
+void write_sparse_file(const fs::path& path, std::uint64_t size) {
+    fs::create_directories(path.parent_path());
+    std::ofstream output(path, std::ios::binary);
+    assert(output.good());
+    assert(size > 0U);
+    output.seekp(static_cast<std::streamoff>(size - 1U));
+    output.put('\0');
+    assert(output.good());
 }
 
 SkillIndexEntry make_entry(const fs::path& package,
@@ -133,6 +144,66 @@ int main() {
     assert(code_is(mapped.error, "skill_resource_mmap_unavailable"));
 #endif
 
+    // A sparse fixture much larger than the requested window proves that the
+    // public materialization and streaming paths remain bounded by max_bytes.
+    constexpr std::uint64_t large_size = 8U * 1024U * 1024U;
+    constexpr std::uint64_t bounded_window = 4096U;
+    write_sparse_file(package / "assets/large.bin", large_size);
+    auto large_manifest = std::make_shared<SkillManifest>(*manifest);
+    SkillResourceDescriptor large_descriptor;
+    large_descriptor.id = "large";
+    large_descriptor.kind = SkillResourceType::Asset;
+    large_descriptor.path = "assets/large.bin";
+    large_descriptor.media_type = "application/octet-stream";
+    large_descriptor.read_mode = SkillResourceReadMode::Stream;
+    large_descriptor.declared_size = large_size;
+    large_descriptor.license = "Apache-2.0";
+    large_descriptor.source_uri = "package://assets/large.bin";
+    large_manifest->resources.push_back(large_descriptor);
+    large_descriptor.id = "large-map";
+    large_descriptor.read_mode = SkillResourceReadMode::MemoryMap;
+    large_manifest->resources.push_back(std::move(large_descriptor));
+
+    SkillResourceOpenOptions large_options;
+    large_options.mode = SkillResourceReadMode::Stream;
+    large_options.max_bytes = bounded_window;
+    auto large = access.open_snapshot(entry, large_manifest, "large", large_options);
+    assert(large.ok && large.handle);
+    assert(large.handle->descriptor.declared_size == large_size);
+    assert(large.handle->view_size == bounded_window);
+    const auto large_bytes = access.read(*large.handle);
+    assert(large_bytes.ok && large_bytes.bytes.size() == bounded_window);
+
+    std::uint64_t streamed_large_bytes = 0U;
+    std::size_t largest_chunk = 0U;
+    const auto large_stream = access.stream(
+        *large.handle, 512U,
+        [&](std::uint64_t offset, std::string_view chunk) {
+            assert(offset == streamed_large_bytes);
+            streamed_large_bytes += chunk.size();
+            largest_chunk = std::max(largest_chunk, chunk.size());
+            return true;
+        });
+    assert(large_stream.ok);
+    assert(streamed_large_bytes == bounded_window);
+    assert(largest_chunk <= 512U);
+
+    SkillResourceOpenOptions large_map_options;
+    large_map_options.mode = SkillResourceReadMode::MemoryMap;
+    large_map_options.offset = 1024U;
+    large_map_options.max_bytes = bounded_window;
+    auto large_map = access.open_snapshot(entry, large_manifest, "large-map", large_map_options);
+    assert(large_map.ok && large_map.handle);
+    assert(large_map.handle->view_size == bounded_window);
+    const auto mapped_large = access.map(*large_map.handle);
+#if defined(__linux__)
+    assert(mapped_large.ok && mapped_large.mapping);
+    assert(mapped_large.mapping->as_string_view().size() == bounded_window);
+#else
+    assert(!mapped_large.ok);
+    assert(code_is(mapped_large.error, "skill_resource_mmap_unavailable"));
+#endif
+
     const auto absent = access.open_snapshot(entry, manifest, "missing", range_options);
     assert(!absent.ok && code_is(absent.error, "skill_resource_not_found"));
 
@@ -167,6 +238,8 @@ int main() {
 
     opened.handle.reset();
     blob.handle.reset();
+    large.handle.reset();
+    large_map.handle.reset();
     entry.package_lease.reset();
     assert(weak_lease.expired());
     fs::remove_all(base, ec);

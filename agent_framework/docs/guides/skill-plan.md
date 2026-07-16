@@ -441,6 +441,18 @@ skillctl package/install/update/enable/disable/remove
 - 离线模式可依据 lockfile/cache 确定资源是否齐备。
 - 模型与资产的 digest、license 和来源可审计。
 
+### 完成证据
+
+- `SkillResourceAccess` 固定 package/manifest/cache lease，统一执行 canonical jail、普通文件、大小与 digest 校验，并只暴露调用方限制的 read、stream 或 mmap 窗口。
+- Reference 分页保持 UTF-8 边界并返回结构化 citation；确定性派生索引提供有界检索，索引身份绑定 resource digest。
+- 内容寻址 cache 实现原子提交、quota/LRU、pin、lease、verify 与 GC；Artifact 导入对下载、展开大小、文件数、压缩比、路径、类型和取消清理分别 fail closed。
+- Model admission 检查 runtime、device、precision、memory、mmap/open 与 cache 可用性，保持只读且 `automaticExecution=false`。
+- `skillctl reference/cache/model` 与扩展 doctor 提供稳定 JSON 审计面；Stage 7 CI 使用无凭据、清空代理变量的离线 job 和四个专项标签。
+- 稀疏大文件回归 fixture 明确验证 materialization、stream chunk 和 mmap 均受请求窗口约束。
+- 全新 `build-stage7` 完整 Debug 构建到 100%；四标签并集 7/7 通过，7 个专项测试各连续运行 20 次（共 140 次执行）无失败。
+- 隔离安装前缀包含 `skillctl`、Stage 7 公共头文件与三个 v1 schema；沙箱内全量 CTest 为 2999/3015，通过之外的 16 项均为既有 HTTP/A2A/LLM mock server 无法绑定本地监听端口，Stage 7 新增测试无失败。
+- 远程传输、归档格式、密码学签名、可信发布者、SBOM 与远程 Registry 未在本阶段实现，继续由 Stage 8 定义。
+
 ## Stage 8：包、签名与远程 Registry，P2
 
 ### 步骤
@@ -524,6 +536,10 @@ install signed package
 - `skill-lifecycle-e2e`
 - `skill-package-reproducibility`
 - `skill-registry-supply-chain`
+- `skill-resource-management`
+- `skill-cache-security`
+- `skill-reference-retrieval`
+- `skill-model-admission`
 
 每项权限和资源控制至少有一个拒绝测试；每项生命周期操作至少有一个并发或失败恢复测试。
 P0/P1 工作不得仅增加文档或 happy-path 测试。
@@ -538,7 +554,8 @@ P0/P1 工作不得仅增加文档或 happy-path 测试。
 - [x] Install/update/rollback/remove、SemVer dependency 和 lockfile 闭环通过。
 - [x] CLI 覆盖 validate/lint/test/package/install/doctor，JSON 和退出码稳定。
 - [x] 包内测试、框架集成、安全负向和综合测试进入 CI。
-- [ ] Digest、签名、来源、license、SBOM 和 Registry 策略可审计。
+- [x] 本地资源的 digest、来源、license、cache 状态和模型 admission 可审计。
+- [ ] 签名、可信发布者、SBOM 和远程 Registry 策略可审计。
 - [ ] 1000 次循环/取消/重启压力测试无资源泄漏或重复副作用。
 
 状态门槛：

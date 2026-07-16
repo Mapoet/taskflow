@@ -3,26 +3,33 @@ name: Ubuntu
 on: [push, pull_request]
 
 jobs:
-  skill-stage6-offline:
+  skill-stage7-offline:
     runs-on: ubuntu-latest
     permissions:
       contents: read
     env:
       AGENT_SKILL_SCRIPT_ALLOWLIST: /bin/sh
       AGENT_TOOL_ALLOWLIST: ""
+      GITHUB_TOKEN: ""
+      HTTP_PROXY: ""
+      HTTPS_PROXY: ""
+      ALL_PROXY: ""
+      NO_PROXY: "*"
     steps:
     - uses: actions/checkout@v3
-    - name: Configure Stage 6 Skill gates
+      with:
+        persist-credentials: false
+    - name: Configure Stage 7 Skill gates
       run: >-
-        cmake -S . -B build-stage6-ci
+        cmake -S . -B build-stage7-ci
         -DCMAKE_BUILD_TYPE=Debug
         -DCMAKE_CXX_STANDARD=20
         -DTF_BUILD_AGENT_FRAMEWORK=ON
         -DTF_BUILD_TESTS=ON
         -DAGENT_BUILD_EXAMPLES=OFF
-    - name: Build Stage 1-6 Skill targets
+    - name: Build Stage 1-7 Skill targets
       run: |
-        cmake --build build-stage6-ci --parallel 10 --target \
+        cmake --build build-stage7-ci --parallel 10 --target \
           skillctl \
           test_skill_registry \
           test_skill_manifest_v1 \
@@ -36,11 +43,18 @@ jobs:
           test_skill_doctor \
           test_skill_test_runner \
           test_skill_cli_lifecycle \
-          test_skill_package_gate
-    - name: Run offline Stage 6 Skill quality gates
+          test_skill_package_gate \
+          test_skill_resource_contract \
+          test_skill_resource_access \
+          test_skill_resource_cache \
+          test_skill_reference \
+          test_skill_artifact_import \
+          test_skill_model \
+          test_skill_cli_resources
+    - name: Run offline Stage 7 Skill quality gates
       run: >-
-        ctest --test-dir build-stage6-ci
-        -L 'skill-(cli-contract|test-runner|package-reproducibility|security-negative)'
+        ctest --test-dir build-stage7-ci
+        -L 'skill-(cli-contract|test-runner|package-reproducibility|security-negative|resource-management|cache-security|reference-retrieval|model-admission)'
         --output-on-failure
 
   debug-test-cpp20-extended:
