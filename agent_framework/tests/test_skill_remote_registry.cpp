@@ -1,4 +1,4 @@
-#include "agent/skill_remote_registry.hpp"
+#include <agent/skills/skill_remote_registry.hpp>
 
 #include <openssl/evp.h>
 #include <openssl/pem.h>

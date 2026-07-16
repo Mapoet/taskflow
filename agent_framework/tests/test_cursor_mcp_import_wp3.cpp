@@ -3,7 +3,7 @@
  * @brief WP1.3: ToolBus 从 Cursor mcp.json 批量导入（best-effort）测试
  */
  
-#include <agent/toolbus.hpp>
+#include <agent/toolbus/toolbus.hpp>
 
 #include <cassert>
 #include <cstdlib>

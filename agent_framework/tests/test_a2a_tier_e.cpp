@@ -2,9 +2,9 @@
  * @file test_a2a_tier_e.cpp
  * @brief Tier E: light QPS + oversize POST + optional auth negative (in-process server)
  */
-#include <agent/agent_server.hpp>
+#include <agent/agent_server/agent_server.hpp>
 #include <agent/a2a/auth_gate.hpp>
-#include <agent/types.hpp>
+#include <agent/core/types.hpp>
 #include "support/test_execution_profile.hpp"
 
 #include <chrono>

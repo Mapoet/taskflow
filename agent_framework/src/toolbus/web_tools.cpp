@@ -8,8 +8,8 @@
  * - web_search：DuckDuckGo HTML，仅 *.duckduckgo.com 重定向。
  */
 
-#include <agent/web_search_ddg.hpp>
-#include <agent/web_tools.hpp>
+#include <agent/toolbus/web_search_ddg.hpp>
+#include <agent/toolbus/web_tools.hpp>
 
 #include <cctype>
 #include <cstdlib>

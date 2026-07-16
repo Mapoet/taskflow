@@ -3,7 +3,7 @@
  * @brief WP2.1b tool orchestration implementation
  */
 
-#include "agent/toolbus.hpp"
+#include <agent/toolbus/toolbus.hpp>
 
 #include <algorithm>
 #include <cctype>

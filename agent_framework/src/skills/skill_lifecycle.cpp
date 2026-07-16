@@ -1,8 +1,8 @@
-#include <agent/skill_lifecycle.hpp>
+#include <agent/skills/skill_lifecycle.hpp>
 
 #include <agent/internal/skill_frontmatter_parse.hpp>
-#include <agent/skill_archive.hpp>
-#include <agent/skill_package_gate.hpp>
+#include <agent/skills/skill_archive.hpp>
+#include <agent/skills/skill_package_gate.hpp>
 
 #if defined(CPPHTTPLIB_OPENSSL_SUPPORT)
 #include <openssl/evp.h>

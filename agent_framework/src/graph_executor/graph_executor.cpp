@@ -3,14 +3,14 @@
  * @brief GraphExecutor implementation (WP2.0 run_react_cli + session merge)
  */
 
-#include <agent/graph_executor.hpp>
+#include <agent/graph_executor/graph_executor.hpp>
 
 #include <agent/internal/agent_thread_state.hpp>
-#include <agent/llm_client.hpp>
-#include <agent/task_state_machine.hpp>
-#include <agent/user_input_preprocessor.hpp>
-#include <agent/verifier_runner.hpp>
-#include <agent/verifier_types.hpp>
+#include <agent/llm_client/llm_client.hpp>
+#include <agent/agent/task_state_machine.hpp>
+#include <agent/agent/user_input_preprocessor.hpp>
+#include <agent/agent/verifier_runner.hpp>
+#include <agent/agent/verifier_types.hpp>
 
 #include <algorithm>
 #include <cctype>

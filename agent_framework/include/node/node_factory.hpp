@@ -9,14 +9,14 @@
 #define __AGENT_NODE_FACTORY_H__
 
 #include <workflow/nodeflow.hpp>
-#include "../agent/types.hpp"
-#include "../agent/llm_client.hpp"
-#include "../agent/prompt_renderer.hpp"
-#include "../agent/toolbus.hpp"
-#include "../agent/memory.hpp"
-#include "../agent/vectorstore.hpp"
-#include "../agent/encoder.hpp"
-#include "../agent/ui_manager.hpp"
+#include <agent/core/types.hpp>
+#include <agent/llm_client/llm_client.hpp>
+#include <agent/prompt_renderer/prompt_renderer.hpp>
+#include <agent/toolbus/toolbus.hpp>
+#include <agent/memory/memory.hpp>
+#include <agent/vectorstore/vectorstore.hpp>
+#include <agent/encoder/encoder.hpp>
+#include <agent/ui/ui_manager.hpp>
 #include <string>
 #include <memory>
 #include <functional>

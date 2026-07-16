@@ -1,6 +1,6 @@
-#include <agent/skill_loader.hpp>
-#include <agent/skill_manifest.hpp>
-#include <agent/skill_registry.hpp>
+#include <agent/skills/skill_loader.hpp>
+#include <agent/skills/skill_manifest.hpp>
+#include <agent/skills/skill_registry.hpp>
 
 #include <cassert>
 #include <filesystem>

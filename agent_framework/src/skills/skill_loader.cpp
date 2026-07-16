@@ -3,8 +3,8 @@
  * @brief SkillLoader 实现
  */
 
-#include <agent/skill_loader.hpp>
-#include <agent/skill_manifest.hpp>
+#include <agent/skills/skill_loader.hpp>
+#include <agent/skills/skill_manifest.hpp>
 
 #include <agent/internal/skill_frontmatter_parse.hpp>
 

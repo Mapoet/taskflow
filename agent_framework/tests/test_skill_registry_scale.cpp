@@ -1,4 +1,4 @@
-#include <agent/skill_registry.hpp>
+#include <agent/skills/skill_registry.hpp>
 
 #include <cassert>
 #include <chrono>

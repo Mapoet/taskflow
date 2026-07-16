@@ -3,18 +3,18 @@
  * @brief build_cli_agent_graph — WP1.5 ReAct 构图工厂
  */
 
-#include <agent/graph_executor.hpp>
+#include <agent/graph_executor/graph_executor.hpp>
 
 #include <agent/internal/agent_thread_state.hpp>
 #include <agent/internal/loop_io_keys.hpp>
-#include <agent/llm_client.hpp>
-#include <agent/draw_tools.hpp>
-#include <agent/expr_tools.hpp>
-#include <agent/fs_tools.hpp>
-#include <agent/news_sources_tool.hpp>
-#include <agent/web_tools.hpp>
-#include <agent/skill_script_tool.hpp>
-#include <agent/toolbus.hpp>
+#include <agent/llm_client/llm_client.hpp>
+#include <agent/toolbus/draw_tools.hpp>
+#include <agent/toolbus/expr_tools.hpp>
+#include <agent/toolbus/fs_tools.hpp>
+#include <agent/toolbus/news_sources_tool.hpp>
+#include <agent/toolbus/web_tools.hpp>
+#include <agent/skills/skill_script_tool.hpp>
+#include <agent/toolbus/toolbus.hpp>
 #include <node/agent_loop_node.hpp>
 
 #include <stdexcept>

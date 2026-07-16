@@ -3,7 +3,7 @@
  * @brief Event logger implementation for event sourcing
  */
 
-#include "agent/memory.hpp"
+#include <agent/memory/memory.hpp>
 
 namespace agent_framework {
 

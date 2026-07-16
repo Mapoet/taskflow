@@ -1,6 +1,6 @@
-#include <agent/skill_capability_runtime.hpp>
-#include <agent/skill_lifecycle.hpp>
-#include <agent/skill_resource_cache.hpp>
+#include <agent/skills/skill_capability_runtime.hpp>
+#include <agent/skills/skill_lifecycle.hpp>
+#include <agent/skills/skill_resource_cache.hpp>
 
 #include <cassert>
 #include <filesystem>

@@ -9,8 +9,8 @@
 #define __AGENT_NODE_TOOL_CALL_NODE_H__
 
 #include <workflow/nodeflow.hpp>
-#include "../agent/types.hpp"
-#include "../agent/toolbus.hpp"
+#include <agent/core/types.hpp>
+#include <agent/toolbus/toolbus.hpp>
 #include <string>
 #include <memory>
 #include <vector>

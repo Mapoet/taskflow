@@ -3,9 +3,9 @@
  * @brief WP2.1c 上下文预算单元测试 B-1–B-5 与 PromptRenderer I-2
  */
 
-#include <agent/context_budget.hpp>
-#include <agent/prompt_renderer.hpp>
-#include <agent/types.hpp>
+#include <agent/context_budget/context_budget.hpp>
+#include <agent/prompt_renderer/prompt_renderer.hpp>
+#include <agent/core/types.hpp>
 
 #include <cassert>
 #include <cstdlib>

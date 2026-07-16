@@ -1,10 +1,10 @@
 #ifndef AGENT_FRAMEWORK_TEST_EXECUTION_PROFILE_HPP
 #define AGENT_FRAMEWORK_TEST_EXECUTION_PROFILE_HPP
 
-#include <agent/agent_server.hpp>
-#include <agent/llm_client.hpp>
-#include <agent/prompt_renderer.hpp>
-#include <agent/toolbus.hpp>
+#include <agent/agent_server/agent_server.hpp>
+#include <agent/llm_client/llm_client.hpp>
+#include <agent/prompt_renderer/prompt_renderer.hpp>
+#include <agent/toolbus/toolbus.hpp>
 
 #include <chrono>
 #include <future>

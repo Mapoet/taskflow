@@ -2,8 +2,8 @@
  * @file test_expr_tools.cpp
  * @brief 内建 expr_eval / expr_validate / expr_batch_eval（ExprTk）；门闩、幂等、allowlist 分进程用例。
  */
-#include <agent/expr_tools.hpp>
-#include <agent/toolbus.hpp>
+#include <agent/toolbus/expr_tools.hpp>
+#include <agent/toolbus/toolbus.hpp>
 
 #include <cassert>
 #include <cstdlib>

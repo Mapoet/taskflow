@@ -2,8 +2,8 @@
  * @file httplib_http_client.cpp
  * @brief cpp-httplib 实现的 HTTPClient
  */
-#include <agent/httplib_http_client.hpp>
-#include <agent/types.hpp>
+#include <agent/agent_client/httplib_http_client.hpp>
+#include <agent/core/types.hpp>
 
 #include <cctype>
 #include <cstdlib>

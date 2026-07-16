@@ -3,14 +3,14 @@
  * @brief WP2.7 UserInputPreprocessor 实现
  */
 
-#include <agent/user_input_preprocessor.hpp>
+#include <agent/agent/user_input_preprocessor.hpp>
 
-#include <agent/context_budget.hpp>
-#include <agent/fs_sandbox.hpp>
+#include <agent/context_budget/context_budget.hpp>
+#include <agent/toolbus/fs_sandbox.hpp>
 #include <agent/internal/agent_thread_state.hpp>
-#include <agent/llm_client.hpp>
-#include <agent/memory_compaction.hpp>
-#include <agent/toolbus.hpp>
+#include <agent/llm_client/llm_client.hpp>
+#include <agent/agent/memory_compaction.hpp>
+#include <agent/toolbus/toolbus.hpp>
 
 #include <algorithm>
 #include <cctype>

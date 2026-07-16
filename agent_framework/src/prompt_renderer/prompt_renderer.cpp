@@ -3,8 +3,8 @@
  * @brief 提示词渲染器与格式化器实现（WP1.1 与 WP1.4 最小可用路径）
  */
 
-#include "agent/prompt_renderer.hpp"
-#include "agent/context_budget.hpp"
+#include <agent/prompt_renderer/prompt_renderer.hpp>
+#include <agent/context_budget/context_budget.hpp>
 
 #include <cctype>
 #include <iostream>

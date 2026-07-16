@@ -1,4 +1,4 @@
-#include "agent/skill_package_gate.hpp"
+#include <agent/skills/skill_package_gate.hpp>
 
 #include <openssl/evp.h>
 #include <openssl/pem.h>

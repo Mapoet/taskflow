@@ -3,10 +3,10 @@
  * @brief news_sources 目录 v1 解析与 web_configured_source 离线 mock 测试
  */
 
-#include <agent/news_sources_catalog.hpp>
-#include <agent/news_sources_tool.hpp>
-#include <agent/toolbus.hpp>
-#include <agent/web_tools.hpp>
+#include <agent/toolbus/news_sources_catalog.hpp>
+#include <agent/toolbus/news_sources_tool.hpp>
+#include <agent/toolbus/toolbus.hpp>
+#include <agent/toolbus/web_tools.hpp>
 
 #include <cassert>
 #include <chrono>

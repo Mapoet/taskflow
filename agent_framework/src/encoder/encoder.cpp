@@ -3,7 +3,7 @@
  * @brief 编码器实现
  */
 
-#include "agent/encoder.hpp"
+#include <agent/encoder/encoder.hpp>
 
 namespace agent_framework {
 

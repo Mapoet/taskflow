@@ -3,9 +3,9 @@
  * @brief WP2.1c 上下文预算：UTF-8、紧凑 dump、方案 S、spill、线路上限
  */
 
-#include "agent/context_budget.hpp"
+#include <agent/context_budget/context_budget.hpp>
 
-#include "agent/types.hpp"
+#include <agent/core/types.hpp>
 
 #include <cctype>
 #include <chrono>

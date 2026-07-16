@@ -2,11 +2,11 @@
  * @file sse_connection.cpp
  * @brief SSE 客户端：get_sse + SseParser + StreamResponse（WP2.4）
  */
-#include <agent/sse_connection.hpp>
-#include <agent/agent_client.hpp>
+#include <agent/agent_transport/sse_connection.hpp>
+#include <agent/agent_client/agent_client.hpp>
 #include <agent/a2a/sse_framing.hpp>
 #include <agent/a2a/wire_mapping.hpp>
-#include <agent/httplib_http_client.hpp>
+#include <agent/agent_client/httplib_http_client.hpp>
 
 #include <cstdlib>
 #include <iostream>

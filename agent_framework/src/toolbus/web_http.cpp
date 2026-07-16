@@ -3,7 +3,7 @@
  * @brief 受控 HTTP(S) GET：SSRF、重定向、流式体上限；HTTPS_PROXY/HTTP_PROXY（HTTP CONNECT）、AGENT_WEB_HTTP_COOKIE。
  */
 
-#include <agent/web_http.hpp>
+#include <agent/toolbus/web_http.hpp>
 
 #include <algorithm>
 #include <cctype>

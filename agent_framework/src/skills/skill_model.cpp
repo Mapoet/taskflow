@@ -1,4 +1,4 @@
-#include <agent/skill_model.hpp>
+#include <agent/skills/skill_model.hpp>
 
 #include <algorithm>
 

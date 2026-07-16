@@ -2,8 +2,8 @@
  * @file skill_services.cpp
  */
 
-#include <agent/skill_services.hpp>
-#include <agent/skill_runtime.hpp>
+#include <agent/skills/skill_services.hpp>
+#include <agent/skills/skill_runtime.hpp>
 
 #include <cstdlib>
 #include <filesystem>

@@ -2,7 +2,7 @@
  * @file test_verifier_types.cpp
  * @brief WP2.8 Verifier types / parse / gate (phase-2-wp8.md §10.1)
  */
-#include <agent/verifier_types.hpp>
+#include <agent/agent/verifier_types.hpp>
 
 #include <cassert>
 #include <cstdlib>

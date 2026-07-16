@@ -9,7 +9,7 @@
 #define __AGENT_A2A_AUTH_REQUIREMENT_H__
 
 #include <agent/a2a/types.hpp>
-#include <agent/types.hpp>
+#include <agent/core/types.hpp>
 
 #include <optional>
 #include <string>

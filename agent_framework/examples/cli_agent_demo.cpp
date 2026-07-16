@@ -18,17 +18,18 @@
 
 #include "CLI11.hpp"
 #include "cli_multiline_tty.hpp"
+#include "common/agent_example_bootstrap.hpp"
 
-#include <agent/graph_executor.hpp>
-#include <agent/execution_context.hpp>
+#include <agent/graph_executor/graph_executor.hpp>
+#include <agent/agent/execution_context.hpp>
 #include <agent/internal/agent_thread_state.hpp>
-#include <agent/llm_client.hpp>
-#include <agent/user_input_preprocessor.hpp>
-#include <agent/prompt_renderer.hpp>
-#include <agent/skill_services.hpp>
-#include <agent/toolbus.hpp>
-#include <agent/types.hpp>
-#include <agent/ui_manager.hpp>
+#include <agent/llm_client/llm_client.hpp>
+#include <agent/agent/user_input_preprocessor.hpp>
+#include <agent/prompt_renderer/prompt_renderer.hpp>
+#include <agent/skills/skill_services.hpp>
+#include <agent/toolbus/toolbus.hpp>
+#include <agent/core/types.hpp>
+#include <agent/ui/ui_manager.hpp>
 
 #include <atomic>
 #include <cstdlib>
@@ -97,40 +98,20 @@ bool env_truthy(const char* key) {
  * @brief 与 wp5 一致：`AGENT_TEST_CURSOR_MCP_JSON` 优先；否则空串交给 ToolBus（`AGENT_MCP_CONFIG_PATH` / ~/.cursor/mcp.json）
  */
 std::string resolve_cursor_mcp_config_path(const std::string& cli_path) {
-    if (!cli_path.empty()) {
-        return cli_path;
-    }
-    const char* test_env = std::getenv("AGENT_TEST_CURSOR_MCP_JSON");
-    if (test_env && *test_env) {
-        return std::string(test_env);
-    }
-    return "";
+    return example::cursor_mcp_config_path(cli_path);
 }
 
 void import_cursor_mcp_tools(ToolBus& bus, const std::string& config_path_arg, bool dbg,
                             std::size_t* out_mcp_services) {
-    *out_mcp_services = 0;
-    const std::string path_for_display = config_path_arg.empty()
-                                              ? std::string("<ToolBus default: AGENT_MCP_CONFIG_PATH or ~/.cursor/mcp.json>")
-                                              : config_path_arg;
-    ToolBus::CursorMcpImportResult r = bus.register_mcp_from_cursor_config(config_path_arg, true);
-    *out_mcp_services = r.registered_services.size();
-    auto tools = bus.export_as_llm_tools();
-
-    if (dbg) {
-        std::clog << "cursor_mcp config_path=\"" << path_for_display << "\"\n";
-        std::clog << "  registered_services=" << r.registered_services.size()
-                  << " failures=" << r.failures.size() << "\n";
-        for (const auto& name : r.registered_services) {
-            std::clog << "    ok: " << name << '\n';
-        }
-        for (const auto& f : r.failures) {
-            std::clog << "    fail: " << f.service_name << " - " << f.reason << '\n';
-        }
-        std::clog << "toolbus export_as_llm_tools count=" << tools.size() << '\n';
-    } else if (!r.failures.empty() && *out_mcp_services == 0) {
-        std::clog << "[cli_agent_demo] cursor_mcp: no services registered (" << r.failures.size()
-                  << " failure(s); use -v or AGENT_TEST_AGENT_LOOP_DEBUG=1 for details)\n";
+    example::BootstrapOptions options;
+    options.cursor_mcp_config = config_path_arg;
+    options.use_cursor_skill_roots = false;
+    options.import_cursor_mcp = true;
+    options.verbose = dbg;
+    const auto boot = example::bootstrap_agent_services(bus, options);
+    *out_mcp_services = boot.mcp_services;
+    if(dbg) {
+        for(const auto& diagnostic : boot.diagnostics) std::clog << "[bootstrap] " << diagnostic << '\n';
     }
 }
 
@@ -192,6 +173,9 @@ int run_graph_once(tf::Executor& executor,
         if (!g_shutdown_requested.load()) {
             cli.handle_stream_token(tok);
         }
+    };
+    req.options.graph_options.skill_event_sink = [](const SkillEvent& event) {
+        std::clog << example::skill_event_json(event).dump() << '\n';
     };
     try {
         WorkflowResult wr = gx.run_react_cli_sync(executor, req);
@@ -304,7 +288,9 @@ int main(int argc, char** argv) {
     AgentWorkflowDeps deps;
     deps.llm = llm;
     deps.toolbus = bus;
-    deps.skills = SkillServices::from_env();
+    example::BootstrapOptions skill_options;
+    skill_options.use_cursor_skill_roots = false;
+    deps.skills = example::discover_skill_services(skill_options);
 
     AgentConfig cfg;
     cfg.name = "cli_agent_demo";

@@ -3,7 +3,7 @@
  * @brief WP1.4 PromptRenderer 单测（无第三方框架）
  */
 
-#include <agent/prompt_renderer.hpp>
+#include <agent/prompt_renderer/prompt_renderer.hpp>
 
 #include <cassert>
 #include <cstdlib>

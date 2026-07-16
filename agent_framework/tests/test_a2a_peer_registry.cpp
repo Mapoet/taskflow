@@ -3,9 +3,9 @@
  * @brief Offline peers.json parsing + loopback discover for A2aPeerRegistry (WP2.agent2agent)
  */
 #include <agent/a2a/peer_registry.hpp>
-#include <agent/agent_server.hpp>
+#include <agent/agent_server/agent_server.hpp>
 #include "support/test_execution_profile.hpp"
-#include <agent/types.hpp>
+#include <agent/core/types.hpp>
 
 #include <chrono>
 #include <cstdlib>

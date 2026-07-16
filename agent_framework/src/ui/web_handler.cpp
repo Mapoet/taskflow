@@ -3,7 +3,7 @@
  * @brief Web output handler — WP2.U（SSE 块队列 + JSON 行）
  */
 
-#include <agent/ui_manager.hpp>
+#include <agent/ui/ui_manager.hpp>
 
 #include <utility>
 

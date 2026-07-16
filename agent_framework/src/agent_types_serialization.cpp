@@ -5,7 +5,7 @@
  * @version 0.1
  * @date 2025-01-XX
  */
-#include <agent/types.hpp>
+#include <agent/core/types.hpp>
 #include <chrono>
 #include <sstream>
 #include <iomanip>

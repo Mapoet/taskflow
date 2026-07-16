@@ -8,8 +8,8 @@
 #ifndef __AGENT_A2A_PEER_REGISTRY_H__
 #define __AGENT_A2A_PEER_REGISTRY_H__
 
-#include <agent/agent_client.hpp>
-#include <agent/types.hpp>
+#include <agent/agent_client/agent_client.hpp>
+#include <agent/core/types.hpp>
 
 #include <cstdint>
 #include <memory>

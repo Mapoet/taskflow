@@ -9,8 +9,8 @@
 #define __AGENT_NODE_UI_SINK_NODE_H__
 
 #include <workflow/nodeflow.hpp>
-#include "../agent/types.hpp"
-#include "../agent/ui_manager.hpp"
+#include <agent/core/types.hpp>
+#include <agent/ui/ui_manager.hpp>
 #include <string>
 #include <memory>
 

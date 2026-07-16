@@ -4,8 +4,8 @@
  */
 
 #include <agent/internal/agent_thread_state.hpp>
-#include <agent/memory_compaction.hpp>
-#include <agent/user_input_preprocessor.hpp>
+#include <agent/agent/memory_compaction.hpp>
+#include <agent/agent/user_input_preprocessor.hpp>
 
 #include <cassert>
 #include <cstdlib>

@@ -3,7 +3,7 @@
  * @brief CLI output handler (WP1.6)
  */
 
-#include <agent/ui_manager.hpp>
+#include <agent/ui/ui_manager.hpp>
 
 #include <iostream>
 #include <sstream>

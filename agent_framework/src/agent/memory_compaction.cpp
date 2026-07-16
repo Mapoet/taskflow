@@ -3,12 +3,12 @@
  * @brief WP2.9 memory compaction / auto trigger
  */
 
-#include <agent/context_budget.hpp>
+#include <agent/context_budget/context_budget.hpp>
 #include <agent/internal/agent_thread_state.hpp>
-#include <agent/llm_client.hpp>
-#include <agent/memory_compaction.hpp>
+#include <agent/llm_client/llm_client.hpp>
+#include <agent/agent/memory_compaction.hpp>
 
-#include <agent/types.hpp>
+#include <agent/core/types.hpp>
 
 #include <cctype>
 #include <chrono>

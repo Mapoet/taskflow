@@ -3,10 +3,10 @@
  * @brief WP2.8 Verifier runner smoke (mock LLM, no network)
  */
 #include <agent/internal/agent_thread_state.hpp>
-#include <agent/llm_client.hpp>
-#include <agent/prompt_renderer.hpp>
-#include <agent/types.hpp>
-#include <agent/verifier_runner.hpp>
+#include <agent/llm_client/llm_client.hpp>
+#include <agent/prompt_renderer/prompt_renderer.hpp>
+#include <agent/core/types.hpp>
+#include <agent/agent/verifier_runner.hpp>
 
 #include <cassert>
 #include <cstdlib>

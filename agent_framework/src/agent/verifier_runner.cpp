@@ -4,9 +4,9 @@
  */
 
 #include <agent/internal/agent_thread_state.hpp>
-#include <agent/verifier_runner.hpp>
+#include <agent/agent/verifier_runner.hpp>
 
-#include <agent/prompt_renderer.hpp>
+#include <agent/prompt_renderer/prompt_renderer.hpp>
 
 #include <cctype>
 #include <cstdlib>

@@ -3,7 +3,7 @@
  * @brief ToolSideEffect string parsing
  */
 
-#include "agent/types.hpp"
+#include <agent/core/types.hpp>
 
 #include <algorithm>
 #include <cctype>

@@ -9,7 +9,7 @@
 #define __AGENT_A2A_ORCHESTRATION_H__
 
 #include <agent/a2a/peer_registry.hpp>
-#include <agent/types.hpp>
+#include <agent/core/types.hpp>
 
 #include <condition_variable>
 #include <functional>

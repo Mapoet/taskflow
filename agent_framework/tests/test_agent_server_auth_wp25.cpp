@@ -2,8 +2,8 @@
  * @file test_agent_server_auth_wp25.cpp
  * @brief AgentServer builtin AuthGate: JSON-RPC 401 + WWW-Authenticate; SSE 401 (WP2.5)
  */
-#include <agent/agent_server.hpp>
-#include <agent/types.hpp>
+#include <agent/agent_server/agent_server.hpp>
+#include <agent/core/types.hpp>
 #include "support/test_execution_profile.hpp"
 
 #include <chrono>

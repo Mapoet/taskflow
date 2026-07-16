@@ -6,7 +6,7 @@
  *      `test_tool_call_hooks --h5`：子测试进程，allowlist 仅含占位名，验证 tool_not_allowed 不调 hook
  */
 
-#include <agent/toolbus.hpp>
+#include <agent/toolbus/toolbus.hpp>
 
 #include <atomic>
 #include <cassert>

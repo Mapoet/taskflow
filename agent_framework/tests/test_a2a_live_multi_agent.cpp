@@ -3,8 +3,8 @@
  * @brief Tier D: two base URLs, worker → reviewer handoff (agent_server_demo roles)
  */
 #include <agent/a2a/peer_registry.hpp>
-#include <agent/agent_client.hpp>
-#include <agent/types.hpp>
+#include <agent/agent_client/agent_client.hpp>
+#include <agent/core/types.hpp>
 
 #include <chrono>
 #include <cstdlib>

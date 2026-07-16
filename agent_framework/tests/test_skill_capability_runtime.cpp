@@ -1,4 +1,4 @@
-#include <agent/skill_capability_runtime.hpp>
+#include <agent/skills/skill_capability_runtime.hpp>
 
 #include <algorithm>
 #include <cassert>

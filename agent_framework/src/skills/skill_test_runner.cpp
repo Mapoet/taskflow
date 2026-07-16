@@ -1,12 +1,12 @@
-#include <agent/skill_test_runner.hpp>
+#include <agent/skills/skill_test_runner.hpp>
 
-#include <agent/skill_capability_runtime.hpp>
-#include <agent/skill_lifecycle.hpp>
-#include <agent/skill_runtime.hpp>
-#include <agent/skill_script_tool.hpp>
-#include <agent/skill_services.hpp>
-#include <agent/skill_workflow.hpp>
-#include <agent/toolbus.hpp>
+#include <agent/skills/skill_capability_runtime.hpp>
+#include <agent/skills/skill_lifecycle.hpp>
+#include <agent/skills/skill_runtime.hpp>
+#include <agent/skills/skill_script_tool.hpp>
+#include <agent/skills/skill_services.hpp>
+#include <agent/skills/skill_workflow.hpp>
+#include <agent/toolbus/toolbus.hpp>
 
 #include <algorithm>
 #include <atomic>

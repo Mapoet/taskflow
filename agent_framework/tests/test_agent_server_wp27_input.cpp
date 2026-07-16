@@ -2,12 +2,12 @@
  * @file test_agent_server_wp27_input.cpp
  * @brief WP2.7：JSON-RPC SendMessage 严格模式下 /cmd 拒绝 → -32602 + violations
  */
-#include <agent/agent_server.hpp>
+#include <agent/agent_server/agent_server.hpp>
 #include <agent/a2a/wire_mapping.hpp>
-#include <agent/execution_context.hpp>
-#include <agent/task_state_machine.hpp>
-#include <agent/types.hpp>
-#include <agent/user_input_preprocessor.hpp>
+#include <agent/agent/execution_context.hpp>
+#include <agent/agent/task_state_machine.hpp>
+#include <agent/core/types.hpp>
+#include <agent/agent/user_input_preprocessor.hpp>
 #include <workflow/nodeflow.hpp>
 #include "support/test_execution_profile.hpp"
 

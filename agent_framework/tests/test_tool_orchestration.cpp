@@ -3,8 +3,8 @@
  * @brief WP2.1b tool orchestration unit tests (O-1 .. O-6)
  */
 
-#include <agent/toolbus.hpp>
-#include <agent/types.hpp>
+#include <agent/toolbus/toolbus.hpp>
+#include <agent/core/types.hpp>
 
 #include <atomic>
 #include <chrono>

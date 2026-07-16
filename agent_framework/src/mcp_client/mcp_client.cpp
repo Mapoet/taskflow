@@ -3,8 +3,8 @@
  * @brief MCPClient、WebSocket 占位
  */
 
-#include "agent/mcp_client.hpp"
-#include "agent/mcp_protocol.hpp"
+#include <agent/mcp_client/mcp_client.hpp>
+#include <agent/mcp_client/mcp_protocol.hpp>
 
 #include <future>
 #include <stdexcept>

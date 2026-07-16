@@ -3,7 +3,7 @@
  * @brief Memory store implementation
  */
 
-#include "agent/memory.hpp"
+#include <agent/memory/memory.hpp>
 
 namespace agent_framework {
 

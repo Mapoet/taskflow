@@ -3,8 +3,8 @@
  * @brief Policy-bound Script/CLI execution in a fail-closed Linux sandbox.
  */
 
-#include <agent/skill_script_tool.hpp>
-#include <agent/skill_runtime.hpp>
+#include <agent/skills/skill_script_tool.hpp>
+#include <agent/skills/skill_runtime.hpp>
 
 #include <algorithm>
 #include <chrono>

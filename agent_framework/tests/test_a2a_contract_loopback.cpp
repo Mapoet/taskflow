@@ -2,9 +2,9 @@
  * @file test_a2a_contract_loopback.cpp
  * @brief WP2.6: fixture replay loopback — mock JSON-RPC returns golden response; optional Bearer (L-2)
  */
-#include <agent/agent_client.hpp>
+#include <agent/agent_client/agent_client.hpp>
 #include <agent/a2a/client_config.hpp>
-#include <agent/types.hpp>
+#include <agent/core/types.hpp>
 
 #include <chrono>
 #include <cstring>

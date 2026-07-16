@@ -2,7 +2,7 @@
  * @file task_state_machine.cpp
  * @brief TaskControl deadline + AgentTask state machine (WP2.3)
  */
-#include "agent/task_state_machine.hpp"
+#include <agent/agent/task_state_machine.hpp>
 
 #include <sstream>
 

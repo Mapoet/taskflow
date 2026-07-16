@@ -2,10 +2,10 @@
  * @file test_a2a_live_smoke.cpp
  * @brief Tier C: AGENT_A2A_LIVE_TEST + AGENT_A2A_LIVE_BASE_URL (http origin); negative JSON-RPC codes
  */
-#include <agent/agent_client.hpp>
+#include <agent/agent_client/agent_client.hpp>
 #include <agent/a2a/client_config.hpp>
 #include <agent/a2a/jsonrpc.hpp>
-#include <agent/types.hpp>
+#include <agent/core/types.hpp>
 
 #include <chrono>
 #include <cstdlib>

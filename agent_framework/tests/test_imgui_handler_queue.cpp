@@ -3,8 +3,8 @@
  * @brief WP2.U U-2：ImGuiHandler 入队 + drain（无 GLFW）
  */
 
-#include <agent/thread_safe_queue.hpp>
-#include <agent/ui_manager.hpp>
+#include <agent/ui/thread_safe_queue.hpp>
+#include <agent/ui/ui_manager.hpp>
 
 #include <cassert>
 #include <memory>

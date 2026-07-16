@@ -3,7 +3,7 @@
  * @brief Faiss vector database adapter
  */
 
-#include "agent/vectorstore.hpp"
+#include <agent/vectorstore/vectorstore.hpp>
 
 namespace agent_framework {
 

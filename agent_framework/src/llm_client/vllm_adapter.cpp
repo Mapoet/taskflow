@@ -3,7 +3,7 @@
  * @brief vLLM 适配器占位（WP1.1 未实现）
  */
 
-#include "agent/llm_client.hpp"
+#include <agent/llm_client/llm_client.hpp>
 
 #include <future>
 #include <stdexcept>

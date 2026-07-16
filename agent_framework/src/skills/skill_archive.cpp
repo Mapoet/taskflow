@@ -1,6 +1,6 @@
-#include "agent/skill_archive.hpp"
-#include "agent/skill_lifecycle.hpp"
-#include "agent/skill_supply_chain.hpp"
+#include <agent/skills/skill_archive.hpp>
+#include <agent/skills/skill_lifecycle.hpp>
+#include <agent/skills/skill_supply_chain.hpp>
 
 #include <algorithm>
 #include <array>

@@ -3,9 +3,9 @@
  * @brief MCPProxyTool、MCPTool、APITool 实现
  */
 
-#include "agent/toolbus.hpp"
+#include <agent/toolbus/toolbus.hpp>
 
-#include "agent/schema_validate.hpp"
+#include <agent/toolbus/schema_validate.hpp>
 
 #include <future>
 #include <utility>

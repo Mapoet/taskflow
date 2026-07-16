@@ -5,10 +5,10 @@
 #include <agent/a2a/orchestration.hpp>
 #include <agent/a2a/outbound_task_supervisor.hpp>
 #include <agent/a2a/peer_registry.hpp>
-#include <agent/agent_server.hpp>
-#include <agent/agent_client.hpp>
-#include <agent/toolbus.hpp>
-#include <agent/types.hpp>
+#include <agent/agent_server/agent_server.hpp>
+#include <agent/agent_client/agent_client.hpp>
+#include <agent/toolbus/toolbus.hpp>
+#include <agent/core/types.hpp>
 #include "support/test_execution_profile.hpp"
 
 #include <chrono>

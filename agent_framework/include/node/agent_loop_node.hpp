@@ -9,12 +9,12 @@
 #define __AGENT_NODE_AGENT_LOOP_NODE_H__
 
 #include <workflow/nodeflow.hpp>
-#include "../agent/types.hpp"
-#include "../agent/llm_client.hpp"
-#include "../agent/toolbus.hpp"
-#include "../agent/skill_runtime.hpp"
-#include "../agent/memory.hpp"
-#include "../agent/vectorstore.hpp"
+#include <agent/core/types.hpp>
+#include <agent/llm_client/llm_client.hpp>
+#include <agent/toolbus/toolbus.hpp>
+#include <agent/skills/skill_runtime.hpp>
+#include <agent/memory/memory.hpp>
+#include <agent/vectorstore/vectorstore.hpp>
 #include <functional>
 #include <string>
 #include <memory>

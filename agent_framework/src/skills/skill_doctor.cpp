@@ -1,7 +1,7 @@
-#include <agent/skill_doctor.hpp>
+#include <agent/skills/skill_doctor.hpp>
 
-#include <agent/skill_capability_runtime.hpp>
-#include <agent/skill_lifecycle.hpp>
+#include <agent/skills/skill_capability_runtime.hpp>
+#include <agent/skills/skill_lifecycle.hpp>
 
 #include <algorithm>
 #include <fstream>

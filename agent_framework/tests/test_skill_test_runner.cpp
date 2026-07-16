@@ -1,4 +1,4 @@
-#include <agent/skill_test_runner.hpp>
+#include <agent/skills/skill_test_runner.hpp>
 
 #include <cassert>
 #include <atomic>

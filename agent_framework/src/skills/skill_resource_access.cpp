@@ -1,8 +1,8 @@
-#include <agent/skill_resource_access.hpp>
+#include <agent/skills/skill_resource_access.hpp>
 
-#include <agent/skill_lifecycle.hpp>
-#include <agent/skill_resource_cache.hpp>
-#include <agent/task_state_machine.hpp>
+#include <agent/skills/skill_lifecycle.hpp>
+#include <agent/skills/skill_resource_cache.hpp>
+#include <agent/agent/task_state_machine.hpp>
 
 #include <algorithm>
 #include <cctype>

@@ -1,5 +1,5 @@
-#include <agent/skill_command.hpp>
-#include <agent/skill_lifecycle.hpp>
+#include <agent/skills/skill_command.hpp>
+#include <agent/skills/skill_lifecycle.hpp>
 
 #include <cassert>
 #include <filesystem>

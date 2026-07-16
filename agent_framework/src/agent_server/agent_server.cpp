@@ -5,21 +5,21 @@
  * @version 0.2
  * @date 2026-04-05
  */
-#include <agent/agent_server.hpp>
+#include <agent/agent_server/agent_server.hpp>
 #include <agent/a2a/auth_gate.hpp>
 #include <agent/a2a/dispatch_table.hpp>
 #include <agent/a2a/jsonrpc.hpp>
 #include <agent/a2a/sse_framing.hpp>
 #include <agent/a2a/wire_card.hpp>
 #include <agent/a2a/wire_mapping.hpp>
-#include <agent/context_budget.hpp>
+#include <agent/context_budget/context_budget.hpp>
 #include <agent/internal/sse_server_channel.hpp>
 #include <agent/internal/task_dispatch_queue.hpp>
-#include <agent/task_state_machine.hpp>
-#include <agent/toolbus.hpp>
-#include <agent/types.hpp>
-#include <agent/execution_context.hpp>
-#include <agent/user_input_preprocessor.hpp>
+#include <agent/agent/task_state_machine.hpp>
+#include <agent/toolbus/toolbus.hpp>
+#include <agent/core/types.hpp>
+#include <agent/agent/execution_context.hpp>
+#include <agent/agent/user_input_preprocessor.hpp>
 #include <workflow/nodeflow.hpp>
 
 #include <taskflow/taskflow.hpp>

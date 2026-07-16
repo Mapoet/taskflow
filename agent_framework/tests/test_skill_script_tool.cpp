@@ -5,10 +5,10 @@
  * CTest 设置 `AGENT_SKILL_SCRIPT_ALLOWLIST=/bin/sh`（见 CMakeLists）。
  */
 
-#include <agent/skill_registry.hpp>
-#include <agent/skill_script_tool.hpp>
-#include <agent/skill_services.hpp>
-#include <agent/toolbus.hpp>
+#include <agent/skills/skill_registry.hpp>
+#include <agent/skills/skill_script_tool.hpp>
+#include <agent/skills/skill_services.hpp>
+#include <agent/toolbus/toolbus.hpp>
 
 #include <cassert>
 #include <atomic>

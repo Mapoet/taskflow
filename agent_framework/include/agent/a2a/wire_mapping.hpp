@@ -9,7 +9,7 @@
 #define __AGENT_A2A_WIRE_MAPPING_H__
 
 #include <agent/a2a/sse_framing.hpp>
-#include <agent/types.hpp>
+#include <agent/core/types.hpp>
 
 #include <optional>
 #include <string>

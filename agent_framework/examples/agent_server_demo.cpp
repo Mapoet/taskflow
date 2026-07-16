@@ -2,12 +2,12 @@
  * @file agent_server_demo.cpp
  * @brief Minimal AgentServer binary for Tier C/D live tests (WP2.a2a-test)
  */
-#include <agent/agent_server.hpp>
+#include <agent/agent_server/agent_server.hpp>
 #include <agent/a2a/auth_gate.hpp>
-#include <agent/types.hpp>
-#include <agent/llm_client.hpp>
-#include <agent/prompt_renderer.hpp>
-#include <agent/toolbus.hpp>
+#include <agent/core/types.hpp>
+#include <agent/llm_client/llm_client.hpp>
+#include <agent/prompt_renderer/prompt_renderer.hpp>
+#include <agent/toolbus/toolbus.hpp>
 
 #include <chrono>
 #include <cstdlib>

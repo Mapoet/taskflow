@@ -8,18 +8,19 @@
  */
 
 #include "CLI11.hpp"
+#include "common/agent_example_bootstrap.hpp"
 
-#include <agent/execution_context.hpp>
-#include <agent/graph_executor.hpp>
+#include <agent/agent/execution_context.hpp>
+#include <agent/graph_executor/graph_executor.hpp>
 #include <agent/internal/agent_thread_state.hpp>
-#include <agent/llm_client.hpp>
-#include <agent/prompt_renderer.hpp>
-#include <agent/skill_services.hpp>
-#include <agent/thread_safe_queue.hpp>
-#include <agent/toolbus.hpp>
-#include <agent/types.hpp>
-#include <agent/ui_manager.hpp>
-#include <agent/user_input_preprocessor.hpp>
+#include <agent/llm_client/llm_client.hpp>
+#include <agent/prompt_renderer/prompt_renderer.hpp>
+#include <agent/skills/skill_services.hpp>
+#include <agent/ui/thread_safe_queue.hpp>
+#include <agent/toolbus/toolbus.hpp>
+#include <agent/core/types.hpp>
+#include <agent/ui/ui_manager.hpp>
+#include <agent/agent/user_input_preprocessor.hpp>
 
 #include <imgui.h>
 #include <imgui_impl_glfw.h>
@@ -157,73 +158,35 @@ void register_demo_tools(ToolBus& bus) {
 }
 
 bool env_truthy(const char* key) {
-    const char* v = std::getenv(key);
-    if (!v || !*v) {
-        return false;
-    }
-    return v[0] == '1' || v[0] == 'y' || v[0] == 'Y' || v[0] == 't' || v[0] == 'T';
+    return example::env_truthy(key);
 }
 
 std::string resolve_cursor_mcp_config_path(const std::string& cli_path) {
-    if (!cli_path.empty()) {
-        return cli_path;
-    }
-    const char* test_env = std::getenv("AGENT_TEST_CURSOR_MCP_JSON");
-    if (test_env && *test_env) {
-        return std::string(test_env);
-    }
-    return "";
+    return example::cursor_mcp_config_path(cli_path);
 }
 
 void import_cursor_mcp_tools(ToolBus& bus, const std::string& config_path_arg, bool dbg,
                             std::size_t* out_mcp_services) {
-    *out_mcp_services = 0;
-    const std::string path_for_display = config_path_arg.empty()
-                                              ? std::string("<ToolBus default: AGENT_MCP_CONFIG_PATH or ~/.cursor/mcp.json>")
-                                              : config_path_arg;
-    ToolBus::CursorMcpImportResult r = bus.register_mcp_from_cursor_config(config_path_arg, true);
-    *out_mcp_services = r.registered_services.size();
-    auto tools = bus.export_as_llm_tools();
-
-    if (dbg) {
-        std::clog << "cursor_mcp config_path=\"" << path_for_display << "\"\n";
-        std::clog << "  registered_services=" << r.registered_services.size()
-                  << " failures=" << r.failures.size() << "\n";
-        for (const auto& name : r.registered_services) {
-            std::clog << "    ok: " << name << '\n';
-        }
-        for (const auto& f : r.failures) {
-            std::clog << "    fail: " << f.service_name << " - " << f.reason << '\n';
-        }
-        std::clog << "toolbus export_as_llm_tools count=" << tools.size() << '\n';
-    } else if (!r.failures.empty() && *out_mcp_services == 0) {
-        std::clog << "[imgui_agent_demo] cursor_mcp: no services registered (" << r.failures.size()
-                  << " failure(s); use -v or AGENT_TEST_AGENT_LOOP_DEBUG=1 for details)\n";
+    example::BootstrapOptions options;
+    options.cursor_mcp_config = config_path_arg;
+    options.use_cursor_skill_roots = false;
+    options.import_cursor_mcp = true;
+    options.verbose = dbg;
+    const auto boot = example::bootstrap_agent_services(bus, options);
+    *out_mcp_services = boot.mcp_services;
+    if(dbg) {
+        for(const auto& diagnostic : boot.diagnostics) std::clog << "[bootstrap] " << diagnostic << '\n';
     }
 }
 
 std::shared_ptr<SkillServices> resolve_skills_services(bool dbg) {
-    const char* override_dir = std::getenv("AGENT_SKILLS_DIR");
-    std::shared_ptr<SkillServices> svc;
-    if (override_dir && *override_dir) {
-        svc = SkillServices::from_env();
-        if (dbg) {
-            std::clog << "[imgui_agent_demo] skills: AGENT_SKILLS_DIR=\"" << override_dir << "\"\n";
-        }
-    } else {
-        svc = SkillServices::from_cursor_default_skill_roots();
-        if (dbg && svc && svc->registry) {
-            std::clog << "[imgui_agent_demo] skills: Cursor roots (merge scan):\n";
-            for (const auto& r : svc->registry->roots()) {
-                std::clog << "  - " << r.string() << '\n';
-            }
-            std::clog << "  indexed_skills=" << svc->registry->entries().size() << '\n';
-        } else if (dbg && !svc) {
-            std::clog << "[imgui_agent_demo] skills: no AGENT_SKILLS_DIR and "
- "~/.cursor/skills / ~/.cursor/skills-cursor missing — skills disabled\n";
-        }
-    }
-    return svc;
+    example::BootstrapOptions options;
+    options.use_cursor_skill_roots = true;
+    options.verbose = dbg;
+    auto services = example::discover_skill_services(options);
+    if(dbg && services && services->registry)
+        std::clog << "[bootstrap] indexed_skills=" << services->registry->entries().size() << '\n';
+    return services;
 }
 
 void set_env_if_absent(const char* key, const char* val) {
@@ -280,6 +243,9 @@ int run_graph_ui(tf::Executor& executor,
         if (!g_shutdown.load()) {
             ui.stream_token("default", tok);
         }
+    };
+    req.options.graph_options.skill_event_sink = [](const SkillEvent& event) {
+        std::clog << example::skill_event_json(event).dump() << '\n';
     };
     try {
         WorkflowResult wr = gx.run_react_cli_sync(executor, req);

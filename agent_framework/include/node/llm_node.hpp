@@ -9,8 +9,8 @@
 #define __AGENT_NODE_LLM_NODE_H__
 
 #include <workflow/nodeflow.hpp>
-#include "../agent/types.hpp"
-#include "../agent/llm_client.hpp"
+#include <agent/core/types.hpp>
+#include <agent/llm_client/llm_client.hpp>
 #include <string>
 #include <memory>
 #include <functional>

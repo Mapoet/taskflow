@@ -3,7 +3,7 @@
  * @brief 工具格式化器实现
  */
 
-#include "agent/prompt_renderer.hpp"
+#include <agent/prompt_renderer/prompt_renderer.hpp>
 
 namespace agent_framework {
 

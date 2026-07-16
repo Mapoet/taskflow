@@ -4,7 +4,7 @@
  */
 
 #include <agent/internal/agent_thread_state.hpp>
-#include <agent/working_memory_metrics.hpp>
+#include <agent/agent/working_memory_metrics.hpp>
 
 #include <cassert>
 #include <cstdlib>

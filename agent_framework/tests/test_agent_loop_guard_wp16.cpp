@@ -3,11 +3,11 @@
  * @brief WP1.6 guard smoke: repeated tool call within one iteration triggers graceful final.
  */
 
-#include <agent/graph_executor.hpp>
-#include <agent/llm_client.hpp>
-#include <agent/prompt_renderer.hpp>
-#include <agent/toolbus.hpp>
-#include <agent/types.hpp>
+#include <agent/graph_executor/graph_executor.hpp>
+#include <agent/llm_client/llm_client.hpp>
+#include <agent/prompt_renderer/prompt_renderer.hpp>
+#include <agent/toolbus/toolbus.hpp>
+#include <agent/core/types.hpp>
 #include <agent/internal/agent_thread_state.hpp>
 
 #include <cassert>

@@ -3,7 +3,7 @@
  * @brief JSON-RPC POST client helper (WP2.4)
  */
 #include <agent/a2a/jsonrpc_client.hpp>
-#include <agent/httplib_http_client.hpp>
+#include <agent/agent_client/httplib_http_client.hpp>
 
 namespace agent_framework {
 namespace a2a {

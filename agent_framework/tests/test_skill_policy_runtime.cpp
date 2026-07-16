@@ -1,6 +1,6 @@
-#include <agent/schema_validate.hpp>
-#include <agent/skill_runtime.hpp>
-#include <agent/toolbus.hpp>
+#include <agent/toolbus/schema_validate.hpp>
+#include <agent/skills/skill_runtime.hpp>
+#include <agent/toolbus/toolbus.hpp>
 
 #include <cassert>
 #include <filesystem>

@@ -3,7 +3,7 @@
  * @brief WP2.8 Verifier parse + gate (phase-2-wp8.md)
  */
 
-#include <agent/verifier_types.hpp>
+#include <agent/agent/verifier_types.hpp>
 
 #include <cctype>
 #include <optional>

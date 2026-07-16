@@ -1,0 +1,50 @@
+/**
+ * @file skill_loader.hpp
+ * @brief WP1.8 L2：技能正文加载（去 frontmatter + 字符预算）
+ */
+#ifndef __AGENT_SKILL_LOADER_H__
+#define __AGENT_SKILL_LOADER_H__
+
+#include <agent/skills/skill_registry.hpp>
+
+#include <cstddef>
+#include <cstdint>
+#include <filesystem>
+#include <optional>
+#include <string>
+#include <mutex>
+#include <unordered_map>
+
+namespace agent_framework {
+
+class SkillLoader {
+public:
+    explicit SkillLoader(const SkillRegistry& registry);
+
+    /**
+     * @brief 读取文件、去掉首块 frontmatter，返回正文；按 `max_chars` 截断 UTF-8 安全按字节截断即可。
+     */
+    std::optional<std::string> load_instructions(const std::string& skill_id,
+                                                   std::size_t max_chars) const;
+
+    std::filesystem::path skill_directory(const std::string& skill_id) const;
+    std::optional<std::string> load_resource(const std::string& skill_id,
+                                             const std::string& relative_path,
+                                             SkillResourceKind kind,
+                                             std::size_t max_bytes,
+                                             std::string* error_out = nullptr) const;
+    /** Load from a task-pinned entry/manifest without consulting the mutable Registry. */
+    std::optional<std::string> load_resource_snapshot(
+        const SkillIndexEntry& entry, std::shared_ptr<const SkillManifest> manifest,
+        const std::string& relative_path, SkillResourceKind kind, std::size_t max_bytes,
+        std::string* error_out = nullptr) const;
+
+private:
+    const SkillRegistry& registry_;
+    mutable std::mutex cache_mutex_;
+    mutable std::unordered_map<std::string, std::pair<std::string, std::string>> cache_;
+};
+
+} // namespace agent_framework
+
+#endif // __AGENT_SKILL_LOADER_H__

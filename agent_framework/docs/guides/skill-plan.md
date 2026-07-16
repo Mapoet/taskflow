@@ -598,6 +598,8 @@ install signed package
 - `skill-platform-stress`
 - `skill-resource-leak`
 - `skill-registry-scale`
+- `stage10-examples`
+- `stage10-header-layout`
 
 每项权限和资源控制至少有一个拒绝测试；每项生命周期操作至少有一个并发或失败恢复测试。
 P0/P1 工作不得仅增加文档或 happy-path 测试。
@@ -615,12 +617,15 @@ P0/P1 工作不得仅增加文档或 happy-path 测试。
 - [x] 本地资源的 digest、来源、license、cache 状态和模型 admission 可审计。
 - [x] 签名、可信发布者、SBOM 和远程 Registry 策略可审计。
 - [x] 1000 次循环/取消/重启压力测试无资源泄漏或重复副作用。
+- [x] Stage 1–9 管理面和运行面已有离线 reference app 与 examples smoke tests。
+- [x] 公共头文件按实现模块分类，旧扁平 include 路径保留一周期兼容转发。
 
 状态门槛：
 
 - Stage 1-4 完成前：`core-supported / resource-incomplete`。
 - Stage 5-7 完成后：`runtime-complete / lifecycle-incomplete`。
-- Stage 8 和全部门禁完成后：`platform-complete`。
+- Stage 8–9 和全部平台门禁完成后：`platform-complete`。
+- Stage 10 examples/header 收口后：`platform-complete / integration-surfaced`。
 
 ## 8. 明确边界
 

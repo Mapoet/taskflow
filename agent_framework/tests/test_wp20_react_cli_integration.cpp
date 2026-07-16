@@ -3,13 +3,13 @@
  * @brief WP2.0 GraphExecutor::run_react_cli_sync 双轮集成（Fake LLM，无网络）
  */
 
-#include <agent/graph_executor.hpp>
+#include <agent/graph_executor/graph_executor.hpp>
 #include <agent/internal/agent_thread_state.hpp>
-#include <agent/llm_client.hpp>
-#include <agent/prompt_renderer.hpp>
-#include <agent/toolbus.hpp>
-#include <agent/task_state_machine.hpp>
-#include <agent/types.hpp>
+#include <agent/llm_client/llm_client.hpp>
+#include <agent/prompt_renderer/prompt_renderer.hpp>
+#include <agent/toolbus/toolbus.hpp>
+#include <agent/agent/task_state_machine.hpp>
+#include <agent/core/types.hpp>
 
 #include <cassert>
 #include <cstdlib>

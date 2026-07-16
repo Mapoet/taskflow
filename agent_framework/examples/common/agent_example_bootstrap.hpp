@@ -1,8 +1,8 @@
 #pragma once
 
-#include <agent/skill_runtime.hpp>
-#include <agent/skill_services.hpp>
-#include <agent/toolbus.hpp>
+#include <agent/skills/skill_runtime.hpp>
+#include <agent/skills/skill_services.hpp>
+#include <agent/toolbus/toolbus.hpp>
 
 #include <cstdlib>
 #include <filesystem>

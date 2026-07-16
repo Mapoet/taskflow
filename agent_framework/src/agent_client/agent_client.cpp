@@ -2,13 +2,13 @@
  * @file agent_client.cpp
  * @brief Agent 客户端：A2A JSON-RPC（默认）与 Legacy REST（WP2.4）
  */
-#include <agent/agent_client.hpp>
+#include <agent/agent_client/agent_client.hpp>
 #include <agent/a2a/client_config.hpp>
 #include <agent/a2a/jsonrpc_client.hpp>
 #include <agent/a2a/wire_card.hpp>
 #include <agent/a2a/wire_mapping.hpp>
-#include <agent/httplib_http_client.hpp>
-#include <agent/types.hpp>
+#include <agent/agent_client/httplib_http_client.hpp>
+#include <agent/core/types.hpp>
 
 #include <cctype>
 #include <cstdlib>

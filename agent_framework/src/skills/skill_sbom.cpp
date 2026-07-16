@@ -1,4 +1,4 @@
-#include "agent/skill_sbom.hpp"
+#include <agent/skills/skill_sbom.hpp>
 
 #include <algorithm>
 #include <chrono>

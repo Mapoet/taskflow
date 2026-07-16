@@ -1,5 +1,5 @@
-#include <agent/skill_manifest.hpp>
-#include <agent/skill_resource.hpp>
+#include <agent/skills/skill_manifest.hpp>
+#include <agent/skills/skill_resource.hpp>
 
 #include <cassert>
 #include <filesystem>

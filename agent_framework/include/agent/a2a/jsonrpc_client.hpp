@@ -9,7 +9,7 @@
 #define __AGENT_A2A_JSONRPC_CLIENT_H__
 
 #include <agent/a2a/jsonrpc.hpp>
-#include <agent/types.hpp>
+#include <agent/core/types.hpp>
 
 #include <atomic>
 #include <cstdint>

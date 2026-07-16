@@ -1,4 +1,4 @@
-#include <agent/skill_manifest.hpp>
+#include <agent/skills/skill_manifest.hpp>
 
 #include <algorithm>
 #include <cctype>

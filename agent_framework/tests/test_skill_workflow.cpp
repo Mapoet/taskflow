@@ -1,4 +1,4 @@
-#include <agent/skill_workflow.hpp>
+#include <agent/skills/skill_workflow.hpp>
 
 #include <cassert>
 #include <filesystem>

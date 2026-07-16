@@ -3,8 +3,8 @@
  * @brief 内建 fs_* 工具：根监禁、读写删、grep、replace（无网络）
  */
 
-#include <agent/fs_tools.hpp>
-#include <agent/toolbus.hpp>
+#include <agent/toolbus/fs_tools.hpp>
+#include <agent/toolbus/toolbus.hpp>
 
 #include <cassert>
 #include <cstdlib>

@@ -6,8 +6,8 @@
  * 可在终端暂停，验证后可选 export AGENT_WEB_DDG_COOKIE=... 再按 Enter 重试一次。
  */
 
-#include <agent/web_http.hpp>
-#include <agent/web_search_ddg.hpp>
+#include <agent/toolbus/web_http.hpp>
+#include <agent/toolbus/web_search_ddg.hpp>
 
 #include <algorithm>
 #include <chrono>

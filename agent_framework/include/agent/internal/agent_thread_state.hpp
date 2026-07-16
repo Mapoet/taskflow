@@ -8,9 +8,9 @@
 #ifndef __AGENT_INTERNAL_AGENT_THREAD_STATE_HPP__
 #define __AGENT_INTERNAL_AGENT_THREAD_STATE_HPP__
 
-#include "agent/types.hpp"
-#include "agent/execution_context.hpp"
-#include "agent/user_input_types.hpp"
+#include <agent/core/types.hpp>
+#include <agent/agent/execution_context.hpp>
+#include <agent/agent/user_input_types.hpp>
 
 #include <ctime>
 #include <memory>

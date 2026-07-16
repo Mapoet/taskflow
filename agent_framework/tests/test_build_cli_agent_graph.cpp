@@ -3,11 +3,11 @@
  * @brief build_cli_agent_graph / GraphExecutor::build_agent_workflow 构图契约（无 Live LLM）
  */
 
-#include <agent/graph_executor.hpp>
+#include <agent/graph_executor/graph_executor.hpp>
 #include <agent/internal/agent_thread_state.hpp>
-#include <agent/llm_client.hpp>
-#include <agent/toolbus.hpp>
-#include <agent/types.hpp>
+#include <agent/llm_client/llm_client.hpp>
+#include <agent/toolbus/toolbus.hpp>
+#include <agent/core/types.hpp>
 
 #include <cassert>
 #include <iostream>

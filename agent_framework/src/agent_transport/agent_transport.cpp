@@ -2,9 +2,9 @@
  * @file agent_transport.cpp
  * @brief Agent 传输层实现（HTTP + JSON-RPC 2.0，底层使用 HttplibClient）
  */
-#include <agent/agent_transport.hpp>
+#include <agent/agent_transport/agent_transport.hpp>
 #include <agent/a2a/jsonrpc_client.hpp>
-#include <agent/httplib_http_client.hpp>
+#include <agent/agent_client/httplib_http_client.hpp>
 
 #include <map>
 #include <stdexcept>

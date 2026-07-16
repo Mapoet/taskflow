@@ -3,8 +3,8 @@
  * @brief ModelAdapter 基类默认实现与重试
  */
 
-#include "agent/llm_client.hpp"
-#include "agent/llm_retry.hpp"
+#include <agent/llm_client/llm_client.hpp>
+#include <agent/llm_client/llm_retry.hpp>
 
 #include <chrono>
 #include <cstring>

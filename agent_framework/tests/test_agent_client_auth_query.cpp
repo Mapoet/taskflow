@@ -2,7 +2,7 @@
  * @file test_agent_client_auth_query.cpp
  * @brief AgentClient api_key_query appended only on GET discover (WP2.5 I-4)
  */
-#include <agent/agent_client.hpp>
+#include <agent/agent_client/agent_client.hpp>
 #include <agent/a2a/wire_card.hpp>
 
 #include <httplib.hpp>

@@ -1,6 +1,6 @@
-#include <agent/child_task.hpp>
+#include <agent/agent/child_task.hpp>
 
-#include <agent/agent_client.hpp>
+#include <agent/agent_client/agent_client.hpp>
 
 #include <future>
 #include <algorithm>

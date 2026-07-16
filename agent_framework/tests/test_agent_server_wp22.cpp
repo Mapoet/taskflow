@@ -2,11 +2,11 @@
  * @file test_agent_server_wp22.cpp
  * @brief AgentServer WP2.2：健康检查、JSON-RPC、异步 handler、SSE（S-1–S-4，E-1–E-2）
  */
-#include <agent/agent_server.hpp>
-#include <agent/task_state_machine.hpp>
+#include <agent/agent_server/agent_server.hpp>
+#include <agent/agent/task_state_machine.hpp>
 #include <agent/a2a/sse_framing.hpp>
 #include <agent/a2a/wire_mapping.hpp>
-#include <agent/types.hpp>
+#include <agent/core/types.hpp>
 #include "support/test_execution_profile.hpp"
 
 #include <chrono>

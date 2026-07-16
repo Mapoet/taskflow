@@ -3,10 +3,10 @@
  * @brief SkillRegistry 实现
  */
 
-#include <agent/skill_registry.hpp>
+#include <agent/skills/skill_registry.hpp>
 
 #include <agent/internal/skill_frontmatter_parse.hpp>
-#include <agent/skill_manifest.hpp>
+#include <agent/skills/skill_manifest.hpp>
 
 #include <cstdlib>
 #include <fstream>

@@ -3,7 +3,7 @@
  * @brief MCP stdio 传输（Content-Length 帧）
  */
 
-#include "agent/mcp_client.hpp"
+#include <agent/mcp_client/mcp_client.hpp>
 #include "agent/internal/stdio_framing.hpp"
 
 #include <chrono>

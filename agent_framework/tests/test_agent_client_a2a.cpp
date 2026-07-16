@@ -2,12 +2,12 @@
  * @file test_agent_client_a2a.cpp
  * @brief WP2.4 AgentClient JSON-RPC / Legacy / SSE (C-1–C-4)
  */
-#include <agent/agent_client.hpp>
+#include <agent/agent_client/agent_client.hpp>
 #include <agent/a2a/jsonrpc_client.hpp>
 #include <agent/a2a/sse_framing.hpp>
 #include <agent/a2a/wire_mapping.hpp>
-#include <agent/httplib_http_client.hpp>
-#include <agent/types.hpp>
+#include <agent/agent_client/httplib_http_client.hpp>
+#include <agent/core/types.hpp>
 
 #include <atomic>
 #include <chrono>

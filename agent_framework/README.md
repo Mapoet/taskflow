@@ -164,7 +164,7 @@ git submodule status
 ### 简单 Agent 示例
 
 ```cpp
-#include <agent/types.hpp>
+#include <agent/core/types.hpp>
 #include <workflow/nodeflow.hpp>
 #include <taskflow/taskflow.hpp>
 #include <iostream>

@@ -2,11 +2,11 @@
  * @file test_user_input_preprocessor.cpp
  * @brief WP2.7：UserInputPreprocessor 单测 U-1..U-8
  */
-#include <agent/execution_context.hpp>
-#include <agent/fs_tools.hpp>
-#include <agent/toolbus.hpp>
-#include <agent/types.hpp>
-#include <agent/user_input_preprocessor.hpp>
+#include <agent/agent/execution_context.hpp>
+#include <agent/toolbus/fs_tools.hpp>
+#include <agent/toolbus/toolbus.hpp>
+#include <agent/core/types.hpp>
+#include <agent/agent/user_input_preprocessor.hpp>
 
 #include <cassert>
 #include <cstdlib>

@@ -1,6 +1,6 @@
-#include <agent/skill_runtime.hpp>
+#include <agent/skills/skill_runtime.hpp>
 
-#include <agent/schema_validate.hpp>
+#include <agent/toolbus/schema_validate.hpp>
 
 #include <algorithm>
 #include <stdexcept>

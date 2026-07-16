@@ -7,10 +7,10 @@
  * web_search 遇人机验证时 JSON 含 ddg_challenge.open_in_browser；交互重试：AGENT_WEB_DDG_PAUSE_ON_CHALLENGE=1、AGENT_WEB_DDG_COOKIE。
  */
 
-#include <agent/fs_tools.hpp>
-#include <agent/toolbus.hpp>
-#include <agent/web_search_ddg.hpp>
-#include <agent/web_tools.hpp>
+#include <agent/toolbus/fs_tools.hpp>
+#include <agent/toolbus/toolbus.hpp>
+#include <agent/toolbus/web_search_ddg.hpp>
+#include <agent/toolbus/web_tools.hpp>
 
 #include <cassert>
 #include <cctype>

@@ -4,17 +4,18 @@
  */
 #include "CLI11.hpp"
 #include "cli_multiline_tty.hpp"
+#include "common/agent_example_bootstrap.hpp"
 
 #include <agent/a2a/orchestration.hpp>
 #include <agent/a2a/outbound_task_supervisor.hpp>
 #include <agent/a2a/peer_registry.hpp>
-#include <agent/graph_executor.hpp>
+#include <agent/graph_executor/graph_executor.hpp>
 #include <agent/internal/agent_thread_state.hpp>
-#include <agent/llm_client.hpp>
-#include <agent/prompt_renderer.hpp>
-#include <agent/toolbus.hpp>
-#include <agent/types.hpp>
-#include <agent/ui_manager.hpp>
+#include <agent/llm_client/llm_client.hpp>
+#include <agent/prompt_renderer/prompt_renderer.hpp>
+#include <agent/toolbus/toolbus.hpp>
+#include <agent/core/types.hpp>
+#include <agent/ui/ui_manager.hpp>
 
 #include <atomic>
 #include <cstdlib>
@@ -113,6 +114,9 @@ int run_graph_once(tf::Executor& executor,
         if (!g_shutdown_requested.load()) {
             cli.handle_stream_token(tok);
         }
+    };
+    req.options.graph_options.skill_event_sink = [](const SkillEvent& event) {
+        std::clog << example::skill_event_json(event).dump() << '\n';
     };
     try {
         WorkflowResult wr = gx.run_react_cli_sync(executor, req);
@@ -229,7 +233,9 @@ int main(int argc, char** argv) {
     AgentWorkflowDeps deps;
     deps.llm = llm;
     deps.toolbus = bus;
-    deps.skills = nullptr;
+    example::BootstrapOptions skill_options;
+    skill_options.use_cursor_skill_roots = true;
+    deps.skills = example::discover_skill_services(skill_options);
 
     AgentConfig cfg;
     cfg.name = "cli_a2a_orchestrator_demo";

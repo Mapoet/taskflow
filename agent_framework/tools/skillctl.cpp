@@ -1,9 +1,9 @@
-#include <agent/skill_command.hpp>
-#include <agent/skill_archive.hpp>
-#include <agent/skill_lifecycle.hpp>
-#include <agent/skill_remote_registry.hpp>
-#include <agent/skill_sbom.hpp>
-#include <agent/skill_supply_chain.hpp>
+#include <agent/skills/skill_command.hpp>
+#include <agent/skills/skill_archive.hpp>
+#include <agent/skills/skill_lifecycle.hpp>
+#include <agent/skills/skill_remote_registry.hpp>
+#include <agent/skills/skill_sbom.hpp>
+#include <agent/skills/skill_supply_chain.hpp>
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>

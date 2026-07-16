@@ -3,7 +3,7 @@
  * @brief Agent workflow templates (ReAct, etc.)
  */
 
-#include <agent/graph_executor.hpp>
+#include <agent/graph_executor/graph_executor.hpp>
 
 #include <stdexcept>
 

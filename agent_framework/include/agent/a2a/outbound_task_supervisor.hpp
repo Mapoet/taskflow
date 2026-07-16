@@ -7,7 +7,7 @@
 
 #include <agent/a2a/orchestration.hpp>
 #include <agent/a2a/peer_registry.hpp>
-#include <agent/types.hpp>
+#include <agent/core/types.hpp>
 
 #include <atomic>
 #include <chrono>

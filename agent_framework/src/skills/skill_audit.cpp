@@ -1,4 +1,4 @@
-#include <agent/skill_audit.hpp>
+#include <agent/skills/skill_audit.hpp>
 
 namespace agent_framework {
 

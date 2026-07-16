@@ -6,8 +6,8 @@
  *      `test_toolbus_wp2 --allowlist`（配合 ctest 设置 AGENT_TOOL_ALLOWLIST=add）
  */
 
-#include <agent/schema_validate.hpp>
-#include <agent/toolbus.hpp>
+#include <agent/toolbus/schema_validate.hpp>
+#include <agent/toolbus/toolbus.hpp>
 
 #include <cassert>
 #include <cstdlib>

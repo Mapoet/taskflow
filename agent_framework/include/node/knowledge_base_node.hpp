@@ -9,9 +9,9 @@
 #define __AGENT_NODE_KNOWLEDGE_BASE_NODE_H__
 
 #include <workflow/nodeflow.hpp>
-#include "../agent/types.hpp"
-#include "../agent/vectorstore.hpp"
-#include "../agent/encoder.hpp"
+#include <agent/core/types.hpp>
+#include <agent/vectorstore/vectorstore.hpp>
+#include <agent/encoder/encoder.hpp>
 #include <string>
 #include <memory>
 

@@ -13,9 +13,9 @@
  * 若需静默（如 CI），设 `AGENT_TEST_QUIET=1`。
  */
 
-#include <agent/httplib_http_client.hpp>
-#include <agent/llm_client.hpp>
-#include <agent/llm_retry.hpp>
+#include <agent/agent_client/httplib_http_client.hpp>
+#include <agent/llm_client/llm_client.hpp>
+#include <agent/llm_client/llm_retry.hpp>
 
 #include <cassert>
 #include <cstdlib>

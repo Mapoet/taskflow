@@ -3,13 +3,13 @@
  * @brief WP2.8 I-1：run_react_cli_sync + Verifier 钩子事件（mock MAIN / mock Verifier LLM）
  */
 
-#include <agent/execution_context.hpp>
-#include <agent/graph_executor.hpp>
+#include <agent/agent/execution_context.hpp>
+#include <agent/graph_executor/graph_executor.hpp>
 #include <agent/internal/agent_thread_state.hpp>
-#include <agent/llm_client.hpp>
-#include <agent/prompt_renderer.hpp>
-#include <agent/toolbus.hpp>
-#include <agent/types.hpp>
+#include <agent/llm_client/llm_client.hpp>
+#include <agent/prompt_renderer/prompt_renderer.hpp>
+#include <agent/toolbus/toolbus.hpp>
+#include <agent/core/types.hpp>
 
 #include <cassert>
 #include <cstdlib>

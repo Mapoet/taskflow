@@ -8,7 +8,7 @@
 #ifndef __AGENT_A2A_DISPATCH_TABLE_H__
 #define __AGENT_A2A_DISPATCH_TABLE_H__
 
-#include <agent/types.hpp>
+#include <agent/core/types.hpp>
 
 #include <functional>
 #include <stdexcept>

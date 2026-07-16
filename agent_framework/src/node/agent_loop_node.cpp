@@ -9,12 +9,12 @@
 #include "node/knowledge_base_node.hpp"
 #include "agent/internal/agent_thread_state.hpp"
 #include "agent/internal/loop_io_keys.hpp"
-#include "agent/skill_services.hpp"
-#include "agent/context_budget.hpp"
-#include "agent/task_state_machine.hpp"
-#include "agent/toolbus.hpp"
-#include "agent/user_input_preprocessor.hpp"
-#include "agent/memory_compaction.hpp"
+#include <agent/skills/skill_services.hpp>
+#include <agent/context_budget/context_budget.hpp>
+#include <agent/agent/task_state_machine.hpp>
+#include <agent/toolbus/toolbus.hpp>
+#include <agent/agent/user_input_preprocessor.hpp>
+#include <agent/agent/memory_compaction.hpp>
 #include <agent/a2a/outbound_task_supervisor.hpp>
 
 #include <algorithm>

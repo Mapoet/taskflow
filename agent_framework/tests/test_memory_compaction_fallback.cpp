@@ -3,13 +3,13 @@
  * @brief WP2.9 F-1（summarize 失败回退）, F-2（硬上限后 1c 包装）
  */
 
-#include <agent/context_budget.hpp>
+#include <agent/context_budget/context_budget.hpp>
 #include <agent/internal/agent_thread_state.hpp>
-#include <agent/llm_client.hpp>
-#include <agent/memory_compaction.hpp>
-#include <agent/prompt_renderer.hpp>
-#include <agent/types.hpp>
-#include <agent/working_memory_metrics.hpp>
+#include <agent/llm_client/llm_client.hpp>
+#include <agent/agent/memory_compaction.hpp>
+#include <agent/prompt_renderer/prompt_renderer.hpp>
+#include <agent/core/types.hpp>
+#include <agent/agent/working_memory_metrics.hpp>
 
 #include <cassert>
 #include <cstdlib>

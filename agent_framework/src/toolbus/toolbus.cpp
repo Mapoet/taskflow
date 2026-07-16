@@ -3,10 +3,10 @@
  * @brief ToolBus implementation (WP1.2, WP2.1d hooks)
  */
 
-#include "agent/toolbus.hpp"
+#include <agent/toolbus/toolbus.hpp>
 
-#include "agent/mcp_client.hpp"
-#include "agent/schema_validate.hpp"
+#include <agent/mcp_client/mcp_client.hpp>
+#include <agent/toolbus/schema_validate.hpp>
 
 #include <cctype>
 #include <cstring>

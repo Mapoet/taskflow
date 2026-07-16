@@ -3,7 +3,7 @@
  * @brief MCP HTTP 传输（单 POST JSON-RPC）
  */
 
-#include "agent/mcp_client.hpp"
+#include <agent/mcp_client/mcp_client.hpp>
 #include "agent/internal/http_sse.hpp"
 
 #include <cctype>

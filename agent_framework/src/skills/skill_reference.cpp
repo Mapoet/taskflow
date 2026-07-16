@@ -1,4 +1,4 @@
-#include <agent/skill_reference.hpp>
+#include <agent/skills/skill_reference.hpp>
 
 #include <algorithm>
 #include <atomic>

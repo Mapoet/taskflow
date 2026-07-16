@@ -3,9 +3,9 @@
  * @brief 合并帽与注入帽辅助
  */
 
-#include "agent/context_budget.hpp"
+#include <agent/context_budget/context_budget.hpp>
 
-#include "agent/types.hpp"
+#include <agent/core/types.hpp>
 
 namespace agent_framework {
 

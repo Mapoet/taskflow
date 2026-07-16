@@ -3,9 +3,9 @@
  * @brief WP2.0 merge_react_session_state 单元测试（phase-2-wp0.md §7.1）
  */
 
-#include <agent/graph_executor.hpp>
+#include <agent/graph_executor/graph_executor.hpp>
 #include <agent/internal/agent_thread_state.hpp>
-#include <agent/types.hpp>
+#include <agent/core/types.hpp>
 
 #include <cassert>
 #include <iostream>

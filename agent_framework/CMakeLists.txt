@@ -535,80 +535,11 @@ if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/agent/verifier_runner.cpp)
     list(APPEND AGENT_SOURCES src/agent/verifier_runner.cpp)
 endif()
 
-# 头文件
-set(AGENT_HEADERS
-    include/agent/types.hpp
-    include/agent/llm_client.hpp
-    include/agent/prompt_renderer.hpp
-    include/agent/schema_validate.hpp
-    include/agent/context_budget.hpp
-    include/agent/mcp_protocol.hpp
-    include/agent/toolbus.hpp
-    include/agent/mcp_client.hpp
-    include/agent/memory.hpp
-    include/agent/vectorstore.hpp
-    include/agent/encoder.hpp
-    include/agent/graph_executor.hpp
-    include/agent/ui_manager.hpp
-    include/agent/tui/tui_handler.hpp
-    include/agent/thread_safe_queue.hpp
-    include/agent/agent_transport.hpp
-    include/agent/sse_connection.hpp
-    include/agent/agent_client.hpp
-    include/agent/httplib_http_client.hpp
-    include/agent/agent_server.hpp
-    include/agent/a2a/jsonrpc.hpp
-    include/agent/a2a/client_config.hpp
-    include/agent/a2a/jsonrpc_client.hpp
-    include/agent/a2a/types.hpp
-    include/agent/a2a/auth_requirement.hpp
-    include/agent/a2a/auth_gate.hpp
-    include/agent/a2a/wire_card.hpp
-    include/agent/a2a/sse_framing.hpp
-    include/agent/a2a/wire_mapping.hpp
-    include/agent/a2a/dispatch_table.hpp
-    include/agent/a2a/peer_registry.hpp
-    include/agent/a2a/orchestration.hpp
-    include/agent/a2a/a2a_task_monitor.hpp
-    include/agent/a2a/outbound_task_supervisor.hpp
-    include/agent/task_state_machine.hpp
-    include/agent/execution_context.hpp
-    include/agent/user_input_types.hpp
-    include/agent/user_input_preprocessor.hpp
-    include/agent/working_memory_metrics.hpp
-    include/agent/memory_compaction.hpp
-    include/agent/verifier_types.hpp
-    include/agent/verifier_runner.hpp
-    include/node/node_factory.hpp
-    include/node/llm_node.hpp
-    include/node/knowledge_base_node.hpp
-    include/node/tool_call_node.hpp
-    include/node/agent_loop_node.hpp
-    include/node/ui_sink_node.hpp
-    include/node/nodes.hpp
-    include/agent/skill_types.hpp
-    include/agent/skill_permissions.hpp
-    include/agent/skill_audit.hpp
-    include/agent/skill_command.hpp
-    include/agent/skill_doctor.hpp
-    include/agent/skill_test_runner.hpp
-    include/agent/skill_registry.hpp
-    include/agent/skill_loader.hpp
-    include/agent/skill_resource_access.hpp
-    include/agent/skill_resource_cache.hpp
-    include/agent/skill_reference.hpp
-    include/agent/skill_artifact_import.hpp
-    include/agent/skill_model.hpp
-    include/agent/skill_config.hpp
-    include/agent/skill_services.hpp
-    include/agent/skill_capability_runtime.hpp
-    include/agent/skill_script_tool.hpp
-    include/agent/internal/skill_frontmatter_parse.hpp
-    include/agent/internal/task_dispatch_queue.hpp
-    include/agent/internal/sse_server_channel.hpp
-    include/agent/expr_tools.hpp
-    include/agent/draw_tools.hpp
-)
+# Public headers mirror src/ modules. The recursive inventory also includes
+# one-release flat compatibility forwarders and the public node headers.
+file(GLOB_RECURSE AGENT_HEADERS CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/agent/*.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/node/*.hpp")
 
 # 创建库
 add_library(agent_framework STATIC ${AGENT_SOURCES} ${AGENT_HEADERS})
@@ -848,6 +779,16 @@ if(AGENT_BUILD_EXAMPLES)
         string(REPLACE ";" " " _agent_ex_label "${_agent_framework_example_targets}")
         message(STATUS "Agent Framework: examples -> ${_agent_ex_label} (target: agent_framework_examples)")
     endif()
+    if(BUILD_TESTING)
+        foreach(_offline_example IN ITEMS simple_agent multimodal_agent tool_integration workflow_custom)
+            if(TARGET ${_offline_example})
+                add_test(NAME example_${_offline_example}_smoke COMMAND ${_offline_example})
+                set_tests_properties(example_${_offline_example}_smoke PROPERTIES
+                    ENVIRONMENT "AGENT_TEST_OFFLINE=1;AGENT_TOOL_ALLOWLIST="
+                    LABELS "stage10-examples;examples-smoke")
+            endif()
+        endforeach()
+    endif()
 else()
     message(STATUS "Agent Framework: examples disabled (AGENT_BUILD_EXAMPLES=OFF); cli demos not built")
 endif()
@@ -859,14 +800,20 @@ if(AGENT_BUILD_IMGUI)
     include(FetchContent)
     set(AGENT_WPU_3RD "${CMAKE_CURRENT_SOURCE_DIR}/../3rd-party")
 
-    FetchContent_Declare(
-        glfw_wpu
-        GIT_REPOSITORY https://github.com/glfw/glfw.git
-        GIT_TAG 3.4)
-    set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
-    set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-    set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
-    FetchContent_MakeAvailable(glfw_wpu)
+    find_package(glfw3 3.3 QUIET)
+    if(NOT TARGET glfw)
+        FetchContent_Declare(
+            glfw_wpu
+            GIT_REPOSITORY https://github.com/glfw/glfw.git
+            GIT_TAG 3.4)
+        set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
+        set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+        set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+        FetchContent_MakeAvailable(glfw_wpu)
+        message(STATUS "WP2.U: GLFW from FetchContent 3.4")
+    else()
+        message(STATUS "WP2.U: GLFW from system package")
+    endif()
 
     if(EXISTS "${AGENT_WPU_3RD}/imgui/imgui.cpp")
         set(IMGUI_WPU_ROOT "${AGENT_WPU_3RD}/imgui")
@@ -1019,6 +966,13 @@ endif()
 # 测试（WP1.1 LLM 轻量单测，无第三方框架）
 if(BUILD_TESTING)
     enable_testing()
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_public_header_layout.cpp)
+        add_executable(test_public_header_layout tests/test_public_header_layout.cpp)
+        target_link_libraries(test_public_header_layout PRIVATE agent_framework)
+        add_test(NAME public_header_layout COMMAND test_public_header_layout)
+        set_tests_properties(public_header_layout PROPERTIES
+            LABELS "stage10-header-layout;install-contract")
+    endif()
     if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_session_store.cpp)
         add_executable(test_session_store tests/test_session_store.cpp)
         target_link_libraries(test_session_store PRIVATE agent_framework)
@@ -1974,7 +1928,7 @@ install(TARGETS agent_framework skillctl
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
 
-install(DIRECTORY include/agent
+install(DIRECTORY include/
     DESTINATION include
     FILES_MATCHING PATTERN "*.hpp"
 )

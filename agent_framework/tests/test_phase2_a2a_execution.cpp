@@ -1,9 +1,9 @@
-#include <agent/agent_client.hpp>
-#include <agent/agent_server.hpp>
-#include <agent/llm_client.hpp>
-#include <agent/prompt_renderer.hpp>
-#include <agent/toolbus.hpp>
-#include <agent/task_state_machine.hpp>
+#include <agent/agent_client/agent_client.hpp>
+#include <agent/agent_server/agent_server.hpp>
+#include <agent/llm_client/llm_client.hpp>
+#include <agent/prompt_renderer/prompt_renderer.hpp>
+#include <agent/toolbus/toolbus.hpp>
+#include <agent/agent/task_state_machine.hpp>
 
 #include <cassert>
 #include <chrono>

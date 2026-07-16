@@ -8,7 +8,7 @@
 #include <set>
 #include <sstream>
 #include <string_view>
-#include "agent/prompt_renderer.hpp"
+#include <agent/prompt_renderer/prompt_renderer.hpp>
 
 namespace agent_framework {
 

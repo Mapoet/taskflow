@@ -1,4 +1,4 @@
-#include <agent/skill_manifest.hpp>
+#include <agent/skills/skill_manifest.hpp>
 
 #if defined(CPPHTTPLIB_OPENSSL_SUPPORT)
 #include <openssl/evp.h>

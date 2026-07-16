@@ -3,7 +3,7 @@
  * @brief Workflow builder implementation
  */
 
-#include "agent/graph_executor.hpp"
+#include <agent/graph_executor/graph_executor.hpp>
 
 namespace agent_framework {
 

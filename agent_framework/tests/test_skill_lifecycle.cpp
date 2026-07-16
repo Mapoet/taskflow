@@ -1,6 +1,6 @@
-#include <agent/skill_lifecycle.hpp>
-#include <agent/skill_loader.hpp>
-#include <agent/skill_workflow.hpp>
+#include <agent/skills/skill_lifecycle.hpp>
+#include <agent/skills/skill_loader.hpp>
+#include <agent/skills/skill_workflow.hpp>
 
 #include <atomic>
 #include <cassert>

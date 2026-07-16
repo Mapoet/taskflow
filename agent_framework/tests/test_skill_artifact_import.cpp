@@ -1,7 +1,7 @@
-#include <agent/skill_artifact_import.hpp>
-#include <agent/skill_archive.hpp>
-#include <agent/skill_lifecycle.hpp>
-#include <agent/task_state_machine.hpp>
+#include <agent/skills/skill_artifact_import.hpp>
+#include <agent/skills/skill_archive.hpp>
+#include <agent/skills/skill_lifecycle.hpp>
+#include <agent/agent/task_state_machine.hpp>
 
 #include <cassert>
 #include <filesystem>

@@ -5,7 +5,7 @@
 #ifndef __AGENT_INTERNAL_SKILL_FRONTMATTER_PARSE_HPP__
 #define __AGENT_INTERNAL_SKILL_FRONTMATTER_PARSE_HPP__
 
-#include <agent/skill_types.hpp>
+#include <agent/skills/skill_types.hpp>
 
 #include <optional>
 #include <string>

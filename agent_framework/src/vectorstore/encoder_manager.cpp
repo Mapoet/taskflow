@@ -3,7 +3,7 @@
  * @brief Encoder manager for multi-modal encoding
  */
 
-#include "agent/vectorstore.hpp"
+#include <agent/vectorstore/vectorstore.hpp>
 
 namespace agent_framework {
 

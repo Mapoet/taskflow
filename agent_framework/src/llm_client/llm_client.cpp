@@ -3,7 +3,7 @@
  * @brief LLMClient 注册、invoke、from_env
  */
 
-#include "agent/llm_client.hpp"
+#include <agent/llm_client/llm_client.hpp>
 
 #include <cstdlib>
 #include <stdexcept>

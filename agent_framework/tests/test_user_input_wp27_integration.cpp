@@ -3,14 +3,14 @@
  * @brief WP2.7 I-1：AgentLoop 首轮将 pending 注入拼入 LLMInput.context
  * @brief WP2.9：仅 `/memory compact`（无正文）不调 LLM
  */
-#include <agent/execution_context.hpp>
-#include <agent/graph_executor.hpp>
+#include <agent/agent/execution_context.hpp>
+#include <agent/graph_executor/graph_executor.hpp>
 #include <agent/internal/agent_thread_state.hpp>
-#include <agent/llm_client.hpp>
-#include <agent/prompt_renderer.hpp>
-#include <agent/toolbus.hpp>
-#include <agent/types.hpp>
-#include <agent/user_input_preprocessor.hpp>
+#include <agent/llm_client/llm_client.hpp>
+#include <agent/prompt_renderer/prompt_renderer.hpp>
+#include <agent/toolbus/toolbus.hpp>
+#include <agent/core/types.hpp>
+#include <agent/agent/user_input_preprocessor.hpp>
 
 #include <atomic>
 #include <cassert>

@@ -3,12 +3,12 @@
  * @brief Offline Stage 1-9 Skill platform reference application.
  */
 
-#include <agent/skill_audit.hpp>
-#include <agent/skill_command.hpp>
-#include <agent/skill_config.hpp>
-#include <agent/skill_lifecycle.hpp>
-#include <agent/skill_runtime.hpp>
-#include <agent/skill_sbom.hpp>
+#include <agent/skills/skill_audit.hpp>
+#include <agent/skills/skill_command.hpp>
+#include <agent/skills/skill_config.hpp>
+#include <agent/skills/skill_lifecycle.hpp>
+#include <agent/skills/skill_runtime.hpp>
+#include <agent/skills/skill_sbom.hpp>
 
 #include <algorithm>
 #include <cstdlib>
@@ -16,6 +16,7 @@
 #include <iostream>
 #include <memory>
 #include <string>
+#include <functional>
 #include <vector>
 
 using namespace agent_framework;
@@ -57,7 +58,10 @@ int main(int argc, char** argv) {
     const auto entries = registry->entries();
     if(selected.empty() && !entries.empty()) selected = entries.front().id;
 
-    SkillCommandService commands(registry, root / ".skill-platform-demo-cache");
+    const auto cache_root = fs::temp_directory_path() /
+        ("agent-skill-platform-demo-cache-" +
+         std::to_string(std::hash<std::string>{}(fs::absolute(root).generic_string())));
+    SkillCommandService commands(registry, cache_root);
     nlohmann::json output = {
         {"apiVersion", "agent.taskflow/skill-platform-demo/v1"},
         {"root", fs::weakly_canonical(root).generic_string()},

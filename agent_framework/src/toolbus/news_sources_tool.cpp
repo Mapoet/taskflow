@@ -3,10 +3,10 @@
  * @brief web_configured_source：AGENT_NEWS_SOURCES_JSON + 目录 v1
  */
 
-#include <agent/news_sources_catalog.hpp>
-#include <agent/news_sources_tool.hpp>
-#include <agent/web_http.hpp>
-#include <agent/web_tools.hpp>
+#include <agent/toolbus/news_sources_catalog.hpp>
+#include <agent/toolbus/news_sources_tool.hpp>
+#include <agent/toolbus/web_http.hpp>
+#include <agent/toolbus/web_tools.hpp>
 
 #include <cctype>
 #include <cstdlib>

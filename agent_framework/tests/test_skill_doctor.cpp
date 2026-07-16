@@ -1,4 +1,4 @@
-#include <agent/skill_doctor.hpp>
+#include <agent/skills/skill_doctor.hpp>
 
 #include <cassert>
 #include <filesystem>

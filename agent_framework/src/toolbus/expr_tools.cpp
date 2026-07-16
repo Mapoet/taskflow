@@ -3,8 +3,8 @@
  * @brief ExprTk 内建 expr_eval / expr_validate / expr_batch_eval（AGENT_EXPR_ENABLE）
  */
 
-#include <agent/expr_tools.hpp>
-#include <agent/types.hpp>
+#include <agent/toolbus/expr_tools.hpp>
+#include <agent/core/types.hpp>
 
 #include <algorithm>
 #include <cctype>

@@ -4,7 +4,7 @@
  */
 #include <agent/a2a/wire_mapping.hpp>
 
-#include <agent/types.hpp>
+#include <agent/core/types.hpp>
 
 #include <chrono>
 #include <fstream>

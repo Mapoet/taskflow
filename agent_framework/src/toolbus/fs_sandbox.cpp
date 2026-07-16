@@ -3,7 +3,7 @@
  * @brief AGENT_FS_ROOT 路径监禁与配置解析
  */
 
-#include <agent/fs_sandbox.hpp>
+#include <agent/toolbus/fs_sandbox.hpp>
 
 #include <cstdlib>
 #include <cstring>

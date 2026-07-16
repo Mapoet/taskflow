@@ -10,9 +10,9 @@
  * - 柱图 n 柱：n 次 fill_rectangle
  * - 散点 n 点：n 次 fill_rectangle（方形标记）
  */
-#include <agent/draw_tools.hpp>
-#include <agent/fs_sandbox.hpp>
-#include <agent/types.hpp>
+#include <agent/toolbus/draw_tools.hpp>
+#include <agent/toolbus/fs_sandbox.hpp>
+#include <agent/core/types.hpp>
 
 #include <algorithm>
 #include <cmath>

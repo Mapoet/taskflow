@@ -19,11 +19,11 @@
  * - `AGENT_HTTP_TIMEOUT_SEC` / `AGENT_MCP_REQUEST_TIMEOUT_MS`：可按网络调大（MCP 多轮较慢）。
  */
 
-#include <agent/graph_executor.hpp>
-#include <agent/llm_client.hpp>
-#include <agent/prompt_renderer.hpp>
-#include <agent/toolbus.hpp>
-#include <agent/types.hpp>
+#include <agent/graph_executor/graph_executor.hpp>
+#include <agent/llm_client/llm_client.hpp>
+#include <agent/prompt_renderer/prompt_renderer.hpp>
+#include <agent/toolbus/toolbus.hpp>
+#include <agent/core/types.hpp>
 #include <agent/internal/agent_thread_state.hpp>
 
 #include <cassert>

@@ -1,4 +1,4 @@
-#include "agent/skill_supply_chain.hpp"
+#include <agent/skills/skill_supply_chain.hpp>
 
 #include <nlohmann/json.hpp>
 #include <openssl/evp.h>

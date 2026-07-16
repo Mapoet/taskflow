@@ -3,7 +3,7 @@
  * @brief WP1.8 PromptRenderer：system 区顺序 base → Active skill → Retrieved context
  */
 
-#include <agent/prompt_renderer.hpp>
+#include <agent/prompt_renderer/prompt_renderer.hpp>
 
 #include <cassert>
 #include <iostream>

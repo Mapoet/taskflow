@@ -2,11 +2,11 @@
  * @file test_a2a_loopback_integration.cpp
  * @brief Tier B: Well-Known → discover_agent → JSON-RPC + SSE (AGENT_A2A_INTEGRATION_LOOPBACK=1)
  */
-#include <agent/agent_client.hpp>
-#include <agent/agent_server.hpp>
+#include <agent/agent_client/agent_client.hpp>
+#include <agent/agent_server/agent_server.hpp>
 #include <agent/a2a/client_config.hpp>
-#include <agent/task_state_machine.hpp>
-#include <agent/types.hpp>
+#include <agent/agent/task_state_machine.hpp>
+#include <agent/core/types.hpp>
 #include "support/test_execution_profile.hpp"
 
 #include <atomic>

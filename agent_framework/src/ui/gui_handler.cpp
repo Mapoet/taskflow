@@ -3,7 +3,7 @@
  * @brief ImGui output handler — WP2.U（队列投递 + aux 事件）
  */
 
-#include <agent/ui_manager.hpp>
+#include <agent/ui/ui_manager.hpp>
 
 #include <cstdlib>
 #include <ctime>

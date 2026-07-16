@@ -1,4 +1,4 @@
-#include <agent/skill_policy.hpp>
+#include <agent/skills/skill_policy.hpp>
 
 #include <algorithm>
 #include <cctype>

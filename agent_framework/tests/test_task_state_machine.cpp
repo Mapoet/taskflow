@@ -3,7 +3,7 @@
  * @brief WP2.3 T-1 / T-2 / T-3 state machine + wire round-trip
  */
 #include "agent/a2a/wire_mapping.hpp"
-#include "agent/task_state_machine.hpp"
+#include <agent/agent/task_state_machine.hpp>
 #include <iostream>
 #include <string>
 

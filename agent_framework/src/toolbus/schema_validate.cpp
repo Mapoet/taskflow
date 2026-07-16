@@ -3,7 +3,7 @@
  * @brief JSON Schema 子集实现（WP1.2）
  */
 
-#include "agent/schema_validate.hpp"
+#include <agent/toolbus/schema_validate.hpp>
 
 #include <cmath>
 #include <regex>

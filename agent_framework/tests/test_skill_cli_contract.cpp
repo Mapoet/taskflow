@@ -1,4 +1,4 @@
-#include <agent/skill_command.hpp>
+#include <agent/skills/skill_command.hpp>
 
 #include <cassert>
 #include <filesystem>

@@ -3,7 +3,7 @@
  * @brief 信源目录 JSON v1 解析（与 builtin-web-tools.md 一致）
  */
 
-#include <agent/news_sources_catalog.hpp>
+#include <agent/toolbus/news_sources_catalog.hpp>
 
 #include <cctype>
 #include <fstream>

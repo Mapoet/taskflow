@@ -1,4 +1,4 @@
-#include "agent/skill_remote_registry.hpp"
+#include <agent/skills/skill_remote_registry.hpp>
 
 #include <algorithm>
 #include <atomic>

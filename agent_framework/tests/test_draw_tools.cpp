@@ -2,8 +2,8 @@
  * @file test_draw_tools.cpp
  * @brief 内建 draw_render / draw_export（canvas_ity + stb）；门闩、allowlist 分进程用例。
  */
-#include <agent/draw_tools.hpp>
-#include <agent/toolbus.hpp>
+#include <agent/toolbus/draw_tools.hpp>
+#include <agent/toolbus/toolbus.hpp>
 
 #include <cassert>
 #include <cstdlib>

@@ -6,7 +6,7 @@
 #include <agent/a2a/a2a_task_monitor.hpp>
 #include <agent/a2a/jsonrpc_client.hpp>
 #include <agent/a2a/outbound_task_supervisor.hpp>
-#include <agent/toolbus.hpp>
+#include <agent/toolbus/toolbus.hpp>
 
 #include <chrono>
 #include <memory>

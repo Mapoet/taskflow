@@ -3,7 +3,7 @@
  * @brief UIManager — minimal WP1.6 implementation
  */
 
-#include <agent/ui_manager.hpp>
+#include <agent/ui/ui_manager.hpp>
 
 #include <utility>
 

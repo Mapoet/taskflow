@@ -1,5 +1,5 @@
-#include <agent/skill_package_gate.hpp>
-#include <agent/skill_command.hpp>
+#include <agent/skills/skill_package_gate.hpp>
+#include <agent/skills/skill_command.hpp>
 
 #include <cassert>
 #include <filesystem>

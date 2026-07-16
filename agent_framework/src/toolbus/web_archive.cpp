@@ -3,8 +3,8 @@
  * @brief web_fetch_archive：下载 ZIP 并解压到 AGENT_FS_ROOT 下（Zip Slip 防护；deflate 需 zlib）
  */
 
-#include <agent/fs_sandbox.hpp>
-#include <agent/web_http.hpp>
+#include <agent/toolbus/fs_sandbox.hpp>
+#include <agent/toolbus/web_http.hpp>
 
 #include <algorithm>
 #include <chrono>

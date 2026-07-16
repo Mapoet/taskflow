@@ -3,7 +3,7 @@
  * @brief 解析仓库内 `data/skills-cursor`（Cursor 形态 SKILL.md）golden 回归
  */
 
-#include <agent/skill_registry.hpp>
+#include <agent/skills/skill_registry.hpp>
 
 #include <cassert>
 #include <filesystem>

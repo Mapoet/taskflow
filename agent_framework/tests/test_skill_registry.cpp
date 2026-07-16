@@ -5,8 +5,8 @@
  * 布局：`<root>/<skill-folder>/SKILL.md`
  */
 
-#include <agent/skill_loader.hpp>
-#include <agent/skill_registry.hpp>
+#include <agent/skills/skill_loader.hpp>
+#include <agent/skills/skill_registry.hpp>
 
 #include <cassert>
 #include <cstdlib>

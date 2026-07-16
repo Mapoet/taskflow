@@ -3,7 +3,7 @@
  * @brief WP2.U U-1：UIManager::dispatch_message → handle_aux_event
  */
 
-#include <agent/ui_manager.hpp>
+#include <agent/ui/ui_manager.hpp>
 
 #include <cassert>
 #include <string>

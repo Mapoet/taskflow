@@ -2,10 +2,10 @@
  * @file test_agent_server_wp23.cpp
  * @brief WP2.3 integration: I-1 cancel, I-2 timeout, I-3 PENDING cancel
  */
-#include <agent/agent_server.hpp>
+#include <agent/agent_server/agent_server.hpp>
 #include <agent/a2a/wire_mapping.hpp>
-#include <agent/task_state_machine.hpp>
-#include <agent/types.hpp>
+#include <agent/agent/task_state_machine.hpp>
+#include <agent/core/types.hpp>
 #include "support/test_execution_profile.hpp"
 
 #include <atomic>

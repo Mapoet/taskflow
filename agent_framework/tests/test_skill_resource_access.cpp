@@ -1,7 +1,7 @@
-#include <agent/skill_manifest.hpp>
-#include <agent/skill_resource_access.hpp>
-#include <agent/skill_resource_cache.hpp>
-#include <agent/task_state_machine.hpp>
+#include <agent/skills/skill_manifest.hpp>
+#include <agent/skills/skill_resource_access.hpp>
+#include <agent/skills/skill_resource_cache.hpp>
+#include <agent/agent/task_state_machine.hpp>
 
 #include <algorithm>
 #include <cassert>

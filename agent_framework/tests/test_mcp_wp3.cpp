@@ -3,8 +3,8 @@
  * @brief WP1.3 MCP JSON-RPC、Mock 传输、ToolBus register_mcp_service
  */
 
-#include <agent/mcp_client.hpp>
-#include <agent/toolbus.hpp>
+#include <agent/mcp_client/mcp_client.hpp>
+#include <agent/toolbus/toolbus.hpp>
 
 #include <cassert>
 #include <cstdlib>

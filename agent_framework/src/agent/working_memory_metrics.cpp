@@ -3,9 +3,9 @@
  * @brief WP2.9 working_memory_metrics
  */
 
-#include <agent/context_budget.hpp>
+#include <agent/context_budget/context_budget.hpp>
 #include <agent/internal/agent_thread_state.hpp>
-#include <agent/working_memory_metrics.hpp>
+#include <agent/agent/working_memory_metrics.hpp>
 
 #include <cstdlib>
 #include <string>
