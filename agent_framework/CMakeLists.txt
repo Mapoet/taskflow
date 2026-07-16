@@ -1786,6 +1786,22 @@ if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_skill_cli_contract.cpp)
             LABELS "skill-unit;skill-test-runner;skill-security-negative"
             ENVIRONMENT "AGENT_SKILL_SCRIPT_ALLOWLIST=/bin/sh")
     endif()
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_skill_platform_stress.cpp)
+        add_executable(test_skill_platform_stress tests/test_skill_platform_stress.cpp)
+        target_link_libraries(test_skill_platform_stress PRIVATE agent_framework)
+        add_test(NAME skill_platform_stress COMMAND test_skill_platform_stress)
+        set_tests_properties(skill_platform_stress PROPERTIES
+            LABELS "skill-platform-stress;skill-resource-leak;skill-runtime-integration"
+            TIMEOUT 180 ENVIRONMENT "AGENT_TOOL_ALLOWLIST=")
+    endif()
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_skill_registry_scale.cpp)
+        add_executable(test_skill_registry_scale tests/test_skill_registry_scale.cpp)
+        target_link_libraries(test_skill_registry_scale PRIVATE agent_framework)
+        add_test(NAME skill_registry_scale COMMAND test_skill_registry_scale)
+        set_tests_properties(skill_registry_scale PROPERTIES
+            LABELS "skill-registry-scale;skill-platform-stress" TIMEOUT 300
+            ENVIRONMENT "AGENT_SKILL_ROUTER=")
+    endif()
     if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_skill_cli_lifecycle.cpp)
         add_executable(test_skill_cli_lifecycle tests/test_skill_cli_lifecycle.cpp)
         target_link_libraries(test_skill_cli_lifecycle PRIVATE agent_framework)
