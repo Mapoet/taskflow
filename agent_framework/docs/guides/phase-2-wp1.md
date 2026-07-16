@@ -2,8 +2,8 @@
 
 本文档将 [phase-2-plan.md](./phase-2-plan.md) **§4 WP2.1** 与交付项 **D2** 中属于「**协议与载荷**」的部分落实为可执行任务。**须先完成 [WP2.1a](./phase-2-wp1a.md)**（`a2a-spec-tracker.md` 初稿含 Card、**通用** `jsonrpc` 层、`wire_card`）；本 WP 接续 **任务 method 表、Task/Message/SSE**。**WP2.1 交付的是与 HTTP 监听无关的编解码与映射**；**httplib 路由、listen、executor 投递** 属 **WP2.2**；**任务状态机与取消语义** 属 **WP2.3**；**AgentClient 改为走 Facade** 属 **WP2.4**。本 WP 与 WP2.1a 共同提供 **唯一权威的线协议契约**（以 `a2a-spec-tracker.md` 为根）。
 
-**文档版本**：0.2  
-**日期**：2026-04-05  
+**文档版本**：0.2
+**日期**：2026-04-05
 **上游依据**：[phase-2-plan.md](./phase-2-plan.md) v0.2；[plan-detailed.md](./plan-detailed.md) §3、§5.2；[plan-detailed.v2.md](./plan-detailed.v2.md) §5（Identity 字段进入 SSE 的约定）
 
 ---
@@ -36,7 +36,7 @@
 
 | 资产 | 路径 | 现状 | WP2.1 动作 |
 |------|------|------|------------|
-| A2A 领域类型 | `include/agent/types.hpp` | `AgentCard`、`AgentTask`、`AgentMessage`、`AgentPart` 等 + `to_json`/`from_json` | 核对与 **官方 Card/Task/Message** 字段差异，在 **tracker** 列映射表；必要时新增 **wire-only** 转换函数，避免破坏现有 JSON 测试 |
+| A2A 领域类型 | `include/agent/core/types.hpp` | `AgentCard`、`AgentTask`、`AgentMessage`、`AgentPart` 等 + `to_json`/`from_json` | 核对与 **官方 Card/Task/Message** 字段差异，在 **tracker** 列映射表；必要时新增 **wire-only** 转换函数，避免破坏现有 JSON 测试 |
 | HTTP 传输 | `agent_transport.hpp/.cpp` | 已构造 `jsonrpc`/`method`/`params`/`id` POST | WP2.1 **定义** `method` 字符串集合与 `params` 与 tracker 一致；WP2.4 将 `AgentClient` 改为使用该集合 |
 | Agent 客户端 | `agent_client.cpp` | **REST**：`POST .../tasks/send` body 为自定义 JSON，非 JSON-RPC 信封 | 不在 WP2.1 删除；新增 Facade 供后续替换 |
 | Agent 服务端 | `agent_server.cpp` | **stub**；注释中 **REST** 风格路径 `/tasks/send` 等 | WP2.2 实现路由时，**对外**改为 tracker 规定的 **单一路径 JSON-RPC** 或 **多路径**（以 tracker 为准），Handler 内部调用 WP2.1 Facade |
@@ -72,7 +72,7 @@
 
 1. **对齐版本**：规范名称、版本号或 Git tag、对齐日期、官方 URL。
 2. **传输约定**：TLS 终止场景（反向代理）是否影响 URL；**JSON-RPC HTTP 绑定**：单一路径 URI（例如官方示例）**或** 每方法一路径 — **选定一种** 并全仓遵守。
-3. **JSON-RPC 方法表**（示例列，行数随规范）  
+3. **JSON-RPC 方法表**（示例列，行数随规范）
 
    | method | params（摘要） | result（摘要） | 错误码 |
    |--------|----------------|----------------|--------|
@@ -248,10 +248,10 @@ flowchart TD
 
 ## 13. 相关链接
 
-- [phase-2-plan.md](./phase-2-plan.md)  
-- [plan-detailed.md](./plan-detailed.md) §3、§5  
-- [architecture/overview.md](../architecture/overview.md)  
-- [types.hpp](../../include/agent/types.hpp)（A2A 结构体）  
-- [agent_transport.cpp](../../src/agent_transport/agent_transport.cpp)（现有 JSON-RPC POST）  
-- [agent_client.cpp](../../src/agent_client/agent_client.cpp)（现有 REST）  
+- [phase-2-plan.md](./phase-2-plan.md)
+- [plan-detailed.md](./plan-detailed.md) §3、§5
+- [architecture/overview.md](../architecture/overview.md)
+- [types.hpp](../../include/agent/core/types.hpp)（A2A 结构体）
+- [agent_transport.cpp](../../src/agent_transport/agent_transport.cpp)（现有 JSON-RPC POST）
+- [agent_client.cpp](../../src/agent_client/agent_client.cpp)（现有 REST）
 - [agent_server.cpp](../../src/agent_server/agent_server.cpp)（路由注释与 stub）

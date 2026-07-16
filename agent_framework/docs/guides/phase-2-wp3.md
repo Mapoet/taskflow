@@ -6,9 +6,9 @@
 
 **不交付**：强杀 OS 线程或 `pthread_cancel`；**WP2.4** Client；**WP2.5** 鉴权；与取消无关的 **持久化队列**（阶段 3）；**INPUT_REQUIRED** 的完整人机闭环 UI（仅 **状态与 JSON** 就绪即可）。
 
-**文档版本**：0.1  
-**日期**：2026-04-04  
-**上游依据**：[phase-2-plan.md](./phase-2-plan.md) v0.7；[`types.hpp`](../../include/agent/types.hpp) `AgentTask` / `AgentTaskStatus`；[phase-2-wp1.md](./phase-2-wp1.md)（wire）；[phase-2-wp2.md](./phase-2-wp2.md)（Server worker）
+**文档版本**：0.1
+**日期**：2026-04-04
+**上游依据**：[phase-2-plan.md](./phase-2-plan.md) v0.7；[`types.hpp`](../../include/agent/core/types.hpp) `AgentTask` / `AgentTaskStatus`；[phase-2-wp1.md](./phase-2-wp1.md)（wire）；[phase-2-wp2.md](./phase-2-wp2.md)（Server worker）
 
 ---
 
@@ -26,7 +26,7 @@
 
 ### 2.1 状态集
 
-沿用 [`AgentTaskStatus`](../../include/agent/types.hpp)：
+沿用 [`AgentTaskStatus`](../../include/agent/core/types.hpp)：
 
 `PENDING` → `WORKING` → **终态** `COMPLETED` | `FAILED` | `CANCELLED` | `INPUT_REQUIRED`
 
@@ -54,7 +54,7 @@
 bool try_transition(AgentTask& task, AgentTaskStatus to, std::string* err_out);
 ```
 
-- **成功**：更新 `task.status`、`task.updated_at`，返回 `true`。  
+- **成功**：更新 `task.status`、`task.updated_at`，返回 `true`。
 - **失败**：`err_out` 填 **英文稳定码** `illegal_transition` + `from`/`to`；**不** 改 `task`。
 
 ---
@@ -99,10 +99,10 @@ std::optional<AgentTaskStatus> agent_task_status_from_a2a_wire(std::string_view)
 
 ### 4.3 `handle_tasks_cancel` / JSON-RPC `cancel`
 
-1. 查找 `task_id`；若不存在 → **404** / RPC 错误。  
-2. `control->cancel_requested.store(true, release)`。  
-3. 若状态为 `PENDING` 且 **仍在队列**：**从队列移除** 或标记 **丢弃**（**实现选一种**，文档写清）；状态 → `CANCELLED`。  
-4. 若 `WORKING`：**不** 在此线程阻塞；worker 在检查点看到 flag → 清理 → `try_transition(..., CANCELLED)`。  
+1. 查找 `task_id`；若不存在 → **404** / RPC 错误。
+2. `control->cancel_requested.store(true, release)`。
+3. 若状态为 `PENDING` 且 **仍在队列**：**从队列移除** 或标记 **丢弃**（**实现选一种**，文档写清）；状态 → `CANCELLED`。
+4. 若 `WORKING`：**不** 在此线程阻塞；worker 在检查点看到 flag → 清理 → `try_transition(..., CANCELLED)`。
 5. **`push_task_status_update`**。
 
 ### 4.4 图内检查点（最低集）
@@ -136,7 +136,7 @@ std::optional<AgentTaskStatus> agent_task_status_from_a2a_wire(std::string_view)
 
 ### 5.3 检查方式（固定）
 
-- **轮询**：在 **AgentLoop 迭代开头** 与 **worker 尾部** 比较 `std::chrono::steady_clock::now()` 与 `deadline`。  
+- **轮询**：在 **AgentLoop 迭代开头** 与 **worker 尾部** 比较 `std::chrono::steady_clock::now()` 与 `deadline`。
 - **禁止** 在 listen 线程每连接起一个 `sleep` 定时器池 v1（可记为 **后续优化**）。
 
 ### 5.4 触发结果
@@ -147,7 +147,7 @@ std::optional<AgentTaskStatus> agent_task_status_from_a2a_wire(std::string_view)
 
 ## 6. 与 `AgentServer` / SSE 的接线
 
-- **每次成功迁移**（除 **no-op** 自环）：更新 `active_tasks_[id]` → **`push_task_status_update(id, task)`**（WP2.2）。  
+- **每次成功迁移**（除 **no-op** 自环）：更新 `active_tasks_[id]` → **`push_task_status_update(id, task)`**（WP2.2）。
 - **终态**：可选择 **关闭** 对应 SSE channel（**可选**；默认 **保持连接直至客户端断开**，仅 **停心跳**）。
 
 ---
@@ -156,7 +156,7 @@ std::optional<AgentTaskStatus> agent_task_status_from_a2a_wire(std::string_view)
 
 | 路径 | 职责 |
 |------|------|
-| `include/agent/task_state_machine.hpp` + `src/agent/task_state_machine.cpp` | `TaskControl`、`try_transition`、非法迁移 |
+| `include/agent/agent/task_state_machine.hpp` + `src/agent/task_state_machine.cpp` | `TaskControl`、`try_transition`、非法迁移 |
 | `src/a2a/task_state_wire.cpp`（或与现有 wire 合并） | §3.2 转换函数 |
 | [`agent_server.cpp`](../../src/agent_server/agent_server.cpp) | `task_controls_`、cancel/timeout 接线、队列与 worker 协作 |
 | [`agent_loop_node.cpp`](../../src/node/agent_loop_node.cpp)（或共享态注入） | cancel/timeout **检查点** |
@@ -210,22 +210,22 @@ flowchart TD
 
 ## 10. 验收清单（DoD）
 
-- [ ] **非法迁移** 被拒绝（**T-2**）。  
-- [ ] **协作式 cancel** 在 **WORKING** 与 **PENDING** 路径可测（**I-1**、**I-3**）。  
-- [ ] **超时** 可测（**I-2**）。  
-- [ ] **tracker** 含状态映射；wire 函数与表一致（**T-3**）。  
-- [ ] **SSE** 至少在一次迁移上观察到推送（可与 WP2.2 测 **合并**）。  
+- [ ] **非法迁移** 被拒绝（**T-2**）。
+- [ ] **协作式 cancel** 在 **WORKING** 与 **PENDING** 路径可测（**I-1**、**I-3**）。
+- [ ] **超时** 可测（**I-2**）。
+- [ ] **tracker** 含状态映射；wire 函数与表一致（**T-3**）。
+- [ ] **SSE** 至少在一次迁移上观察到推送（可与 WP2.2 测 **合并**）。
 
 ---
 
 ## 11. 相关链接
 
-- [phase-2-plan.md](./phase-2-plan.md)  
-- [phase-2-wp2.md](./phase-2-wp2.md)  
-- [phase-2-wp1.md](./phase-2-wp1.md)  
-- [types.hpp](../../include/agent/types.hpp)  
-- [agent_server.cpp](../../src/agent_server/agent_server.cpp)  
-- [agent_loop_node.cpp](../../src/node/agent_loop_node.cpp)  
+- [phase-2-plan.md](./phase-2-plan.md)
+- [phase-2-wp2.md](./phase-2-wp2.md)
+- [phase-2-wp1.md](./phase-2-wp1.md)
+- [types.hpp](../../include/agent/core/types.hpp)
+- [agent_server.cpp](../../src/agent_server/agent_server.cpp)
+- [agent_loop_node.cpp](../../src/node/agent_loop_node.cpp)
 
 ---
 

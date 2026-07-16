@@ -2,8 +2,8 @@
 
 本文档将 [phase-1-plan.md](./phase-1-plan.md) **§3 WP1.1** 细化为可执行任务、接口契约、错误模型、测试与提交顺序。范围仅限 **LLM 客户端与 OpenAI / Anthropic 适配器**；不包含 ToolBus（WP1.2）与图节点（WP1.5），但约定与 `LLMOutput` / `RenderedPrompt` 的衔接。
 
-**文档版本**：0.1  
-**日期**：2026-03-31  
+**文档版本**：0.1
+**日期**：2026-03-31
 **上游依据**：`phase-1-plan.md` v0.1（任务 1.1.1–1.1.6）
 
 ---
@@ -32,7 +32,7 @@
 
 ## 2. 与现有代码的契约
 
-### 2.1 类型（`include/agent/types.hpp`）
+### 2.1 类型（`include/agent/core/types.hpp`）
 
 - **统一输出**：`LLMOutput` 使用 `std::vector<CallSpec> tool_calls`；节点与 ToolBus 已按 `CallSpec` 命名，**不再**引入并行类型名 `ToolCallRequest`。
 - **语义约定**：
@@ -40,12 +40,12 @@
   - `reasoning`：可选；OpenAI 的 `reasoning`/`思考` 类内容若 API 暴露则填入，否则留空。
 - **`RenderedPrompt`**：适配器 **只消费** `messages`、`tools_json`（及可选多模态字段）；`rendered_text` 可用于日志，**不要求**各供应商都发送该字段。
 
-### 2.2 头文件 API（`include/agent/llm_client.hpp`）
+### 2.2 头文件 API（`include/agent/llm_client/llm_client.hpp`）
 
 - 保持现有 `ModelAdapter` / `OpenAIAdapter` / `AnthropicAdapter` / `LLMClient` 公开接口；若需新增成员，优先 **私有辅助** 或 **`internal` 命名空间** 自由函数，避免破坏二进制兼容以外的源码依赖。
 - `ModelAdapter::send_request` / `parse_response`：若与流式 POST 冲突，可改为 **默认实现抛异常**，实际路径走子类 `post_json` / `post_sse`。
 
-### 2.3 HTTP 现状（`include/agent/httplib_http_client.hpp`）
+### 2.3 HTTP 现状（`include/agent/agent_client/httplib_http_client.hpp`）
 
 - 当前 `HttplibClient` 仅 **`post` → `json`**，适合 **非流式** completion。
 - **WP1.1 必须增加**：对流式响应的 **`POST + 分块读 body` 或 SSE 解析**（见任务 T-HTTP-2）。可选两种落地方式：
@@ -244,10 +244,10 @@ flowchart TD
 
 ## 10. 相关链接
 
-- [phase-1-plan.md](./phase-1-plan.md) — 阶段 1 总表  
-- [plan-detailed.md](./plan-detailed.md) — §4.3 流式与工具要点  
-- `include/agent/llm_client.hpp`、`include/agent/types.hpp`  
-- `include/agent/httplib_http_client.hpp`
+- [phase-1-plan.md](./phase-1-plan.md) — 阶段 1 总表
+- [plan-detailed.md](./plan-detailed.md) — §4.3 流式与工具要点
+- `include/agent/llm_client/llm_client.hpp`、`include/agent/core/types.hpp`
+- `include/agent/agent_client/httplib_http_client.hpp`
 
 ---
 

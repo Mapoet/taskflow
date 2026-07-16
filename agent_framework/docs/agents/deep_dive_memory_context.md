@@ -10,7 +10,7 @@
   - `history`：`std::vector<Message>`，轮次间累积 user/assistant/tool 等；
   - `iteration`：已完成 LLM 调用次数；
   - `initial_user_prompt`、**Skills** 相关 `skill_prompt_cache` / `active_skill_id`。
-- `**Message`**（`agent_framework/include/agent/types.hpp`）：`role`、`content`、`tool_call_id`、`tool_name`、`tool_result`、`timestamp` — **扁平消息列表**，无 CC 式的 block 数组。
+- `**Message`**（`agent_framework/include/agent/core/types.hpp`）：`role`、`content`、`tool_call_id`、`tool_name`、`tool_result`、`timestamp` — **扁平消息列表**，无 CC 式的 block 数组。
 
 ### 1.2 策略层
 

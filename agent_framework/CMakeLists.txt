@@ -535,8 +535,18 @@ if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/agent/verifier_runner.cpp)
     list(APPEND AGENT_SOURCES src/agent/verifier_runner.cpp)
 endif()
 
-# Public headers mirror src/ modules. The recursive inventory also includes
-# one-release flat compatibility forwarders and the public node headers.
+# Public headers mirror src/ modules. Flat include/agent/*.hpp entry points are
+# intentionally forbidden so new APIs cannot bypass the module layout.
+file(GLOB _AGENT_FLAT_PUBLIC_HEADERS CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/agent/*.hpp")
+if(_AGENT_FLAT_PUBLIC_HEADERS)
+    list(JOIN _AGENT_FLAT_PUBLIC_HEADERS "\n  " _AGENT_FLAT_PUBLIC_HEADERS_TEXT)
+    message(FATAL_ERROR
+        "Flat Agent Framework public headers are not supported; move these under a module:\n"
+        "  ${_AGENT_FLAT_PUBLIC_HEADERS_TEXT}")
+endif()
+
+# Recursively inventory canonical Agent Framework and public Node headers.
 file(GLOB_RECURSE AGENT_HEADERS CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/include/agent/*.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/include/node/*.hpp")

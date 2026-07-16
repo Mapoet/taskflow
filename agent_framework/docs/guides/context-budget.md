@@ -1,6 +1,6 @@
 # 上下文预算（WP2.1c）
 
-本文描述工具结果与用户注入（`context` / `skill_block` / `user_prompt`）在送入 LLM 前的三层字节上限、截断形态与环境变量。实现见 `include/agent/context_budget.hpp`（`AfTruncationKind` 在 `types.hpp`）与 `src/context_budget/*.cpp`。
+本文描述工具结果与用户注入（`context` / `skill_block` / `user_prompt`）在送入 LLM 前的三层字节上限、截断形态与环境变量。实现见 `include/agent/context_budget/context_budget.hpp`（`AfTruncationKind` 在 `types.hpp`）与 `src/context_budget/*.cpp`。
 
 ## 方案 S / T
 

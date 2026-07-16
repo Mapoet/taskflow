@@ -2,8 +2,8 @@
 
 本文档将 [phase-1-plan.md](./phase-1-plan.md) **§3 WP1.5** 细化为可执行任务、**`create_loop`** 用法、对话状态在 **key-based I/O** 下的传递方式、工具执行顺序与退出条件。与 [phase-1-wp4.md](./phase-1-wp4.md)（`LLMInput` / `history`）、[phase-1-wp1.md](./phase-1-wp1.md)（`LLMOutput`）、[phase-1-wp2.md](./phase-1-wp2.md)（`call_tool`）衔接。
 
-**文档版本**：0.1  
-**日期**：2026-03-31  
+**文档版本**：0.1
+**日期**：2026-03-31
 **上游依据**：`phase-1-plan.md` v0.1（任务 1.5.1–1.5.4）
 
 ---
@@ -219,7 +219,7 @@ flowchart TD
 
 | 子 ID | 工作项 |
 |-------|--------|
-| T5.1 | **`build_cli_agent_graph`**（[graph_executor.hpp](../include/agent/graph_executor.hpp)）：`AgentWorkflowDeps`（`llm` + `toolbus`）+ `AgentConfig` + `shared_ptr<AgentThreadState>` 或 `user_query` 重载；内置源节点名 **`SystemPrompt` / `UserInput` / `AgentState`**，输出键同 [loop_io_keys.hpp](../include/agent/internal/loop_io_keys.hpp)；默认 Loop 名 **`AgentLoop`**。`PromptRenderer` 由调用方在 `LLMClient` 上配置。 |
+| T5.1 | **`build_cli_agent_graph`**（[graph_executor.hpp](../include/agent/graph_executor/graph_executor.hpp)）：`AgentWorkflowDeps`（`llm` + `toolbus`）+ `AgentConfig` + `shared_ptr<AgentThreadState>` 或 `user_query` 重载；内置源节点名 **`SystemPrompt` / `UserInput` / `AgentState`**，输出键同 [loop_io_keys.hpp](../include/agent/internal/loop_io_keys.hpp)；默认 Loop 名 **`AgentLoop`**。`PromptRenderer` 由调用方在 `LLMClient` 上配置。 |
 | T5.2 | **`GraphExecutor::build_agent_workflow`** 委托 `build_cli_agent_graph`；**`ReActTemplate::build_react_loop`** 同委托；**`ReActTemplate::build(json)`** 抛错并提示使用上述入口（JSON 无法表达 `shared_ptr` 运行时依赖）。 |
 | T5.3 | 挂 **`Sink`**（WP1.6）：仍可由调用方在图外加 `create_any_sink`，依赖 `AgentLoop` 的 `final_answer` / `next_agent_state` 等键。 |
 | T5.4 | **终端 Sink 可选 API**：`CliAgentTerminalSinkOptions` + **`build_cli_agent_graph_with_terminal_sink`**（及 `GraphExecutor::build_agent_workflow(..., sink)`）一次构图即订阅上述键并向 `std::function<void(const json&)>` 交付终稿摘要；详见 [phase-1-wp6.md](./phase-1-wp6.md) §5.1。 |
@@ -267,11 +267,11 @@ flowchart TD
 
 ## 11. 相关链接
 
-- [phase-1-plan.md](./phase-1-plan.md) — WP1.5 摘要  
-- [phase-1-wp4.md](./phase-1-wp4.md) — history / 当前轮 user  
-- [phase-1-wp2.md](./phase-1-wp2.md) — `call_tool` 返回 JSON  
-- [phase-1-wp1.md](./phase-1-wp1.md) — `LLMOutput`  
-- `workflow/include/workflow/nodeflow.hpp` — `create_loop_decl`  
+- [phase-1-plan.md](./phase-1-plan.md) — WP1.5 摘要
+- [phase-1-wp4.md](./phase-1-wp4.md) — history / 当前轮 user
+- [phase-1-wp2.md](./phase-1-wp2.md) — `call_tool` 返回 JSON
+- [phase-1-wp1.md](./phase-1-wp1.md) — `LLMOutput`
+- `workflow/include/workflow/nodeflow.hpp` — `create_loop_decl`
 - `include/node/agent_loop_node.hpp`、`llm_node.hpp`、`tool_call_node.hpp`
 
 ---

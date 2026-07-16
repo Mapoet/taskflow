@@ -6,8 +6,8 @@
 
 **不交付**：OAuth 设备码刷新完整实现（可留 TODO，属 **WP2.5** 深化）；**WP2.6** 契约快照仓库（Client 侧 **单测 fixture** 可先行）。
 
-**文档版本**：0.1  
-**日期**：2026-04-04  
+**文档版本**：0.1
+**日期**：2026-04-04
 **上游依据**：[phase-2-plan.md](./phase-2-plan.md) v0.8；[plan-detailed.md](./plan-detailed.md) §3 双栈；[phase-2-wp1.md](./phase-2-wp1.md)、[phase-2-wp1a.md](./phase-2-wp1a.md)；[`agent_client.cpp`](../../src/agent_client/agent_client.cpp)、[`agent_transport.cpp`](../../src/agent_transport/agent_transport.cpp)
 
 ---
@@ -72,8 +72,8 @@
 
 **实现**：私有函数 `json call_jsonrpc(const std::string& method, const json& params)`：
 
-1. 组装信封：`jsonrpc`、`method`、`params`、`id`（**线程安全递增** `std::atomic<std::uint64_t>`，与 [HTTPAgentTransport](../../src/agent_transport/agent_transport.cpp) **一致策略**）。  
-2. `http_client_->post(url, envelope, headers)`。  
+1. 组装信封：`jsonrpc`、`method`、`params`、`id`（**线程安全递增** `std::atomic<std::uint64_t>`，与 [HTTPAgentTransport](../../src/agent_transport/agent_transport.cpp) **一致策略**）。
+2. `http_client_->post(url, envelope, headers)`。
 3. 解析：`result` → 业务；`error` → `throw std::runtime_error` 或自定义 **`A2aRpcException{code, message, data}`**（**二选一字面**，推荐 **struct** 便于 WP2.6 断言 `code`）。
 
 ### 4.3 与 `HTTPAgentTransport` 统一
@@ -84,7 +84,7 @@
 
 ## 5. 发现（Card）
 
-- **JSON-RPC 模式**：若 tracker 规定 Card 为 **独立 GET**（Well-Known），保持 **`discover_agent(endpoint)`** → `GET join_url(server_url_, endpoint)`；body → **`agent_card_from_a2a_wire`**（WP2.1a）；**禁止**仅 `AgentCard::from_json` **除非** wire 与 legacy **完全相同**（由 tracker 声明）。  
+- **JSON-RPC 模式**：若 tracker 规定 Card 为 **独立 GET**（Well-Known），保持 **`discover_agent(endpoint)`** → `GET join_url(server_url_, endpoint)`；body → **`agent_card_from_a2a_wire`**（WP2.1a）；**禁止**仅 `AgentCard::from_json` **除非** wire 与 legacy **完全相同**（由 tracker 声明）。
 - **Legacy 模式**：保持 `from_json`。
 
 ---
@@ -93,16 +93,16 @@
 
 ### 6.1 传输
 
-- A2A 常见为 **`GET`** + `Accept: text/event-stream` + `Last-Event-ID`（重连）。  
-- 若 **`HttplibClient`** 尚无 **GET 流式**，新增：  
-  `void get_sse(const std::string& url, const std::map<...>& headers, std::function<void(string_view chunk)> on_chunk, int timeout_sec)`  
+- A2A 常见为 **`GET`** + `Accept: text/event-stream` + `Last-Event-ID`（重连）。
+- 若 **`HttplibClient`** 尚无 **GET 流式**，新增：
+  `void get_sse(const std::string& url, const std::map<...>& headers, std::function<void(string_view chunk)> on_chunk, int timeout_sec)`
   使用 **cpp-httplib** `Client::Get` + **`content_receiver`**（或等价）**增量** 写 ring buffer，喂 **`agent_framework::a2a::SseParser`**（[phase-2-wp1.md](./phase-2-wp1.md)）。
 
 ### 6.2 事件处理
 
-- **`event:`** 与 **`data:`** 解析后，按 **tracker** 的事件名分支：  
-  - 任务状态 → `AgentTask::from_json` / `task_from_wire`；回调 `on_status_update`。  
-  - Artifact → `AgentArtifact::from_json`；回调 `on_artifact_update`。  
+- **`event:`** 与 **`data:`** 解析后，按 **tracker** 的事件名分支：
+  - 任务状态 → `AgentTask::from_json` / `task_from_wire`；回调 `on_status_update`。
+  - Artifact → `AgentArtifact::from_json`；回调 `on_artifact_update`。
 - **弃用** 硬编码 `"type":"task_status_update"`（[sse_connection.cpp](../../src/agent_transport/sse_connection.cpp)）；**兼容模式**：`AGENT_CLIENT_SSE_LEGACY_PAYLOAD=1` 时 **仍解析** 旧 JSON — **可选**，默认 `0`。
 
 ### 6.3 URL
@@ -117,15 +117,15 @@
 
 ## 7. Legacy REST（2.4.2）
 
-- 现有 `agent_client.cpp` 路径 **整体移入** `impl_legacy_rest_*` 或 `#if` 分支由 **`AGENT_CLIENT_USE_LEGACY_REST`** 控制。  
-- 头文件 **`[[deprecated]]`** 或 Doxygen `@deprecated`：**仅** 标注「REST 模式」；**公共 API 签名不变**（减少调用方破坏）。  
+- 现有 `agent_client.cpp` 路径 **整体移入** `impl_legacy_rest_*` 或 `#if` 分支由 **`AGENT_CLIENT_USE_LEGACY_REST`** 控制。
+- 头文件 **`[[deprecated]]`** 或 Doxygen `@deprecated`：**仅** 标注「REST 模式」；**公共 API 签名不变**（减少调用方破坏）。
 - **`agent-client.md`**：**移除计划** = 「默认 Legacy 关闭后 **N 个小版本** 删除实现」— **N 写死为 2** 或 **由发布经理填**。
 
 ---
 
 ## 8. 认证头（与 WP2.5）
 
-- **`build_auth_headers()`** 已支持 `bearer` / `api_key`；JSON-RPC 与 Legacy **共用**。  
+- **`build_auth_headers()`** 已支持 `bearer` / `api_key`；JSON-RPC 与 Legacy **共用**。
 - WP2.4 **不**新增 OAuth 刷新逻辑；**确保** headers 注入 **POST JSON-RPC** 与 **GET SSE** 一致。
 
 ---
@@ -181,23 +181,23 @@ flowchart TD
 
 ## 12. 验收清单（DoD）
 
-- [ ] **默认**（`AGENT_CLIENT_USE_LEGACY_REST=0`）**端到端** 对 WP2.2 Server：**send/get/cancel/update** 至少 **happy path**（可与 WP2.6 合并验收）。  
-- [ ] **Legacy** 路径 **C-3** 绿。  
-- [ ] **JSON-RPC 错误** **C-2** 绿。  
-- [ ] **SSE** **C-4** 或 **与 WP2.2 集成** 绿。  
-- [ ] **`agent-client.md`** 含 **deprecated** 与 **默认策略**。  
+- [ ] **默认**（`AGENT_CLIENT_USE_LEGACY_REST=0`）**端到端** 对 WP2.2 Server：**send/get/cancel/update** 至少 **happy path**（可与 WP2.6 合并验收）。
+- [ ] **Legacy** 路径 **C-3** 绿。
+- [ ] **JSON-RPC 错误** **C-2** 绿。
+- [ ] **SSE** **C-4** 或 **与 WP2.2 集成** 绿。
+- [ ] **`agent-client.md`** 含 **deprecated** 与 **默认策略**。
 - [ ] **tracker** 中 method/path 与 **`a2a/client_config.hpp`** **无漂移**（CI 可加 **grep 校验** 或 **手工** release checklist）。
 
 ---
 
 ## 13. 相关链接
 
-- [phase-2-plan.md](./phase-2-plan.md)  
-- [phase-2-wp1.md](./phase-2-wp1.md)  
-- [phase-2-wp1a.md](./phase-2-wp1a.md)  
-- [phase-2-wp2.md](./phase-2-wp2.md)  
-- [agent_client.hpp](../../include/agent/agent_client.hpp)  
-- [httplib_http_client.hpp](../../include/agent/httplib_http_client.hpp)  
+- [phase-2-plan.md](./phase-2-plan.md)
+- [phase-2-wp1.md](./phase-2-wp1.md)
+- [phase-2-wp1a.md](./phase-2-wp1a.md)
+- [phase-2-wp2.md](./phase-2-wp2.md)
+- [agent_client.hpp](../../include/agent/agent_client/agent_client.hpp)
+- [httplib_http_client.hpp](../../include/agent/agent_client/httplib_http_client.hpp)
 
 ---
 

@@ -78,7 +78,7 @@ isProject: false
 ## 2. 代码与类型改动清单（按仓库现状落地）
 
 ### 2.1 现状核对（来自现有代码）
-- `include/agent/prompt_renderer.hpp` 已声明：
+- `include/agent/prompt_renderer/prompt_renderer.hpp` 已声明：
   - `PromptTemplate` / `ToolFormatter` / `HistoryFormatter` / `PromptRenderer`。
 - `src/prompt_renderer/prompt_renderer.cpp` **已实现大部分逻辑**（模板/工具 formatter/部分 history formatter/多模态注入/渲染主流程）。
 - 但 `src/prompt_renderer/history_formatter.cpp`、`tool_formatter.cpp`、`prompt_template.cpp` 仍是 TODO 空壳，与 `prompt_renderer.cpp` 存在实现重复/错位（需要收敛）。

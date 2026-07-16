@@ -6,9 +6,9 @@
 
 **不交付**：**生产级** 鉴权 UI、**多用户** 会话隔离 **完备** 方案（**留** WP2.5）；**与** A2A **完全等价** 的 **浏览器** 客户端（**仅** **最小** SSE 样例）；**移动端** 适配；**ImPlot** 深度绑定（**可选** 后续 PR）。
 
-**文档版本**：0.2  
-**日期**：2026-04-04  
-**上游依据**：[phase-2-plan.md](./phase-2-plan.md)；[plan-detailed.md](./plan-detailed.md) §5.4、§7；[phase-1-wp6.md](./phase-1-wp6.md) §4；[`ui_manager.hpp`](../../include/agent/ui_manager.hpp)；[`ui_sink_node.hpp`](../../include/node/ui_sink_node.hpp)；[`types.hpp`](../../include/agent/types.hpp) `StreamMessage` / `WebConnectionInfo`
+**文档版本**：0.2
+**日期**：2026-04-04
+**上游依据**：[phase-2-plan.md](./phase-2-plan.md)；[plan-detailed.md](./plan-detailed.md) §5.4、§7；[phase-1-wp6.md](./phase-1-wp6.md) §4；[`ui_manager.hpp`](../../include/agent/ui/ui_manager.hpp)；[`ui_sink_node.hpp`](../../include/node/ui_sink_node.hpp)；[`types.hpp`](../../include/agent/core/types.hpp) `StreamMessage` / `WebConnectionInfo`
 
 ---
 
@@ -32,7 +32,7 @@
 | **目标可执行文件** | **`imgui_agent_demo`**（名称 **可** 调整 **须** 写入 CMake **`add_executable`** 与本文 **同步**） |
 | **渲染线程模型** | **单** 主线程 **poll** GLFW（**或** SDL2 — **全仓** **固定一种**：**`GLFW3` + `OpenGL3` + Dear ImGui**） |
 | **LLM / executor 线程** | **禁止** 直接 `ImGui::Text`；**必须** **`ImGuiHandler::handle_stream_token`** → **`ThreadSafeQueue<StreamMessage>`**；**渲染帧** **drain** 队列 **上限** **每帧 `AGENT_IMGUI_QUEUE_DRAIN_MAX`**（默认 **`256`**）**防** 卡死 |
-| **`StreamMessage::message_type`** | **`token`** \| **`final`** \| **`error`**（与 [types.hpp](../../include/agent/types.hpp) 注释一致）；**扩展** **aux** 用 **`aux:`** 前缀，如 **`aux:tool_start`**（§5） |
+| **`StreamMessage::message_type`** | **`token`** \| **`final`** \| **`error`**（与 [types.hpp](../../include/agent/core/types.hpp) 注释一致）；**扩展** **aux** 用 **`aux:`** 前缀，如 **`aux:tool_start`**（§5） |
 | **去重** | **严格** [phase-1-wp6.md](./phase-1-wp6.md) **§4.3**：**流式** 仅 **增量**；**终稿** **仅** **`handle_final_result`** **或** **`message_type==final`** **一处** 落屏 **主答案区**（**禁止** 再 **全文 dump** 已 stream 过的 **同一段**） |
 | **CMake** | **`AGENT_BUILD_IMGUI`**（**`OFF`** 默认）；**ON** 时 **find/ FetchContent** ImGui + GLFW；**OFF** 时 **目标** **`imgui_agent_demo`** **不** 加入 **all** |
 | **图接线** | **优先** [`UISinkNode::create_imgui`](../../include/node/ui_sink_node.hpp) **若** 实现 **已** 与 **demo** 一致；**否则** demo **直接** **`UIManager::register_gui_handler` + `stream_token("default", tok)`**（与阶段 1 **一致**） |
@@ -45,7 +45,7 @@
 | **后端** | **`ncurses`**（**系统** 库 **`libncursesw`** **优先**）；**禁止** 在 **默认** CI 镜像 **无 dev 包** 时 **强制** 链接 |
 | **CMake** | **`AGENT_BUILD_TUI`**（**`OFF`** 默认）；**ON** 时 **`find_package(Curses)`** 失败 → **FATAL_ERROR** **并** **文档** 要求安装 **`libncurses-dev`**（或发行版等价名） |
 | **与 CI** | **HEAD** **不** 将 **`tui_agent_demo`** 加入 **必跑** `ctest`；**允许** **编译** job **分轨** |
-| **事件模型** | **实现** **`UIHandler`** **子类** **`TuiHandler`**（**新** 类，**路径** `include/agent/ui_manager.hpp` **或** `tui/tui_handler.hpp`）**或** **复用** **`CLIHandler`** **加** **全屏** 缓冲 — **固定**：**新建** **`TuiHandler : public UIHandler`**，**内部** ncurses **窗口**；**`handle_stream_token`** **追加** 环形缓冲 **UTF-8** **安全** |
+| **事件模型** | **实现** **`UIHandler`** **子类** **`TuiHandler`**（**新** 类，**路径** `include/agent/ui/ui_manager.hpp` **或** `tui/tui_handler.hpp`）**或** **复用** **`CLIHandler`** **加** **全屏** 缓冲 — **固定**：**新建** **`TuiHandler : public UIHandler`**，**内部** ncurses **窗口**；**`handle_stream_token`** **追加** 环形缓冲 **UTF-8** **安全** |
 | **输入** | **最小**：**单行** 用户输入 **底栏** **`getstr` 封装`**；**回车** 提交 **等同** CLI **一行** `user_query` |
 
 ### 2.3 Track W — Web（浏览器 + SSE）
@@ -79,10 +79,10 @@
 
 **WP2.U 固定实现**：
 
-1. **`void UIHandler::handle_aux_event(std::string_view type, const json& payload)`**  
-   - **在** `UIHandler` **基类** **内联默认** **`{}`**（**非纯虚**）；**`CLIHandler`** **不重写**（**无操作**）。  
-2. **`ImGuiHandler` / `WebHandler` / `TuiHandler`（若存在）`** **重写**：**统一** 使用 **`StreamMessage`**，**`message_type = "aux:" + std::string(type)`**，**`content = payload.dump()`**（**禁止** 另设 **并行** `aux_queue`，**避免** 双消费顺序）。  
-3. **`UIManager::dispatch_message(type, data)`** → **`lock`** → **对** 全部 handler **`handle_aux_event(type, data)`**。  
+1. **`void UIHandler::handle_aux_event(std::string_view type, const json& payload)`**
+   - **在** `UIHandler` **基类** **内联默认** **`{}`**（**非纯虚**）；**`CLIHandler`** **不重写**（**无操作**）。
+2. **`ImGuiHandler` / `WebHandler` / `TuiHandler`（若存在）`** **重写**：**统一** 使用 **`StreamMessage`**，**`message_type = "aux:" + std::string(type)`**，**`content = payload.dump()`**（**禁止** 另设 **并行** `aux_queue`，**避免** 双消费顺序）。
+3. **`UIManager::dispatch_message(type, data)`** → **`lock`** → **对** 全部 handler **`handle_aux_event(type, data)`**。
 
 **`type` 闭集（v1）**：
 
@@ -138,10 +138,10 @@ flowchart TD
 
 ## 8. 验收清单（M8 / DoD）
 
-- [ ] **三选一**：**`imgui_agent_demo`** **或** **`tui_agent_demo`** **或** **`web_ui_demo`** **可** **从** `getting_started` **或** `rich-ui.md` **启动**。  
-- [ ] **`UIHandler`** **三路** API **行为** 与 **§3** **一致**；**§4.3 去重** **人工** **U-3** **通过**。  
-- [ ] **默认 CMake**：**富界面** targets **不** **拖垮** **无** 依赖 **机器**。  
-- [ ] **`UIHandler::handle_aux_event`** **默认实现** + **`UIManager::dispatch_message`** **非 stub** **且** **U-1** **绿**。  
+- [ ] **三选一**：**`imgui_agent_demo`** **或** **`tui_agent_demo`** **或** **`web_ui_demo`** **可** **从** `getting_started` **或** `rich-ui.md` **启动**。
+- [ ] **`UIHandler`** **三路** API **行为** 与 **§3** **一致**；**§4.3 去重** **人工** **U-3** **通过**。
+- [ ] **默认 CMake**：**富界面** targets **不** **拖垮** **无** 依赖 **机器**。
+- [ ] **`UIHandler::handle_aux_event`** **默认实现** + **`UIManager::dispatch_message`** **非 stub** **且** **U-1** **绿**。
 
 ---
 
@@ -153,10 +153,10 @@ flowchart TD
 
 ## 10. 相关链接
 
-- [phase-2-plan.md](./phase-2-plan.md)  
-- [plan-detailed.md](./plan-detailed.md) §5.4、§7  
-- [phase-1-wp6.md](./phase-1-wp6.md)  
-- [phase-2-wp2.md](./phase-2-wp2.md)  
+- [phase-2-plan.md](./phase-2-plan.md)
+- [plan-detailed.md](./plan-detailed.md) §5.4、§7
+- [phase-1-wp6.md](./phase-1-wp6.md)
+- [phase-2-wp2.md](./phase-2-wp2.md)
 
 ---
 

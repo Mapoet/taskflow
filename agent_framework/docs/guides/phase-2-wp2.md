@@ -6,8 +6,8 @@
 
 **不交付**：任务状态机完备语义、协作式取消、超时策略（**WP2.3**）；`AgentClient` 规范侧切换（**WP2.4**）；认证策略实现（**WP2.5**）；契约快照门禁（**WP2.6**）；**WP2.1c** 预算裁剪（仅 **建议** 在序列化前调用已有 API）。
 
-**文档版本**：0.1  
-**日期**：2026-04-04  
+**文档版本**：0.1
+**日期**：2026-04-04
 **上游依据**：[phase-2-plan.md](./phase-2-plan.md) v0.5；[plan-detailed.md](./plan-detailed.md) §3 双栈；[phase-2-wp1.md](./phase-2-wp1.md)、[phase-2-wp1a.md](./phase-2-wp1a.md)（线协议与 Card）；`3rd-party/httplib/httplib.hpp`（`set_chunked_content_provider`）
 
 ---
@@ -165,7 +165,7 @@ void run_agent_task_on_executor(
 
 | 路径 | 变更 |
 |------|------|
-| [`agent_server.hpp`](../../include/agent/agent_server.hpp) | 前向声明足够；可增 `start_async`、worker 池成员（`unique_ptr` 实现类 Pimpl 可选） |
+| [`agent_server.hpp`](../../include/agent/agent_server/agent_server.hpp) | 前向声明足够；可增 `start_async`、worker 池成员（`unique_ptr` 实现类 Pimpl 可选） |
 | [`agent_server.cpp`](../../src/agent_server/agent_server.cpp) | 完整实现 §3–§7 |
 | `include/agent/internal/sse_server_channel.hpp`（可选） | `SseClientChannel` 定义 |
 | `docs/guides/agent-server.md` | 监听地址、端口 env（如 `AGENT_SERVER_PORT`）、`AGENT_SERVER_*`、双栈开关、与 WP2.1 tracker 的链接 |
@@ -228,12 +228,12 @@ flowchart TD
 
 ## 12. 相关链接
 
-- [phase-2-plan.md](./phase-2-plan.md)  
-- [phase-2-wp1.md](./phase-2-wp1.md)  
-- [phase-2-wp1a.md](./phase-2-wp1a.md)  
-- [phase-2-wp1c.md](./phase-2-wp1c.md)（线上一级裁剪）  
-- [architecture/overview.md](../architecture/overview.md)  
-- [graph_executor.cpp](../../src/graph_executor/graph_executor.cpp)  
+- [phase-2-plan.md](./phase-2-plan.md)
+- [phase-2-wp1.md](./phase-2-wp1.md)
+- [phase-2-wp1a.md](./phase-2-wp1a.md)
+- [phase-2-wp1c.md](./phase-2-wp1c.md)（线上一级裁剪）
+- [architecture/overview.md](../architecture/overview.md)
+- [graph_executor.cpp](../../src/graph_executor/graph_executor.cpp)
 
 ---
 

@@ -6,8 +6,8 @@
 
 **不交付**：**WP2.9** 压缩实现本体（`/memory compact` **可发 `control_action`** 由 WP2.9 消费）；**WP3.7** `/mcp` 热加载（**仅 stub/拒绝**）；**Verifier**（**WP2.8**）；**Identity** 全链路进 SSE（**字段预留**即可，与 [plan-detailed.v2.md](./plan-detailed.v2.md) §9 对齐后续 PR）。
 
-**文档版本**：0.2  
-**日期**：2026-04-04  
+**文档版本**：0.2
+**日期**：2026-04-04
 **上游依据**：[phase-2-plan.md](./phase-2-plan.md)；[plan-detailed.v2.md](./plan-detailed.v2.md) §5.1、§5、§9；[phase-2-wp1c.md](./phase-2-wp1c.md) §6–§7；[`cli_agent_graph.cpp`](../../src/graph_executor/cli_agent_graph.cpp)（`UserInput` / `initial_user_prompt`）
 
 ---
@@ -26,7 +26,7 @@
 
 ### 2.1 `ExecutionContext`
 
-新建 **`include/agent/execution_context.hpp`**（命名空间 `agent_framework`）：
+新建 **`include/agent/agent/execution_context.hpp`**（命名空间 `agent_framework`）：
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
@@ -73,28 +73,28 @@
 
 对 **原始** `raw_user_text` **只做一次** 下列流水线（**禁止** 重排）：
 
-1. **按行扫描 `/cmd`**：对 **每一行**，若 **去掉行首空白后** 以 **`/`** 开头，则将该行 **整行** 从正文移除，并尝试 **解析为命令**（§3.3）。**不** 做 Markdown 围栏感知：围栏内的 `/` 行 **仍** 视为命令（**v1 已知限制**，写入 `user-input-dsl.md`）。  
-2. **在剩余字符串上** 从左到右找 **`@file(`**、**`@url(`** 的 **非重叠** 匹配（§3.1–3.2）；**每条** 必须 **单行内** 完整出现（**禁止** 跨行括号）。  
+1. **按行扫描 `/cmd`**：对 **每一行**，若 **去掉行首空白后** 以 **`/`** 开头，则将该行 **整行** 从正文移除，并尝试 **解析为命令**（§3.3）。**不** 做 Markdown 围栏感知：围栏内的 `/` 行 **仍** 视为命令（**v1 已知限制**，写入 `user-input-dsl.md`）。
+2. **在剩余字符串上** 从左到右找 **`@file(`**、**`@url(`** 的 **非重叠** 匹配（§3.1–3.2）；**每条** 必须 **单行内** 完整出现（**禁止** 跨行括号）。
 3. 应用 §3.5 空白规则得到 `llm_user_text`。
 
 ### 3.1 `@file`（固定文法 v1）
 
-- **形式一（整文件）**：**`@file(`** *path* **`)`**，*path* 为 **非空** 且 **不含** 未转义 **`)`** 的 UTF-8 片段（v1 **禁止** 路径中含 `)`；含 `)` 的路径须阶段 3 另议）。  
-- **形式二（行范围）**：**`@file(`** *path* **`,`** *range* **`)`**，*range* 为正则 **`^\d+-\d+$`**（**闭区间**、**从 1 起** 行号），例如 **`12-34`**。  
-- **物化**：先 **`call_tool("fs_read", …)`** 读 **完整** 文件（参数名以 **当前** `fs_read` JSON Schema 为准）；若带 *range*，在 **预处理内存中** 按 **行** 切分后 **只保留** 该行段 **再 UTF-8 拼接** 为 `text_utf8`（**不在** 工具层新增参数，除非未来 `fs_read` 已支持行段）。  
-- **path**：相对路径以 `ExecutionContext::cwd` 解析；**canonical** 后须 **落在** `AGENT_FS_ROOT` 监禁下（规则同 [builtin-fs-tools.md](./builtin-fs-tools.md)）；否则 **`tier_a_violations`** 追加 **`file_path_outside_jail`**。  
-- **长度**：单块 **`text_utf8`** 字节数 **≤** **`AGENT_INPUT_FILE_INJECT_MAX_BYTES`**（默认 **`262144`**）；超限 **`tier_a_violations`** 追加 **`file_inject_too_large`**。  
+- **形式一（整文件）**：**`@file(`** *path* **`)`**，*path* 为 **非空** 且 **不含** 未转义 **`)`** 的 UTF-8 片段（v1 **禁止** 路径中含 `)`；含 `)` 的路径须阶段 3 另议）。
+- **形式二（行范围）**：**`@file(`** *path* **`,`** *range* **`)`**，*range* 为正则 **`^\d+-\d+$`**（**闭区间**、**从 1 起** 行号），例如 **`12-34`**。
+- **物化**：先 **`call_tool("fs_read", …)`** 读 **完整** 文件（参数名以 **当前** `fs_read` JSON Schema 为准）；若带 *range*，在 **预处理内存中** 按 **行** 切分后 **只保留** 该行段 **再 UTF-8 拼接** 为 `text_utf8`（**不在** 工具层新增参数，除非未来 `fs_read` 已支持行段）。
+- **path**：相对路径以 `ExecutionContext::cwd` 解析；**canonical** 后须 **落在** `AGENT_FS_ROOT` 监禁下（规则同 [builtin-fs-tools.md](./builtin-fs-tools.md)）；否则 **`tier_a_violations`** 追加 **`file_path_outside_jail`**。
+- **长度**：单块 **`text_utf8`** 字节数 **≤** **`AGENT_INPUT_FILE_INJECT_MAX_BYTES`**（默认 **`262144`**）；超限 **`tier_a_violations`** 追加 **`file_inject_too_large`**。
 - **工具错误**：`fs_read` 返回 **业务失败**（非 allowlist 拒绝同理）时 **`tier_a_violations`** 追加 **`file_fetch_failed`**（**可** 附 **截断** 错误摘要 **≤200 字节**，**禁止** 泄露绝对路径根以外隐私）。
 
 ### 3.2 `@url`（2.7.3）
 
-- **形式**：**`@url(`** *url* **`)`**，**单行**；*url* 规则与 [builtin-web-tools.md](./builtin-web-tools.md) 中 **`web_fetch`** 一致（**https** 默认可用；**http** 仅当 **`AGENT_WEB_ALLOW_HTTP=1`**）。  
-- **物化**：**`call_tool("web_fetch", …)`**，参数与 **响应体截断** 与内建 web 工具 **同实现**；失败时 **`tier_a_violations`** 追加 **`url_fetch_failed`**（错误摘要规则同 `file_fetch_failed`）。  
+- **形式**：**`@url(`** *url* **`)`**，**单行**；*url* 规则与 [builtin-web-tools.md](./builtin-web-tools.md) 中 **`web_fetch`** 一致（**https** 默认可用；**http** 仅当 **`AGENT_WEB_ALLOW_HTTP=1`**）。
+- **物化**：**`call_tool("web_fetch", …)`**，参数与 **响应体截断** 与内建 web 工具 **同实现**；失败时 **`tier_a_violations`** 追加 **`url_fetch_failed`**（错误摘要规则同 `file_fetch_failed`）。
 - **预算**：每块得到 `text_utf8` 后 **立即** 调 **WP2.1c** `consume_injection`（或与其实现 **等价字节计数**）；失败则 **`tier_a_violations`** 追加 **`injection_budget_exceeded`**，**不** 将该块写入 `injected_context`（**整块丢弃**）。**严格模式**下与其它 violation **相同**：**整轮** 不调用 LLM（§6）。
 
 ### 3.3 `/cmd`（2.7.4）
 
-- **识别**：已被 §3.0 抽出的 **整行**；规范化：**trim** 后 **按空格切分**，**第一 token** 小写比较。  
+- **识别**：已被 §3.0 抽出的 **整行**；规范化：**trim** 后 **按空格切分**，**第一 token** 小写比较。
 - **白名单**（**精确** 匹配 **前两 token** 或 **首 token + 余下**）：
 
 | 用户行（trim 后示例） | `ControlAction.command` | `args` |
@@ -103,14 +103,14 @@
 | `/memory clear` | `memory.clear` | `{}` |
 | `/model gpt-4o` | `model.set` | `{"id":"gpt-4o"}`（*id* 为 **第二 token 起** 到行尾 **trim**，**不得** 为空） |
 
-- **`/mcp …`、`/skills …`、以及任何未命中上表** 的行：**不** 生成 `ControlAction`；**`tier_a_violations`** 追加 **`command_not_whitelisted:<trim 后行截断至 200 字符>`**；**审计**：**`std::clog << "[user_command] REJECTED policy=wp27-v1 stub=wp3.7_only line=…\n"`**（**必须** 含 `input_policy_version`；若有 `session_id` 一并输出）。  
+- **`/mcp …`、`/skills …`、以及任何未命中上表** 的行：**不** 生成 `ControlAction`；**`tier_a_violations`** 追加 **`command_not_whitelisted:<trim 后行截断至 200 字符>`**；**审计**：**`std::clog << "[user_command] REJECTED policy=wp27-v1 stub=wp3.7_only line=…\n"`**（**必须** 含 `input_policy_version`；若有 `session_id` 一并输出）。
 - **白名单命中** 的 **审计**：**`std::clog << "[user_command] OK policy=wp27-v1 cmd=… session=…\n"`**（字段与 **v2 §9** 对齐，后续可换统一日志门面 **不改变键语义**）。
 
 ### 3.4 与 LLM 的拼接顺序（固定）
 
-1. `PromptRenderer` / `LLMNode` 消费时：`LLMInput.user_prompt` = `llm_user_text`。  
-2. `injected_context` **按出现顺序** 追加到 **`LLMInput.context`**，每块前加 **固定分隔头**：  
-   `"\n--- injection:" + source_kind + ":" + source_ref_trunc + "\n"`  
+1. `PromptRenderer` / `LLMNode` 消费时：`LLMInput.user_prompt` = `llm_user_text`。
+2. `injected_context` **按出现顺序** 追加到 **`LLMInput.context`**，每块前加 **固定分隔头**：
+   `"\n--- injection:" + source_kind + ":" + source_ref_trunc + "\n"`
 3. **`extra_variables["input_policy_version"]`** = **`ctx.input_policy_version`**（**禁止** 省略）。
 
 ### 3.5 `llm_user_text` 空白规则
@@ -121,9 +121,9 @@
 
 ## 4. Tier B（2.7.5，可选）
 
-- **开关**：**`AGENT_INPUT_TIER_B=0`**（默认）关闭。  
-- **开启时**：对 **无法 Tier A 解析** 的 token（或 **歧义 `@`**）调用 **已有 `LLMClient`** **最小** prompt，**强制** JSON 输出 schema：  
-  `{"action":"ignore"|"inject_file"|"inject_url","path_or_url":"…","reason":"…"}`  
+- **开关**：**`AGENT_INPUT_TIER_B=0`**（默认）关闭。
+- **开启时**：对 **无法 Tier A 解析** 的 token（或 **歧义 `@`**）调用 **已有 `LLMClient`** **最小** prompt，**强制** JSON 输出 schema：
+  `{"action":"ignore"|"inject_file"|"inject_url","path_or_url":"…","reason":"…"}`
 - **限流**：**每用户输入最多 1 次** Tier B 调用；超时 **5s**；失败 → **按 Tier A 拒绝**。
 
 ---
@@ -153,17 +153,17 @@ public:
 
 ### 5.2 CLI
 
-- 在 **读取 stdin / 得到 raw 用户串之后**、**调用 `build_cli_agent_graph` 之前**（demo 或图工厂包装）：  
-  1. `UserInputPreprocessor prep(opt);`  
-  2. `auto out = prep.process(raw, ctx);`  
-  3. **`agent_state->initial_user_prompt = out.llm_user_text`**；  
-  4. **`agent_state->pending_injected_context = std::move(out.injected_context)`**；**`pending_control_actions = std::move(out.control_actions)`**；**`pending_input_violations = std::move(out.tier_a_violations)`**（字段名以头文件为准，**语义** 须一致）。  
-- **`AgentLoopNode`** 在 **组装首轮 `LLMInput`** 时：将 **`pending_injected_context`** 按 §3.4 拼入 **`LLMInput.context`**；**消费后清空** `pending_injected_context`（**同一轮** 仅消费一次）。  
+- 在 **读取 stdin / 得到 raw 用户串之后**、**调用 `build_cli_agent_graph` 之前**（demo 或图工厂包装）：
+  1. `UserInputPreprocessor prep(opt);`
+  2. `auto out = prep.process(raw, ctx);`
+  3. **`agent_state->initial_user_prompt = out.llm_user_text`**；
+  4. **`agent_state->pending_injected_context = std::move(out.injected_context)`**；**`pending_control_actions = std::move(out.control_actions)`**；**`pending_input_violations = std::move(out.tier_a_violations)`**（字段名以头文件为准，**语义** 须一致）。
+- **`AgentLoopNode`** 在 **组装首轮 `LLMInput`** 时：将 **`pending_injected_context`** 按 §3.4 拼入 **`LLMInput.context`**；**消费后清空** `pending_injected_context`（**同一轮** 仅消费一次）。
 - **`control_actions`**：**首轮** 在 **进入 LLM 前** 调用 **注册表 stub**（`/memory compact` → 空操作或回调 WP2.9；**不得** 静默丢弃）；**消费后清空**。
 
 ### 5.3 A2A
 
-- 将 **user 角色** 的 `AgentMessage` **文本部分** 按规范 **顺序拼接为单一 UTF-8 字符串** 后，调用 **同一** `UserInputPreprocessor::process`。  
+- 将 **user 角色** 的 `AgentMessage` **文本部分** 按规范 **顺序拼接为单一 UTF-8 字符串** 后，调用 **同一** `UserInputPreprocessor::process`。
 - **`ExecutionContext::session_id` / `task_id`** 从 **A2A task / message metadata** 填入（与 [plan-detailed.v2.md](./plan-detailed.v2.md) §9 字段名 **对齐已有** C++ 结构体，无则 `nullopt`）。
 
 ---
@@ -181,8 +181,8 @@ public:
 
 | 路径 | 职责 |
 |------|------|
-| `include/agent/execution_context.hpp` + `src/agent/execution_context.cpp` | 构造、env |
-| `include/agent/user_input_preprocessor.hpp` + `src/agent/user_input_preprocessor.cpp` | Tier A 扫描、ToolBus 调用、1c 钩子 |
+| `include/agent/agent/execution_context.hpp` + `src/agent/execution_context.cpp` | 构造、env |
+| `include/agent/agent/user_input_preprocessor.hpp` + `src/agent/user_input_preprocessor.cpp` | Tier A 扫描、ToolBus 调用、1c 钩子 |
 | `include/agent/internal/agent_thread_state.hpp`（若需） | `pending_injected_context` 等 |
 | [`agent_loop_node.cpp`](../../src/node/agent_loop_node.cpp) | 读 pending 注入 **进** `LLMInput`；**执行** `control_actions` **分发 stub**（**memory** 调 **空函数** 或 **回调** 注册表，**WP2.9** 实现体） |
 | [`cli_agent_graph.cpp`](../../src/graph_executor/cli_agent_graph.cpp) 或 **demo** | 调用 `preprocess` 或 **文档**要求调用方先预处理 |
@@ -238,22 +238,22 @@ flowchart TD
 
 ## 10. 验收清单（DoD）
 
-- [ ] **D8**：Tier A **至少** `@file`、`@url`、`/cmd` **各 1** 条 **正向** + **各 1** 条 **负向** 单测。  
-- [ ] **`ExecutionContext`** 进入 **日志** 或 **`LLMInput.extra_variables`**（**可观测**）。  
-- [ ] **WP2.1c** 钩子 **调用**（或 **同字节语义** 占位 **在 PR 描述** 写明债务）。  
-- [ ] **`user-input-dsl.md`** 与 **§3.1 `@file` 文法** **一字不差** 同步代码。  
-- [ ] **`/mcp`** **未** 实现热加载（**stub** 行为与文档一致）。  
+- [ ] **D8**：Tier A **至少** `@file`、`@url`、`/cmd` **各 1** 条 **正向** + **各 1** 条 **负向** 单测。
+- [ ] **`ExecutionContext`** 进入 **日志** 或 **`LLMInput.extra_variables`**（**可观测**）。
+- [ ] **WP2.1c** 钩子 **调用**（或 **同字节语义** 占位 **在 PR 描述** 写明债务）。
+- [ ] **`user-input-dsl.md`** 与 **§3.1 `@file` 文法** **一字不差** 同步代码。
+- [ ] **`/mcp`** **未** 实现热加载（**stub** 行为与文档一致）。
 
 ---
 
 ## 11. 相关链接
 
-- [phase-2-plan.md](./phase-2-plan.md)  
-- [plan-detailed.v2.md](./plan-detailed.v2.md) §5.1  
-- [phase-2-wp1c.md](./phase-2-wp1c.md)  
-- [phase-2-wp0.md](./phase-2-wp0.md)  
-- [builtin-fs-tools.md](./builtin-fs-tools.md)  
-- [builtin-web-tools.md](./builtin-web-tools.md)  
+- [phase-2-plan.md](./phase-2-plan.md)
+- [plan-detailed.v2.md](./plan-detailed.v2.md) §5.1
+- [phase-2-wp1c.md](./phase-2-wp1c.md)
+- [phase-2-wp0.md](./phase-2-wp0.md)
+- [builtin-fs-tools.md](./builtin-fs-tools.md)
+- [builtin-web-tools.md](./builtin-web-tools.md)
 
 ---
 

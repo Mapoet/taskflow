@@ -2,7 +2,7 @@
 
 本文档说明 `ToolBus::call_tool` 上的**同步、可链式** before-call hook：`Allow` / `Deny` / `Replace`，以及与 **`AGENT_TOOL_ALLOWLIST`**、**WP2.1b 并行** 的组合语义。
 
-**实现参考**：[`types.hpp`](../../include/agent/types.hpp)（`ToolHookVerdict`）、[`toolbus.hpp`](../../include/agent/toolbus.hpp)（`ToolHookResult`、`ToolCallHook`、API）/ [`toolbus.cpp`](../../src/toolbus/toolbus.cpp)。**详案**：[phase-2-wp1d.md](./phase-2-wp1d.md)。
+**实现参考**：[`types.hpp`](../../include/agent/core/types.hpp)（`ToolHookVerdict`）、[`toolbus.hpp`](../../include/agent/toolbus/toolbus.hpp)（`ToolHookResult`、`ToolCallHook`、API）/ [`toolbus.cpp`](../../src/toolbus/toolbus.cpp)。**详案**：[phase-2-wp1d.md](./phase-2-wp1d.md)。
 
 ---
 
@@ -108,5 +108,5 @@ bus.add_tool_call_hook([root](const std::string& name, const json& args) -> Tool
 
 ---
 
-**文档版本**：0.1  
+**文档版本**：0.1
 **日期**：2026-04-05

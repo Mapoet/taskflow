@@ -2,8 +2,8 @@
 
 本文档将 [phase-1-plan.md](./phase-1-plan.md) **§3 WP1.4** 细化为可执行任务、`LLMInput` → `RenderedPrompt` 契约、历史截断规则、供应商差异吸收方式与测试策略。与 [phase-1-wp1.md](./phase-1-wp1.md)（适配器只消费 `RenderedPrompt`）对齐：**本 WP 产出稳定 messages/tools_json，供应商差异主要在适配器第二遍映射（若需）**。
 
-**文档版本**：0.1  
-**日期**：2026-03-31  
+**文档版本**：0.1
+**日期**：2026-03-31
 **上游依据**：`phase-1-plan.md` v0.1（任务 1.4.1–1.4.3）
 
 ---
@@ -32,7 +32,7 @@
 
 ## 2. 类型与头文件契约
 
-### 2.1 现有定义（`include/agent/types.hpp`）
+### 2.1 现有定义（`include/agent/core/types.hpp`）
 
 - **`LLMInput`**：`system_prompt`、`user_prompt`、`context`、`tools`、`history`、`image_data`、`audio_data`。
 - **`RenderedPrompt`**：`rendered_text`、`messages`（注释为 OpenAI messages 形态）、`tools_json`、`image_data`、`audio_data`、`total_tokens`。
@@ -48,7 +48,7 @@
 
 本文件 **默认**：优先 **扩展 `RenderedPrompt` + `Message`**，避免适配器从纯文本猜结构。
 
-### 2.3 `include/agent/prompt_renderer.hpp`（与实现对齐）
+### 2.3 `include/agent/prompt_renderer/prompt_renderer.hpp`（与实现对齐）
 
 - **`PromptRenderer` 构造**：当前为 `explicit PromptRenderer(shared_ptr<PromptTemplate>)`；需支持 **无模板** 路径（纯结构化 messages），建议增加 **默认构造** 或 **`PromptRenderer::create_default()`**，内部使用 **空模板** / 跳过 `rendered_text`。
 - **`register_tool_formatter(model_pattern, formatter)`**：实现 **通配符匹配**（`gpt-*`、`claude-*`）或前缀表；未命中时 **回退 `OpenAIToolFormatter`** 并 `std::clog` 警告。
@@ -80,8 +80,8 @@
 
 **固定策略（择一写死）**：
 
-- **A**：追加到 system：`system_prompt + "\n\n## Retrieved context\n" + context`  
-- **B**：插入 user 前：`user_prompt` → `"Context:\n" + context + "\n\nQuestion:\n" + user_prompt`  
+- **A**：追加到 system：`system_prompt + "\n\n## Retrieved context\n" + context`
+- **B**：插入 user 前：`user_prompt` → `"Context:\n" + context + "\n\nQuestion:\n" + user_prompt`
 
 推荐 **A**（system 更易缓存）；在 tracker 单行注释中写明。
 
@@ -112,8 +112,8 @@
 ### 4.3 `HistoryFormatter::truncate`
 
 - 默认实现 **`OpenAIHistoryFormatter::truncate`**：应用 §4.2 规则。
-- **`format_as_messages`**：  
-  - `role == "tool"` → `{"role","content","tool_call_id"}`（依赖 T-TYPES）  
+- **`format_as_messages`**：
+  - `role == "tool"` → `{"role","content","tool_call_id"}`（依赖 T-TYPES）
   - `assistant` 若有 `tool_calls` json → 原样放入
 
 ---
@@ -239,10 +239,10 @@ flowchart TD
 
 ## 9. 相关链接
 
-- [phase-1-plan.md](./phase-1-plan.md) — WP1.4 摘要  
-- [phase-1-wp1.md](./phase-1-wp1.md) — `RenderedPrompt` 消费方  
-- [phase-1-plan.md](./phase-1-plan.md) §3 WP1.5 — Agent 循环与 `history` 写入需与本 WP 当前轮 user 规则一致  
-- `include/agent/prompt_renderer.hpp`、`include/agent/types.hpp`
+- [phase-1-plan.md](./phase-1-plan.md) — WP1.4 摘要
+- [phase-1-wp1.md](./phase-1-wp1.md) — `RenderedPrompt` 消费方
+- [phase-1-plan.md](./phase-1-plan.md) §3 WP1.5 — Agent 循环与 `history` 写入需与本 WP 当前轮 user 规则一致
+- `include/agent/prompt_renderer/prompt_renderer.hpp`、`include/agent/core/types.hpp`
 
 ---
 

@@ -6,8 +6,8 @@
 
 **不交付**：工具返回体大小截断与外置引用（**WP2.1c**）；allow / deny / 改参 hook（**WP2.1d**）；与 hook 组合的完整策略矩阵（**WP2.1d** 文档）。
 
-**文档版本**：0.1  
-**日期**：2026-04-04  
+**文档版本**：0.1
+**日期**：2026-04-04
 **上游依据**：[phase-2-plan.md](./phase-2-plan.md) v0.3；[plan-detailed.v2.md](./plan-detailed.v2.md) §6.1（WP2.1b DoD）；[deep_dive_execution.md](../agents/deep_dive_execution.md) §1.2（当前串行现状）
 
 ---
@@ -31,8 +31,8 @@
 | [`agent_loop_node.cpp`](../../src/node/agent_loop_node.cpp) `body_func` | 注释 `// tools (sequential)`：`for (c : calls) toolbus->call_tool(...).get()` |
 | 同文件 `ToolAggregator` | 同样 **顺序** `call_tool` |
 | [`tool_call_node.cpp`](../../src/node/tool_call_node.cpp) `create_parallel` | 对 **整表** `call_list` **无差别** `std::async`+`get` 并行，**无**读/写分类、**无**并发上限 |
-| [`types.hpp`](../../include/agent/types.hpp) `ToolMeta` | 仅 `name` / `schema` / `description`，**无**副作用类别字段 |
-| [`types.hpp`](../../include/agent/types.hpp) `ToolInfo` | 含 `is_heavy`、`is_io_bound` 等，**与读/写语义正交**，本 WP **不**复用为写工具判定 |
+| [`types.hpp`](../../include/agent/core/types.hpp) `ToolMeta` | 仅 `name` / `schema` / `description`，**无**副作用类别字段 |
+| [`types.hpp`](../../include/agent/core/types.hpp) `ToolInfo` | 含 `is_heavy`、`is_io_bound` 等，**与读/写语义正交**，本 WP **不**复用为写工具判定 |
 
 ---
 
@@ -116,11 +116,11 @@ enum class ToolSideEffect {
 
 | 路径 | 职责 |
 |------|------|
-| `include/agent/types.hpp` | `enum class ToolSideEffect`；`tool_side_effect_from_string(std::string_view)`（可选，供配置） |
-| `include/agent/toolbus.hpp` | `ToolOrchestrationOptions`、`resolve_tool_orchestration_options`、`ToolSideEffectResolver`、`execute_tool_calls_sequenced`（与 `ToolBus` 同头文件） |
+| `include/agent/core/types.hpp` | `enum class ToolSideEffect`；`tool_side_effect_from_string(std::string_view)`（可选，供配置） |
+| `include/agent/toolbus/toolbus.hpp` | `ToolOrchestrationOptions`、`resolve_tool_orchestration_options`、`ToolSideEffectResolver`、`execute_tool_calls_sequenced`（与 `ToolBus` 同头文件） |
 | `src/toolbus/tool_orchestration.cpp`（或 `src/node/tool_orchestration.cpp`） | `std::vector<json> execute_tool_calls_sequenced(std::shared_ptr<ToolBus> bus, const std::vector<CallSpec>& calls, const ToolOrchestrationOptions&, SideEffectResolver)`；**副作用解析器**签名：`ToolSideEffect(std::string_view tool_name)`，由调用方传入 lambda：内部 `bus->get_tool_meta(name)` 读元数据 |
-| `include/agent/types.hpp` | 在 **`ToolMeta`** 增加 `ToolSideEffect side_effect = ToolSideEffect::Unknown;`（或 `std::optional` + 默认 unknown）— **与 JSON 导出无关字段**，`export_as_llm_tools` **不**需把该字段发给 LLM（避免污染 OpenAI schema） |
-| `include/agent/toolbus.hpp` / `toolbus.cpp` | `register_local_tool` / MCP 注册路径：允许传入 `ToolSideEffect` 或从 `ToolMeta` 读取；`get_tool_meta` 已存在，返回结构 **含** `side_effect` |
+| `include/agent/core/types.hpp` | 在 **`ToolMeta`** 增加 `ToolSideEffect side_effect = ToolSideEffect::Unknown;`（或 `std::optional` + 默认 unknown）— **与 JSON 导出无关字段**，`export_as_llm_tools` **不**需把该字段发给 LLM（避免污染 OpenAI schema） |
+| `include/agent/toolbus/toolbus.hpp` / `toolbus.cpp` | `register_local_tool` / MCP 注册路径：允许传入 `ToolSideEffect` 或从 `ToolMeta` 读取；`get_tool_meta` 已存在，返回结构 **含** `side_effect` |
 | `src/node/agent_loop_node.cpp` | `body_func` 与 `ToolAggregator`：**替换** 裸 `for` 为 `execute_tool_calls_sequenced`（或内联薄封装），传入 **repeat guard 前置** 已通过的 `calls` |
 | `src/node/tool_call_node.cpp` | `create_parallel`：**改为** 调用同一编排函数且 **默认选项为关闭并行**；或 **弃用** 并在头文件 `@deprecated` 指向编排 API（二选一在 PR 描述写明；**推荐** 复用编排 + `parallel_on` 由调用方传入） |
 | `src/graph_executor/cli_agent_graph.cpp`（及任何构造 `AgentConfig` 处） | 从 env 合并 `ToolOrchestrationOptions`（若尚未集中在 `resolve`） |
@@ -199,11 +199,11 @@ flowchart TD
 
 ## 11. 相关链接
 
-- [phase-2-plan.md](./phase-2-plan.md)  
-- [plan-detailed.v2.md](./plan-detailed.v2.md) §6.1  
-- [phase-1-wp2.md](./phase-1-wp2.md)（ToolBus / allowlist）  
-- [deep_dive_execution.md](../agents/deep_dive_execution.md)  
-- [tool_call_node.hpp](../../include/node/tool_call_node.hpp)  
+- [phase-2-plan.md](./phase-2-plan.md)
+- [plan-detailed.v2.md](./plan-detailed.v2.md) §6.1
+- [phase-1-wp2.md](./phase-1-wp2.md)（ToolBus / allowlist）
+- [deep_dive_execution.md](../agents/deep_dive_execution.md)
+- [tool_call_node.hpp](../../include/node/tool_call_node.hpp)
 - [agent_loop_node.cpp](../../src/node/agent_loop_node.cpp)
 
 ---

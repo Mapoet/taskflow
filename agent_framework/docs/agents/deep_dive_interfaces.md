@@ -4,7 +4,7 @@
 
 ### 1.1 工具抽象
 
-- **`ToolInterface`**：`call(name, args) -> future<json>`、`get_tool_meta`、`validate_arguments` 等（`agent_framework/include/agent/toolbus.hpp`）。
+- **`ToolInterface`**：`call(name, args) -> future<json>`、`get_tool_meta`、`validate_arguments` 等（`agent_framework/include/agent/toolbus/toolbus.hpp`）。
 - **`LocalTool`**：包装 `std::function<json(const json&)>`，便于单元测试与轻量扩展。
 - **`ToolBus`**：注册本地工具、加载 MCP 服务、导出 `export_as_llm_tools()`；调用路径上带 **JSON Schema 校验**（`call_tool` 内）。
 

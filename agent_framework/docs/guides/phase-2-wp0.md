@@ -2,8 +2,8 @@
 
 本文档将 [phase-2-plan.md](./phase-2-plan.md) **§4 WP2.0** 与交付项 **D1**（统一执行入口）、**D11**（多轮 `NextAgentState` / `history` 写回）落实为**无歧义、可按 PR 顺序落地**的任务、接口、算法与测试。范围**仅限**本 WP；不实现 WP2.1–2.6（A2A Server）、WP2.7（完整输入 DSL）、WP2.9（压缩策略深化）— 仅预留与本 WP 的衔接点。
 
-**文档版本**：0.1  
-**日期**：2026-04-04  
+**文档版本**：0.1
+**日期**：2026-04-04
 **上游依据**：[phase-2-plan.md](./phase-2-plan.md) v0.1；[plan-detailed.v2.md](./plan-detailed.v2.md) §5.1、§6.1 WP2.0；[phase-1-plan.md](./phase-1-plan.md)（阶段 1 已交付基线）
 
 ---
@@ -61,9 +61,9 @@
 | 类型 | 路径 | 本 WP 动作 |
 |------|------|------------|
 | `internal::AgentThreadState` | `include/agent/internal/agent_thread_state.hpp` | **可选**：增加 `void clear_ephemeral_for_new_turn()`（清 `last_error` 等）；**非必须** |
-| `WorkflowResult` | `include/agent/types.hpp` | **必须**：执行路径填充字段；不删现有成员 |
-| `CliAgentTerminalSinkOptions` | `include/agent/graph_executor.hpp` | **已有** `on_final_state`；本 WP **必须**在统一执行路径中**默认接上**写回逻辑（调用方仍可覆盖） |
-| `GraphExecutor` | `include/agent/graph_executor.hpp` | **新增**方法 + **废弃/替换**旧 `execute(string)`（§6） |
+| `WorkflowResult` | `include/agent/core/types.hpp` | **必须**：执行路径填充字段；不删现有成员 |
+| `CliAgentTerminalSinkOptions` | `include/agent/graph_executor/graph_executor.hpp` | **已有** `on_final_state`；本 WP **必须**在统一执行路径中**默认接上**写回逻辑（调用方仍可覆盖） |
+| `GraphExecutor` | `include/agent/graph_executor/graph_executor.hpp` | **新增**方法 + **废弃/替换**旧 `execute(string)`（§6） |
 
 ### 3.2 建议新增：运行请求聚合体（避免 12 个参数）
 
@@ -288,9 +288,9 @@ flowchart LR
 
 ## 12. 相关链接
 
-- [phase-2-plan.md](./phase-2-plan.md)  
-- [plan-detailed.v2.md](./plan-detailed.v2.md) §5.1  
-- [graph_executor.hpp](../include/agent/graph_executor.hpp)  
-- [agent_thread_state.hpp](../include/agent/internal/agent_thread_state.hpp)  
-- [phase-1-wp5.md](./phase-1-wp5.md)（Agent 循环与构图）  
+- [phase-2-plan.md](./phase-2-plan.md)
+- [plan-detailed.v2.md](./plan-detailed.v2.md) §5.1
+- [graph_executor.hpp](../include/agent/graph_executor/graph_executor.hpp)
+- [agent_thread_state.hpp](../include/agent/internal/agent_thread_state.hpp)
+- [phase-1-wp5.md](./phase-1-wp5.md)（Agent 循环与构图）
 - [deep_dive_execution.md](../agents/deep_dive_execution.md)（GraphExecutor 缺口背景）

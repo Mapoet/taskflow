@@ -73,10 +73,12 @@ jobs:
       run: |
         cmake --install build-stage10-ci --prefix "$RUNNER_TEMP/taskflow-stage10"
         test -x "$RUNNER_TEMP/taskflow-stage10/bin/skillctl"
+        test -f "$RUNNER_TEMP/taskflow-stage10/include/agent/core/types.hpp"
         test -f "$RUNNER_TEMP/taskflow-stage10/include/agent/skills/skill_config.hpp"
         test -f "$RUNNER_TEMP/taskflow-stage10/include/agent/skills/skill_audit.hpp"
-        test -f "$RUNNER_TEMP/taskflow-stage10/include/agent/skill_config.hpp"
         test -f "$RUNNER_TEMP/taskflow-stage10/include/node/nodes.hpp"
+        test ! -e "$RUNNER_TEMP/taskflow-stage10/include/agent/types.hpp"
+        test ! -e "$RUNNER_TEMP/taskflow-stage10/include/agent/skill_config.hpp"
         test -f "$RUNNER_TEMP/taskflow-stage10/share/agent_framework/schemas/skill-manifest-v1.schema.json"
 
   debug-test-cpp20-extended:

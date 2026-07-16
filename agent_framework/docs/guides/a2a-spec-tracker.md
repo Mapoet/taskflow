@@ -1,6 +1,6 @@
 # A2A 规范锚点（spec tracker）
 
-**路径**：`agent_framework/docs/guides/a2a-spec-tracker.md`（固定，供 WP2.1 / WP2.2 / WP2.4 引用）  
+**路径**：`agent_framework/docs/guides/a2a-spec-tracker.md`（固定，供 WP2.1 / WP2.2 / WP2.4 引用）
 **范围**：WP2.1a：**Agent Card（Well-Known）** 与 **JSON-RPC 2.0 通用层**；WP2.1：**方法表、Task/Message/Artifact ProtoJSON 映射、SSE 载荷、dispatch_table**。
 
 **规范正文权威**：以 [A2A Specification v1.0.0](https://a2a-protocol.org/v1.0.0/specification) 及上游仓库 **`specification/a2a.proto`**（package `lf.a2a.v1`）的 **ProtoJSON（camelCase 字段名）** 为准。本文件为仓库实现对照表；若与网站示例冲突，以 **proto** 为准。
@@ -37,7 +37,7 @@
 ### 2.1 Task state（WP2.3 索引）
 
 - **Wire 字符串 ↔ `AgentTaskStatus`** 的**唯一权威对照表**见 **§6.4**（`TASK_STATE_*` ↔ `PENDING` / `WORKING` / …）。
-- **运行时状态迁移**（合法边、非法边拒绝）由 C++ **`try_transition`**（`include/agent/task_state_machine.hpp`）执行；Wire 层仍通过 **`agent_task_status_to_a2a_state` / `agent_task_status_from_a2a_state`**（`wire_mapping`）编解码。
+- **运行时状态迁移**（合法边、非法边拒绝）由 C++ **`try_transition`**（`include/agent/agent/task_state_machine.hpp`）执行；Wire 层仍通过 **`agent_task_status_to_a2a_state` / `agent_task_status_from_a2a_state`**（`wire_mapping`）编解码。
 - **超时失败**：本仓库在 `Task.metadata` 使用键 **`a2a_failure_reason`**，超时取字面 **`timeout`**（与 §6.4 `TASK_STATE_FAILED` 并存；详见 [agent-server.md](./agent-server.md)）。
 
 ### 2.2 WP2.4 Client literals（索引）

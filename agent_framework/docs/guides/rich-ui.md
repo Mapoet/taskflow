@@ -43,7 +43,7 @@ cmake --build build --parallel -t web_ui_demo
 
 - **系统包（Debian/Ubuntu）**：`libncurses-dev`（或提供 **ncursesw** 的开发包）。CMake 使用 **`CURSES_NEED_WIDE_CHAR`**，渲染与输入走 **宽字符 API**（`mvwaddnwstr` / `wget_wch`），配合 **`setlocale(LC_ALL, "")`** 与 **UTF-8 按列宽换行**（`wcwidth`），以正确显示 **中文**。
 - **Skills / MCP**：与 **`cli_agent_skills_demo`** 对齐——默认合并扫描 `~/.cursor/skills` 与 `~/.cursor/skills-cursor`（可用 **`AGENT_SKILLS_DIR`** 覆写为单根）；默认加载 Cursor **`mcp.json`**（**`--no-cursor-mcp`** 或 `AGENT_CLI_SKIP_CURSOR_MCP` 等跳过）；**`AGENT_SKILL_INJECT_CATALOG`** 可注入技能短表。
-- **运行**：全屏 TUI；底栏输入，回车提交；`Ctrl+C` 退出。类 **`TuiHandler`** 位于 `include/agent/tui/tui_handler.hpp`（缓冲 UTF-8 文本，渲染在 demo 内完成）。
+- **运行**：全屏 TUI；底栏输入，回车提交；`Ctrl+C` 退出。类 **`TuiHandler`** 位于 `include/agent/ui/tui_handler.hpp`（缓冲 UTF-8 文本，渲染在 demo 内完成）。
 
 ## Track W — `web_ui_demo`
 

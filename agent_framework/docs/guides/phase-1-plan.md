@@ -2,8 +2,8 @@
 
 本文档在 [plan-detailed.md](./plan-detailed.md) **§4** 的工作包与交付定义之上，给出**可排期、可验收**的实现拆解、依赖顺序、配置与测试矩阵。阶段 2（A2A，及 **plan-detailed §5.4/§7** 中的 ImGui/TUI/Web 富界面）与阶段 3（RAG）仅在与阶段 1 的衔接处被引用，不纳入本文件范围。
 
-**文档版本**：0.5  
-**日期**：2026-04-04  
+**文档版本**：0.5
+**日期**：2026-04-04
 **上游依据**：`plan-detailed.md` v0.2（含 WP1.1–WP1.8）
 
 ---
@@ -36,10 +36,10 @@
 
 | 区域 | 主要路径 | 说明 |
 |------|----------|------|
-| 类型与协议 | `include/agent/types.hpp` | `LLMInput` / `LLMOutput` / `ToolMeta` / `Message` 等已定义，需与适配器一致 |
+| 类型与协议 | `include/agent/core/types.hpp` | `LLMInput` / `LLMOutput` / `ToolMeta` / `Message` 等已定义，需与适配器一致 |
 | LLM | `src/llm_client/*.cpp` | `llm_client.cpp`、各 OpenAI/Anthropic/vLLM 适配器需实现 `invoke` / 流式 / tool 解析 |
 | 提示词 | `src/prompt_renderer/*.cpp` | 与 `RenderedPrompt`、各供应商消息格式对齐 |
-| 工具 | `src/toolbus/*.cpp`、`include/agent/toolbus.hpp` | 注册、校验、`call_tool`、`export_as_llm_tools` |
+| 工具 | `src/toolbus/*.cpp`、`include/agent/toolbus/toolbus.hpp` | 注册、校验、`call_tool`、`export_as_llm_tools` |
 | MCP | `src/toolbus/mcp_client.cpp`、`src/mcp_client/mcp_client.cpp` | 需统一入口与 ToolBus 注册；**建议先 stdio 后 HTTP**（与 plan-detailed §4.4 一致） |
 | 节点与模板 | `src/node/llm_node.cpp`、agent_loop、tool_call | 将真实 client 接入 `workflow`，避免长期占位 lambda |
 | CLI | `src/ui/cli_handler.cpp`、`ui_manager.cpp` | REPL、信号、日志级别 |
@@ -305,9 +305,9 @@ flowchart LR
 
 ## 8. 相关链接
 
-- [plan-detailed.md](./plan-detailed.md) — 三阶段总规划  
-- [plan-detailed.v2.md](./plan-detailed.v2.md) — 阶段 2/3 深化包（Verifier、工具升格、输入 DSL、记忆）  
-- [phase-2-plan.md](./phase-2-plan.md) — 阶段 2 详细规划（WP2.x）  
-- [skills.md](./skills.md) — Skills / Harness 概念（WP1.8）  
-- [../architecture/overview.md](../architecture/overview.md) — 模块与 A2A 现状  
+- [plan-detailed.md](./plan-detailed.md) — 三阶段总规划
+- [plan-detailed.v2.md](./plan-detailed.v2.md) — 阶段 2/3 深化包（Verifier、工具升格、输入 DSL、记忆）
+- [phase-2-plan.md](./phase-2-plan.md) — 阶段 2 详细规划（WP2.x）
+- [skills.md](./skills.md) — Skills / Harness 概念（WP1.8）
+- [../architecture/overview.md](../architecture/overview.md) — 模块与 A2A 现状
 - `readme/guide_agent.v3.md` — 设计长文（工作流语义）

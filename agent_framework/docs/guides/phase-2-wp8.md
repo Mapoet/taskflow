@@ -6,8 +6,8 @@
 
 **不交付**：**WP2.9** 记忆压缩实现；**人工工单系统**（**`abort`** 仅 **任务失败/退出码**，不接外部 escalation 平台）；**Verifier 专用向量/RAG**；对主模型输出的 **自动改写**（**仅** `retry_main` **注入 hint**，由 **主模型** 自改）。
 
-**文档版本**：0.2  
-**日期**：2026-04-04  
+**文档版本**：0.2
+**日期**：2026-04-04
 **上游依据**：[phase-2-plan.md](./phase-2-plan.md)；[plan-detailed.v2.md](./plan-detailed.v2.md) §6.2、§6.1、§9；[`agent_loop_node.cpp`](../../src/node/agent_loop_node.cpp)（`kFinalAnswer` / `exit_func`）；[phase-2-wp3.md](./phase-2-wp3.md)（SSE、任务状态）
 
 ---
@@ -43,10 +43,10 @@ flowchart LR
 
 **术语**：
 
-- **MAIN**：现有 **ReAct / AgentLoop** 子图（**可含 ToolBus**）。  
-- **OUT**：**物化** `draft_final_answer` + **快照** `VerifierInput`（§3）。  
-- **VRF**：**单次**（v1 **禁止** Verifier 内再调工具）**聊天补全** 调用 **`LLMClient`**（**profile B**）。  
-- **FIX**：根据 **`VerifierResult`** 更新 **`AgentThreadState`**（注入 hint、递增 **Verifier 重试计数**），**条件** 回到 MAIN。  
+- **MAIN**：现有 **ReAct / AgentLoop** 子图（**可含 ToolBus**）。
+- **OUT**：**物化** `draft_final_answer` + **快照** `VerifierInput`（§3）。
+- **VRF**：**单次**（v1 **禁止** Verifier 内再调工具）**聊天补全** 调用 **`LLMClient`**（**profile B**）。
+- **FIX**：根据 **`VerifierResult`** 更新 **`AgentThreadState`**（注入 hint、递增 **Verifier 重试计数**），**条件** 回到 MAIN。
 - **PUB**：CLI **打印**/Sink、A2A **COMPLETED** + 最终 artifact。
 
 **v1 约束**：Verifier **不** 注册 **任何** `ToolBus` 工具；**`LLMInput.tools` 为空**；温度 **0.0**（或 **`AGENT_VERIFIER_TEMPERATURE`** 默认 **0**）。
@@ -99,8 +99,8 @@ Verifier **必须** 输出 **唯一** 顶层 JSON 对象（**无** markdown 围�
 
 **缺省规则**（解析合法 JSON 后 **缺键** 时 **合成**）：
 
-- 缺 `issues` → **`[]`**。  
-- 缺 `ok` → **`false`**。  
+- 缺 `issues` → **`[]`**。
+- 缺 `ok` → **`false`**。
 - 缺 `suggested_action`：若 **`ok==true`** → **`pass`**；若 **`ok==false`** → **`retry_main`** 当 **`retry_count < max`**（§5），否则 **`pass_through`**。
 
 ---
@@ -109,24 +109,24 @@ Verifier **必须** 输出 **唯一** 顶层 JSON 对象（**无** markdown 围�
 
 定义：
 
-- **`retry_count`**：挂在 **`AgentThreadState`**（或 **图外环共享态**）的 **`verifier_retry_count`**，**每次** 从 FIX **回到** MAIN 前 **`++`**。  
+- **`retry_count`**：挂在 **`AgentThreadState`**（或 **图外环共享态**）的 **`verifier_retry_count`**，**每次** 从 FIX **回到** MAIN 前 **`++`**。
 - **`max_retries`**：**`AGENT_VERIFIER_MAX_RETRIES`**，默认 **`1`**（即 **最多 1 次** 额外主循环；**加上** 首次 MAIN 共 **2** 次主图机会 — **字面**：**重试次数** 指 **Verifier 触发的额外 MAIN 次数**）。
 
 ### 5.1 判定顺序（实现 **必须** 按序执行）
 
-1. **`suggested_action == "abort"`** → **ABORT**（§5.2），**无论** `ok`。  
-2. **`ok == true`** → **PASS** → **PUB**（**不再** 解释 `suggested_action`，**除** 步骤 1 已处理 **`abort`**）。  
-3. **`ok == false`**：  
-   - **`suggested_action == "retry_main"`** 且 **`retry_count < max_retries`** → **FIX**（§5.3）→ **`retry_count++`** → **MAIN**。  
-   - **`suggested_action == "retry_main"`** 且 **`retry_count >= max_retries`** → **等同** **`pass_through`**：**PUB** + **`verifier_ok:false`**。  
-   - **`suggested_action`** 为 **`pass_through`** 或 **`pass`** → **PUB** + **`verifier_ok:false`**。  
+1. **`suggested_action == "abort"`** → **ABORT**（§5.2），**无论** `ok`。
+2. **`ok == true`** → **PASS** → **PUB**（**不再** 解释 `suggested_action`，**除** 步骤 1 已处理 **`abort`**）。
+3. **`ok == false`**：
+   - **`suggested_action == "retry_main"`** 且 **`retry_count < max_retries`** → **FIX**（§5.3）→ **`retry_count++`** → **MAIN**。
+   - **`suggested_action == "retry_main"`** 且 **`retry_count >= max_retries`** → **等同** **`pass_through`**：**PUB** + **`verifier_ok:false`**。
+   - **`suggested_action`** 为 **`pass_through`** 或 **`pass`** → **PUB** + **`verifier_ok:false`**。
    - **`suggested_action`** **非** 上述枚举值 → **等同** **`pass_through`**（**PUB** + **`verifier_ok:false`** + 日志 **`action=unknown_normalized`**）。
 
 **`issues[].severity`**：**不** 参与分支；**仅** 用于 **日志 / SSE / 人工阅读**（模型 **应** 在严重问题时使用 **`block`**）。
 
 ### 5.2 ABORT 行为
 
-- **CLI**：**stderr** 打印 **`[verifier] abort …`** + **issues 首条** `code`/`detail` **截断**；进程 **退出码 `4`**（**与** WP2.7 输入质控 **`3`** **区分**）。  
+- **CLI**：**stderr** 打印 **`[verifier] abort …`** + **issues 首条** `code`/`detail` **截断**；进程 **退出码 `4`**（**与** WP2.7 输入质控 **`3`** **区分**）。
 - **A2A**：任务 **`FAILED`**，`error` / `message` **含** **`verifier_abort`**；SSE **推送** §6 事件 **`failed`**。
 
 ### 5.3 `retry_main` 的 FIX 注入（固定）
@@ -152,12 +152,12 @@ Issues (JSON): <issues_json_compact>
 
 每条 Verifier **调用** **一行**（**`std::clog`** 或项目统一门面），**键值对** 稳定：
 
-- **`[verifier]`**  
-- **`task_id=`** / **`session_id=`**（若有）  
-- **`ok=`** `0|1`  
-- **`action=`** `pass|retry_main|pass_through|abort`（**解析后** **有效** action）  
-- **`issues_count=`**  
-- **`latency_ms=`**  
+- **`[verifier]`**
+- **`task_id=`** / **`session_id=`**（若有）
+- **`ok=`** `0|1`
+- **`action=`** `pass|retry_main|pass_through|abort`（**解析后** **有效** action）
+- **`issues_count=`**
+- **`latency_ms=`**
 - **`outcome=`** `published|retrying|aborted|skipped`
 
 ### 6.2 SSE（A2A）
@@ -186,8 +186,8 @@ Issues (JSON): <issues_json_compact>
 
 ## 7. 第二套 LLMClient（2.8.1）
 
-- **实现**：**独立** `std::shared_ptr<LLMClient> verifier_llm`，由 **工厂** `make_verifier_llm_client_from_env()` 创建；配置 **读取** **`AGENT_VERIFIER_*`**，**未设置** 的键 **回退** 到 **`AGENT_LLM_*`**（或项目现有主配置键名）。  
-- **系统提示（Verifier system prompt）**：**入仓** **常量模板** **`kVerifierSystemPrompt`**（**英文**），要求 **仅** 输出 §4 JSON；**禁止** 建议调用工具。  
+- **实现**：**独立** `std::shared_ptr<LLMClient> verifier_llm`，由 **工厂** `make_verifier_llm_client_from_env()` 创建；配置 **读取** **`AGENT_VERIFIER_*`**，**未设置** 的键 **回退** 到 **`AGENT_LLM_*`**（或项目现有主配置键名）。
+- **系统提示（Verifier system prompt）**：**入仓** **常量模板** **`kVerifierSystemPrompt`**（**英文**），要求 **仅** 输出 §4 JSON；**禁止** 建议调用工具。
 - **User message**：**序列化** `VerifierInput` 为 **可读** 多段文本 **或** **单段 JSON** — **固定**：**单段 JSON** `dump()`，键名与 §3 表一致，**便于** 单测 **快照**。
 
 ---
@@ -196,10 +196,10 @@ Issues (JSON): <issues_json_compact>
 
 若 **响应非 JSON** / **parse throw** / **缺必填键**（在应用 §4 缺省规则 **之后** `issues` 仍不可用）：
 
-- **合成** `VerifierResult`：  
-  - `ok: false`  
-  - `issues: [{ "code": "verifier_parse_error", "severity": "block", "detail": "<截断原始响应前缀256字符>" }]`  
-  - `suggested_action: "pass_through"`  
+- **合成** `VerifierResult`：
+  - `ok: false`
+  - `issues: [{ "code": "verifier_parse_error", "severity": "block", "detail": "<截断原始响应前缀256字符>" }]`
+  - `suggested_action: "pass_through"`
 
 **禁止**：解析失败时 **`retry_main`**（**避免** 无限「坏模型→重试」）。
 
@@ -209,8 +209,8 @@ Issues (JSON): <issues_json_compact>
 
 | 路径（建议） | 职责 |
 |--------------|------|
-| `include/agent/verifier_types.hpp` | `VerifierInput`, `VerifierResult`, `VerifierIssue`, **parse/validate** 函数 |
-| `include/agent/verifier_runner.hpp` + `src/agent/verifier_runner.cpp` | 组装 prompt、调 `LLMClient`、超时、解析 → `VerifierResult` |
+| `include/agent/agent/verifier_types.hpp` | `VerifierInput`, `VerifierResult`, `VerifierIssue`, **parse/validate** 函数 |
+| `include/agent/agent/verifier_runner.hpp` + `src/agent/verifier_runner.cpp` | 组装 prompt、调 `LLMClient`、超时、解析 → `VerifierResult` |
 | `src/graph_executor/…` **或** `build_cli_agent_graph` 扩展 | **外环**：MAIN→VRF→FIX→PUB；**条件** 边 **仅** 通过 **数据**（`needs_retry`）**在** **同模板** 内 **展开**（**可** 用 **子图** + **显式** 节点，**禁止** 手连 `precede` **违反** `.cursorrules` 时 **以** `input_specs` **表达依赖**） |
 | [`cli_agent_graph.cpp`](../../src/graph_executor/cli_agent_graph.cpp) | **`AGENT_VERIFIER`** 开关；挂载 Verifier **后置** |
 | A2A worker（[phase-2-wp2.md](./phase-2-wp2.md)） | §6 SSE **调用点** |
@@ -262,21 +262,21 @@ flowchart TD
 
 ## 12. 验收清单（DoD）
 
-- [ ] **D9**：**第二套** `LLMClient` **可配置**；**结构化** `ok` / `issues` / `suggested_action` **单测覆盖**。  
-- [ ] **默认无写工具**：Verifier 调用路径 **`tools` 为空**（**断言** 或 **代码审查清单**）。  
-- [ ] **Retry**：**`retry_main`** **最多** `AGENT_VERIFIER_MAX_RETRIES` 次 **额外** MAIN；**耗尽** **降级** `pass_through`。  
-- [ ] **SSE + 日志**：§6 **字段** **实现** 与 **文档** 一致。  
-- [ ] **`AGENT_VERIFIER=off`**：**回归** 行为与 **无 Verifier** 前 **一致**（**无** 额外延迟）。  
+- [ ] **D9**：**第二套** `LLMClient` **可配置**；**结构化** `ok` / `issues` / `suggested_action` **单测覆盖**。
+- [ ] **默认无写工具**：Verifier 调用路径 **`tools` 为空**（**断言** 或 **代码审查清单**）。
+- [ ] **Retry**：**`retry_main`** **最多** `AGENT_VERIFIER_MAX_RETRIES` 次 **额外** MAIN；**耗尽** **降级** `pass_through`。
+- [ ] **SSE + 日志**：§6 **字段** **实现** 与 **文档** 一致。
+- [ ] **`AGENT_VERIFIER=off`**：**回归** 行为与 **无 Verifier** 前 **一致**（**无** 额外延迟）。
 
 ---
 
 ## 13. 相关链接
 
-- [phase-2-plan.md](./phase-2-plan.md)  
-- [plan-detailed.v2.md](./plan-detailed.v2.md) §6.2  
-- [phase-2-wp7.md](./phase-2-wp7.md)（输入质控边界）  
-- [phase-2-wp1c.md](./phase-2-wp1c.md)（上下文预算，Verifier prompt 截断）  
-- [phase-2-wp3.md](./phase-2-wp3.md)（任务失败与 SSE）  
+- [phase-2-plan.md](./phase-2-plan.md)
+- [plan-detailed.v2.md](./plan-detailed.v2.md) §6.2
+- [phase-2-wp7.md](./phase-2-wp7.md)（输入质控边界）
+- [phase-2-wp1c.md](./phase-2-wp1c.md)（上下文预算，Verifier prompt 截断）
+- [phase-2-wp3.md](./phase-2-wp3.md)（任务失败与 SSE）
 
 ---
 

@@ -1,8 +1,9 @@
 # Public header module migration
 
-Stage 10 aligns the public include tree with `agent_framework/src`. New code should use the
-canonical module paths immediately. The former flat paths remain forwarding headers for one
-release cycle so existing source and installed consumers continue to compile.
+Stage 10 aligns the public include tree with `agent_framework/src`. The Stage 10 canonical-only
+follow-up removed every flat forwarding header, so module-qualified paths are now the only public
+API. This is an intentional source-breaking change for consumers that still include
+`agent/<header>.hpp` directly.
 
 ## Canonical modules
 
@@ -30,26 +31,25 @@ release cycle so existing source and installed consumers continue to compile.
 
 ## Source migration
 
-```cpp
-// Legacy, supported for one compatibility release.
-#include <agent/skill_runtime.hpp>
-#include <agent/toolbus.hpp>
+Replace removed flat imports with their module-qualified equivalents:
 
-// Canonical.
+```cpp
 #include <agent/skills/skill_runtime.hpp>
 #include <agent/toolbus/toolbus.hpp>
+#include <agent/core/types.hpp>
+#include <agent/agent/execution_context.hpp>
 ```
 
-The compatibility headers contain no declarations of their own. They only forward to the
-canonical header, so mixing old and new paths in one translation unit is safe. Internal sources,
-tests, tools, and examples use canonical paths and therefore continuously validate the new API.
+There is no generated alias layer and no opt-in compatibility switch. Downstream projects must
+migrate their includes before updating. Internal sources, tests, tools, and examples all use the
+same canonical paths as installed consumers.
 
 ## Installation contract
 
 The install rule now copies the complete `include/` tree. This corrects the historical omission
-of `include/node` and installs both canonical modules and legacy forwarding headers. CI verifies
-representative canonical paths, forwarding paths, Node headers, `skillctl`, and schemas.
+of `include/node` and installs canonical Agent modules plus public Node headers. CI verifies
+representative canonical paths, Node headers, `skillctl`, and schemas, and explicitly asserts that
+representative flat paths are absent.
 
-The forwarding layer may be removed in the next major API version after downstream projects have
-migrated. Removal must be announced in release notes and preceded by a repository-wide search for
-flat includes.
+CMake configuration rejects any new file placed directly under `include/agent/`; public headers
+must be owned by a module directory.

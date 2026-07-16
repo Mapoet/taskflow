@@ -2,8 +2,8 @@
 
 本文档将 [phase-1-plan.md](./phase-1-plan.md) **§3 WP1.6** 细化为可执行任务、进程生命周期、与 **WP1.5 图** 的衔接方式及日志/信号策略。与 [phase-1-wp5.md](./phase-1-wp5.md)（`build_cli_agent_graph`、`stream_callback` 注入）一致。
 
-**文档版本**：0.2  
-**日期**：2026-04-01  
+**文档版本**：0.2
+**日期**：2026-04-01
 **上游依据**：`phase-1-plan.md` v0.1（任务 1.6.1–1.6.3）；UI 阶段划分见 `plan-detailed.md`
 
 ---
@@ -39,13 +39,13 @@
 | **TUI**（如 **ncurses**、分栏终端 UI） | **阶段 2** | 与「简单 REPL」区分；可作为独立可执行目标，复用 `LLMClient` / 图工厂，**不**替代阶段 1 的 `cli_agent_demo` DoD。 |
 | **Web** | **阶段 2**（与 [plan-detailed.md](./plan-detailed.md) §5、§7 一致） | `WebHandler`、HTTP/SSE 消费侧等。 |
 
-阶段 1 的 **预留**：`include/agent/ui_manager.hpp` 中 **`UIHandler` 虚接口**、`ImGuiHandler` / `WebHandler` 声明或 stub，保证阶段 2 接入时无需改动核心图与 `CLIHandler` 契约。
+阶段 1 的 **预留**：`include/agent/ui/ui_manager.hpp` 中 **`UIHandler` 虚接口**、`ImGuiHandler` / `WebHandler` 声明或 stub，保证阶段 2 接入时无需改动核心图与 `CLIHandler` 契约。
 
 ---
 
 ## 2. 与现有头文件契约
 
-### 2.1 `include/agent/ui_manager.hpp`
+### 2.1 `include/agent/ui/ui_manager.hpp`
 
 | 类型 | WP1.6 要求 |
 |------|------------|
@@ -112,7 +112,7 @@ auto stream_cb = [&cli](std::string_view tok) {
 
 - **`handle_final_result(json)`**：pretty-print 可选；至少打印 `final_answer` 字段或整段 JSON。
 - 若图 **Sink 节点** 已打印最终文本，避免 **重复输出** — 约定：**仅一处**负责用户可见终稿（推荐 **Sink → CLIHandler**，LLM stream 仅增量）。
-- **`build_cli_agent_graph_with_terminal_sink`**（[graph_executor.hpp](../include/agent/graph_executor.hpp)）产出的 JSON 含 `final_answer`、`iteration`、`history_size`，可直接传入 `handle_final_result` 或由 lambda 转发，与上述去重约定一致。
+- **`build_cli_agent_graph_with_terminal_sink`**（[graph_executor.hpp](../include/agent/graph_executor/graph_executor.hpp)）产出的 JSON 含 `final_answer`、`iteration`、`history_size`，可直接传入 `handle_final_result` 或由 lambda 转发，与上述去重约定一致。
 
 ### 4.4 反“陷入形式”工程兜底（Anti-loop Guard）
 
@@ -132,7 +132,7 @@ auto stream_cb = [&cli](std::string_view tok) {
 
 #### 终稿 JSON 兼容扩展字段
 
-`build_cli_agent_graph_with_terminal_sink` 的 sink 回调 JSON 在原有字段基础上追加（不破坏既有消费者）：  
+`build_cli_agent_graph_with_terminal_sink` 的 sink 回调 JSON 在原有字段基础上追加（不破坏既有消费者）：
 `guard_triggered`（bool）、`guard_reason`（string）、`guard_details`（string）。
 
 ---
@@ -241,11 +241,11 @@ flowchart LR
 
 ## 12. 相关链接
 
-- [phase-1-plan.md](./phase-1-plan.md) — WP1.6 摘要  
-- [phase-1-wp5.md](./phase-1-wp5.md) — Agent 循环与工厂  
-- [phase-1-wp1.md](./phase-1-wp1.md) — 流式回调  
-- [phase-1-wp3.md](./phase-1-wp3.md) — 可选 `--mcp-*`  
-- `include/agent/ui_manager.hpp`、`examples/simple_agent.cpp`
+- [phase-1-plan.md](./phase-1-plan.md) — WP1.6 摘要
+- [phase-1-wp5.md](./phase-1-wp5.md) — Agent 循环与工厂
+- [phase-1-wp1.md](./phase-1-wp1.md) — 流式回调
+- [phase-1-wp3.md](./phase-1-wp3.md) — 可选 `--mcp-*`
+- `include/agent/ui/ui_manager.hpp`、`examples/simple_agent.cpp`
 
 ---
 

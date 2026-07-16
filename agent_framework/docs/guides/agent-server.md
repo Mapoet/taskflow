@@ -103,8 +103,8 @@ Server 启动前必须配置 `AgentExecutionProfile`。每个任务由 Server �
 
 ## 相关代码
 
-- [agent_server.hpp](../../include/agent/agent_server.hpp)、[agent_server.cpp](../../src/agent_server/agent_server.cpp)
-- [task_state_machine.hpp](../../include/agent/task_state_machine.hpp)（`TaskControl` + `try_transition`）
+- [agent_server.hpp](../../include/agent/agent_server/agent_server.hpp)、[agent_server.cpp](../../src/agent_server/agent_server.cpp)
+- [task_state_machine.hpp](../../include/agent/agent/task_state_machine.hpp)（`TaskControl` + `try_transition`）
 - [task_dispatch_queue.hpp](../../include/agent/internal/task_dispatch_queue.hpp)
 - [sse_server_channel.hpp](../../include/agent/internal/sse_server_channel.hpp)
 

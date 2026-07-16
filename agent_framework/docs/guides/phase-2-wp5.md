@@ -6,8 +6,8 @@
 
 **可选交付（同一 WP，独立 PR 切片）**：OAuth 2.0 **Device Authorization Grant**（RFC 8628）轮询 `token` 端点；**不**交付完整 Authorization Server，仅 **客户端** 与 **资源服务器校验 access token**（opaque 或 JWT 校验策略 **二选一字面**，默认 **opaque 字符串与配置比对**）。
 
-**文档版本**：0.1  
-**日期**：2026-04-04  
+**文档版本**：0.1
+**日期**：2026-04-04
 **上游依据**：[phase-2-plan.md](./phase-2-plan.md) v0.9；[plan-detailed.md](./plan-detailed.md) §3.2；[phase-2-wp2.md](./phase-2-wp2.md) §6；RFC 6750（Bearer）；RFC 8628（Device，可选）
 
 ---
@@ -53,19 +53,19 @@
 
 ### 4.2 与静态配置的关系（优先级 **固定**）
 
-1. **环境 / 配置文件** `AGENT_SERVER_AUTH_MODE`：`off` | `bearer` | `api_key_header` | `api_key_query` | `match_card`  
-2. **`match_card`**（推荐生产）：以 **§4.1** 解析结果为准；解析失败 → **503** 或 **off**（**实现选一种**，文档写明）。  
+1. **环境 / 配置文件** `AGENT_SERVER_AUTH_MODE`：`off` | `bearer` | `api_key_header` | `api_key_query` | `match_card`
+2. **`match_card`**（推荐生产）：以 **§4.1** 解析结果为准；解析失败 → **503** 或 **off**（**实现选一种**，文档写明）。
 3. **`off`**：**不** 校验（**除** 显式禁止匿名 的 env — **不** 在 v1 引入）。
 
 ### 4.3 Bearer 校验
 
-- 头 **`Authorization`**：`Bearer <token>`（**大小写不敏感** scheme，**trim** token）。  
+- 头 **`Authorization`**：`Bearer <token>`（**大小写不敏感** scheme，**trim** token）。
 - 有效 token 集：`AGENT_SERVER_BEARER_TOKENS`（**逗号分隔**）或 **单值** `AGENT_SERVER_BEARER_TOKEN`；**常数时间**比较（逐字节比较长度一致后 `std::memcmp` 或手写循环 **无 early exit** — **实现选一种**，单测 **计时侧信道不要求**，**逻辑**必对）。
 
 ### 4.4 API Key 校验
 
-- **Header 模式**：头名默认 **`X-API-Key`**，可 `AGENT_SERVER_API_KEY_HEADER` 覆盖；值与 `AGENT_SERVER_API_KEYS`（逗号分隔）之一匹配。  
-- **Query 模式**：参数名默认 **`api_key`**，可 `AGENT_SERVER_API_KEY_QUERY` 覆盖；值同上。  
+- **Header 模式**：头名默认 **`X-API-Key`**，可 `AGENT_SERVER_API_KEY_HEADER` 覆盖；值与 `AGENT_SERVER_API_KEYS`（逗号分隔）之一匹配。
+- **Query 模式**：参数名默认 **`api_key`**，可 `AGENT_SERVER_API_KEY_QUERY` 覆盖；值同上。
 - **Card 指定** header/query 名时：**覆盖** 默认值。
 
 ### 4.5 Query 与 JSON-RPC
@@ -74,8 +74,8 @@
 
 ### 4.6 `set_authentication_validator` 兼容
 
-- **保留** 用户自定义 `validator(headers)`；**调用顺序（固定）**：  
-  **内置 `AuthGate` 通过** → 若用户设置了 `auth_validator_`，再 **AND** 用户 validator；**任一方失败** → 401。  
+- **保留** 用户自定义 `validator(headers)`；**调用顺序（固定）**：
+  **内置 `AuthGate` 通过** → 若用户设置了 `auth_validator_`，再 **AND** 用户 validator；**任一方失败** → 401。
 - **或**：`AuthGate` **可配置为** `builtin_only | custom_only | both` — **v1 固定 `both`**（内置先，再 custom）。
 
 ---
@@ -110,8 +110,8 @@
 
 ### 6.3 OAuth（可选 PR）
 
-- `type`: `oauth2_device`：`client_id`、`scope`（可选）、`device_authorization_endpoint`、`token_endpoint`。  
-- **流程**：`refresh_authentication` 实现 **device code** 获取 + **poll**（间隔与 `expires_in` 遵守 RFC 8628）；成功后将 **`access_token`** 写入内部并 **等价** `bearer`。  
+- `type`: `oauth2_device`：`client_id`、`scope`（可选）、`device_authorization_endpoint`、`token_endpoint`。
+- **流程**：`refresh_authentication` 实现 **device code** 获取 + **poll**（间隔与 `expires_in` 遵守 RFC 8628）；成功后将 **`access_token`** 写入内部并 **等价** `bearer`。
 - **单测**：**mock** token 端点（httplib Server），**无** 外网。
 
 ---
@@ -178,22 +178,22 @@ flowchart TD
 
 ## 10. 验收清单（DoD）
 
-- [ ] **Bearer + API Key**（header + query）**服务端** 与 **客户端** **对称** 文档化。  
-- [ ] **401** 与 **`WWW-Authenticate`**（Bearer）行为 **I-2** 可测。  
-- [ ] **SSE** 与 **JSON-RPC** **同** AuthGate（**I-3**）。  
-- [ ] **`a2a-authentication.md`** 已合并。  
+- [ ] **Bearer + API Key**（header + query）**服务端** 与 **客户端** **对称** 文档化。
+- [ ] **401** 与 **`WWW-Authenticate`**（Bearer）行为 **I-2** 可测。
+- [ ] **SSE** 与 **JSON-RPC** **同** AuthGate（**I-3**）。
+- [ ] **`a2a-authentication.md`** 已合并。
 - [ ] **OAuth**：若 **未** 做 P5，须在文档 **显式**「阶段 2 可选未实现」；若 **已** 做，**单测** 无外网。
 
 ---
 
 ## 11. 相关链接
 
-- [a2a-authentication.md](./a2a-authentication.md)（实现落地后的用户 / 运维指南）  
-- [phase-2-plan.md](./phase-2-plan.md)  
-- [phase-2-wp2.md](./phase-2-wp2.md) §6  
-- [phase-2-wp4.md](./phase-2-wp4.md)  
-- [agent_server.hpp](../../include/agent/agent_server.hpp)  
-- [RFC 6750](https://www.rfc-editor.org/rfc/rfc6750)  
+- [a2a-authentication.md](./a2a-authentication.md)（实现落地后的用户 / 运维指南）
+- [phase-2-plan.md](./phase-2-plan.md)
+- [phase-2-wp2.md](./phase-2-wp2.md) §6
+- [phase-2-wp4.md](./phase-2-wp4.md)
+- [agent_server.hpp](../../include/agent/agent_server/agent_server.hpp)
+- [RFC 6750](https://www.rfc-editor.org/rfc/rfc6750)
 - [RFC 8628](https://www.rfc-editor.org/rfc/rfc8628)（可选）
 
 ---

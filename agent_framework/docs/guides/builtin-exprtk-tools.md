@@ -2,7 +2,7 @@
 
 本文档说明如何在 **Agent Framework** 中基于 **[ExprTk](https://github.com/ArashPartow/exprtk)**（单头文件、MIT 许可）**设计与实现**面向 LLM 调用的**本地数学/数据计算工具**，并与 **`ToolBus::register_local_tool`**、**`build_cli_agent_graph`** 等现有机制对齐。文档定位与 [builtin-fs-tools.md](./builtin-fs-tools.md)（本地文件监禁）、[builtin-web-tools.md](./builtin-web-tools.md)（受控出站 HTTP）并列：**`fs_*` 管磁盘边界，`web_*` 管网络边界，表达式工具管「可执行数学语言的计算边界」**。
 
-**现状说明**：当 **`exprtk.hpp`** 存在且 **`AGENT_EXPR_ENABLE`** 未设为 **`0` / `false` / `off` / `no`** 时，`build_cli_agent_graph` 会幂等注册 **`expr_eval`**、**`expr_validate`**、**`expr_batch_eval`**（实现见 **`src/toolbus/expr_tools.cpp`**，声明 **`include/agent/expr_tools.hpp`**）。门闩与解析/循环上限等环境变量见下文 §10；**`AGENT_TOOL_ALLOWLIST`** 若启用须**同时**列入上述三名（与 `web_*` 相同，缺一会在注册阶段抛错）。离线回归：**`ctest -R expr_tools`**（**`test_expr_tools`**）。
+**现状说明**：当 **`exprtk.hpp`** 存在且 **`AGENT_EXPR_ENABLE`** 未设为 **`0` / `false` / `off` / `no`** 时，`build_cli_agent_graph` 会幂等注册 **`expr_eval`**、**`expr_validate`**、**`expr_batch_eval`**（实现见 **`src/toolbus/expr_tools.cpp`**，声明 **`include/agent/toolbus/expr_tools.hpp`**）。门闩与解析/循环上限等环境变量见下文 §10；**`AGENT_TOOL_ALLOWLIST`** 若启用须**同时**列入上述三名（与 `web_*` 相同，缺一会在注册阶段抛错）。离线回归：**`ctest -R expr_tools`**（**`test_expr_tools`**）。
 
 **安全说明**：表达式求值 **不是** 操作系统沙箱。若允许模型提交**任意字符串**作为表达式，必须通过 **ExprTk 解析器限制**（深度、节点数、循环迭代、表达式长度、可选禁用控制流/赋值）约束 **CPU 与内存**；对不可信输入还应考虑 **禁用文件 I/O RTL**（若编译定义未关闭）及 **不在符号表注册危险自定义函数**。勿在无人监督场景下把表达式语言当作「通用脚本」。
 
@@ -275,7 +275,7 @@ ExprTk 可选 **RTL 包**（打印、文件、向量扩展等，上游 **Section
 
 ## 15. 参考链接
 
-- ExprTk 主页：<https://www.partow.net/programming/exprtk/index.html>  
-- 源码镜像：<https://github.com/ArashPartow/exprtk>  
-- 本仓库：**`3rd-party/exprtk/readme.txt`**（完整章节手册）  
+- ExprTk 主页：<https://www.partow.net/programming/exprtk/index.html>
+- 源码镜像：<https://github.com/ArashPartow/exprtk>
+- 本仓库：**`3rd-party/exprtk/readme.txt`**（完整章节手册）
 - 并列文档：[builtin-fs-tools.md](./builtin-fs-tools.md) · [builtin-web-tools.md](./builtin-web-tools.md)

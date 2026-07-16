@@ -2,8 +2,8 @@
 
 本文档将 [phase-1-plan.md](./phase-1-plan.md) **§3 WP1.2** 细化为可执行任务、JSON Schema 子集规则、错误载荷、测试与完成定义。范围以 **`register_local_tool` + `call_tool` + `export_as_llm_tools`** 为主；`register_mcp_service` / `register_api_tool` / `MCPTool` / `APITool` 的**完整行为**分别由 **WP1.3** 与后续工作包负责，此处仅要求 **ToolBus 路由不破坏**（可注册、可占位抛出明确错误）。
 
-**文档版本**：0.1  
-**日期**：2026-03-31  
+**文档版本**：0.1
+**日期**：2026-03-31
 **上游依据**：`phase-1-plan.md` v0.1（任务 1.2.1–1.2.4）
 
 ---
@@ -31,7 +31,7 @@
 
 ## 2. 与现有代码的契约
 
-### 2.1 头文件（`include/agent/toolbus.hpp`）
+### 2.1 头文件（`include/agent/toolbus/toolbus.hpp`）
 
 - **`ToolInterface`**：`LocalTool` 实现全部虚函数；`MCPTool`/`APITool` 可与 WP1.3 同步填满。
 - **`LocalTool`**：对 `call(name, arguments)`：若 `name != name_`，返回失败 future 或 assert（单工具实例只服务自身 `name_`）；实现任选其一并在测试中固定约定。
@@ -40,7 +40,7 @@
   - `find_tool`：读锁路径；**写路径** `register_*` 与 `call_tool` 内部查找共用 `tools_mutex_`。
 - **`call_tool`**：解析 `find_tool`；不存在则 **立即** `std::async` 返回 `{"error":...,"code":"unknown_tool"}` 或抛异常；**phase-1-plan 要求适合回灌模型** → 推荐 **返回 JSON，不抛**（与 WP1.5 聚合简单一致）。
 
-### 2.2 类型（`include/agent/types.hpp`）
+### 2.2 类型（`include/agent/core/types.hpp`）
 
 - **`ToolMeta`**：`name`、`description`、`schema`（**OpenAI function parameters 形态**：`{"type":"object","properties":{...},"required":[...]}`）。
 - **`ToolInfo`**：用于 `get_tool_info`；本地工具可在注册时用默认值或从 `meta.extra` 扩展（若需可增加 `ToolMeta::optional<json> hints`，本 WP **不强制** 改 `types.hpp`）。
@@ -94,7 +94,7 @@ flowchart TD
 | T0.1 | **API** | `bool validate_tool_arguments(const json& schema, const json& arguments, json& error_obj)`；失败时 `error_obj` 含 `message`、`path`（可选 JSON Pointer 简版）、`code`。 |
 | T0.2 | **单测** | 覆盖：缺 required、类型错误、additionalProperties、`enum`（若实现）。 |
 
-**产出**：`src/toolbus/schema_validate.cpp` + `include/agent/schema_validate.hpp`（可选内联匿名命名空间于 `local_tool.cpp`，若忌文件膨胀可合并）.
+**产出**：`src/toolbus/schema_validate.cpp` + `include/agent/toolbus/schema_validate.hpp`（可选内联匿名命名空间于 `local_tool.cpp`，若忌文件膨胀可合并）.
 
 ---
 
@@ -228,9 +228,9 @@ flowchart TD
 
 ## 10. 相关链接
 
-- [phase-1-plan.md](./phase-1-plan.md) — WP1.2 摘要  
-- [phase-1-wp1.md](./phase-1-wp1.md) — LLM 与 tools 列表格式  
-- `include/agent/toolbus.hpp`、`include/agent/types.hpp`
+- [phase-1-plan.md](./phase-1-plan.md) — WP1.2 摘要
+- [phase-1-wp1.md](./phase-1-wp1.md) — LLM 与 tools 列表格式
+- `include/agent/toolbus/toolbus.hpp`、`include/agent/core/types.hpp`
 
 ---
 

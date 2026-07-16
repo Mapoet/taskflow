@@ -6,8 +6,8 @@
 
 **不交付**：调用前 allow/deny/改参 hook（**WP2.1d**）；`@file`/`@url` **语法与 Tier A 校验**（**WP2.7**）；基于子 LLM 的智能摘要（可记为阶段 3 或 WP2.9 扩展）；**Verifier**（**WP2.8**）。
 
-**文档版本**：0.1  
-**日期**：2026-04-04  
+**文档版本**：0.1
+**日期**：2026-04-04
 **上游依据**：[phase-2-plan.md](./phase-2-plan.md) v0.4；[plan-detailed.v2.md](./plan-detailed.v2.md) §5.1、§6.1（WP2.1c）；[phase-2-wp1b.md](./phase-2-wp1b.md)（与编排层衔接顺序）
 
 ---
@@ -124,7 +124,7 @@
 
 | 路径 | 职责 |
 |------|------|
-| `include/agent/context_budget.hpp` | `ContextBudgetLimits`、`ContextBudgetMeter`、`apply_injection_cap`、`apply_per_tool_result_budget`、`utf8_safe_truncate`、`json_utf8_dump_bytes`、`apply_wire_payload_cap` 等（`AfTruncationKind` 在 `types.hpp`） |
+| `include/agent/context_budget/context_budget.hpp` | `ContextBudgetLimits`、`ContextBudgetMeter`、`apply_injection_cap`、`apply_per_tool_result_budget`、`utf8_safe_truncate`、`json_utf8_dump_bytes`、`apply_wire_payload_cap` 等（`AfTruncationKind` 在 `types.hpp`） |
 | `src/context_budget/context_budget.cpp` | 方案 S 包装、spill、env/extra_config 解析 |
 | `src/context_budget/context_budget_meter.cpp` | 合并帽、注入帽（`<<AF_INJ>>` 分隔合并串） |
 | `src/node/agent_loop_node.cpp` | `apply_per_tool_result_budget`（`append_tool_message` 与 `tool_agg`） |
@@ -205,11 +205,11 @@ flowchart TD
 
 ## 12. 相关链接
 
-- [phase-2-plan.md](./phase-2-plan.md)  
-- [plan-detailed.v2.md](./plan-detailed.v2.md) §5.1、§6.1  
-- [phase-2-wp1b.md](./phase-2-wp1b.md)  
-- [history_formatter.cpp](../../src/prompt_renderer/history_formatter.cpp)  
-- [prompt_renderer.cpp](../../src/prompt_renderer/prompt_renderer.cpp)  
+- [phase-2-plan.md](./phase-2-plan.md)
+- [plan-detailed.v2.md](./plan-detailed.v2.md) §5.1、§6.1
+- [phase-2-wp1b.md](./phase-2-wp1b.md)
+- [history_formatter.cpp](../../src/prompt_renderer/history_formatter.cpp)
+- [prompt_renderer.cpp](../../src/prompt_renderer/prompt_renderer.cpp)
 
 ---
 

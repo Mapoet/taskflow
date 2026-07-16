@@ -2,8 +2,8 @@
 
 本文档将 [phase-1-plan.md](./phase-1-plan.md) **§3 WP1.3** 细化为可执行任务、传输层契约、JSON-RPC 要点、ToolBus 集成与测试策略。实施顺序与 **plan-detailed §4.4** 一致：**stdio 传输优先**，**HTTP 其次**；WebSocket 仅保留头文件占位，本 WP 不要求可跑通。
 
-**文档版本**：0.1  
-**日期**：2026-03-31  
+**文档版本**：0.1
+**日期**：2026-03-31
 **上游依据**：`phase-1-plan.md` v0.1（任务 1.3.1–1.3.4）
 
 ---
@@ -34,7 +34,7 @@
 
 | 现状 | 处理建议 |
 |------|----------|
-| `include/agent/mcp_client.hpp` 已定义 `MCPTransportInterface`、`StdioMCPTransport`、`HttpMCPTransport`、`MCPClient` | 对齐实现；修正 `StdioMCPTransport` 中 **`std::unique_ptr<void> process_`** 为平台相关类型（`FILE*`+pid / `posix_spawn` 封装类） |
+| `include/agent/mcp_client/mcp_client.hpp` 已定义 `MCPTransportInterface`、`StdioMCPTransport`、`HttpMCPTransport`、`MCPClient` | 对齐实现；修正 `StdioMCPTransport` 中 **`std::unique_ptr<void> process_`** 为平台相关类型（`FILE*`+pid / `posix_spawn` 封装类） |
 | `src/mcp_client/mcp_client.cpp` 存在但 **未列入** `CMakeLists.txt` | **T-ORG**：将 MCP 实现源文件统一加入 `AGENT_SOURCES`（推荐 `src/mcp_client/*.cpp`） |
 | `src/toolbus/mcp_client.cpp` 仅 TODO 且错误包含 `toolbus.hpp` | **改为** `MCPTool` 实现 **或** 删除并改为 `src/toolbus/mcptool.cpp`，避免与 `src/mcp_client` 重复定义 |
 
@@ -225,9 +225,9 @@ flowchart TD
 
 ## 10. 相关链接
 
-- [phase-1-plan.md](./phase-1-plan.md) — WP1.3 摘要  
-- [phase-1-wp2.md](./phase-1-wp2.md) — ToolBus、schema、错误形状  
-- `include/agent/mcp_client.hpp`、`include/agent/toolbus.hpp`  
+- [phase-1-plan.md](./phase-1-plan.md) — WP1.3 摘要
+- [phase-1-wp2.md](./phase-1-wp2.md) — ToolBus、schema、错误形状
+- `include/agent/mcp_client/mcp_client.hpp`、`include/agent/toolbus/toolbus.hpp`
 - MCP 官方规范（URL 写入 `mcp-spec-tracker.md`）
 
 ---

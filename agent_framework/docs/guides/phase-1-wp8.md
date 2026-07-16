@@ -2,8 +2,8 @@
 
 本文档将 [phase-1-plan.md](./phase-1-plan.md) **§3 WP1.8** 展开为可交付任务、数据类型、图内挂接点及测试；并显式依赖 [phase-1-wp2.md](./phase-1-wp2.md)（ToolBus、`run_skill_script`）、[phase-1-wp4.md](./phase-1-wp4.md)（`LLMInput` / `PromptRenderer` 拼装顺序）、[phase-1-wp5.md](./phase-1-wp5.md)（Agent 循环状态桶、每轮 `LLMInput` 构造）。概念背景见 [skills.md](./skills.md)（渐进式披露 L1–L3）。
 
-**文档版本**：0.2  
-**日期**：2026-04-03  
+**文档版本**：0.2
+**日期**：2026-04-03
 **上游依据**：`phase-1-plan.md` v0.3（任务 1.8.1–1.8.5；里程碑 M6/M7）
 
 **与 WP1.7 的关系**：[WP1.7](./phase-1-wp7.md)（示例与测试）当前列为 **BACKLOG**：在 **本 WP 闭环并接入 Agent 图** 之后，再统一实施 WP1.7 的 **完整**无网/CI 测试套件，并把 **Skills**（L1/L2/L3、`run_skill_script` 等）纳入回归范围；避免在 Skills 未定型前重复改写大面积测试夹具。
@@ -95,8 +95,8 @@ struct SkillIndexEntry {
 
 | 路径 | 说明 |
 |------|------|
-| `include/agent/skill_registry.hpp` | `SkillRegistry` |
-| `include/agent/skill_loader.hpp` | `SkillLoader` |
+| `include/agent/skills/skill_registry.hpp` | `SkillRegistry` |
+| `include/agent/skills/skill_loader.hpp` | `SkillLoader` |
 | `src/skills/skill_registry.cpp` | 扫描、YAML 解析 |
 | `src/skills/skill_loader.cpp` | 读文件、去 frontmatter |
 | `src/skills/skill_script_tool.cpp` | `run_skill_script` 注册辅助（由 `toolbus` 或 `cli` 初始化调用） |
@@ -273,13 +273,13 @@ flowchart TD
 
 ## 14. 相关链接
 
-- [phase-1-plan.md](./phase-1-plan.md) — WP1.8 摘要  
-- [phase-1-wp2.md](./phase-1-wp2.md) — ToolBus / schema / 错误 JSON  
-- [phase-1-wp4.md](./phase-1-wp4.md) — `LLMInput`、`PromptRenderer`  
-- [phase-1-wp5.md](./phase-1-wp5.md) — `AgentThreadState`、循环、LLM 前节点  
-- [phase-1-wp6.md](./phase-1-wp6.md) — CLI 工厂  
-- [phase-1-wp7.md](./phase-1-wp7.md) — WP1.7 示例与测试（**BACKLOG**，Skills 后完整收口）  
-- [skills.md](./skills.md) — 概念 L1–L3  
+- [phase-1-plan.md](./phase-1-plan.md) — WP1.8 摘要
+- [phase-1-wp2.md](./phase-1-wp2.md) — ToolBus / schema / 错误 JSON
+- [phase-1-wp4.md](./phase-1-wp4.md) — `LLMInput`、`PromptRenderer`
+- [phase-1-wp5.md](./phase-1-wp5.md) — `AgentThreadState`、循环、LLM 前节点
+- [phase-1-wp6.md](./phase-1-wp6.md) — CLI 工厂
+- [phase-1-wp7.md](./phase-1-wp7.md) — WP1.7 示例与测试（**BACKLOG**，Skills 后完整收口）
+- [skills.md](./skills.md) — 概念 L1–L3
 
 ---
 

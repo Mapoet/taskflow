@@ -1,11 +1,11 @@
 # WP2.1a：A2A 规范锚点 + Agent Card（Well-Known）+ JSON-RPC 2.0 通用层 — 实现计划
 
-本文档将 [phase-2-plan.md](./phase-2-plan.md) 中 **WP2.1a**（从 **WP2.1 / D2** 拆出的**前置切片**）落实为可执行任务。  
-**WP2.1a** 交付：**可追溯的规范文档**、**发现面（Agent Card）与官方 JSON 的双向映射**、**与 A2A 业务方法无关的 JSON-RPC 2.0 信封编解码**。  
+本文档将 [phase-2-plan.md](./phase-2-plan.md) 中 **WP2.1a**（从 **WP2.1 / D2** 拆出的**前置切片**）落实为可执行任务。
+**WP2.1a** 交付：**可追溯的规范文档**、**发现面（Agent Card）与官方 JSON 的双向映射**、**与 A2A 业务方法无关的 JSON-RPC 2.0 信封编解码**。
 **不交付**：任务类 JSON-RPC `method` 实现、`AgentTask` / `AgentMessage` / `AgentArtifact` 的 wire 映射、SSE 帧与任务事件载荷（属 **WP2.1** 主体，见 [phase-2-wp1.md](./phase-2-wp1.md)）。
 
-**文档版本**：0.1  
-**日期**：2026-04-04  
+**文档版本**：0.1
+**日期**：2026-04-04
 **上游依据**：[phase-2-plan.md](./phase-2-plan.md) v0.3；[plan-detailed.md](./plan-detailed.md) §3.1–3.2（发现、Card、双栈）；[phase-2-wp1.md](./phase-2-wp1.md)（WP2.1 全量 closure 与 PR 顺序）
 
 ---
@@ -99,7 +99,7 @@ std::string agent_card_discovery_json_string(const AgentCard& card);
 
 | 文件 | 现状 | WP2.1a 动作 |
 |------|------|-------------|
-| [`types.hpp`](../../include/agent/types.hpp) | `AgentCard`, `AgentSkill`, `to_json`/`from_json` | **不删**；`wire_card` **调用** `from_json` **仅当** 官方键与现有实现 **已对齐** 时可选；否则 **独立键名映射** |
+| [`types.hpp`](../../include/agent/core/types.hpp) | `AgentCard`, `AgentSkill`, `to_json`/`from_json` | **不删**；`wire_card` **调用** `from_json` **仅当** 官方键与现有实现 **已对齐** 时可选；否则 **独立键名映射** |
 | [`agent_client.cpp`](../../src/agent_client/agent_client.cpp) | `discover_agent`：`GET` + `AgentCard::from_json(body)` | **不改**（WP2.4）；WP2.1a 单测 **模拟** 官方 body 调 `agent_card_from_a2a_wire` |
 | [`agent_server.cpp`](../../src/agent_server/agent_server.cpp) | `handle_well_known_agent_card` 使用 `agent_card_.to_json()` | **不改**（WP2.2）；备注：上线 A2A 时改为 `agent_card_discovery_json_string` 或 `agent_card_to_a2a_wire` |
 
@@ -153,9 +153,9 @@ flowchart TD
 
 ## 10. 相关链接
 
-- [phase-2-plan.md](./phase-2-plan.md)  
-- [phase-2-wp1.md](./phase-2-wp1.md)  
-- [plan-detailed.md](./plan-detailed.md) §3  
+- [phase-2-plan.md](./phase-2-plan.md)
+- [phase-2-wp1.md](./phase-2-wp1.md)
+- [plan-detailed.md](./plan-detailed.md) §3
 - [architecture/overview.md](../architecture/overview.md)
 
 ---

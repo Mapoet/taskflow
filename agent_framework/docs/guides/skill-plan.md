@@ -183,8 +183,8 @@ Model、Test 必须走同一条相对路径、canonical jail、普通文件、�
 
 新增：
 
-- `include/agent/skill_manifest.hpp`
-- `include/agent/skill_resource.hpp`
+- `include/agent/skills/skill_manifest.hpp`
+- `include/agent/skills/skill_resource.hpp`
 - `src/skills/skill_manifest.cpp`
 - `src/skills/skill_manifest_validate.cpp`
 - `schemas/skill-manifest-v1.schema.json`
@@ -618,7 +618,7 @@ P0/P1 工作不得仅增加文档或 happy-path 测试。
 - [x] 签名、可信发布者、SBOM 和远程 Registry 策略可审计。
 - [x] 1000 次循环/取消/重启压力测试无资源泄漏或重复副作用。
 - [x] Stage 1–9 管理面和运行面已有离线 reference app 与 examples smoke tests。
-- [x] 公共头文件按实现模块分类，旧扁平 include 路径保留一周期兼容转发。
+- [x] 公共头文件按实现模块分类，并删除旧扁平 include 转发层；CMake 强制 canonical-only 布局。
 
 状态门槛：
 

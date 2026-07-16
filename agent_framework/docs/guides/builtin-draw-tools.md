@@ -22,7 +22,7 @@
 | **第三方依赖** | 子模块 **`3rd-party/canvas_ity`**（头文件在 **`src/canvas_ity.hpp`**）、**`3rd-party/stb`**（**`stb_image.h`** / **`stb_image_write.h`** 等） |
 | **CMake** | **`agent_framework/CMakeLists.txt`**：存在头文件时加入 include，并定义 **`AGENT_HAVE_CANVAS_ITY`**、**`AGENT_HAVE_STB_IMAGE`**；**`test_canvas_ity_smoke`** 在定义 **`AGENT_HAVE_STB_IMAGE_WRITE`** 时链接 PNG 输出逻辑 |
 | **冒烟测试** | **`agent_framework/tests/test_canvas_ity_smoke.cpp`**：`canvas_ity::canvas` 绘制复杂场景，**默认输出 PNG**（有 stb 时）或 **TGA**；路径可由参数、环境变量 **`AGENT_TEST_CANVAS_OUT`** 指定；运行 **`ctest -R canvas_ity_smoke`** |
-| **`draw_*` ToolBus 注册** | **v1 已实现**：**`register_builtin_draw_tools_if_configured(ToolBus&)`**（声明 **`include/agent/draw_tools.hpp`**，实现 **`src/toolbus/draw_tools.cpp`**）；**`build_cli_agent_graph`** 在 **`register_builtin_expr_tools_if_configured`** 之后调用。无 **canvas_ity** 或编译单元内不可见 **`stb_image_write.h`** 时为 **空 stub**，不注册工具。 |
+| **`draw_*` ToolBus 注册** | **v1 已实现**：**`register_builtin_draw_tools_if_configured(ToolBus&)`**（声明 **`include/agent/toolbus/draw_tools.hpp`**，实现 **`src/toolbus/draw_tools.cpp`**）；**`build_cli_agent_graph`** 在 **`register_builtin_expr_tools_if_configured`** 之后调用。无 **canvas_ity** 或编译单元内不可见 **`stb_image_write.h`** 时为 **空 stub**，不注册工具。 |
 | **回归测试** | **`agent_framework/tests/test_draw_tools.cpp`**；**`ctest -R draw_tools`**（含 **`AGENT_DRAW_ENABLE=0`**、allowlist 部分列表、**`dimension_limit`** / **`command_limit`**、**`draw_export`** 写 **`AGENT_FS_ROOT`** 下文件） |
 
 初始化子模块示例：
@@ -276,8 +276,8 @@ flowchart LR
 
 ## 参考链接
 
-- canvas_ity：<https://github.com/a-e-k/canvas_ity>  
-- stb：<https://github.com/nothings/stb>  
-- 内建文件工具：[builtin-fs-tools.md](./builtin-fs-tools.md)  
-- 内建网络工具：[builtin-web-tools.md](./builtin-web-tools.md)  
-- 内建表达式工具：[builtin-exprtk-tools.md](./builtin-exprtk-tools.md)  
+- canvas_ity：<https://github.com/a-e-k/canvas_ity>
+- stb：<https://github.com/nothings/stb>
+- 内建文件工具：[builtin-fs-tools.md](./builtin-fs-tools.md)
+- 内建网络工具：[builtin-web-tools.md](./builtin-web-tools.md)
+- 内建表达式工具：[builtin-exprtk-tools.md](./builtin-exprtk-tools.md)

@@ -6,8 +6,8 @@
 
 **不交付**：异步 hook、子进程 hook、远程策略服务；**WP2.7** `ExecutionContext` 全量注入（v1 仅 **可选** `ToolInvocationContext` 占位字段）；工具结果截断（**WP2.1c**）；读并行编排（**WP2.1b** 已完成则仅声明 **hook 须线程安全**）。
 
-**文档版本**：0.2  
-**日期**：2026-04-05  
+**文档版本**：0.2
+**日期**：2026-04-05
 **上游依据**：[phase-2-plan.md](./phase-2-plan.md) v0.6；[plan-detailed.v2.md](./plan-detailed.v2.md) §6.1；[`toolbus.cpp`](../../src/toolbus/toolbus.cpp)（`call_tool` 顺序）；[phase-2-wp1b.md](./phase-2-wp1b.md)（并行下 hook 并发）
 
 ---
@@ -122,11 +122,11 @@ using ToolCallHook =
 
 **[`docs/guides/tool-call-hooks.md`](./tool-call-hooks.md)**（新建）须包含：
 
-1. **顺序图**（文字或 Mermaid）：find → allowlist → **hooks** → validate → call  
-2. **`ToolHookResult` 字段表**  
-3. **与 allowlist** 的交互表（本节 §4.3）  
-4. **并行**：WP2.1b 开启时 hook 的 **可重入 / 线程安全** 要求  
-5. **示例**：注册一个 hook 把某工具的 `path` 参数前缀 **重写** 为 jail 内路径（**伪代码**）  
+1. **顺序图**（文字或 Mermaid）：find → allowlist → **hooks** → validate → call
+2. **`ToolHookResult` 字段表**
+3. **与 allowlist** 的交互表（本节 §4.3）
+4. **并行**：WP2.1b 开启时 hook 的 **可重入 / 线程安全** 要求
+5. **示例**：注册一个 hook 把某工具的 `path` 参数前缀 **重写** 为 jail 内路径（**伪代码**）
 6. **错误码**：`hook_denied`、`hook_invalid_replace`、`hook_threw`
 
 ---
@@ -135,8 +135,8 @@ using ToolCallHook =
 
 | 路径 | 变更 |
 |------|------|
-| [`include/agent/types.hpp`](../../include/agent/types.hpp) | `ToolHookVerdict` |
-| [`include/agent/toolbus.hpp`](../../include/agent/toolbus.hpp) | `ToolHookResult`、`ToolCallHook`；`add_tool_call_hook`、`clear_tool_call_hooks`、`tool_call_hook_count` |
+| [`include/agent/core/types.hpp`](../../include/agent/core/types.hpp) | `ToolHookVerdict` |
+| [`include/agent/toolbus/toolbus.hpp`](../../include/agent/toolbus/toolbus.hpp) | `ToolHookResult`、`ToolCallHook`；`add_tool_call_hook`、`clear_tool_call_hooks`、`tool_call_hook_count` |
 | [`src/toolbus/toolbus.cpp`](../../src/toolbus/toolbus.cpp) | `call_tool` 插入 §3.4 逻辑；`hook_denied` / `hook_invalid_replace` / `hook_threw` |
 | [`tests/test_tool_call_hooks.cpp`](../../tests/test_tool_call_hooks.cpp) | H-1–H-7；`--h5` 子模式 |
 | [`docs/guides/tool-call-hooks.md`](./tool-call-hooks.md) | 用户文档 |
@@ -161,7 +161,7 @@ using ToolCallHook =
 
 ### 7.2 CTest
 
-- `tool_call_hooks_wp21d`：`COMMAND test_tool_call_hooks`，`ENVIRONMENT`：`AGENT_TOOL_ALLOWLIST=`  
+- `tool_call_hooks_wp21d`：`COMMAND test_tool_call_hooks`，`ENVIRONMENT`：`AGENT_TOOL_ALLOWLIST=`
 - `tool_call_hooks_wp21d_h5`：`COMMAND test_tool_call_hooks --h5`（进程内最先设置 `AGENT_TOOL_ALLOWLIST=ok_only`，覆盖 H-5）
 
 ---
@@ -183,20 +183,20 @@ flowchart TD
 
 ## 9. 验收清单（DoD）
 
-- [x] **`call_tool` 顺序** 与 §2、§4.3 **一致**（`toolbus.hpp` / `toolbus.cpp` Doxygen 指向 `tool-call-hooks.md`）。  
-- [x] **H-1–H-7** 全绿（`ctest -R tool_call_hooks_wp21d`，含 `--h5`）。  
-- [x] **`tool-call-hooks.md`** 已合并且含 allowlist 组合表。  
-- [x] **默认无 hook** 时行为与既有 ToolBus 一致（回归 `test_toolbus_wp2`）。  
+- [x] **`call_tool` 顺序** 与 §2、§4.3 **一致**（`toolbus.hpp` / `toolbus.cpp` Doxygen 指向 `tool-call-hooks.md`）。
+- [x] **H-1–H-7** 全绿（`ctest -R tool_call_hooks_wp21d`，含 `--h5`）。
+- [x] **`tool-call-hooks.md`** 已合并且含 allowlist 组合表。
+- [x] **默认无 hook** 时行为与既有 ToolBus 一致（回归 `test_toolbus_wp2`）。
 
 ---
 
 ## 10. 相关链接
 
-- [phase-2-plan.md](./phase-2-plan.md)  
-- [phase-1-wp2.md](./phase-1-wp2.md)（ToolBus / allowlist）  
-- [phase-2-wp1b.md](./phase-2-wp1b.md)  
-- [cursor_mcp_json.md](./cursor_mcp_json.md)（MCP 工具名与 allowlist）  
-- [toolbus.cpp](../../src/toolbus/toolbus.cpp)  
+- [phase-2-plan.md](./phase-2-plan.md)
+- [phase-1-wp2.md](./phase-1-wp2.md)（ToolBus / allowlist）
+- [phase-2-wp1b.md](./phase-2-wp1b.md)
+- [cursor_mcp_json.md](./cursor_mcp_json.md)（MCP 工具名与 allowlist）
+- [toolbus.cpp](../../src/toolbus/toolbus.cpp)
 
 ---
 
