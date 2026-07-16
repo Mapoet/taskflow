@@ -1653,6 +1653,16 @@ if(BUILD_TESTING)
         set_tests_properties(skill_remote_registry PROPERTIES
             LABELS "skill-registry-supply-chain;skill-signature-security;skill-security-negative")
     endif()
+    if(OpenSSL_FOUND AND EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_skill_cli_supply_chain.cpp)
+        add_executable(test_skill_cli_supply_chain tests/test_skill_cli_supply_chain.cpp)
+        target_link_libraries(test_skill_cli_supply_chain PRIVATE agent_framework OpenSSL::Crypto)
+        target_compile_definitions(test_skill_cli_supply_chain PRIVATE
+            "AGENT_SKILLCTL_PATH=\"$<TARGET_FILE:skillctl>\"")
+        add_dependencies(test_skill_cli_supply_chain skillctl)
+        add_test(NAME skill_cli_supply_chain COMMAND test_skill_cli_supply_chain)
+        set_tests_properties(skill_cli_supply_chain PROPERTIES
+            LABELS "skill-cli-contract;skill-supply-chain-e2e;skill-signature-security;skill-registry-supply-chain")
+    endif()
     if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_skill_model.cpp)
         add_executable(test_skill_model tests/test_skill_model.cpp)
         target_link_libraries(test_skill_model PRIVATE agent_framework)

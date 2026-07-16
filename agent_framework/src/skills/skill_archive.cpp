@@ -281,7 +281,7 @@ SkillArchiveResult build_skill_archive(const fs::path& source_directory,
         expanded += entry.bytes.size();
         if(expanded > limits.max_expanded_bytes) { set_error(result, "expanded size limit exceeded"); return result; }
     }
-    fs::create_directories(output_archive.parent_path(), ec);
+    if(!output_archive.parent_path().empty()) fs::create_directories(output_archive.parent_path(), ec);
     if(ec) { set_error(result, "cannot create archive directory: " + ec.message()); return result; }
     const auto temporary = temp_path_for(output_archive);
     std::ofstream output(temporary, std::ios::binary | std::ios::trunc);

@@ -60,7 +60,11 @@ nlohmann::json package_record_to_json(const SkillPackageRecord& package) {
             {"packageDigest", package.package_digest},
             {"resourceDigests", package.resource_digests},
             {"sourceUri", package.source_uri},
-            {"signatureIdentity", package.signature_identity}};
+            {"signatureIdentity", package.signature_identity},
+            {"archiveDigest", package.archive_digest}, {"publisher", package.publisher},
+            {"keyId", package.key_id}, {"signatureDigest", package.signature_digest},
+            {"sbomDigest", package.sbom_digest}, {"provenanceDigest", package.provenance_digest},
+            {"registryDigest", package.registry_digest}, {"legacyUnsigned", package.legacy_unsigned}};
 }
 
 SkillCliExit lifecycle_exit(const std::string& command, const nlohmann::json& error) {
@@ -363,7 +367,13 @@ std::string skillctl_usage() {
            "       skillctl ROOT reference search ID RESOURCE QUERY --limit N\n"
            "       skillctl ROOT cache status|verify|gc\n"
            "       skillctl ROOT cache pin|unpin DIGEST\n"
-           "       skillctl ROOT model check ID RESOURCE --runtime R --device D --precision P --memory N";
+           "       skillctl ROOT model check ID RESOURCE --runtime R --device D --precision P --memory N\n"
+           "       skillctl ROOT package build SOURCE OUTPUT --source URI --revision REV [--builder ID]\n"
+           "       skillctl ROOT package inspect|sbom PATH\n"
+           "       skillctl ROOT package sign ARCHIVE SIG --key KEY --publisher P --source URI\n"
+           "       skillctl ROOT package verify ARCHIVE SIG --trust TRUST [--now EPOCH]\n"
+           "       skillctl ROOT registry sync INDEX SIG TRUST SOURCE\n"
+           "       skillctl ROOT registry resolve INDEX SIG TRUST SOURCE ID VERSION";
 }
 
 SkillCommandService::SkillCommandService(std::shared_ptr<SkillRegistry> registry,
