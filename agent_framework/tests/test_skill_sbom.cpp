@@ -38,7 +38,15 @@ int main() {
         resource("mcp", SkillResourceType::Mcp, "mcp/server.json"),
         resource("asset", SkillResourceType::Asset, "assets/data.bin"),
         resource("model", SkillResourceType::Model, "models/model.onnx")};
-    manifest->dependencies.push_back({"org.example.dep", "^2.0.0", false});
+    manifest->resources[0].runtime = "posix-sh";
+    manifest->resources[0].executable = true;
+    manifest->resources[0].depends_on = {"asset"};
+    manifest->resources[3].source_uri = "https://example.test/data.bin";
+    manifest->resources[3].media_type = "application/octet-stream";
+    manifest->resources[3].cache_policy = SkillCachePolicy::Pin;
+    manifest->resources[4].model_requirements =
+        SkillModelRequirements{{"cuda", "cpu"}, {"fp16"}, 4096};
+    manifest->dependencies.push_back({"org.example.dep", "^2.0.0", true});
     SkillPackageRecord record;
     record.id = manifest->name;
     record.version = *SkillSemVersion::parse(manifest->version);
@@ -47,13 +55,31 @@ int main() {
         record.resource_digests[resource.path] = std::string(64, 'a');
     const auto sbom = generate_skill_sbom(record);
     assert(sbom.at("bomFormat") == "CycloneDX" && sbom.at("specVersion") == "1.6");
-    assert(sbom.at("components").size() == 5);
+    assert(sbom.at("components").size() == 6);
     std::set<std::string> types;
     for(const auto& component : sbom.at("components"))
         types.insert(component.at("type").get<std::string>());
     assert(types.count("application") && types.count("file") && types.count("machine-learning-model"));
+    assert(types.count("library"));
+    const auto component_by_name = [&](const std::string& name) -> const nlohmann::json& {
+        for(const auto& component : sbom.at("components"))
+            if(component.at("name") == name) return component;
+        assert(false);
+        return sbom;
+    };
+    const auto property_value = [](const nlohmann::json& component,
+                                   const std::string& name) -> std::string {
+        for(const auto& property : component.at("properties"))
+            if(property.at("name") == name) return property.at("value");
+        return {};
+    };
+    assert(property_value(component_by_name("script"), "agent.taskflow/runtime") == "posix-sh");
+    assert(property_value(component_by_name("asset"), "agent.taskflow/cache-policy") == "pin");
+    assert(property_value(component_by_name("model"), "agent.taskflow/model-min-memory-bytes") == "4096");
+    assert(component_by_name("org.example.dep").at("scope") == "optional");
     assert(sbom.at("dependencies").at(0).at("dependsOn").at(0) ==
            "pkg:taskflow/org.example.dep@^2.0.0");
+    assert(sbom.at("dependencies").size() == 6);
 
     SkillProvenanceOptions provenance{"https://github.com/example/audit", "abc123", "ci/test"};
     const auto statement = generate_skill_provenance(record, provenance);

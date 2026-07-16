@@ -27,6 +27,15 @@ std::string package_ref(const SkillPackageRecord& package) {
 
 std::string canonical(const json& value) { return value.dump() + "\n"; }
 
+void property(json& properties, const std::string& name, const std::string& value) {
+    if(!value.empty()) properties.push_back({{"name", name}, {"value", value}});
+}
+
+std::string string_list(const std::vector<std::string>& values) {
+    json serialized = values;
+    return serialized.dump();
+}
+
 } // namespace
 
 json generate_skill_sbom(const SkillPackageRecord& package) {
@@ -37,13 +46,37 @@ json generate_skill_sbom(const SkillPackageRecord& package) {
             return a.path < b.path;
         });
         for(const auto& resource : resources) {
+            json properties = json::array({
+                {{"name", "agent.taskflow/resource-kind"}, {"value", to_string(resource.kind)}},
+                {{"name", "agent.taskflow/path"}, {"value", resource.path}},
+                {{"name", "agent.taskflow/cache-policy"}, {"value", to_string(resource.cache_policy)}},
+                {{"name", "agent.taskflow/executable"}, {"value", resource.executable ? "true" : "false"}},
+                {{"name", "agent.taskflow/optional"}, {"value", resource.optional ? "true" : "false"}}
+            });
+            property(properties, "agent.taskflow/runtime", resource.runtime);
+            property(properties, "agent.taskflow/media-type", resource.media_type);
+            property(properties, "agent.taskflow/source-uri", resource.source_uri);
+            property(properties, "agent.taskflow/read-mode", to_string(resource.read_mode));
+            property(properties, "agent.taskflow/input-schema", resource.input_schema);
+            property(properties, "agent.taskflow/output-schema", resource.output_schema);
+            if(resource.declared_size)
+                property(properties, "agent.taskflow/declared-size", std::to_string(*resource.declared_size));
+            if(resource.size_limit)
+                property(properties, "agent.taskflow/size-limit", std::to_string(*resource.size_limit));
+            if(!resource.depends_on.empty())
+                property(properties, "agent.taskflow/resource-dependencies", string_list(resource.depends_on));
+            if(resource.model_requirements) {
+                property(properties, "agent.taskflow/model-devices",
+                         string_list(resource.model_requirements->devices));
+                property(properties, "agent.taskflow/model-precisions",
+                         string_list(resource.model_requirements->precisions));
+                property(properties, "agent.taskflow/model-min-memory-bytes",
+                         std::to_string(resource.model_requirements->min_memory_bytes));
+            }
             json component = {{"type", component_type(resource.kind)},
                               {"bom-ref", package_ref(package) + "/" + resource.path},
                               {"name", resource.id}, {"version", package.version.str()},
-                              {"properties", json::array({
-                                  {{"name", "agent.taskflow/resource-kind"}, {"value", to_string(resource.kind)}},
-                                  {{"name", "agent.taskflow/path"}, {"value", resource.path}}
-                              })}};
+                              {"properties", std::move(properties)}};
             const auto digest = package.resource_digests.find(resource.path);
             if(digest != package.resource_digests.end())
                 component["hashes"] = json::array({{{"alg", "SHA-256"}, {"content", digest->second}}});
@@ -51,6 +84,15 @@ json generate_skill_sbom(const SkillPackageRecord& package) {
                 component["licenses"] = json::array({{{"license", {{"id", resource.license}}}}});
             components.push_back(std::move(component));
         }
+        auto declared = package.manifest->dependencies;
+        std::sort(declared.begin(), declared.end(), [](const auto& a, const auto& b) {
+            return a.name < b.name || (a.name == b.name && a.version < b.version);
+        });
+        for(const auto& dependency : declared)
+            components.push_back({{"type", "library"},
+                {"bom-ref", "pkg:taskflow/" + dependency.name + "@" + dependency.version},
+                {"name", dependency.name}, {"version", dependency.version},
+                {"scope", dependency.optional ? "optional" : "required"}});
     }
     json dependencies = json::array();
     json depends_on = json::array();
@@ -63,6 +105,21 @@ json generate_skill_sbom(const SkillPackageRecord& package) {
             depends_on.push_back("pkg:taskflow/" + dependency.name + "@" + dependency.version);
     }
     dependencies.push_back({{"ref", package_ref(package)}, {"dependsOn", depends_on}});
+    if(package.manifest) {
+        for(const auto& resource : package.manifest->resources) {
+            json resource_dependencies = json::array();
+            for(const auto& dependency_id : resource.depends_on) {
+                const auto dependency = std::find_if(package.manifest->resources.begin(),
+                    package.manifest->resources.end(), [&](const auto& candidate) {
+                        return candidate.id == dependency_id;
+                    });
+                if(dependency != package.manifest->resources.end())
+                    resource_dependencies.push_back(package_ref(package) + "/" + dependency->path);
+            }
+            dependencies.push_back({{"ref", package_ref(package) + "/" + resource.path},
+                                    {"dependsOn", std::move(resource_dependencies)}});
+        }
+    }
     return {{"bomFormat", "CycloneDX"}, {"specVersion", "1.6"}, {"version", 1},
             {"metadata", {{"component", {{"type", "application"},
                 {"bom-ref", package_ref(package)}, {"name", package.id},
