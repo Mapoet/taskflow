@@ -273,7 +273,7 @@ bool merge_react_session_state(
     session.pending_control_actions = next->pending_control_actions;
     session.pending_input_violations = next->pending_input_violations;
     session.execution_context = next->execution_context;
-    session.last_error.clear();
+    session.last_error = next->last_error;
     session.initial_user_prompt.clear();
     return true;
 }
@@ -324,6 +324,8 @@ WorkflowResult GraphExecutor::run_react_cli_sync(tf::Executor& executor,
 
     const std::string u_snapshot = request.session->initial_user_prompt;
     const std::shared_ptr<internal::AgentThreadState> session = request.session;
+    const internal::AgentThreadState session_snapshot = *session;
+    session->last_error.clear();
     session->verifier_retry_count = 0;
 
     const VerifierSwitchMode v_mode = verifier_switch_from_env();
@@ -412,6 +414,15 @@ WorkflowResult GraphExecutor::run_react_cli_sync(tf::Executor& executor,
                 std::clog << "[GraphExecutor] state merge failed: history prefix mismatch (user_turn len="
                           << u_snapshot.size() << ")\n";
             }
+            return wr;
+        }
+        if (!session->last_error.empty()) {
+            const std::string error = session->last_error;
+            *session = session_snapshot;
+            session->initial_user_prompt.clear();
+            wr.success = false;
+            wr.exit_code = 1;
+            wr.error_message = error;
             return wr;
         }
         use_full_user_merge = false;

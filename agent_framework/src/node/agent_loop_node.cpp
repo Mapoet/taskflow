@@ -118,6 +118,27 @@ bool pending_is_control_only_cli_turn(const std::vector<ControlAction>& actions)
     return true;
 }
 
+std::vector<CallSpec> bounded_tool_calls(std::vector<CallSpec> calls, int max_calls,
+                                         int iteration) {
+    const std::size_t cap = max_calls > 0 ? static_cast<std::size_t>(max_calls) : 0U;
+    if (calls.size() > cap) {
+        calls.resize(cap);
+    }
+    std::unordered_set<std::string> ids;
+    ids.reserve(calls.size());
+    for (std::size_t i = 0; i < calls.size(); ++i) {
+        std::string id = calls[i].tool_call_id.value_or("");
+        if (id.empty() || !ids.insert(id).second) {
+            std::size_t salt = i;
+            do {
+                id = "af_call_" + std::to_string(iteration) + "_" + std::to_string(salt++);
+            } while (!ids.insert(id).second);
+            calls[i].tool_call_id = std::move(id);
+        }
+    }
+    return calls;
+}
+
 } // namespace
 
 std::pair<std::shared_ptr<workflow::LoopNode>, tf::Task>
@@ -490,6 +511,7 @@ AgentLoopNode::create(
             shared->last_llm.is_final = true;
             shared->last_llm.final_answer = shared->final_answer;
             shared->last_llm.tool_calls.clear();
+            shared->state->last_error = shared->final_answer;
             return emit();
         }
         const auto t1 = std::chrono::steady_clock::now();
@@ -528,37 +550,44 @@ AgentLoopNode::create(
                 llm_out.is_final = false;
             }
         }
+        llm_out.tool_calls = bounded_tool_calls(
+            std::move(llm_out.tool_calls), agent_config.max_tool_calls_per_iteration, it);
         shared->last_llm = llm_out;
 
-        // assistant message
-        Message a;
-        a.role = "assistant";
-        a.timestamp = std::time(nullptr);
-        if (!llm_out.tool_calls.empty()) {
-            json j;
-            j["tool_calls"] = json::array();
-            for (const auto& c : llm_out.tool_calls) {
-                json one;
-                if (c.tool_call_id && !c.tool_call_id->empty()) {
-                    one["id"] = *c.tool_call_id;
+        auto make_assistant_message = [](const LLMOutput& output,
+                                         const std::vector<CallSpec>& tool_calls) {
+            Message a;
+            a.role = "assistant";
+            a.timestamp = std::time(nullptr);
+            if (!tool_calls.empty()) {
+                json j;
+                j["tool_calls"] = json::array();
+                for (const auto& c : tool_calls) {
+                    json one;
+                    if (c.tool_call_id && !c.tool_call_id->empty()) {
+                        one["id"] = *c.tool_call_id;
+                    }
+                    one["type"] = "function";
+                    one["function"] =
+                        json{{"name", c.name}, {"arguments", c.arguments.dump()}};
+                    j["tool_calls"].push_back(std::move(one));
                 }
-                one["type"] = "function";
-                one["function"] = json{{"name", c.name}, {"arguments", c.arguments.dump()}};
-                j["tool_calls"].push_back(std::move(one));
+                a.content = j.dump();
+            } else if (!output.final_answer.empty()) {
+                a.content = output.final_answer;
+            } else {
+                a.content = output.reasoning;
             }
-            a.content = j.dump();
-        } else if (!llm_out.final_answer.empty()) {
-            a.content = llm_out.final_answer;
-        } else {
-            a.content = llm_out.reasoning;
+            return a;
+        };
+
+        const std::size_t tool_group_insert_pos = shared->state->history.size();
+        if (llm_out.tool_calls.empty()) {
+            shared->state->history.push_back(make_assistant_message(llm_out, {}));
         }
-        shared->state->history.push_back(std::move(a));
 
         // tools: WP2.1b orchestration (read parallel + cap) + repeat guard
         std::vector<CallSpec> calls = llm_out.tool_calls;
-        if (static_cast<int>(calls.size()) > agent_config.max_tool_calls_per_iteration) {
-            calls.resize(static_cast<std::size_t>(agent_config.max_tool_calls_per_iteration));
-        }
         const bool guard_repeat_on = guard_repeat_tool_in_iteration_enabled();
         const std::size_t guard_trunc = guard_text_trunc();
         std::unordered_set<std::string> seen_calls;
@@ -769,6 +798,34 @@ AgentLoopNode::create(
             }
         }
 
+        if (!calls.empty()) {
+            std::unordered_set<std::string> completed_ids;
+            for (std::size_t h = tool_group_insert_pos; h < shared->state->history.size(); ++h) {
+                const Message& message = shared->state->history[h];
+                if (message.role == "tool" && message.tool_call_id) {
+                    completed_ids.insert(*message.tool_call_id);
+                }
+            }
+            std::vector<CallSpec> completed_calls;
+            completed_calls.reserve(completed_ids.size());
+            for (const auto& call : calls) {
+                if (call.tool_call_id && completed_ids.contains(*call.tool_call_id)) {
+                    completed_calls.push_back(call);
+                }
+            }
+            if (!completed_calls.empty()) {
+                shared->state->history.insert(
+                    shared->state->history.begin() +
+                        static_cast<std::ptrdiff_t>(tool_group_insert_pos),
+                    make_assistant_message(llm_out, completed_calls));
+            } else if (shared->is_final && !shared->final_answer.empty()) {
+                LLMOutput terminal = llm_out;
+                terminal.final_answer = shared->final_answer;
+                terminal.reasoning.clear();
+                shared->state->history.push_back(make_assistant_message(terminal, {}));
+            }
+        }
+
         shared->state->iteration += 1;
         if (!shared->is_final) {
             shared->is_final =
@@ -861,10 +918,11 @@ void AgentLoopNode::build_loop_body(
         std::vector<Message> tool_msgs;
         bool had_error = false;
 
-        std::vector<CallSpec> calls = llm_out.tool_calls;
-        if (static_cast<int>(calls.size()) > agent_config.max_tool_calls_per_iteration) {
-            calls.resize(static_cast<std::size_t>(agent_config.max_tool_calls_per_iteration));
-        }
+        auto state = std::any_cast<std::shared_ptr<internal::AgentThreadState>>(
+            inps.at(std::string(internal::kAgentState)));
+        std::vector<CallSpec> calls = bounded_tool_calls(
+            llm_out.tool_calls, agent_config.max_tool_calls_per_iteration,
+            state ? state->iteration : 0);
 
         if (!toolbus || calls.empty()) {
             return {
@@ -880,8 +938,6 @@ void AgentLoopNode::build_loop_body(
         std::vector<json> results(calls.size());
         std::vector<CallSpec> pending_calls;
         std::vector<std::size_t> pending_indexes;
-        auto state = std::any_cast<std::shared_ptr<internal::AgentThreadState>>(
-            inps.at(std::string(internal::kAgentState)));
         for (std::size_t i = 0; i < calls.size(); ++i) {
             bool restored = false;
             if (state && calls[i].tool_call_id) {
@@ -950,14 +1006,26 @@ void AgentLoopNode::build_loop_body(
         if (st) {
             *next = *st;
         }
+        const std::vector<CallSpec> calls = bounded_tool_calls(
+            llm_out.tool_calls, agent_config.max_tool_calls_per_iteration, next->iteration);
+        std::unordered_set<std::string> completed_ids;
+        for (const auto& tool_message : tool_msgs) {
+            if (tool_message.tool_call_id) completed_ids.insert(*tool_message.tool_call_id);
+        }
+        std::vector<CallSpec> completed_calls;
+        for (const auto& call : calls) {
+            if (call.tool_call_id && completed_ids.contains(*call.tool_call_id)) {
+                completed_calls.push_back(call);
+            }
+        }
         // append assistant message
         Message a;
         a.role = "assistant";
         a.timestamp = std::time(nullptr);
-        if (!llm_out.tool_calls.empty()) {
+        if (!completed_calls.empty()) {
             json j;
             j["tool_calls"] = json::array();
-            for (const auto& c : llm_out.tool_calls) {
+            for (const auto& c : completed_calls) {
                 json one;
                 one["type"] = "function";
                 one["function"] = json{{"name", c.name}, {"arguments", c.arguments.dump()}};
@@ -972,7 +1040,9 @@ void AgentLoopNode::build_loop_body(
         } else {
             a.content = llm_out.reasoning;
         }
-        next->history.push_back(std::move(a));
+        if (calls.empty() || !completed_calls.empty()) {
+            next->history.push_back(std::move(a));
+        }
         for (const auto& tm : tool_msgs) {
             next->history.push_back(tm);
         }
@@ -983,7 +1053,7 @@ void AgentLoopNode::build_loop_body(
         mcopt.llm_client = llm_client.get();
         maybe_auto_compact_memory(*next, mcopt);
 
-        const bool is_final = llm_out.tool_calls.empty() && (llm_out.is_final || !llm_out.final_answer.empty());
+        const bool is_final = calls.empty() && (llm_out.is_final || !llm_out.final_answer.empty());
         const std::string final_answer = llm_out.final_answer;
 
         return {

@@ -144,6 +144,61 @@ void test_history_truncate_avoids_orphan_tool() {
     }
 }
 
+Message assistant_calls(std::initializer_list<const char*> ids) {
+    json calls = json::array();
+    for (const char* id : ids) {
+        calls.push_back({{"id", id},
+                         {"type", "function"},
+                         {"function", {{"name", "x"}, {"arguments", "{}"}}}});
+    }
+    Message message;
+    message.role = "assistant";
+    message.content = json{{"tool_calls", std::move(calls)}}.dump();
+    return message;
+}
+
+Message tool_result(const char* id) {
+    Message message;
+    message.role = "tool";
+    message.tool_call_id = id;
+    message.tool_name = "x";
+    message.tool_result = json{{"ok", true}};
+    return message;
+}
+
+void test_openai_history_keeps_only_complete_tool_groups() {
+    OpenAIHistoryFormatter formatter;
+    std::vector<Message> complete = {
+        Message{"user", "u", std::nullopt, std::nullopt, std::nullopt, 0},
+        assistant_calls({"c1", "c2"}), tool_result("c1"), tool_result("c2")};
+    const auto valid = formatter.format_as_messages(complete);
+    assert(valid.size() == 4U);
+    assert(valid[1].contains("tool_calls"));
+    assert(valid[2].at("tool_call_id") == "c1");
+    assert(valid[3].at("tool_call_id") == "c2");
+
+    std::vector<Message> broken = {
+        Message{"user", "u", std::nullopt, std::nullopt, std::nullopt, 0},
+        assistant_calls({"c1", "c2"}), tool_result("c1"),
+        Message{"assistant", "recovered", std::nullopt, std::nullopt, std::nullopt, 0}};
+    const auto repaired = formatter.format_as_messages(broken);
+    assert(repaired.size() == 2U);
+    assert(repaired[0].at("role") == "user");
+    assert(repaired[1].at("content") == "recovered");
+}
+
+void test_openai_history_truncates_tool_group_atomically() {
+    OpenAIHistoryFormatter formatter;
+    std::vector<Message> history = {
+        Message{"user", "u", std::nullopt, std::nullopt, std::nullopt, 0},
+        assistant_calls({"c1"}), tool_result("c1"),
+        Message{"assistant", "done", std::nullopt, std::nullopt, std::nullopt, 0}};
+    const auto suffix = formatter.truncate(history, 2);
+    assert(suffix.size() == 1U);
+    assert(suffix.front().role == "assistant");
+    assert(suffix.front().content == "done");
+}
+
 void test_image_injected_as_content_parts() {
     PromptRenderer r;
     r.register_tool_formatter("gpt-*", std::make_shared<OpenAIToolFormatter>());
@@ -220,10 +275,11 @@ int main() {
     test_context_injected_into_system();
     test_tools_json_shape_openai_vs_anthropic();
     test_history_truncate_avoids_orphan_tool();
+    test_openai_history_keeps_only_complete_tool_groups();
+    test_openai_history_truncates_tool_group_atomically();
     test_image_injected_as_content_parts();
     test_complete_render_user_template_vars();
     test_missing_vars_adds_extra_system_message();
     test_two_phase_order_user_vars_before_context_injection();
     return 0;
 }
-

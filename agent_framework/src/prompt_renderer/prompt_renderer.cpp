@@ -193,6 +193,12 @@ RenderedPrompt PromptRenderer::truncate_prompt(const RenderedPrompt& rendered,
     };
     while (total_dump() > cap_bytes && out.messages.size() > 2) {
         out.messages.erase(out.messages.begin() + 1);
+        // Message index 0 is the primary system message and the last message is the current user
+        // input. If the erased history entry was assistant(tool_calls), remove its now-orphaned
+        // tool results as part of the same truncation unit.
+        while (out.messages.size() > 2 && out.messages[1].value("role", "") == "tool") {
+            out.messages.erase(out.messages.begin() + 1);
+        }
     }
     out.total_tokens = estimate_tokens(out);
     return out;

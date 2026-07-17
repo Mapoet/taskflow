@@ -156,10 +156,12 @@ public:
     int post_llm_calls = 0;
     int fail_post_with_503 = 0;
     int cancellable_sse_calls = 0;
+    json last_request;
 
-    json post_llm(const std::string&, const json&, const std::map<std::string, std::string>&,
+    json post_llm(const std::string&, const json& request, const std::map<std::string, std::string>&,
                   const std::string&) override {
         ++post_llm_calls;
+        last_request = request;
         if (fail_post_with_503 > 0) {
             --fail_post_with_503;
             throw llm_http_error(503, "test", "service unavailable", std::nullopt);
@@ -390,6 +392,37 @@ void test_llm_client_invoke_with_rendered() {
     assert(out.final_answer.find("Hello") != std::string::npos);
 }
 
+void test_openai_request_repairs_incomplete_tool_group() {
+    auto fake = std::make_shared<FakeLlmTransport>();
+    fake->post_response = load_fixture("openai_nonstream_text.json");
+    OpenAIAdapter adapter("k", "https://api.example.com/v1", fake);
+    ModelConfig config;
+    config.model_name = "m";
+    config.stream = false;
+    adapter.configure(config);
+
+    RenderedPrompt prompt;
+    prompt.messages = {
+        json{{"role", "user"}, {"content", "old"}},
+        json{{"role", "assistant"},
+             {"content", nullptr},
+             {"tool_calls",
+              json::array({json{{"id", "c1"},
+                                {"type", "function"},
+                                {"function", {{"name", "x"}, {"arguments", "{}"}}}},
+                           json{{"id", "c2"},
+                                {"type", "function"},
+                                {"function", {{"name", "x"}, {"arguments", "{}"}}}}})}},
+        json{{"role", "tool"}, {"tool_call_id", "c1"}, {"content", "{}"}},
+        json{{"role", "user"}, {"content", "new"}}};
+    (void)adapter.invoke_with_rendered(prompt, nullptr).get();
+    assert(fake->last_request.contains("messages"));
+    const json& sent = fake->last_request.at("messages");
+    assert(sent.size() == 2U);
+    assert(sent[0].at("content") == "old");
+    assert(sent[1].at("content") == "new");
+}
+
 void run_offline_tests() {
     test_openai_nonstream_text();
     test_openai_nonstream_tools();
@@ -400,6 +433,7 @@ void run_offline_tests() {
     test_anthropic_stream();
     test_invoke_with_retries_eventually_ok();
     test_llm_client_invoke_with_rendered();
+    test_openai_request_repairs_incomplete_tool_group();
 }
 
 ModelConfig live_model_config(const std::string& model) {

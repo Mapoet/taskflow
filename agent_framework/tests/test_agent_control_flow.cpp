@@ -226,6 +226,146 @@ private:
     }
 };
 
+class OverflowToolsAdapter final : public ModelAdapter {
+public:
+    std::future<LLMOutput> invoke(
+        const LLMInput&, std::function<void(std::string_view)> = nullptr) override {
+        return next();
+    }
+    std::future<LLMOutput> invoke_with_rendered(
+        const RenderedPrompt& prompt, std::function<void(std::string_view)> = nullptr) override {
+        if (calls_ == 1) {
+            std::size_t assistant_calls = 0;
+            std::size_t tool_results = 0;
+            for (const auto& message : prompt.messages) {
+                if (message.value("role", "") == "assistant" && message.contains("tool_calls")) {
+                    assistant_calls += message.at("tool_calls").size();
+                } else if (message.value("role", "") == "tool") {
+                    ++tool_results;
+                }
+            }
+            saw_bounded_complete_group_ = assistant_calls == 3U && tool_results == 3U;
+        }
+        return next();
+    }
+    std::vector<ToolMeta> get_available_tools() const override { return {}; }
+    void configure(const ModelConfig&) override {}
+    std::string get_model_name() const override { return "overflow-tools"; }
+    bool supports_multimodal() const override { return false; }
+    bool saw_bounded_complete_group() const { return saw_bounded_complete_group_; }
+
+private:
+    std::future<LLMOutput> next() {
+        return std::async(std::launch::async, [this]() {
+            LLMOutput output;
+            if (calls_++ == 0) {
+                for (int i = 0; i < 7; ++i) {
+                    CallSpec call;
+                    call.name = "step";
+                    call.arguments = nlohmann::json{{"round", i}};
+                    call.tool_call_id = "overflow-" + std::to_string(i);
+                    output.tool_calls.push_back(std::move(call));
+                }
+            } else {
+                output.is_final = true;
+                output.final_answer = "bounded";
+            }
+            return output;
+        });
+    }
+
+    std::atomic_int calls_ {0};
+    std::atomic_bool saw_bounded_complete_group_ {false};
+};
+
+class ThrowingAdapter final : public ModelAdapter {
+public:
+    std::future<LLMOutput> invoke(
+        const LLMInput&, std::function<void(std::string_view)> = nullptr) override {
+        return fail();
+    }
+    std::future<LLMOutput> invoke_with_rendered(
+        const RenderedPrompt&, std::function<void(std::string_view)> = nullptr) override {
+        return fail();
+    }
+    std::vector<ToolMeta> get_available_tools() const override { return {}; }
+    void configure(const ModelConfig&) override {}
+    std::string get_model_name() const override { return "throwing"; }
+    bool supports_multimodal() const override { return false; }
+
+private:
+    static std::future<LLMOutput> fail() {
+        return std::async(std::launch::async, []() -> LLMOutput {
+            throw std::runtime_error("protocol rejected");
+        });
+    }
+};
+
+void test_tool_call_cap_preserves_openai_pairing() {
+    auto adapter = std::make_shared<OverflowToolsAdapter>();
+    auto llm = std::make_shared<LLMClient>();
+    llm->set_prompt_renderer(std::make_shared<PromptRenderer>());
+    llm->register_adapter("overflow", adapter);
+    llm->set_default_adapter("overflow");
+    auto bus = std::make_shared<ToolBus>();
+    ToolMeta meta;
+    meta.name = "step";
+    meta.description = "bounded test tool";
+    meta.schema = nlohmann::json::parse(R"({"type":"object"})");
+    bus->register_local_tool("step", [](const nlohmann::json& args) {
+        return nlohmann::json{{"round", args.at("round")}, {"ok", true}};
+    }, meta);
+
+    ReactCliRunRequest request;
+    request.config.system_prompt = "test";
+    request.config.max_iterations = 4;
+    request.config.max_tool_calls_per_iteration = 3;
+    request.deps = {llm, bus, nullptr};
+    request.session = std::make_shared<internal::AgentThreadState>();
+    request.session->initial_user_prompt = "overflow";
+    request.options.sink.on_final_json = [](const nlohmann::json&) {};
+
+    tf::Executor executor(2);
+    GraphExecutor graph_executor;
+    const WorkflowResult result = graph_executor.run_react_cli_sync(executor, request);
+    assert(result.success);
+    assert(adapter->saw_bounded_complete_group());
+    int tool_messages = 0;
+    for (const auto& message : request.session->history) {
+        if (message.role == "tool") ++tool_messages;
+    }
+    assert(tool_messages == 3);
+}
+
+void test_llm_failure_rolls_back_user_turn() {
+    auto adapter = std::make_shared<ThrowingAdapter>();
+    auto llm = std::make_shared<LLMClient>();
+    llm->set_prompt_renderer(std::make_shared<PromptRenderer>());
+    llm->register_adapter("throwing", adapter);
+    llm->set_default_adapter("throwing");
+
+    ReactCliRunRequest request;
+    request.config.system_prompt = "test";
+    request.config.max_iterations = 2;
+    request.deps = {llm, std::make_shared<ToolBus>(), nullptr};
+    request.session = std::make_shared<internal::AgentThreadState>();
+    request.session->history.push_back(
+        Message{"user", "committed", std::nullopt, std::nullopt, std::nullopt, 0});
+    request.session->iteration = 7;
+    request.session->initial_user_prompt = "must roll back";
+    request.options.sink.on_final_json = [](const nlohmann::json&) {};
+
+    tf::Executor executor(2);
+    GraphExecutor graph_executor;
+    const WorkflowResult result = graph_executor.run_react_cli_sync(executor, request);
+    assert(!result.success);
+    assert(result.error_message.has_value());
+    assert(result.error_message->find("protocol rejected") != std::string::npos);
+    assert(request.session->history.size() == 1U);
+    assert(request.session->history.front().content == "committed");
+    assert(request.session->iteration == 7);
+}
+
 void test_cancel_during_llm_stream_stops_delivery_and_commit() {
     auto adapter = std::make_shared<StreamingCancelAdapter>();
     auto llm = std::make_shared<LLMClient>();
@@ -312,4 +452,6 @@ int main() {
     test_cancelled_session();
     test_resume_does_not_replay_tool_call();
     test_cancel_during_llm_stream_stops_delivery_and_commit();
+    test_tool_call_cap_preserves_openai_pairing();
+    test_llm_failure_rolls_back_user_turn();
 }

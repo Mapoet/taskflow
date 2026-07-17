@@ -16,6 +16,7 @@
 #include <stdexcept>
 #include <string>
 #include <tuple>
+#include <unordered_set>
 #include <utility>
 
 namespace agent_framework {
@@ -113,6 +114,54 @@ struct StreamToolSlot {
     std::string arguments;
 };
 
+std::vector<json> sanitize_openai_message_protocol(const std::vector<json>& messages) {
+    std::vector<json> out;
+    out.reserve(messages.size());
+    for (std::size_t i = 0; i < messages.size();) {
+        const json& message = messages[i];
+        const std::string role = message.value("role", "");
+        if (role == "tool") {
+            ++i;
+            continue;
+        }
+        if (role != "assistant" || !message.contains("tool_calls") ||
+            !message.at("tool_calls").is_array() || message.at("tool_calls").empty()) {
+            out.push_back(message);
+            ++i;
+            continue;
+        }
+
+        std::vector<std::string> expected;
+        bool ids_valid = true;
+        for (const auto& call : message.at("tool_calls")) {
+            if (!call.is_object() || !call.contains("id") || !call.at("id").is_string() ||
+                call.at("id").get_ref<const std::string&>().empty()) {
+                ids_valid = false;
+                break;
+            }
+            expected.push_back(call.at("id").get<std::string>());
+        }
+        std::unordered_set<std::string> remaining(expected.begin(), expected.end());
+        std::vector<json> tools;
+        std::size_t j = i + 1;
+        while (j < messages.size() && messages[j].value("role", "") == "tool") {
+            const json& tool = messages[j];
+            if (tool.contains("tool_call_id") && tool.at("tool_call_id").is_string() &&
+                remaining.erase(tool.at("tool_call_id").get<std::string>()) != 0U) {
+                tools.push_back(tool);
+            }
+            ++j;
+        }
+        if (ids_valid && expected.size() == remaining.size() + tools.size() &&
+            remaining.empty() && tools.size() == expected.size()) {
+            out.push_back(message);
+            out.insert(out.end(), tools.begin(), tools.end());
+        }
+        i = j;
+    }
+    return out;
+}
+
 } // namespace
 
 OpenAIAdapter::OpenAIAdapter(const std::string& api_key, const std::string& base_url,
@@ -142,7 +191,7 @@ json OpenAIAdapter::build_openai_request(const RenderedPrompt& rendered) {
     json req;
     req["model"] = config_.model_name;
     json msgs = json::array();
-    for (const auto& m : rendered.messages) {
+    for (const auto& m : sanitize_openai_message_protocol(rendered.messages)) {
         msgs.push_back(m);
     }
     req["messages"] = std::move(msgs);
