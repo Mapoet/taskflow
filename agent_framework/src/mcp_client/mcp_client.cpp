@@ -68,8 +68,10 @@ void MCPClient::handshake() {
 }
 
 std::shared_ptr<MCPClient> MCPClient::create_stdio(const std::string& command,
-                                                   const std::vector<std::string>& args) {
-    auto tr = std::make_unique<StdioMCPTransport>(command, args);
+                                                   const std::vector<std::string>& args,
+                                                   MCPStdioFraming framing) {
+    auto tr = std::make_unique<StdioMCPTransport>(
+        command, args, std::map<std::string, std::string>{}, framing);
     if (!tr->connect("")) {
         throw std::runtime_error("MCP initialize failed: stdio connect()");
     }
@@ -85,8 +87,9 @@ std::shared_ptr<MCPClient> MCPClient::create_stdio(const std::string& command,
 
 std::shared_ptr<MCPClient> MCPClient::create_stdio(const std::string& command,
                                                    const std::vector<std::string>& args,
-                                                   const std::map<std::string, std::string>& extra_env) {
-    auto tr = std::make_unique<StdioMCPTransport>(command, args, extra_env);
+                                                   const std::map<std::string, std::string>& extra_env,
+                                                   MCPStdioFraming framing) {
+    auto tr = std::make_unique<StdioMCPTransport>(command, args, extra_env, framing);
     if (!tr->connect("")) {
         throw std::runtime_error("MCP initialize failed: stdio connect()");
     }

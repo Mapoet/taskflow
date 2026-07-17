@@ -98,6 +98,40 @@ httplib::Headers to_httplib_headers(const std::map<std::string, std::string>& he
     return h;
 }
 
+const char* http_error_name(httplib::Error error) {
+    switch (error) {
+    case httplib::Error::Success: return "success";
+    case httplib::Error::Unknown: return "unknown";
+    case httplib::Error::Connection: return "connection failed or refused";
+    case httplib::Error::BindIPAddress: return "local bind failed";
+    case httplib::Error::Read: return "read failed or timed out";
+    case httplib::Error::Write: return "write failed or timed out";
+    case httplib::Error::ExceedRedirectCount: return "redirect limit exceeded";
+    case httplib::Error::Canceled: return "request canceled";
+    case httplib::Error::SSLConnection: return "TLS connection failed";
+    case httplib::Error::SSLLoadingCerts: return "TLS certificate loading failed";
+    case httplib::Error::SSLServerVerification: return "TLS server verification failed";
+    case httplib::Error::UnsupportedMultipartBoundaryChars: return "unsupported multipart boundary";
+    case httplib::Error::Compression: return "response decompression failed";
+    }
+    return "unknown";
+}
+
+bool looks_like_legacy_sse_path(const std::string& path_and_query) {
+    const std::size_t query = path_and_query.find('?');
+    const std::string path = path_and_query.substr(0, query);
+    return path == "/sse" || (path.size() > 4 && path.compare(path.size() - 4, 4, "/sse") == 0);
+}
+
+std::string legacy_sse_guidance(const ParsedHttpUrl& url) {
+    if (!looks_like_legacy_sse_path(url.path_and_query)) {
+        return {};
+    }
+    return "; /sse commonly denotes legacy MCP SSE (GET event stream plus a separate POST "
+           "endpoint), while this transport requires a Streamable HTTP POST endpoint; verify "
+           "the service is running and use its /mcp endpoint when available";
+}
+
 } // namespace
 
 HttpMCPTransport::HttpMCPTransport(std::string post_url, std::map<std::string, std::string> extra_headers)
@@ -148,12 +182,15 @@ json HttpMCPTransport::post_json(const json& body,
         if (cancellation_requested && cancellation_requested()) {
             throw std::runtime_error("MCP request cancelled");
         }
-        throw std::runtime_error("HttpMCPTransport: HTTP request failed (network)");
+        throw std::runtime_error(std::string("HttpMCPTransport: HTTP request failed: ") +
+                                 http_error_name(error) + legacy_sse_guidance(u));
     }
     const std::string& body_text = response_body.empty() ? response.body : response_body;
     if (response.status < 200 || response.status >= 300) {
-        throw std::runtime_error("HttpMCPTransport: HTTP status " + std::to_string(response.status) + " body: " +
-                                 body_text.substr(0, 512));
+        std::string reason = response.reason.empty() ? std::string() : " (" + response.reason + ")";
+        throw std::runtime_error("HttpMCPTransport: HTTP status " +
+                                 std::to_string(response.status) + reason +
+                                 legacy_sse_guidance(u));
     }
     if (response.has_header("Mcp-Session-Id")) {
         headers_["Mcp-Session-Id"] = response.get_header_value("Mcp-Session-Id");

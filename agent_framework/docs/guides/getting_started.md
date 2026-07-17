@@ -55,6 +55,8 @@ cp agent_framework/examples/configs/tui.env.example .env.tui
 
 默认只允许 HTTPS；只有显式设置 `AGENT_WEB_ALLOW_HTTP=1` 才允许 HTTP。Skill 脚本执行也不会被启动器静默放开，须在可信配置中显式设置 `AGENT_SKILL_SCRIPT_ALLOWLIST`。完整参数见 `./agent_framework/tools/run_tui.sh --help`，工具边界见 [内建 fs_* 工具](./builtin-fs-tools.md) 与 [内建 web_* 工具](./builtin-web-tools.md)。
 
+MCP stdio 默认使用现代 SDK 的 JSON Lines framing，`npx` 首次启动可能需要下载/加载包，因此默认请求超时为 60000 ms；可用 `AGENT_MCP_REQUEST_TIMEOUT_MS` 覆写。旧 Content-Length 服务需在对应条目显式设置 `"framing": "content-length"`，详见 [Cursor MCP 配置](./cursor_mcp_json.md)。
+
 ## WP2.1c：上下文预算（可选阅读）
 
 工具结果与注入文本的字节上限、`_af_truncation` 形态与 CTest 说明见 **[context-budget.md](./context-budget.md)**。

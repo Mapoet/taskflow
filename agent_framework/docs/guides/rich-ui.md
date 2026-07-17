@@ -62,7 +62,7 @@ cp agent_framework/examples/configs/tui.env.example .env.tui
 | ExprTk / Draw | 默认启用；实际可用性仍由构建依赖决定 |
 | Skills | 默认 Cursor 双根、L1 catalog；`AGENT_SKILLS_DIR` 可覆写为单根 |
 | Skill scripts | 保留 `AGENT_SKILL_SCRIPT_ALLOWLIST` 显式授权，不默认开放解释器 |
-| MCP | 默认加载 Cursor `mcp.json`；支持 `--cursor-mcp-json` 与 `--no-cursor-mcp` |
+| MCP | 默认加载 Cursor `mcp.json`；stdio 默认 JSON Lines；请求超时默认 60000 ms；支持 `--cursor-mcp-json` 与 `--no-cursor-mcp` |
 | LLM | 接受标准 OpenAI-compatible / Anthropic 环境；DeepSeek 使用 OpenAI-compatible base URL |
 | 构建 | 增量 CMake；`--no-build` 复用现有二进制，`--reconfigure` 清理选定构建树 |
 

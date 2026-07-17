@@ -259,6 +259,60 @@ inline std::string read_one_framed_body_text(int fd, std::string& pending_read, 
     return body;
 }
 
+inline std::string read_one_json_line_text(int fd, std::string& pending_read, int timeout_ms,
+                                           std::size_t max_message_bytes,
+                                           const std::function<bool()>& cancellation_requested = {}) {
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
+    for (;;) {
+        const std::size_t newline = pending_read.find('\n');
+        if (newline != std::string::npos) {
+            if (newline > max_message_bytes) {
+                pending_read.clear();
+                throw std::runtime_error("StdioMCPTransport: JSON line exceeds size limit");
+            }
+            std::string line = pending_read.substr(0, newline);
+            pending_read.erase(0, newline + 1);
+            if (!line.empty() && line.back() == '\r') {
+                line.pop_back();
+            }
+            if (line.empty()) {
+                throw std::runtime_error("StdioMCPTransport: empty JSON line on stdout");
+            }
+            return line;
+        }
+        if (pending_read.size() > max_message_bytes) {
+            pending_read.clear();
+            throw std::runtime_error("StdioMCPTransport: JSON line exceeds size limit");
+        }
+        if (cancellation_requested && cancellation_requested()) {
+            throw std::runtime_error("MCP request cancelled");
+        }
+        const auto now = std::chrono::steady_clock::now();
+        if (now >= deadline) {
+            throw std::runtime_error("StdioMCPTransport: read timeout");
+        }
+        const auto remaining =
+            std::chrono::duration_cast<std::chrono::milliseconds>(deadline - now).count();
+        if (!poll_readable_cancellable(
+                fd, static_cast<int>(std::max<long long>(1, remaining)), cancellation_requested)) {
+            throw std::runtime_error("StdioMCPTransport: read timeout");
+        }
+        char tmp[4096];
+        const ssize_t n = ::read(fd, tmp, sizeof(tmp));
+        if (n < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            throw std::runtime_error("StdioMCPTransport: read failed: " +
+                                     std::string(std::strerror(errno)));
+        }
+        if (n == 0) {
+            throw std::runtime_error("StdioMCPTransport: unexpected EOF before JSON newline");
+        }
+        pending_read.append(tmp, static_cast<std::size_t>(n));
+    }
+}
+
 } // namespace internal
 } // namespace agent_framework
 

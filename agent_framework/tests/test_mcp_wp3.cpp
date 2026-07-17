@@ -290,6 +290,24 @@ void test_parse_sse_body_missing_data_throws() {
     }
 }
 
+void test_http_network_error_is_specific_and_redacted() {
+#if defined(_WIN32)
+    return;
+#else
+    (void)::setenv("AGENT_MCP_REQUEST_TIMEOUT_MS", "1000", 1);
+    const std::string secret = "must-not-appear-in-diagnostic";
+    try {
+        (void)MCPClient::create_http("http://127.0.0.1:1/sse?token=" + secret);
+        assert(false);
+    } catch (const std::runtime_error& e) {
+        const std::string message = e.what();
+        assert(message.find("HTTP request failed:") != std::string::npos);
+        assert(message.find("legacy MCP SSE") != std::string::npos);
+        assert(message.find(secret) == std::string::npos);
+    }
+#endif
+}
+
 void test_stdio_framing_noise_prefix_ok() {
 #if defined(_WIN32)
     return;
@@ -400,6 +418,82 @@ void test_stdio_framing_fragmented_header_ok() {
     json j = json::parse(out);
     assert(j.at("id") == 7);
     ::close(rd);
+#endif
+}
+
+void test_stdio_json_lines_multiple_buffered_messages() {
+#if defined(_WIN32)
+    return;
+#else
+    int p[2]{-1, -1};
+    assert(::pipe(p) == 0);
+    const std::string payload =
+        "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}\n"
+        "{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{}}\n";
+    (void)::write(p[1], payload.data(), payload.size());
+    ::close(p[1]);
+
+    std::string pending;
+    const std::string first =
+        agent_framework::internal::read_one_json_line_text(p[0], pending, 2000, 4096);
+    const std::string second =
+        agent_framework::internal::read_one_json_line_text(p[0], pending, 2000, 4096);
+    assert(json::parse(first).at("id") == 1);
+    assert(json::parse(second).at("id") == 2);
+    ::close(p[0]);
+#endif
+}
+
+void test_stdio_json_lines_rejects_empty_and_oversize_messages() {
+#if defined(_WIN32)
+    return;
+#else
+    {
+        int p[2]{-1, -1};
+        assert(::pipe(p) == 0);
+        (void)::write(p[1], "\n", 1);
+        ::close(p[1]);
+        std::string pending;
+        try {
+            (void)agent_framework::internal::read_one_json_line_text(p[0], pending, 2000, 4096);
+            assert(false);
+        } catch (const std::runtime_error&) {
+        }
+        ::close(p[0]);
+    }
+    {
+        int p[2]{-1, -1};
+        assert(::pipe(p) == 0);
+        const std::string payload(65, 'x');
+        (void)::write(p[1], payload.data(), payload.size());
+        ::close(p[1]);
+        std::string pending;
+        try {
+            (void)agent_framework::internal::read_one_json_line_text(p[0], pending, 2000, 64);
+            assert(false);
+        } catch (const std::runtime_error&) {
+        }
+        ::close(p[0]);
+    }
+#endif
+}
+
+void test_stdio_json_lines_cancellation() {
+#if defined(_WIN32)
+    return;
+#else
+    int p[2]{-1, -1};
+    assert(::pipe(p) == 0);
+    std::string pending;
+    try {
+        (void)agent_framework::internal::read_one_json_line_text(
+            p[0], pending, 2000, 4096, [] { return true; });
+        assert(false);
+    } catch (const std::runtime_error& e) {
+        assert(std::string(e.what()).find("cancelled") != std::string::npos);
+    }
+    ::close(p[0]);
+    ::close(p[1]);
 #endif
 }
 
@@ -547,10 +641,14 @@ int main(int argc, char** argv) {
     test_parse_sse_body_multi_line_concat();
     test_parse_sse_body_done_stops();
     test_parse_sse_body_missing_data_throws();
+    test_http_network_error_is_specific_and_redacted();
     test_stdio_framing_noise_prefix_ok();
     test_stdio_framing_noise_between_frames_ok();
     test_stdio_framing_only_noise_throws();
     test_stdio_framing_fragmented_header_ok();
+    test_stdio_json_lines_multiple_buffered_messages();
+    test_stdio_json_lines_rejects_empty_and_oversize_messages();
+    test_stdio_json_lines_cancellation();
     std::cout << "test_mcp_wp3: all tests passed\n";
     return 0;
 }

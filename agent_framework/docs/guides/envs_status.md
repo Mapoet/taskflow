@@ -192,7 +192,7 @@
 
 | 名称 | 功能 | 默认值 | 主文档 | 实现 | 作用域 | 读取时机 | 竞态与多 Agent 备注 | Phase 3 建议 |
 |------|------|--------|--------|------|--------|----------|---------------------|--------------|
-| `AGENT_MCP_REQUEST_TIMEOUT_MS` | stdio/HTTP 读超时 | `60000`（文档）；实现见代码 | [mcp-spec-tracker.md](./mcp-spec-tracker.md) | `stdio_transport.cpp`, `http_transport.cpp` | MCPClient, GlobalProcess | 传输层每次构造/请求 | **全进程同一超时** | **P0**：`McpClient` 构造选项 |
+| `AGENT_MCP_REQUEST_TIMEOUT_MS` | stdio/HTTP 单次请求超时 | `60000` | [mcp-spec-tracker.md](./mcp-spec-tracker.md) | `stdio_transport.cpp`, `http_transport.cpp`；TUI 启动器显式传递 | MCPClient, GlobalProcess | 每次请求 | **全进程同一超时** | **P0**：`McpClient` 构造选项 |
 | `AGENT_MCP_CONFIG_PATH` | Cursor 式 `mcp.json` 路径 | `~/.cursor/mcp.json` | [cursor_mcp_json.md](./cursor_mcp_json.md) | `toolbus.cpp` `default_cursor_mcp_path` | MCP, AgentLoad | 调用 `register_mcp_from_cursor_config` 时 | 多 Agent **不能**靠 env 指不同文件除非 **顺序化** | **P0**：API 显式传 `path`；env 仅默认 |
 | `AGENT_TEST_CURSOR_MCP_JSON` | 测试覆盖 MCP 路径 | — | [cursor_mcp_json.md](./cursor_mcp_json.md), [getting_started.md](./getting_started.md) | `examples/cli_agent_*.cpp` | Test | 示例启动 | — | — |
 | `AGENT_TEST_SKIP_CURSOR_MCP` | 跳过 MCP 加载 | — | [getting_started.md](./getting_started.md) | 示例/测试逻辑 | Test | 启动 | — | — |

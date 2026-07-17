@@ -74,6 +74,7 @@ PROVIDER="${AGENT_LLM_PROVIDER:-openai}"
 MODEL="${AGENT_LLM_MODEL:-}"
 PROMPT=""
 MAX_ITERATIONS=""
+MCP_TIMEOUT_MS="${AGENT_MCP_REQUEST_TIMEOUT_MS:-60000}"
 CURSOR_MCP_JSON=""
 NO_CURSOR_MCP=0
 NO_BUILD=0
@@ -123,6 +124,9 @@ fi
 if [[ -n "${MAX_ITERATIONS}" && ! "${MAX_ITERATIONS}" =~ ^[1-9][0-9]*$ ]]; then
     die "--max-iterations must be a positive integer"
 fi
+if [[ ! "${MCP_TIMEOUT_MS}" =~ ^[1-9][0-9]*$ ]]; then
+    die "AGENT_MCP_REQUEST_TIMEOUT_MS must be a positive integer"
+fi
 if ((NO_BUILD && RECONFIGURE)); then
     die "--no-build and --reconfigure cannot be used together"
 fi
@@ -166,6 +170,7 @@ export AGENT_WEB_ENABLE="${AGENT_WEB_ENABLE:-1}"
 export AGENT_EXPR_ENABLE="${AGENT_EXPR_ENABLE:-1}"
 export AGENT_DRAW_ENABLE="${AGENT_DRAW_ENABLE:-1}"
 export AGENT_SKILL_INJECT_CATALOG="${AGENT_SKILL_INJECT_CATALOG:-1}"
+export AGENT_MCP_REQUEST_TIMEOUT_MS="${MCP_TIMEOUT_MS}"
 if ((VERBOSE)); then
     export AGENT_LOG_LEVEL=debug
 fi
@@ -204,6 +209,7 @@ printf '  model:      %s\n' "${AGENT_LLM_MODEL:-<provider default>}"
 printf '  web/expr/draw: %s/%s/%s\n' "${AGENT_WEB_ENABLE}" "${AGENT_EXPR_ENABLE}" "${AGENT_DRAW_ENABLE}"
 printf '  skills catalog: %s\n' "${AGENT_SKILL_INJECT_CATALOG}"
 printf '  Cursor MCP: %s\n' "$([[ ${NO_CURSOR_MCP} -eq 1 ]] && printf disabled || printf enabled)"
+printf '  MCP timeout: %s ms\n' "${AGENT_MCP_REQUEST_TIMEOUT_MS}"
 printf '  API credential: configured (redacted)\n'
 [[ -z "${ENV_FILE}" ]] || printf '  env file:   %s\n' "${ENV_FILE}"
 

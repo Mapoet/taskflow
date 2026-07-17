@@ -23,7 +23,7 @@ Agent Framework 的 `ToolBus::register_mcp_from_cursor_config` 读取 **与 Curs
 | 形态 | 识别条件 | 支持的字段 | 说明 |
 |------|----------|------------|------|
 | **HTTP** | 存在非空字符串字段 **`url`** | `url`（必填）、`headers`（可选，字符串→字符串） | `type` 字段**不参与分支**；Cursor 里写的 `"type": "http"` 可保留，只要同时有 **`url`** 即可。 |
-| **stdio** | **无** `url`，且存在 **`command`** | `command`（必填）、`args`（可选，字符串数组）、`env`（可选，字符串→字符串） | 子进程环境 = **当前进程环境** 与 `env` 合并（同名键由 `env` **覆盖**）。 |
+| **stdio** | **无** `url`，且存在 **`command`** | `command`（必填）、`args`（可选，字符串数组）、`env`（可选，字符串→字符串）、`framing`（可选） | 子进程环境 = **当前进程环境** 与 `env` 合并（同名键由 `env` **覆盖**）。默认 framing 为现代 MCP **JSON Lines**；旧服务可写 `"framing": "content-length"`。 |
 
 任一服务端条目在连接或 MCP handshake 失败时，会记入导入结果的 **failures**，**不阻断**其他服务的注册（best-effort）。
 
@@ -74,6 +74,12 @@ Agent Framework 的 `ToolBus::register_mcp_from_cursor_config` 读取 **与 Curs
 }
 ```
 
+现代 `@modelcontextprotocol/*`、Context7 和 Playwright Node 服务通常无需填写 `framing`。只有明确仍输出 `Content-Length:` 头的旧服务才增加：
+
+```json
+"framing": "content-length"
+```
+
 说明：
 
 - **`@modelcontextprotocol/server-filesystem`**：`args` 中 **紧跟包名之后** 的每一项都是该 ref server 允许的根目录（与 [MCP servers 文档](https://github.com/modelcontextprotocol/servers) 一致）。请只填需要的目录，勿写 `$HOME` 整棵树 unless 你有意为之。
@@ -108,14 +114,14 @@ Agent Framework 的 `ToolBus::register_mcp_from_cursor_config` 读取 **与 Curs
 | Humanus (TOML) | Agent Framework `mcp.json` |
 |----------------|----------------------------|
 | `type = "stdio"`, `command`, `args` | `command` + `args` (+ `env`) |
-| `type = "sse"`, `host`, `port` 等 | 需换成服务端给出的 **完整 HTTP MCP `url`**（AF 无单独 host/port 键，只认 `url`） |
+| `type = "sse"`, `host`, `port` 等 | 不能直接等同于 HTTP POST；优先使用服务端提供的 Streamable HTTP **`/mcp`** URL。仅有旧版 `/sse` 时需要 legacy SSE 客户端。 |
 
-将已有 Humanus 配置迁到 Cursor JSON 时，SSE 类服务请使用 Cursor/服务商文档中的 **单一 endpoint URL** 填入 `url`。
+将已有 Humanus 配置迁到 Cursor JSON 时，应先确认 endpoint 是可接收 JSON-RPC POST 的 Streamable HTTP，而不是只接受 GET 的旧版 SSE。出现 `/sse` 加网络错误时，同时检查服务进程是否启动、端口是否监听，以及服务是否另行提供 `/mcp`。
 
 ## 8. 校验清单
 
 - [ ] 文件为合法 JSON（无注释、无尾逗号）。
 - [ ] 每个服务要么有 **`url`**，要么有 **`command`**。
 - [ ] stdio 的 `command` 在 `PATH` 中可找到（常用 `npx` 需已安装 Node）。
-- [ ] 密钥仅放在 `headers` / `env` 或 URL 查询参数中，并限制文件权限（如 `chmod 600 ~/.cursor/mcp.json`）。
+- [ ] 密钥优先放在受保护的环境变量或 `headers`，避免 URL 查询参数，并限制配置权限（如 `chmod 600 ~/.cursor/mcp.json`）。
 - [ ] 使用 allowlist 时，预先用日志或 `export_as_llm_tools` 确认 **`服务名__工具名`** 拼写。

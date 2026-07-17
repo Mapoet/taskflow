@@ -58,6 +58,7 @@ grep -Fq -- 'provider:   openai' <<<"${OUTPUT}" || fail "provider missing"
 grep -Fq -- 'model:      test-model' <<<"${OUTPUT}" || fail "model missing"
 grep -Fq -- 'web/expr/draw: 1/1/1' <<<"${OUTPUT}" || fail "full tool defaults missing"
 grep -Fq -- 'Cursor MCP: disabled' <<<"${OUTPUT}" || fail "MCP override missing"
+grep -Fq -- 'MCP timeout: 60000 ms' <<<"${OUTPUT}" || fail "MCP timeout default missing"
 grep -Fq -- 'API credential: configured (redacted)' <<<"${OUTPUT}" || fail "credential redaction marker missing"
 if grep -Fq -- "${SECRET}" <<<"${OUTPUT}"; then
     fail "secret leaked in dry-run output"
@@ -69,6 +70,9 @@ expect_failure '--max-iterations must be a positive integer' \
     "${LAUNCHER}" --env-file "${TMP_ROOT}/empty.env" --dry-run --max-iterations 0 --fs-root "${TMP_ROOT}/fs-root"
 expect_failure 'AGENT_TUI_BUILD_JOBS must be a positive integer' \
     AGENT_TUI_BUILD_JOBS=0 OPENAI_API_KEY=test-key \
+    "${LAUNCHER}" --env-file "${TMP_ROOT}/empty.env" --dry-run --fs-root "${TMP_ROOT}/fs-root"
+expect_failure 'AGENT_MCP_REQUEST_TIMEOUT_MS must be a positive integer' \
+    AGENT_MCP_REQUEST_TIMEOUT_MS=0 OPENAI_API_KEY=test-key \
     "${LAUNCHER}" --env-file "${TMP_ROOT}/empty.env" --dry-run --fs-root "${TMP_ROOT}/fs-root"
 expect_failure 'filesystem root is not an existing directory' \
     "${LAUNCHER}" --env-file "${TMP_ROOT}/empty.env" --dry-run --fs-root "${TMP_ROOT}/missing"

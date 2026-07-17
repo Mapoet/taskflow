@@ -224,7 +224,6 @@ void apply_live_llm_env_defaults() {
         (void)::setenv("AGENT_LLM_MODEL", model.c_str(), 0);
 #endif
     }
-    set_env_if_absent("AGENT_MCP_REQUEST_TIMEOUT_MS", "1500");
 }
 
 int run_graph_ui(tf::Executor& executor,
@@ -323,7 +322,7 @@ int main(int argc, char** argv) {
     std::size_t mcp_services = 0;
     if (!skip_cursor_mcp) {
         std::clog << "[imgui_agent_demo] loading Cursor MCP config (--no-cursor-mcp to skip)...\n"
-                      "  (AGENT_MCP_REQUEST_TIMEOUT_MS per service; default 1500 ms if unset)\n"
+                      "  (AGENT_MCP_REQUEST_TIMEOUT_MS per request; transport default 60000 ms)\n"
                   << std::flush;
         const std::string mcp_cfg = resolve_cursor_mcp_config_path(cursor_mcp_json_arg);
         import_cursor_mcp_tools(*bus, mcp_cfg, mcp_dbg, &mcp_services);

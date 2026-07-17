@@ -19,8 +19,11 @@ void test_import_failures_are_collected() {
     (void)::setenv("AGENT_MCP_REQUEST_TIMEOUT_MS", "5000", 1);
 
     ToolBus bus;
+    const char* configured_path = std::getenv("AGENT_TEST_CURSOR_MCP_JSON");
+    const std::string config_path =
+        (configured_path && *configured_path) ? configured_path : "/home/mapoet/.cursor/mcp.json";
     ToolBus::CursorMcpImportResult r =
-        bus.register_mcp_from_cursor_config("/home/mapoet/.cursor/mcp.json", true);
+        bus.register_mcp_from_cursor_config(config_path, true);
 
     // assert(r.registered_services.empty());
     // assert(r.failures.size() == 2U);
@@ -59,4 +62,3 @@ int main() {
     std::cout << "test_cursor_mcp_import_wp3: ok\n";
     return 0;
 }
-

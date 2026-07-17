@@ -1,6 +1,6 @@
 /**
  * @file stdio_transport.cpp
- * @brief MCP stdio 传输（Content-Length 帧）
+ * @brief MCP stdio 传输（JSON Lines 默认，兼容旧 Content-Length 帧）
  */
 
 #include <agent/mcp_client/mcp_client.hpp>
@@ -33,6 +33,7 @@ namespace agent_framework {
 
 struct StdioMCPTransport::StdioPipes {
     pid_t pid = -1;
+    bool owns_process_group = false;
     int to_child = -1;
     int from_child = -1;
 };
@@ -57,26 +58,6 @@ void writen(int fd, const char* buf, std::size_t len) {
                 continue;
             }
             throw std::runtime_error("StdioMCPTransport: write failed: " + std::string(std::strerror(errno)));
-        }
-        off += static_cast<std::size_t>(n);
-    }
-}
-
-void read_exact(int fd, char* buf, std::size_t len, int timeout_ms) {
-    std::size_t off = 0;
-    while (off < len) {
-        if (!internal::poll_readable(fd, timeout_ms)) {
-            throw std::runtime_error("StdioMCPTransport: read timeout");
-        }
-        ssize_t n = ::read(fd, buf + off, len - off);
-        if (n < 0) {
-            if (errno == EINTR) {
-                continue;
-            }
-            throw std::runtime_error("StdioMCPTransport: read failed: " + std::string(std::strerror(errno)));
-        }
-        if (n == 0) {
-            throw std::runtime_error("StdioMCPTransport: unexpected EOF");
         }
         off += static_cast<std::size_t>(n);
     }
@@ -121,8 +102,10 @@ std::vector<char*> build_envp(const std::map<std::string, std::string>& merged,
 } // namespace
 
 StdioMCPTransport::StdioMCPTransport(std::string command, std::vector<std::string> args,
-                                     std::map<std::string, std::string> extra_env)
-    : command_(std::move(command)), args_(std::move(args)), extra_env_(std::move(extra_env)) {}
+                                     std::map<std::string, std::string> extra_env,
+                                     MCPStdioFraming framing)
+    : command_(std::move(command)), args_(std::move(args)), extra_env_(std::move(extra_env)),
+      framing_(framing) {}
 
 StdioMCPTransport::~StdioMCPTransport() {
     disconnect();
@@ -136,9 +119,14 @@ bool StdioMCPTransport::connect(const std::string& /*endpoint*/) {
     pending_read_.clear();
     io_ = std::make_unique<StdioPipes>();
 
-    int in_pipe[2];
-    int out_pipe[2];
-    if (::pipe(in_pipe) != 0 || ::pipe(out_pipe) != 0) {
+    int in_pipe[2]{-1, -1};
+    int out_pipe[2]{-1, -1};
+    if (::pipe(in_pipe) != 0) {
+        throw std::runtime_error("StdioMCPTransport: pipe() failed");
+    }
+    if (::pipe(out_pipe) != 0) {
+        ::close(in_pipe[0]);
+        ::close(in_pipe[1]);
         throw std::runtime_error("StdioMCPTransport: pipe() failed");
     }
 
@@ -152,7 +140,7 @@ bool StdioMCPTransport::connect(const std::string& /*endpoint*/) {
     }
     ::posix_spawn_file_actions_adddup2(&fa, in_pipe[0], STDIN_FILENO);
     ::posix_spawn_file_actions_adddup2(&fa, out_pipe[1], STDOUT_FILENO);
-    // Do not redirect STDERR to the MCP pipe — logs would corrupt Content-Length framing.
+    // MCP servers may log to stderr; only stdout carries protocol messages.
     ::posix_spawn_file_actions_addclose(&fa, in_pipe[1]);
     ::posix_spawn_file_actions_addclose(&fa, out_pipe[0]);
 
@@ -177,7 +165,33 @@ bool StdioMCPTransport::connect(const std::string& /*endpoint*/) {
     std::vector<std::string> env_store;
     std::vector<char*> envp = build_envp(merged_env, env_store);
 
-    int rc = ::posix_spawnp(&pid, command_.c_str(), &fa, nullptr, argv.data(), envp.data());
+    posix_spawnattr_t attr;
+    if (::posix_spawnattr_init(&attr) != 0) {
+        ::posix_spawn_file_actions_destroy(&fa);
+        ::close(in_pipe[0]);
+        ::close(in_pipe[1]);
+        ::close(out_pipe[0]);
+        ::close(out_pipe[1]);
+        io_.reset();
+        throw std::runtime_error("StdioMCPTransport: posix_spawnattr_init failed");
+    }
+    const short spawn_flags = POSIX_SPAWN_SETPGROUP;
+    const int flags_rc = ::posix_spawnattr_setflags(&attr, spawn_flags);
+    const int pgroup_rc = ::posix_spawnattr_setpgroup(&attr, 0);
+    if (flags_rc != 0 || pgroup_rc != 0) {
+        ::posix_spawnattr_destroy(&attr);
+        ::posix_spawn_file_actions_destroy(&fa);
+        ::close(in_pipe[0]);
+        ::close(in_pipe[1]);
+        ::close(out_pipe[0]);
+        ::close(out_pipe[1]);
+        io_.reset();
+        const int error = flags_rc != 0 ? flags_rc : pgroup_rc;
+        throw std::runtime_error("StdioMCPTransport: process group setup failed: " +
+                                 std::string(std::strerror(error)));
+    }
+    int rc = ::posix_spawnp(&pid, command_.c_str(), &fa, &attr, argv.data(), envp.data());
+    ::posix_spawnattr_destroy(&attr);
     ::posix_spawn_file_actions_destroy(&fa);
 
     ::close(in_pipe[0]);
@@ -191,6 +205,7 @@ bool StdioMCPTransport::connect(const std::string& /*endpoint*/) {
     }
 
     io_->pid = pid;
+    io_->owns_process_group = true;
     io_->to_child = in_pipe[1];
     io_->from_child = out_pipe[0];
     connected_ = true;
@@ -213,7 +228,8 @@ void StdioMCPTransport::disconnect() {
             io_->from_child = -1;
         }
         if (io_->pid > 0) {
-            ::kill(io_->pid, SIGTERM);
+            const pid_t signal_target = io_->owns_process_group ? -io_->pid : io_->pid;
+            (void)::kill(signal_target, SIGTERM);
             int st = 0;
             for (int i = 0; i < 20; ++i) {
                 pid_t w = ::waitpid(io_->pid, &st, WNOHANG);
@@ -223,8 +239,8 @@ void StdioMCPTransport::disconnect() {
                 std::this_thread::sleep_for(std::chrono::milliseconds(50));
             }
             (void)::waitpid(io_->pid, &st, WNOHANG);
-            if (::kill(io_->pid, 0) == 0) {
-                ::kill(io_->pid, SIGKILL);
+            if (::kill(signal_target, 0) == 0) {
+                (void)::kill(signal_target, SIGKILL);
                 (void)::waitpid(io_->pid, &st, 0);
             }
             io_->pid = -1;
@@ -236,6 +252,11 @@ void StdioMCPTransport::disconnect() {
 
 void StdioMCPTransport::write_framed_message(const json& msg) {
     std::string body = msg.dump();
+    if (framing_ == MCPStdioFraming::JsonLines) {
+        body.push_back('\n');
+        writen(io_->to_child, body.data(), body.size());
+        return;
+    }
     std::ostringstream head;
     head << "Content-Length: " << body.size() << "\r\n\r\n";
     std::string h = head.str();
@@ -250,11 +271,22 @@ json StdioMCPTransport::read_framed_message() {
 json StdioMCPTransport::read_framed_message(
     const std::function<bool()>& cancellation_requested) {
     int tmo = mcp_timeout_ms();
-    constexpr std::size_t k_max_scan_bytes = 256U * 1024U;
-    const std::string body_text =
-        internal::read_one_framed_body_text(io_->from_child, pending_read_, tmo, k_max_scan_bytes,
-                                            cancellation_requested);
-    return json::parse(body_text);
+    constexpr std::size_t k_max_message_bytes = 16U * 1024U * 1024U;
+    std::string body_text;
+    if (framing_ == MCPStdioFraming::JsonLines) {
+        body_text = internal::read_one_json_line_text(
+            io_->from_child, pending_read_, tmo, k_max_message_bytes, cancellation_requested);
+    } else {
+        constexpr std::size_t k_max_scan_bytes = 256U * 1024U;
+        body_text = internal::read_one_framed_body_text(
+            io_->from_child, pending_read_, tmo, k_max_scan_bytes, cancellation_requested);
+    }
+    try {
+        return json::parse(body_text);
+    } catch (const json::parse_error& e) {
+        throw std::runtime_error(std::string("StdioMCPTransport: non-JSON stdout message: ") +
+                                 e.what());
+    }
 }
 
 json StdioMCPTransport::transceive(const json& jsonrpc_request) {

@@ -38,13 +38,19 @@ public:
     virtual MCPTransport get_transport_type() const = 0;
 };
 
+enum class MCPStdioFraming {
+    JsonLines,
+    ContentLength,
+};
+
 /**
- * @brief stdio 传输（Content-Length 帧，见 mcp-spec-tracker.md）
+ * @brief stdio 传输（默认 MCP JSON Lines；可显式启用旧 Content-Length 帧）
  */
 class StdioMCPTransport : public MCPTransportInterface {
 public:
     explicit StdioMCPTransport(std::string command, std::vector<std::string> args = {},
-                               std::map<std::string, std::string> extra_env = {});
+                               std::map<std::string, std::string> extra_env = {},
+                               MCPStdioFraming framing = MCPStdioFraming::JsonLines);
     ~StdioMCPTransport() override;
 
     StdioMCPTransport(const StdioMCPTransport&) = delete;
@@ -65,6 +71,7 @@ private:
     std::string command_;
     std::vector<std::string> args_;
     std::map<std::string, std::string> extra_env_;
+    MCPStdioFraming framing_ = MCPStdioFraming::JsonLines;
     bool connected_ = false;
     std::mutex io_mutex_;
     std::string pending_read_;
@@ -127,10 +134,12 @@ class MCPClient {
 public:
     /** 启动子进程 stdio MCP 并完成 initialize */
     static std::shared_ptr<MCPClient> create_stdio(const std::string& command,
-                                                   const std::vector<std::string>& args = {});
+                                                   const std::vector<std::string>& args = {},
+                                                   MCPStdioFraming framing = MCPStdioFraming::JsonLines);
     static std::shared_ptr<MCPClient> create_stdio(
         const std::string& command, const std::vector<std::string>& args,
-        const std::map<std::string, std::string>& extra_env);
+        const std::map<std::string, std::string>& extra_env,
+        MCPStdioFraming framing = MCPStdioFraming::JsonLines);
 
     /** HTTP POST 到 post_url（完整 URL），可选额外头 */
     static std::shared_ptr<MCPClient> create_http(

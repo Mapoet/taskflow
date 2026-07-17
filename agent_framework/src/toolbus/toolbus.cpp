@@ -243,6 +243,24 @@ std::map<std::string, std::string> parse_string_map(const json& obj) {
     return out;
 }
 
+MCPStdioFraming parse_stdio_framing(const json& server) {
+    if (!server.contains("framing")) {
+        return MCPStdioFraming::JsonLines;
+    }
+    if (!server["framing"].is_string()) {
+        throw std::invalid_argument("stdio framing must be a string");
+    }
+    const std::string framing = server["framing"].get<std::string>();
+    if (framing == "jsonl") {
+        return MCPStdioFraming::JsonLines;
+    }
+    if (framing == "content-length") {
+        return MCPStdioFraming::ContentLength;
+    }
+    throw std::invalid_argument(
+        "unknown stdio framing (expected jsonl or content-length)");
+}
+
 } // namespace
 
 std::shared_ptr<ToolInterface> ToolBus::find_tool(const std::string& name) const {
@@ -559,7 +577,7 @@ ToolBus::CursorMcpImportResult ToolBus::register_mcp_from_cursor_config(const st
                 if (s.contains("env")) {
                     env = parse_string_map(s["env"]);
                 }
-                client = MCPClient::create_stdio(command, args, env);
+                client = MCPClient::create_stdio(command, args, env, parse_stdio_framing(s));
             } else {
                 throw std::invalid_argument("unknown server type (need url or command)");
             }
