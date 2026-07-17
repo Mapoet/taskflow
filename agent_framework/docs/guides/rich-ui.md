@@ -45,13 +45,17 @@ cmake --build build --parallel -t web_ui_demo
 - **Skills / MCP**：与 **`cli_agent_skills_demo`** 对齐——默认合并扫描 `~/.cursor/skills` 与 `~/.cursor/skills-cursor`（可用 **`AGENT_SKILLS_DIR`** 覆写为单根）；默认加载 Cursor **`mcp.json`**（**`--no-cursor-mcp`** 或 `AGENT_CLI_SKIP_CURSOR_MCP` 等跳过）；**`AGENT_SKILL_INJECT_CATALOG`** 可注入技能短表。
 - **运行**：全屏 TUI；底栏输入，回车提交；`Ctrl+C` 退出。类 **`TuiHandler`** 位于 `include/agent/ui/tui_handler.hpp`（缓冲 UTF-8 文本，渲染在 demo 内完成）。
 
-推荐从仓库根目录使用一键启动器；它会创建独立的 `build-tui` 构建树、强制启用 `AGENT_BUILD_TUI=ON`、只构建目标 `tui_agent_demo`，并在运行前检查凭据、监禁根和交互终端：
+推荐从仓库根目录使用统一一键启动器。`--ui` 可选择 `tui`、`imgui` 或 `web`；启动器只启用所选界面的 CMake 开关、只构建对应目标，并在运行前检查凭据与文件系统监禁根。TUI 还会检查交互终端：
 
 ```bash
-cp agent_framework/examples/configs/tui.env.example .env.tui
-# 编辑 .env.tui 后：
-./agent_framework/tools/run_tui.sh
+cp agent_framework/examples/configs/ui.env.example .env.ui
+# 编辑 .env.ui 后任选一种界面：
+./agent_framework/tools/run_ui.sh --ui tui
+./agent_framework/tools/run_ui.sh --ui imgui
+./agent_framework/tools/run_ui.sh --ui web --port 8080
 ```
+
+不指定 `--ui` 时默认 TUI。旧的 `run_tui.sh` 保留为 `run_ui.sh --ui tui` 的兼容入口。
 
 完整能力与默认安全策略：
 
@@ -64,9 +68,9 @@ cp agent_framework/examples/configs/tui.env.example .env.tui
 | Skill scripts | 保留 `AGENT_SKILL_SCRIPT_ALLOWLIST` 显式授权，不默认开放解释器 |
 | MCP | 默认加载 Cursor `mcp.json`；stdio 默认 JSON Lines；请求超时默认 60000 ms；支持 `--cursor-mcp-json` 与 `--no-cursor-mcp` |
 | LLM | 接受标准 OpenAI-compatible / Anthropic 环境；DeepSeek 使用 OpenAI-compatible base URL |
-| 构建 | 增量 CMake；`--no-build` 复用现有二进制，`--reconfigure` 清理选定构建树 |
+| 构建 | 默认独立 `build-ui` 构建树；增量 CMake；`--no-build` 复用现有二进制，`--reconfigure` 清理选定构建树 |
 
-`--dry-run` 会执行参数、目录、依赖与凭据预检，输出脱敏后的配置和 shell 命令但不构建、不启动。环境文件使用可信 shell 语法；默认自动读取仓库根 `.env.tui`，也可用 `--env-file` 指定。全部参数以 `./agent_framework/tools/run_tui.sh --help` 为准。
+`--dry-run` 会执行参数、目录、依赖与凭据预检，输出脱敏后的配置和 shell 命令但不构建、不启动。环境文件使用可信 shell 语法；默认自动读取仓库根 `.env.ui`，并兼容旧 `.env.tui`，也可用 `--env-file` 指定。全部参数以 `./agent_framework/tools/run_ui.sh --help` 为准。
 
 ## Track W — `web_ui_demo`
 

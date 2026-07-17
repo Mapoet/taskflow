@@ -1,3 +1,5 @@
 build*
 Testing
 .env.tui
+.env.ui
+imgui.ini

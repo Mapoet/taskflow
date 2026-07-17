@@ -30,30 +30,32 @@ make -j$(nproc)
 
 里程碑 **M8** 与构建开关、系统依赖、SSE 协议与 DoD 见 **[rich-ui.md](./rich-ui.md)**（默认 CMake **不** 启用；需 `-DAGENT_BUILD_IMGUI` / `AGENT_BUILD_TUI` / `AGENT_BUILD_WEB_UI`）。
 
-### 完整 TUI 一键启动
+### 完整富界面一键启动
 
-Debian/Ubuntu 首次使用前需具备 C++、CMake 和宽字符 ncurses 开发库（通常为 `libncurses-dev` 或 `libncursesw5-dev`）。复制配置模板、填写一种 LLM 凭据后，从仓库根目录一键配置、增量构建并启动：
+统一启动器支持 TUI、ImGui 和 Web 三种界面。Debian/Ubuntu 首次使用前需具备 C++、CMake，以及所选界面的系统依赖（TUI 通常为 `libncurses-dev`/`libncursesw5-dev`；ImGui 需要 GLFW/OpenGL）。复制配置模板、填写一种 LLM 凭据后，从仓库根目录一键配置、增量构建并启动：
 
 ```bash
-cp agent_framework/examples/configs/tui.env.example .env.tui
-# 编辑 .env.tui；该文件已被 .gitignore 忽略，勿提交真实 API Key。
-./agent_framework/tools/run_tui.sh
+cp agent_framework/examples/configs/ui.env.example .env.ui
+# 编辑 .env.ui；该文件已被 .gitignore 忽略，勿提交真实 API Key。
+./agent_framework/tools/run_ui.sh --ui tui
+./agent_framework/tools/run_ui.sh --ui imgui
+./agent_framework/tools/run_ui.sh --ui web --port 8080
 ```
 
-启动器默认把 `AGENT_FS_ROOT` 限制为当前仓库，启用内建 **FS / WEB / ExprTk / Draw** 和 Skill catalog，并沿用 `tui_agent_demo` 的 Cursor Skills 双根及 MCP 自动发现。常用覆盖：
+三种界面使用相同的 ReAct graph 与 ToolBus 注册路径。启动器默认把 `AGENT_FS_ROOT` 限制为当前仓库，完整启用内建 **FS / WEB / ExprTk / Draw** 和 Skill catalog，并沿用 Cursor Skills 双根及 MCP 自动发现。常用覆盖：
 
 ```bash
 # 启动前只检查配置并显示脱敏后的实际命令
-./agent_framework/tools/run_tui.sh --dry-run
+./agent_framework/tools/run_ui.sh --ui imgui --dry-run
 
 # 缩小文件系统监禁根，首轮直接提交问题，并跳过 Cursor MCP
-./agent_framework/tools/run_tui.sh \
+./agent_framework/tools/run_ui.sh --ui web --port 9090 \
   --fs-root /absolute/safe/workspace \
   --prompt "检索资料并整理当前目录中的相关文件" \
   --no-cursor-mcp
 ```
 
-默认只允许 HTTPS；只有显式设置 `AGENT_WEB_ALLOW_HTTP=1` 才允许 HTTP。Skill 脚本执行也不会被启动器静默放开，须在可信配置中显式设置 `AGENT_SKILL_SCRIPT_ALLOWLIST`。完整参数见 `./agent_framework/tools/run_tui.sh --help`，工具边界见 [内建 fs_* 工具](./builtin-fs-tools.md) 与 [内建 web_* 工具](./builtin-web-tools.md)。
+默认只允许 HTTPS；只有显式设置 `AGENT_WEB_ALLOW_HTTP=1` 才允许 HTTP。Skill 脚本执行也不会被启动器静默放开，须在可信配置中显式设置 `AGENT_SKILL_SCRIPT_ALLOWLIST`。旧 `run_tui.sh` 仍可作为 TUI 兼容入口。完整参数见 `./agent_framework/tools/run_ui.sh --help`，工具边界见 [内建 fs_* 工具](./builtin-fs-tools.md) 与 [内建 web_* 工具](./builtin-web-tools.md)。
 
 MCP stdio 默认使用现代 SDK 的 JSON Lines framing，`npx` 首次启动可能需要下载/加载包，因此默认请求超时为 60000 ms；可用 `AGENT_MCP_REQUEST_TIMEOUT_MS` 覆写。旧 Content-Length 服务需在对应条目显式设置 `"framing": "content-length"`，详见 [Cursor MCP 配置](./cursor_mcp_json.md)。
 

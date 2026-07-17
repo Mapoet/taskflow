@@ -976,11 +976,11 @@ endif()
 # 测试（WP1.1 LLM 轻量单测，无第三方框架）
 if(BUILD_TESTING)
     enable_testing()
-    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/scripts/test_run_tui_launcher.sh)
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/scripts/test_run_ui_launcher.sh)
         add_test(
-            NAME tui_launcher_script
-            COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/tests/scripts/test_run_tui_launcher.sh)
-        set_tests_properties(tui_launcher_script PROPERTIES LABELS "rich-ui;tui-launcher")
+            NAME ui_launcher_script
+            COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/tests/scripts/test_run_ui_launcher.sh)
+        set_tests_properties(ui_launcher_script PROPERTIES LABELS "rich-ui;ui-launcher")
     endif()
     if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_public_header_layout.cpp)
         add_executable(test_public_header_layout tests/test_public_header_layout.cpp)
