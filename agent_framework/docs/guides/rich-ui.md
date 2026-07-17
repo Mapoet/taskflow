@@ -45,6 +45,29 @@ cmake --build build --parallel -t web_ui_demo
 - **Skills / MCP**：与 **`cli_agent_skills_demo`** 对齐——默认合并扫描 `~/.cursor/skills` 与 `~/.cursor/skills-cursor`（可用 **`AGENT_SKILLS_DIR`** 覆写为单根）；默认加载 Cursor **`mcp.json`**（**`--no-cursor-mcp`** 或 `AGENT_CLI_SKIP_CURSOR_MCP` 等跳过）；**`AGENT_SKILL_INJECT_CATALOG`** 可注入技能短表。
 - **运行**：全屏 TUI；底栏输入，回车提交；`Ctrl+C` 退出。类 **`TuiHandler`** 位于 `include/agent/ui/tui_handler.hpp`（缓冲 UTF-8 文本，渲染在 demo 内完成）。
 
+推荐从仓库根目录使用一键启动器；它会创建独立的 `build-tui` 构建树、强制启用 `AGENT_BUILD_TUI=ON`、只构建目标 `tui_agent_demo`，并在运行前检查凭据、监禁根和交互终端：
+
+```bash
+cp agent_framework/examples/configs/tui.env.example .env.tui
+# 编辑 .env.tui 后：
+./agent_framework/tools/run_tui.sh
+```
+
+完整能力与默认安全策略：
+
+| 能力 | 启动器行为 |
+|------|------------|
+| FS | `AGENT_FS_ROOT` 默认仓库根；`--fs-root` 可缩小或改为其它已存在目录 |
+| WEB | `AGENT_WEB_ENABLE=1`；注册搜索、抓取、RSS 与安全归档；HTTP 仍为显式 opt-in |
+| ExprTk / Draw | 默认启用；实际可用性仍由构建依赖决定 |
+| Skills | 默认 Cursor 双根、L1 catalog；`AGENT_SKILLS_DIR` 可覆写为单根 |
+| Skill scripts | 保留 `AGENT_SKILL_SCRIPT_ALLOWLIST` 显式授权，不默认开放解释器 |
+| MCP | 默认加载 Cursor `mcp.json`；支持 `--cursor-mcp-json` 与 `--no-cursor-mcp` |
+| LLM | 接受标准 OpenAI-compatible / Anthropic 环境；DeepSeek 使用 OpenAI-compatible base URL |
+| 构建 | 增量 CMake；`--no-build` 复用现有二进制，`--reconfigure` 清理选定构建树 |
+
+`--dry-run` 会执行参数、目录、依赖与凭据预检，输出脱敏后的配置和 shell 命令但不构建、不启动。环境文件使用可信 shell 语法；默认自动读取仓库根 `.env.tui`，也可用 `--env-file` 指定。全部参数以 `./agent_framework/tools/run_tui.sh --help` 为准。
+
 ## Track W — `web_ui_demo`
 
 - **Skills / MCP**：与 **`cli_agent_skills_demo`** 相同约定（默认 Cursor 技能双路径 +默认 MCP；**`--cursor-mcp-json`** / **`--no-cursor-mcp`**；**`AGENT_SKILL_INJECT_CATALOG`**）。
