@@ -425,6 +425,9 @@ endif()
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/ui/tui_handler.cpp)
     list(APPEND AGENT_SOURCES src/ui/tui_handler.cpp)
 endif()
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/ui/presentation_model.cpp)
+    list(APPEND AGENT_SOURCES src/ui/presentation_model.cpp)
+endif()
 
 # Node 模块
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/node/node_factory.cpp)
@@ -976,6 +979,12 @@ endif()
 # 测试（WP1.1 LLM 轻量单测，无第三方框架）
 if(BUILD_TESTING)
     enable_testing()
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_ui_presentation_model.cpp)
+        add_executable(test_ui_presentation_model tests/test_ui_presentation_model.cpp)
+        target_link_libraries(test_ui_presentation_model PRIVATE agent_framework)
+        add_test(NAME ui_presentation_model COMMAND test_ui_presentation_model)
+        set_tests_properties(ui_presentation_model PROPERTIES LABELS "rich-ui;scientific-console")
+    endif()
     if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/scripts/test_run_ui_launcher.sh)
         add_test(
             NAME ui_launcher_script

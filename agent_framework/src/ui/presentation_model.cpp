@@ -1,0 +1,196 @@
+#include <agent/ui/presentation_model.hpp>
+
+#include <algorithm>
+#include <chrono>
+#include <utility>
+
+namespace agent_framework {
+
+UiPresentationModel::UiPresentationModel(std::size_t max_turns, std::size_t max_tools,
+                                         std::size_t max_text_bytes)
+    : max_turns_(std::max<std::size_t>(2, max_turns)),
+      max_tools_(std::max<std::size_t>(1, max_tools)),
+      max_text_bytes_(std::max<std::size_t>(1024, max_text_bytes)) {}
+
+std::int64_t UiPresentationModel::now_ms() {
+    return std::chrono::duration_cast<std::chrono::milliseconds>(
+               std::chrono::system_clock::now().time_since_epoch())
+        .count();
+}
+
+void UiPresentationModel::append_utf8_capped(std::string& dst, std::string_view text,
+                                             std::size_t cap) {
+    dst.append(text.data(), text.size());
+    if (dst.size() <= cap) return;
+    std::size_t cut = dst.size() - cap;
+    while (cut < dst.size() && (static_cast<unsigned char>(dst[cut]) & 0xC0U) == 0x80U) ++cut;
+    dst.erase(0, cut);
+}
+
+void UiPresentationModel::set_runtime_metadata(std::string session_id, std::string provider,
+                                               std::string model,
+                                               std::string connection_label) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    state_.session_id = std::move(session_id);
+    state_.provider = std::move(provider);
+    state_.model = std::move(model);
+    state_.connection_label = std::move(connection_label);
+}
+
+void UiPresentationModel::begin_user_turn(std::string prompt) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    state_.run_state = UiRunState::Running;
+    state_.last_error.clear();
+    state_.turns.push_back({UiTurnRole::User, std::move(prompt), now_ms(), false, false});
+    state_.turns.push_back({UiTurnRole::Assistant, {}, now_ms(), true, false});
+    trim_locked();
+}
+
+void UiPresentationModel::ensure_assistant_turn_locked() {
+    if (state_.turns.empty() || state_.turns.back().role != UiTurnRole::Assistant ||
+        !state_.turns.back().streaming) {
+        state_.turns.push_back({UiTurnRole::Assistant, {}, now_ms(), true, false});
+    }
+}
+
+void UiPresentationModel::append_stream_token(std::string_view token) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (state_.run_state == UiRunState::Idle) state_.run_state = UiRunState::Running;
+    ensure_assistant_turn_locked();
+    append_utf8_capped(state_.turns.back().content, token, max_text_bytes_);
+    trim_locked();
+}
+
+void UiPresentationModel::complete(const json& result) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    ensure_assistant_turn_locked();
+    UiTurn& turn = state_.turns.back();
+    if (turn.content.empty() && result.contains("final_answer") && result["final_answer"].is_string()) {
+        append_utf8_capped(turn.content, result["final_answer"].get_ref<const std::string&>(),
+                           max_text_bytes_);
+    }
+    turn.streaming = false;
+    state_.run_state = UiRunState::Completed;
+    state_.connection_label = "Ready";
+    trim_locked();
+}
+
+void UiPresentationModel::fail(std::string message) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!state_.turns.empty() && state_.turns.back().role == UiTurnRole::Assistant &&
+        state_.turns.back().streaming) {
+        state_.turns.back().streaming = false;
+        state_.turns.back().error = true;
+    }
+    state_.last_error = message;
+    state_.turns.push_back({UiTurnRole::System, std::move(message), now_ms(), false, true});
+    state_.run_state = UiRunState::Failed;
+    state_.connection_label = "Error";
+    trim_locked();
+}
+
+void UiPresentationModel::cancel(std::string message) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!state_.turns.empty() && state_.turns.back().streaming) state_.turns.back().streaming = false;
+    state_.turns.push_back({UiTurnRole::System, std::move(message), now_ms(), false, false});
+    state_.run_state = UiRunState::Cancelled;
+    state_.connection_label = "Ready";
+    trim_locked();
+}
+
+bool UiPresentationModel::result_is_error(const json& result) {
+    if (!result.is_object()) return false;
+    if (result.contains("error")) return true;
+    if (result.contains("ok") && result["ok"].is_boolean()) return !result["ok"].get<bool>();
+    return false;
+}
+
+void UiPresentationModel::observe_tool(const ToolExecutionEvent& event) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto it = std::find_if(state_.tools.rbegin(), state_.tools.rend(), [&](const auto& tool) {
+        return !event.tool_call_id.empty() && tool.tool_call_id == event.tool_call_id;
+    });
+    if (event.phase == ToolExecutionPhase::Started || it == state_.tools.rend()) {
+        UiToolActivity activity;
+        activity.tool_call_id = event.tool_call_id;
+        activity.tool_name = event.tool_name;
+        activity.arguments = event.arguments;
+        activity.state = UiRunState::Running;
+        activity.started_at_ms = now_ms();
+        state_.tools.push_back(std::move(activity));
+    } else {
+        it->result = event.result;
+        it->finished_at_ms = now_ms();
+        it->duration_ms = std::max<std::int64_t>(0, it->finished_at_ms - it->started_at_ms);
+        it->state = result_is_error(event.result) ? UiRunState::Failed : UiRunState::Completed;
+    }
+    trim_locked();
+}
+
+void UiPresentationModel::trim_locked() {
+    if (state_.turns.size() > max_turns_) {
+        state_.turns.erase(state_.turns.begin(),
+                           state_.turns.begin() + static_cast<std::ptrdiff_t>(state_.turns.size() - max_turns_));
+    }
+    if (state_.tools.size() > max_tools_) {
+        state_.tools.erase(state_.tools.begin(),
+                           state_.tools.begin() + static_cast<std::ptrdiff_t>(state_.tools.size() - max_tools_));
+    }
+}
+
+void UiPresentationModel::reset() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    const auto session = state_.session_id;
+    const auto provider = state_.provider;
+    const auto model = state_.model;
+    state_ = {};
+    state_.session_id = session;
+    state_.provider = provider;
+    state_.model = model;
+    state_.connection_label = "Ready";
+}
+
+void UiPresentationModel::load_demo_state() {
+    reset();
+    set_runtime_metadata("orbital-analysis", "OpenAI", "deepseek-chat", "MCP connected");
+    begin_user_turn("Plot sin(x) from 0 to 2π and find its maximum value and location.");
+    append_stream_token("I evaluated the expression over [0, 2π] and generated a plot.\n\n"
+                        "The maximum value is **1.0000** at **x = π/2 ≈ 1.5708 rad**.");
+    ToolExecutionEvent a{ToolExecutionPhase::Started, "fs_search", "demo-fs",
+                         json{{"query", "*.cpp"}, {"path", "/workspace/src"}}, {}};
+    observe_tool(a);
+    a.phase = ToolExecutionPhase::Completed;
+    a.result = json{{"matches", 18}, {"top", "agent.cpp, tool_mgr.cpp, plot_tool.cpp"}};
+    observe_tool(a);
+    ToolExecutionEvent b{ToolExecutionPhase::Started, "web_search", "demo-web",
+                         json{{"query", "sin(x) maximum 0 to 2pi"}}, {}};
+    observe_tool(b);
+    b.phase = ToolExecutionPhase::Completed;
+    b.result = json{{"sources", 5}, {"status", "verified"}};
+    observe_tool(b);
+    ToolExecutionEvent c{ToolExecutionPhase::Started, "expr_eval", "demo-expr",
+                         json{{"expression", "max(sin(x))"}}, {}};
+    observe_tool(c);
+    c.phase = ToolExecutionPhase::Completed;
+    c.result = json{{"value", 1.0}, {"x", 1.5708}};
+    observe_tool(c);
+    complete(json{{"final_answer", "demo"}, {"iteration", 3}});
+}
+
+UiPresentationSnapshot UiPresentationModel::snapshot() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return state_;
+}
+
+const char* UiPresentationModel::state_name(UiRunState state) noexcept {
+    switch (state) {
+        case UiRunState::Idle: return "idle";
+        case UiRunState::Running: return "running";
+        case UiRunState::Completed: return "completed";
+        case UiRunState::Failed: return "failed";
+        case UiRunState::Cancelled: return "cancelled";
+    }
+    return "idle";
+}
+
+} // namespace agent_framework
