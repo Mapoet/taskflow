@@ -6,6 +6,7 @@
 #include <agent/skills/skill_runtime.hpp>
 
 #include <cstdlib>
+#include <algorithm>
 #include <filesystem>
 #include <limits>
 #include <sstream>
@@ -16,8 +17,8 @@ namespace agent_framework {
 
 namespace {
 
-void wire_resource_services(const std::shared_ptr<SkillServices>& services,
-                            const std::filesystem::path& fallback_root) {
+std::filesystem::path wire_resource_services(const std::shared_ptr<SkillServices>& services,
+                                             const std::filesystem::path& fallback_root) {
     const char* configured = std::getenv("AGENT_SKILL_CACHE_DIR");
     const auto cache_root = configured && *configured
         ? std::filesystem::path(configured) : fallback_root / ".skill-cache";
@@ -27,6 +28,19 @@ void wire_resource_services(const std::shared_ptr<SkillServices>& services,
     services->references = std::make_shared<SkillReferenceService>(
         reference_limits, cache_root / "derived");
     services->models = std::make_shared<SkillModelService>(services->resource_cache);
+    return cache_root;
+}
+
+std::filesystem::path authoring_root_from_env() {
+    const char* configured = std::getenv("AGENT_SKILL_AUTHORING_DIR");
+    return configured && *configured ? std::filesystem::path(configured) : std::filesystem::path{};
+}
+
+std::filesystem::path workspace_root_from_env() {
+    const char* configured = std::getenv("AGENT_FS_ROOT");
+    if (configured && *configured) return std::filesystem::path(configured);
+    std::error_code ec;
+    return std::filesystem::current_path(ec);
 }
 
 std::filesystem::path user_home_directory() {
@@ -43,20 +57,37 @@ std::filesystem::path user_home_directory() {
 
 } // namespace
 
+std::shared_ptr<SessionResourceContext> SkillServices::pin_resource_context() const {
+    if (!registry || !resources) return nullptr;
+    auto pinned = std::make_shared<SessionResourceContext>(
+        resources->workspace_root(), registry->roots(),
+        manager ? manager->authoring_root() : resources->authoring_root(),
+        resources->cache_root(), registry->snapshot());
+    return pinned;
+}
+
 std::shared_ptr<SkillServices> SkillServices::from_env() {
     const char* d = std::getenv("AGENT_SKILLS_DIR");
     if (!d || !*d) {
         return nullptr;
     }
     try {
-        auto reg = std::make_shared<SkillRegistry>(std::filesystem::path(d));
+        const auto authoring = authoring_root_from_env();
+        std::vector<std::filesystem::path> roots{std::filesystem::path(d)};
+        if (!authoring.empty() && authoring != roots.front()) roots.push_back(authoring);
+        auto reg = std::make_shared<SkillRegistry>(std::move(roots));
         reg->scan_or_reload();
         auto loader = std::make_shared<SkillLoader>(*reg);
         auto svc = std::make_shared<SkillServices>();
         svc->registry = std::move(reg);
         svc->loader = std::move(loader);
         svc->runtime = std::make_shared<SkillRuntime>(svc->registry, svc->loader);
-        wire_resource_services(svc, std::filesystem::path(d));
+        const auto cache = wire_resource_services(svc, std::filesystem::path(d));
+        svc->manager = std::make_shared<SkillManager>(svc->registry, svc->loader, svc->runtime,
+                                                      authoring);
+        svc->resources = std::make_shared<SessionResourceContext>(
+            workspace_root_from_env(), svc->registry->roots(), authoring, cache,
+            svc->registry->snapshot());
         return svc;
     } catch (...) {
         return nullptr;
@@ -79,9 +110,14 @@ std::shared_ptr<SkillServices> SkillServices::from_cursor_default_skill_roots() 
         roots.push_back(b);
     }
     if (roots.empty()) {
-        return nullptr;
+        const auto authoring = authoring_root_from_env();
+        if (authoring.empty()) return nullptr;
+        roots.push_back(authoring);
     }
     try {
+        const auto authoring = authoring_root_from_env();
+        if (!authoring.empty() &&
+            std::find(roots.begin(), roots.end(), authoring) == roots.end()) roots.push_back(authoring);
         auto reg = std::make_shared<SkillRegistry>(std::move(roots));
         reg->scan_or_reload();
         auto loader = std::make_shared<SkillLoader>(*reg);
@@ -89,7 +125,12 @@ std::shared_ptr<SkillServices> SkillServices::from_cursor_default_skill_roots() 
         svc->registry = std::move(reg);
         svc->loader = std::move(loader);
         svc->runtime = std::make_shared<SkillRuntime>(svc->registry, svc->loader);
-        wire_resource_services(svc, home / ".cursor");
+        const auto cache = wire_resource_services(svc, home / ".cursor");
+        svc->manager = std::make_shared<SkillManager>(svc->registry, svc->loader, svc->runtime,
+                                                      authoring);
+        svc->resources = std::make_shared<SessionResourceContext>(
+            workspace_root_from_env(), svc->registry->roots(), authoring, cache,
+            svc->registry->snapshot());
         return svc;
     } catch (...) {
         return nullptr;

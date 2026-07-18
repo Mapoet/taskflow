@@ -11,6 +11,8 @@
 #include <agent/skills/skill_resource_cache.hpp>
 #include <agent/skills/skill_reference.hpp>
 #include <agent/skills/skill_model.hpp>
+#include <agent/skills/skill_manager.hpp>
+#include <agent/resources/session_resource_context.hpp>
 
 #include <memory>
 
@@ -26,6 +28,11 @@ struct SkillServices {
     std::shared_ptr<SkillResourceCache> resource_cache;
     std::shared_ptr<SkillReferenceService> references;
     std::shared_ptr<SkillModelService> models;
+    std::shared_ptr<SkillManager> manager;
+    std::shared_ptr<SessionResourceContext> resources;
+
+    /** Create a request-pinned context using the latest atomically published Registry snapshot. */
+    std::shared_ptr<SessionResourceContext> pin_resource_context() const;
 
     /** `AGENT_SKILLS_DIR` 未设置或为空则返回 nullptr */
     static std::shared_ptr<SkillServices> from_env();

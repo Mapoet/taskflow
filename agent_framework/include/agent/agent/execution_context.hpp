@@ -15,8 +15,12 @@
 #include <map>
 #include <string>
 #include <unordered_set>
+#include <memory>
 
 namespace agent_framework {
+
+class SessionResourceContext;
+class SkillLoader;
 
 /**
  * @brief 单次执行输入策略上下文；在拼装 LLMInput 前固化
@@ -36,6 +40,9 @@ struct ExecutionContext {
     std::function<std::optional<std::string>(std::string_view)> skill_secret_provider;
     std::size_t skill_max_input_bytes = 1024U * 1024U;
     std::size_t skill_max_output_bytes = 1024U * 1024U;
+    /** Request-pinned resource namespace and Skill loader. */
+    std::shared_ptr<SessionResourceContext> resources;
+    std::shared_ptr<SkillLoader> skill_loader;
 
     /**
      * @brief 从环境构造：AGENT_FS_ROOT（经 fs 模块）、PWD、当前路径
