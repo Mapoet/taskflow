@@ -110,6 +110,6 @@
 - [x] Run MCP, resource, Skill, Cursor import, launcher, static UI, and presentation tests.
 - [x] Launch the merged TUI in the real terminal and capture a screenshot showing the combined layout and Skills/Resources state.
 - [x] Commit any merge-resolution fixes.
-- [ ] Remove `/home/Mapoet/projects/taskflow-2skills` through `git worktree remove`.
-- [ ] Delete the local `2skills` branch and retain `skills` plus `upgrade/taskflow-4x`.
-- [ ] Verify the final branch and worktree status are clean.
+- [x] Remove `/home/Mapoet/projects/taskflow-2skills` through `git worktree remove`.
+- [x] Delete the local `2skills` branch and retain `skills` plus `upgrade/taskflow-4x`.
+- [x] Verify the final branch and worktree status are clean.
