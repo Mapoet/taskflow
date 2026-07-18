@@ -114,11 +114,16 @@ static bool try_load_imgui_cjk_font(ImGuiIO& io) {
 #endif
         ImFontConfig fc;
         fc.OversampleH = 2;
-        fc.OversampleV = 2;
-        ImFont* f = io.Fonts->AddFontFromFileTTF(
-            p, 20.0f, &fc, io.Fonts->GetGlyphRangesChineseSimplifiedCommon());
+        fc.OversampleV = 1;
+        fc.FontNo = 0; // NotoSansCJK-Regular.ttc face 0 is Simplified Chinese.
+        // ImGui 1.92 dynamically rasterizes requested glyphs when GlyphRanges is null. This
+        // avoids the legacy 2,500-character SimplifiedCommon restriction without eagerly
+        // allocating a very large 21k-glyph atlas.
+        ImFont* f = io.Fonts->AddFontFromFileTTF(p, 20.0f, &fc, nullptr);
         if (f) {
             io.FontDefault = f;
+            std::clog << "[imgui_agent_demo] CJK font: " << p
+                      << " (20 px, dynamic full CJK glyphs)\n";
             return true;
         }
     }
@@ -187,8 +192,15 @@ std::shared_ptr<SkillServices> resolve_skills_services(bool dbg) {
     options.use_cursor_skill_roots = true;
     options.verbose = dbg;
     auto services = example::discover_skill_services(options);
+    const auto status = example::skill_ui_status(services);
+    std::clog << "[bootstrap] skills=" << (status.enabled ? "enabled" : "disabled")
+              << " root=" << (status.root.empty() ? "-" : status.root)
+              << " indexed=" << status.count << " generation=" << status.generation
+              << " diagnostics=" << status.diagnostics << " errors=" << status.errors << '\n';
     if(dbg && services && services->registry)
-        std::clog << "[bootstrap] indexed_skills=" << services->registry->entries().size() << '\n';
+        for(const auto& diagnostic : services->registry->diagnostics())
+            std::clog << "[bootstrap] skill " << diagnostic.code << ": "
+                      << diagnostic.path.string() << '\n';
     return services;
 }
 
@@ -286,15 +298,23 @@ int main(int argc, char** argv) {
     std::string prompt_arg;
     std::string provider_arg;
     std::string cursor_mcp_json_arg;
+    std::string skills_root_arg;
+    std::string skill_authoring_root_arg;
     int max_iterations = -1;
     bool verbose = false;
     bool no_cursor_mcp = false;
     bool demo_state = false;
+    bool no_skills = false;
     app.add_option("-p,--prompt", prompt_arg, "Optional single-turn: run then keep window open");
     app.add_option("--provider", provider_arg, "Override AGENT_LLM_PROVIDER");
     app.add_option("--max-iterations", max_iterations, "Override max_iterations");
     app.add_option("--cursor-mcp-json", cursor_mcp_json_arg,
                    "Cursor mcp.json (else AGENT_TEST_CURSOR_MCP_JSON, else ToolBus default)");
+    app.add_option("--skills-root", skills_root_arg, "Installed read-only Skill root")
+        ->check(CLI::ExistingDirectory);
+    app.add_option("--skill-authoring-root", skill_authoring_root_arg,
+                   "Writable root used by /skills create");
+    app.add_flag("--no-skills", no_skills, "Disable Skill discovery and management");
     app.add_flag("--no-cursor-mcp", no_cursor_mcp,
                  "Skip MCP (or AGENT_TEST_SKIP_CURSOR_MCP / AGENT_CLI_SKIP_CURSOR_MCP)");
     app.add_flag("--demo-state", demo_state,
@@ -316,6 +336,7 @@ int main(int argc, char** argv) {
         (void)::setenv("AGENT_LLM_PROVIDER", provider_arg.c_str(), 1);
 #endif
     }
+    example::apply_skill_cli_options(skills_root_arg, skill_authoring_root_arg, no_skills);
 
     apply_live_llm_env_defaults();
 
@@ -494,6 +515,8 @@ int main(int argc, char** argv) {
 
     if (demo_state) {
         presentation->load_demo_state();
+        presentation->add_system_notice(
+            "中文显示验证：GNSS 掩星、电离层建模、数据同化、轨道与气象卫星；扩展字：龘。");
     } else if (!prompt_arg.empty()) {
         agent_busy = true;
         run_line(prompt_arg);
@@ -512,8 +535,17 @@ int main(int argc, char** argv) {
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
 
+        const auto runtime_skills = example::skill_ui_status(deps.skills);
+        example::ImGuiSkillStatus imgui_skills;
+        imgui_skills.enabled = runtime_skills.enabled;
+        imgui_skills.count = runtime_skills.count;
+        imgui_skills.generation = runtime_skills.generation;
+        imgui_skills.diagnostics = runtime_skills.diagnostics;
+        imgui_skills.errors = runtime_skills.errors;
+        imgui_skills.root = runtime_skills.root;
+        imgui_skills.active = runtime_skills.active;
         auto action = example::render_scientific_console(
-            presentation->snapshot(), input_buf, sizeof(input_buf), agent_busy.load());
+            presentation->snapshot(), imgui_skills, input_buf, sizeof(input_buf), agent_busy.load());
         if (action.send && !agent_busy.exchange(true)) {
             std::thread([&, line = std::move(action.prompt)]() {
                 run_line(line);

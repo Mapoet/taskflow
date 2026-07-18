@@ -59,21 +59,39 @@ grep -Fq -- 'interface:  tui (tui_agent_demo)' <<<"${TUI_OUTPUT}" || fail "TUI s
 grep -Fq -- 'TUI backend: FTXUI 7.0.1 (vendored submodule)' <<<"${TUI_OUTPUT}" || fail "FTXUI backend missing"
 grep -Fq -- '-DAGENT_BUILD_TUI=ON' <<<"${TUI_OUTPUT}" || fail "TUI CMake option missing"
 grep -Fq -- '--target tui_agent_demo' <<<"${TUI_OUTPUT}" || fail "TUI build target missing"
+grep -Fq -- "--skills-root ${TMP_ROOT}/home/.codex/skills" <<<"${TUI_OUTPUT}" || fail "TUI Skill root missing"
 
 IMGUI_OUTPUT="$(dry_run_ui imgui)"
 grep -Fq -- 'interface:  imgui (imgui_agent_demo)' <<<"${IMGUI_OUTPUT}" || fail "ImGui selection missing"
 grep -Fq -- '-DAGENT_BUILD_IMGUI=ON' <<<"${IMGUI_OUTPUT}" || fail "ImGui CMake option missing"
 grep -Fq -- '--target imgui_agent_demo' <<<"${IMGUI_OUTPUT}" || fail "ImGui build target missing"
+grep -Fq -- "--skills-root ${TMP_ROOT}/home/.codex/skills" <<<"${IMGUI_OUTPUT}" || fail "ImGui Skill root missing"
 
 WEB_OUTPUT="$(dry_run_ui web --port 9090 --demo-state --skip-mcp-service python_execute --skip-mcp-service playwright)"
 grep -Fq -- 'interface:  web (web_ui_demo)' <<<"${WEB_OUTPUT}" || fail "Web selection missing"
 grep -Fq -- '-DAGENT_BUILD_WEB_UI=ON' <<<"${WEB_OUTPUT}" || fail "Web CMake option missing"
 grep -Fq -- '--target web_ui_demo' <<<"${WEB_OUTPUT}" || fail "Web build target missing"
+grep -Fq -- "--skills-root ${TMP_ROOT}/home/.codex/skills" <<<"${WEB_OUTPUT}" || fail "Web Skill root missing"
 grep -Fq -- 'web URL:     http://127.0.0.1:9090/' <<<"${WEB_OUTPUT}" || fail "Web URL missing"
 grep -Fq -- '--port 9090' <<<"${WEB_OUTPUT}" || fail "Web port forwarding missing"
 grep -Fq -- 'demo state: enabled' <<<"${WEB_OUTPUT}" || fail "demo-state summary missing"
 grep -Fq -- '--demo-state' <<<"${WEB_OUTPUT}" || fail "demo-state forwarding missing"
 grep -Fq -- 'skipped MCP: python_execute,playwright' <<<"${WEB_OUTPUT}" || fail "MCP service filter missing"
+
+mkdir -p "${TMP_ROOT}/explicit-skills"
+EXPLICIT_SKILLS_OUTPUT="$(run_clean AGENT_SKILLS_DIR="${TMP_ROOT}/explicit-skills" \
+    OPENAI_API_KEY=test-key "${LAUNCHER}" --env-file "${TMP_ROOT}/empty.env" \
+    --dry-run --ui web --no-cursor-mcp --build-dir "${TMP_ROOT}/build" \
+    --fs-root "${TMP_ROOT}/fs-root")"
+grep -Fq -- "--skills-root ${TMP_ROOT}/explicit-skills" <<<"${EXPLICIT_SKILLS_OUTPUT}" || \
+    fail "AGENT_SKILLS_DIR precedence was not preserved"
+
+NO_SKILLS_OUTPUT="$(dry_run_ui imgui --no-skills)"
+grep -Fq -- 'skills root: disabled' <<<"${NO_SKILLS_OUTPUT}" || fail "disabled Skills summary missing"
+grep -Fq -- '--no-skills' <<<"${NO_SKILLS_OUTPUT}" || fail "--no-skills forwarding missing"
+if grep -Fq -- '--skills-root' <<<"${NO_SKILLS_OUTPUT}"; then
+    fail "disabled Skills unexpectedly forwarded a root"
+fi
 
 SECRET='launcher-secret-must-not-leak'
 OUTPUT="$(run_clean \

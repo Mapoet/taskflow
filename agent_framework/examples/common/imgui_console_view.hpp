@@ -4,6 +4,7 @@
 #include <agent/ui/presentation_model.hpp>
 
 #include <cstddef>
+#include <cstdint>
 #include <string>
 
 namespace agent_framework::example {
@@ -15,8 +16,19 @@ struct ImGuiConsoleAction {
     std::string prompt;
 };
 
+struct ImGuiSkillStatus {
+    bool enabled = false;
+    std::size_t count = 0;
+    std::uint64_t generation = 0;
+    std::size_t diagnostics = 0;
+    std::size_t errors = 0;
+    std::string root;
+    std::string active = "-";
+};
+
 void apply_scientific_console_theme();
 ImGuiConsoleAction render_scientific_console(const UiPresentationSnapshot& snapshot,
+                                             const ImGuiSkillStatus& skills,
                                              char* input, std::size_t input_size,
                                              bool agent_busy);
 

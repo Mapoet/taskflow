@@ -50,7 +50,7 @@ void render_header(const UiPresentationSnapshot& s) {
     ImGui::PopStyleColor();
 }
 
-void render_left_rail(const UiPresentationSnapshot& s, float width) {
+void render_left_rail(const UiPresentationSnapshot& s, const ImGuiSkillStatus& skills, float width) {
     ImGui::BeginChild("##left", ImVec2(width, 0), true);
     ImGui::TextColored(kMuted, "SESSION");
     ImGui::Spacing();
@@ -65,6 +65,18 @@ void render_left_rail(const UiPresentationSnapshot& s, float width) {
     const char* items[] = {"File system        FS", "Web research       WEB", "Expression engine  EXPR",
                            "Plot & draw        DRAW", "Skills             SKILL", "MCP services       MCP"};
     for (const char* item : items) { ImGui::Spacing(); ImGui::TextUnformatted(item); }
+    ImGui::Spacing(); ImGui::Separator(); ImGui::Spacing();
+    ImGui::TextColored(kMuted, "SKILLS");
+    if (skills.enabled) {
+        ImGui::Text("Indexed %zu  Gen %llu", skills.count,
+                    static_cast<unsigned long long>(skills.generation));
+        ImGui::TextColored(skills.errors == 0 ? kMuted : kDanger,
+                           "Diagnostics %zu  Errors %zu", skills.diagnostics, skills.errors);
+        ImGui::TextWrapped("Root  %s", skills.root.empty() ? "-" : skills.root.c_str());
+        ImGui::TextWrapped("Active  %s", skills.active.c_str());
+    } else {
+        ImGui::TextColored(kMuted, "Disabled");
+    }
     ImGui::SetCursorPosY(std::max(ImGui::GetCursorPosY(), ImGui::GetWindowHeight() - 52.0f));
     ImGui::Separator(); ImGui::TextColored(kMuted, "Agent Framework\nFS jail enabled");
     ImGui::EndChild();
@@ -172,7 +184,8 @@ void apply_scientific_console_theme() {
     c[ImGuiCol_TextDisabled] = kMuted;
 }
 
-ImGuiConsoleAction render_scientific_console(const UiPresentationSnapshot& s, char* input,
+ImGuiConsoleAction render_scientific_console(const UiPresentationSnapshot& s,
+                                             const ImGuiSkillStatus& skills, char* input,
                                              std::size_t input_size, bool busy) {
     ImGuiConsoleAction action;
     const ImGuiViewport* viewport = ImGui::GetMainViewport();
@@ -186,7 +199,7 @@ ImGuiConsoleAction render_scientific_console(const UiPresentationSnapshot& s, ch
     const bool wide = avail >= 1020.0f;
     const float left = wide ? 218.0f : 0.0f;
     const float right = wide ? 318.0f : std::min(280.0f, avail * 0.33f);
-    if (wide) { render_left_rail(s, left); ImGui::SameLine(); }
+    if (wide) { render_left_rail(s, skills, left); ImGui::SameLine(); }
     ImGui::BeginGroup();
     const float main_width = std::max(320.0f, avail - left - right - (wide ? 16.0f : 8.0f));
     ImGui::BeginChild("##main", ImVec2(main_width, 0), false);

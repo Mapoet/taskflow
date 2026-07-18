@@ -97,6 +97,16 @@
       $("provider-name").textContent = text(payload.provider || "OpenAI");
       $("model-name").textContent = text(payload.model || "provider default");
       setConnection(text(payload.connection || "Connected"), "connected");
+    } else if (type === "skills_status") {
+      const enabled = payload.enabled === true;
+      $("skills-state").textContent = enabled ? "READY" : "DISABLED";
+      $("skills-health").textContent = enabled ? (Number(payload.errors || 0) ? "DEGRADED" : "READY") : "OFF";
+      $("skills-count").textContent = String(payload.count || 0);
+      $("skills-generation").textContent = String(payload.generation || 0);
+      $("skills-errors").textContent = String(payload.errors || 0);
+      $("skills-active").textContent = text(payload.active || "-");
+      $("skills-root").textContent = enabled ? text(payload.root || "Unknown root") : "Skills disabled";
+      $("skills-health").dataset.state = enabled && Number(payload.errors || 0) ? "error" : enabled ? "ready" : "off";
     } else if (type === "user_turn" || type === "demo_user") {
       addTurn("user", payload.content || payload.prompt || "", false); setBusy(true);
     } else if (type === "tool_started" || type === "tool_completed") {

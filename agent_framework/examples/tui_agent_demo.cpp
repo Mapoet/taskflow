@@ -95,8 +95,15 @@ std::shared_ptr<SkillServices> resolve_skills_services(bool dbg) {
     options.use_cursor_skill_roots = true;
     options.verbose = dbg;
     auto services = example::discover_skill_services(options);
+    const auto status = example::skill_ui_status(services);
+    std::clog << "[bootstrap] skills=" << (status.enabled ? "enabled" : "disabled")
+              << " root=" << (status.root.empty() ? "-" : status.root)
+              << " indexed=" << status.count << " generation=" << status.generation
+              << " diagnostics=" << status.diagnostics << " errors=" << status.errors << '\n';
     if(dbg && services && services->registry)
-        std::clog << "[bootstrap] indexed_skills=" << services->registry->entries().size() << '\n';
+        for(const auto& diagnostic : services->registry->diagnostics())
+            std::clog << "[bootstrap] skill " << diagnostic.code << ": "
+                      << diagnostic.path.string() << '\n';
     return services;
 }
 
@@ -199,7 +206,8 @@ int main(int argc, char** argv) {
     app.add_option("--max-iterations", max_iterations, "Override max_iterations");
     app.add_option("--cursor-mcp-json", cursor_mcp_json_arg,
                    "Cursor mcp.json (else AGENT_TEST_CURSOR_MCP_JSON, else ToolBus default)");
-    app.add_option("--skills-root", skills_root_arg, "Installed read-only Skill root");
+    app.add_option("--skills-root", skills_root_arg, "Installed read-only Skill root")
+        ->check(CLI::ExistingDirectory);
     app.add_option("--skill-authoring-root", skill_authoring_root_arg,
                    "Writable root used by /skills create");
     app.add_flag("--no-skills", no_skills, "Disable Skill discovery and management");
@@ -226,27 +234,7 @@ int main(int argc, char** argv) {
         (void)::setenv("AGENT_LLM_PROVIDER", provider_arg.c_str(), 1);
 #endif
     }
-    if (!skills_root_arg.empty()) {
-#if defined(_WIN32)
-        (void)_putenv_s("AGENT_SKILLS_DIR", skills_root_arg.c_str());
-#else
-        (void)::setenv("AGENT_SKILLS_DIR", skills_root_arg.c_str(), 1);
-#endif
-    }
-    if (!skill_authoring_root_arg.empty()) {
-#if defined(_WIN32)
-        (void)_putenv_s("AGENT_SKILL_AUTHORING_DIR", skill_authoring_root_arg.c_str());
-#else
-        (void)::setenv("AGENT_SKILL_AUTHORING_DIR", skill_authoring_root_arg.c_str(), 1);
-#endif
-    }
-    if (no_skills) {
-#if defined(_WIN32)
-        (void)_putenv_s("AGENT_SKILLS_DISABLED", "1");
-#else
-        (void)::setenv("AGENT_SKILLS_DISABLED", "1", 1);
-#endif
-    }
+    example::apply_skill_cli_options(skills_root_arg, skill_authoring_root_arg, no_skills);
 
     apply_live_llm_env_defaults();
 
@@ -440,16 +428,14 @@ int main(int argc, char** argv) {
 
     auto skill_status_provider = [&]() {
         example::FtxuiSkillStatus result;
-        if (!deps.skills || !deps.skills->manager) return result;
-        const auto status = deps.skills->manager->status();
-        result.enabled = true;
-        result.count = status.value("skills", std::size_t{0});
-        result.generation = status.value("generation", std::uint64_t{0});
-        const auto active = status.find("activeSkill");
-        result.active = active != status.end() && active->is_string()
-                            ? active->get<std::string>()
-                            : "-";
-        if (result.active.empty()) result.active = "-";
+        const auto status = example::skill_ui_status(deps.skills);
+        result.enabled = status.enabled;
+        result.count = status.count;
+        result.generation = status.generation;
+        result.diagnostics = status.diagnostics;
+        result.errors = status.errors;
+        result.root = status.root;
+        result.active = status.active;
         return result;
     };
 

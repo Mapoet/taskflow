@@ -24,7 +24,7 @@ Options:
   --build-dir PATH         CMake build directory (default: build-ui)
   --build-type TYPE        Release or Debug (default: Release)
   --fs-root PATH           Filesystem jail root (default: this repository)
-  --skills-root PATH       Installed/read-only Skill root (default: ~/.cursor/skills)
+  --skills-root PATH       Installed/read-only Skill root (default: ~/.codex/skills)
   --skill-authoring-root PATH  Writable root for /skills create
   --no-skills              Disable Skill discovery and management
   --env-file PATH          Source a trusted local environment file
@@ -89,8 +89,8 @@ MAX_ITERATIONS=""
 PORT="${AGENT_WEB_UI_PORT:-8080}"
 MCP_TIMEOUT_MS="${AGENT_MCP_REQUEST_TIMEOUT_MS:-60000}"
 CURSOR_MCP_JSON=""
-# Prefer an explicit AGENT_SKILLS_DIR; otherwise use Cursor's ~/.cursor/skills.
-DEFAULT_SKILLS_ROOT="${HOME}/.cursor/skills"
+# Prefer an explicit AGENT_SKILLS_DIR; otherwise use the Codex user Skill root.
+DEFAULT_SKILLS_ROOT="${HOME}/.codex/skills"
 SKILLS_ROOT="${AGENT_SKILLS_DIR:-}"
 SKILL_AUTHORING_ROOT="${AGENT_SKILL_AUTHORING_DIR:-}"
 NO_SKILLS=0
@@ -170,10 +170,13 @@ fi
 if [[ -n "${CURSOR_MCP_JSON}" && ! -r "${CURSOR_MCP_JSON}" ]]; then
     die "Cursor MCP configuration is not readable: ${CURSOR_MCP_JSON}"
 fi
-# ".cursor/skills" is the Cursor user skill root under $HOME.
+# ".codex/skills" is the Codex user Skill root under $HOME.
 case "${SKILLS_ROOT}" in
-    .cursor/skills|./.cursor/skills) SKILLS_ROOT="${HOME}/.cursor/skills" ;;
+    .codex/skills|./.codex/skills) SKILLS_ROOT="${HOME}/.codex/skills" ;;
 esac
+if ((NO_SKILLS)); then
+    SKILLS_ROOT=""
+fi
 if [[ -z "${SKILLS_ROOT}" && ${NO_SKILLS} -eq 0 ]]; then
     SKILLS_ROOT="${DEFAULT_SKILLS_ROOT}"
 fi
@@ -182,9 +185,9 @@ if [[ -n "${SKILLS_ROOT}" ]]; then
         SKILLS_ROOT="${REPO_ROOT}/${SKILLS_ROOT}"
     fi
     if [[ ! -d "${SKILLS_ROOT}" ]]; then
-        # Create the default Cursor skill root; reject missing explicit overrides.
+        # Create the default Codex Skill root; reject missing explicit overrides.
         if [[ "${SKILLS_ROOT}" == "${DEFAULT_SKILLS_ROOT}" || \
-              "${SKILLS_ROOT}" == "$(cd -- "${HOME}" && pwd -P)/.cursor/skills" ]]; then
+              "${SKILLS_ROOT}" == "$(cd -- "${HOME}" && pwd -P)/.codex/skills" ]]; then
             mkdir -p -- "${SKILLS_ROOT}" || die "cannot create Skill root: ${SKILLS_ROOT}"
         else
             die "Skill root is not an existing directory: ${SKILLS_ROOT}"
@@ -195,6 +198,8 @@ if [[ -n "${SKILLS_ROOT}" ]]; then
 fi
 if [[ -n "${SKILL_AUTHORING_ROOT}" ]]; then
     SKILL_AUTHORING_ROOT="$(realpath -m -- "${SKILL_AUTHORING_ROOT}")"
+    mkdir -p -- "${SKILL_AUTHORING_ROOT}" || die "cannot create Skill authoring root: ${SKILL_AUTHORING_ROOT}"
+    [[ -w "${SKILL_AUTHORING_ROOT}" ]] || die "Skill authoring root is not writable: ${SKILL_AUTHORING_ROOT}"
     export AGENT_SKILL_AUTHORING_DIR="${SKILL_AUTHORING_ROOT}"
 fi
 ((NO_SKILLS == 0)) || export AGENT_SKILLS_DISABLED=1
@@ -301,7 +306,7 @@ printf '  provider:   %s\n' "${AGENT_LLM_PROVIDER}"
 printf '  model:      %s\n' "${AGENT_LLM_MODEL:-<provider default>}"
 printf '  web/expr/draw: %s/%s/%s\n' "${AGENT_WEB_ENABLE}" "${AGENT_EXPR_ENABLE}" "${AGENT_DRAW_ENABLE}"
 printf '  skills catalog: %s\n' "${AGENT_SKILL_INJECT_CATALOG}"
-printf '  skills root: %s\n' "${AGENT_SKILLS_DIR:-<Cursor defaults>}"
+printf '  skills root: %s\n' "$([[ ${NO_SKILLS} -eq 1 ]] && printf disabled || printf '%s' "${AGENT_SKILLS_DIR:-${DEFAULT_SKILLS_ROOT}}")"
 printf '  skill authoring: %s\n' "${AGENT_SKILL_AUTHORING_DIR:-disabled}"
 printf '  Cursor MCP: %s\n' "$([[ ${NO_CURSOR_MCP} -eq 1 ]] && printf disabled || printf enabled)"
 printf '  demo state: %s\n' "$([[ ${DEMO_STATE} -eq 1 ]] && printf enabled || printf disabled)"

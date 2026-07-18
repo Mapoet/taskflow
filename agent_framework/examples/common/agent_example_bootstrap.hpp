@@ -5,6 +5,7 @@
 #include <agent/toolbus/toolbus.hpp>
 
 #include <algorithm>
+#include <cstdint>
 #include <cstdlib>
 #include <filesystem>
 #include <functional>
@@ -31,6 +32,57 @@ struct BootstrapResult {
     std::vector<std::string> skipped_mcp_services;
     std::vector<std::string> diagnostics;
 };
+
+struct SkillUiStatus {
+    bool enabled = false;
+    std::size_t count = 0;
+    std::uint64_t generation = 0;
+    std::size_t diagnostics = 0;
+    std::size_t errors = 0;
+    std::string root;
+    std::string active = "-";
+};
+
+inline void set_environment_override(const char* key, const std::string& value) {
+#if defined(_WIN32)
+    (void)_putenv_s(key, value.c_str());
+#else
+    (void)::setenv(key, value.c_str(), 1);
+#endif
+}
+
+inline void apply_skill_cli_options(const std::string& skills_root,
+                                    const std::string& authoring_root,
+                                    bool disabled) {
+    if(!skills_root.empty()) set_environment_override("AGENT_SKILLS_DIR", skills_root);
+    if(!authoring_root.empty())
+        set_environment_override("AGENT_SKILL_AUTHORING_DIR", authoring_root);
+    if(disabled) set_environment_override("AGENT_SKILLS_DISABLED", "1");
+}
+
+inline SkillUiStatus skill_ui_status(const std::shared_ptr<SkillServices>& services) {
+    SkillUiStatus result;
+    if(!services || !services->registry) return result;
+    result.enabled = true;
+    const auto snapshot = services->registry->snapshot();
+    result.count = snapshot.entries().size();
+    result.generation = snapshot.generation();
+    result.diagnostics = snapshot.diagnostics().size();
+    result.errors = static_cast<std::size_t>(std::count_if(
+        snapshot.diagnostics().begin(), snapshot.diagnostics().end(),
+        [](const SkillDiagnostic& diagnostic) {
+            return diagnostic.severity == SkillDiagnosticSeverity::Error;
+        }));
+    if(!services->registry->roots().empty())
+        result.root = services->registry->roots().front().string();
+    if(services->manager) {
+        const auto status = services->manager->status();
+        const auto active = status.find("activeSkill");
+        if(active != status.end() && active->is_string()) result.active = active->get<std::string>();
+    }
+    if(result.active.empty()) result.active = "-";
+    return result;
+}
 
 inline std::vector<std::string> comma_separated_env(const char* name) {
     std::vector<std::string> values;

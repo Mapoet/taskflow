@@ -62,6 +62,15 @@ kbd { padding: 1px 5px; border: 1px solid var(--line-strong); border-radius: 4px
 .capabilities li { display: flex; justify-content: space-between; padding: 9px 8px; color: #cbd4dc; border-radius: 4px; }
 .capabilities li:hover { background: var(--surface-2); }
 .capabilities small { color: var(--dim); font-size: 10px; letter-spacing: .08em; }
+.skill-status { display: grid; gap: 8px; }
+.skill-status dl { display: grid; gap: 7px; margin: 0; }
+.skill-status dl div { display: flex; justify-content: space-between; gap: 12px; }
+.skill-status dt { color: var(--muted); }
+.skill-status dd { margin: 0; color: var(--text); font-variant-numeric: tabular-nums; }
+.skill-status p { margin: 2px 0 0; color: var(--dim); font-size: 10px; line-height: 1.45; overflow-wrap: anywhere; }
+#skills-health[data-state="ready"] { color: var(--success); }
+#skills-health[data-state="error"] { color: var(--danger); }
+#skills-health[data-state="off"] { color: var(--dim); }
 .rail-footer { margin-top: auto; display: grid; gap: 6px; padding: 18px 22px; border-top: 1px solid var(--line); color: var(--muted); }
 
 .conversation-panel { grid-area: main; min-width: 0; min-height: 0; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; background: var(--bg); }

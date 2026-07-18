@@ -102,6 +102,10 @@ Element capabilities(const UiPresentationSnapshot& snapshot, const FtxuiSkillSta
     if (skills.enabled) {
         rows.push_back(text("  indexed " + std::to_string(skills.count)));
         rows.push_back(text("  generation " + std::to_string(skills.generation)));
+        rows.push_back(text("  diagnostics " + std::to_string(skills.diagnostics) +
+                            " / errors " + std::to_string(skills.errors)) |
+                       color(skills.errors == 0 ? kMuted : Color::RedLight));
+        if (!skills.root.empty()) rows.push_back(paragraph("  root " + skills.root));
         rows.push_back(paragraph("  active " + skills.active));
     } else {
         rows.push_back(text("  disabled") | color(kMuted));
@@ -164,7 +168,8 @@ Element render_document(RenderState state) {
 
     std::string skill_line = state.skills.enabled
         ? "Skills gen=" + std::to_string(state.skills.generation) +
-              " count=" + std::to_string(state.skills.count) + " active=" + state.skills.active
+              " count=" + std::to_string(state.skills.count) +
+              " errors=" + std::to_string(state.skills.errors) + " active=" + state.skills.active
         : "Skills disabled";
     auto composer = window(text(" COMPOSER ") | bold | color(kAccent),
                            vbox({

@@ -14,6 +14,9 @@ struct FtxuiSkillStatus {
     bool enabled{false};
     std::size_t count{0};
     std::uint64_t generation{0};
+    std::size_t diagnostics{0};
+    std::size_t errors{0};
+    std::string root;
     std::string active{"-"};
 };
 

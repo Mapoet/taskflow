@@ -38,9 +38,19 @@
           <li><span>Web research</span><small>WEB</small></li>
           <li><span>Expression engine</span><small>EXPR</small></li>
           <li><span>Plot &amp; draw</span><small>DRAW</small></li>
-          <li><span>Skills</span><small>SKILL</small></li>
+          <li class="skill-capability"><span>Skills</span><small id="skills-state">CONNECTING</small></li>
           <li><span>MCP services</span><small>MCP</small></li>
         </ul>
+      </section>
+      <section class="rail-section skill-status" aria-label="Skill status">
+        <div class="section-heading"><span>SKILLS</span><span id="skills-health" class="muted">PENDING</span></div>
+        <dl>
+          <div><dt>Indexed</dt><dd id="skills-count">0</dd></div>
+          <div><dt>Generation</dt><dd id="skills-generation">0</dd></div>
+          <div><dt>Errors</dt><dd id="skills-errors">0</dd></div>
+          <div><dt>Active</dt><dd id="skills-active">-</dd></div>
+        </dl>
+        <p id="skills-root" title="Skill root">No Skill root discovered</p>
       </section>
       <section class="rail-footer">
         <span>Agent Framework</span>

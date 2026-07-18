@@ -19,6 +19,9 @@ int main() {
     skills.enabled = true;
     skills.count = 3;
     skills.generation = 7;
+    skills.diagnostics = 2;
+    skills.errors = 1;
+    skills.root = "/workspace/.codex/skills";
     skills.active = "research-helper";
 
     const std::string wide = FtxuiConsoleView::render_for_test(snapshot, skills, true, 160, 42);
@@ -27,6 +30,7 @@ int main() {
     assert(wide.find("CONVERSATION") != std::string::npos);
     assert(wide.find("TOOL ACTIVITY") != std::string::npos);
     assert(wide.find("research-helper") != std::string::npos);
+    assert(wide.find("errors=1") != std::string::npos);
     assert(wide.find("GNSS") != std::string::npos);
     assert(wide.find("RUNNING") != std::string::npos);
     assert(wide.find("wide") != std::string::npos);

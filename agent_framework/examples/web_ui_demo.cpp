@@ -98,8 +98,15 @@ std::shared_ptr<SkillServices> resolve_skills_services(bool dbg) {
     options.use_cursor_skill_roots = true;
     options.verbose = dbg;
     auto services = example::discover_skill_services(options);
-    if (dbg && services && services->registry)
-        std::clog << "[bootstrap] indexed_skills=" << services->registry->entries().size() << '\n';
+    const auto status = example::skill_ui_status(services);
+    std::clog << "[bootstrap] skills=" << (status.enabled ? "enabled" : "disabled")
+              << " root=" << (status.root.empty() ? "-" : status.root)
+              << " indexed=" << status.count << " generation=" << status.generation
+              << " diagnostics=" << status.diagnostics << " errors=" << status.errors << '\n';
+    if(dbg && services && services->registry)
+        for(const auto& diagnostic : services->registry->diagnostics())
+            std::clog << "[bootstrap] skill " << diagnostic.code << ": "
+                      << diagnostic.path.string() << '\n';
     return services;
 }
 
@@ -194,16 +201,24 @@ int main(int argc, char** argv) {
     std::string prompt_arg;
     std::string provider_arg;
     std::string cursor_mcp_json_arg;
+    std::string skills_root_arg;
+    std::string skill_authoring_root_arg;
     int max_iterations = -1;
     bool verbose = false;
     bool no_cursor_mcp = false;
     bool demo_state = false;
+    bool no_skills = false;
     app.add_option("--port", port, "Listen port")->check(CLI::PositiveNumber);
     app.add_option("-p,--prompt", prompt_arg, "Optional single-turn on startup");
     app.add_option("--provider", provider_arg, "Override AGENT_LLM_PROVIDER");
     app.add_option("--max-iterations", max_iterations, "Override max_iterations");
     app.add_option("--cursor-mcp-json", cursor_mcp_json_arg,
                    "Cursor mcp.json (else AGENT_TEST_CURSOR_MCP_JSON, else ToolBus default)");
+    app.add_option("--skills-root", skills_root_arg, "Installed read-only Skill root")
+        ->check(CLI::ExistingDirectory);
+    app.add_option("--skill-authoring-root", skill_authoring_root_arg,
+                   "Writable root used by /skills create");
+    app.add_flag("--no-skills", no_skills, "Disable Skill discovery and management");
     app.add_flag("--no-cursor-mcp", no_cursor_mcp,
                  "Skip MCP (or AGENT_TEST_SKIP_CURSOR_MCP / AGENT_CLI_SKIP_CURSOR_MCP)");
     app.add_flag("--demo-state", demo_state,
@@ -225,6 +240,7 @@ int main(int argc, char** argv) {
         (void)::setenv("AGENT_LLM_PROVIDER", provider_arg.c_str(), 1);
 #endif
     }
+    example::apply_skill_cli_options(skills_root_arg, skill_authoring_root_arg, no_skills);
 
     apply_live_llm_env_defaults();
 
@@ -360,6 +376,14 @@ int main(int argc, char** argv) {
                                             {"model", cfg.model_config.model_name.empty() ? "provider default" : cfg.model_config.model_name},
                                             {"connection", skip_cursor_mcp ? "Core tools ready" :
                                              mcp_boot.diagnostics.empty() ? "MCP connected" : "MCP partial"}});
+        const auto skills = example::skill_ui_status(deps.skills);
+        ui.dispatch_message("skills_status", json{{"enabled", skills.enabled},
+                                                   {"count", skills.count},
+                                                   {"generation", skills.generation},
+                                                   {"diagnostics", skills.diagnostics},
+                                                   {"errors", skills.errors},
+                                                   {"root", skills.root},
+                                                   {"active", skills.active}});
         for (const auto& diagnostic : mcp_boot.diagnostics)
             ui.dispatch_message("mcp_status", json{{"level", "error"}, {"message", "MCP unavailable: " + diagnostic}});
         for (const auto& service : mcp_boot.skipped_mcp_services)
@@ -454,14 +478,23 @@ int main(int argc, char** argv) {
         res.set_header("X-Accel-Buffering", "no");
         res.set_chunked_content_provider(
             "text/event-stream",
-            [web_h](std::size_t /*offset*/, httplib::DataSink& sink) {
+            [web_h, last_heartbeat = std::chrono::steady_clock::now()]
+            (std::size_t /*offset*/, httplib::DataSink& sink) mutable {
+                if (!sink.is_writable()) return false;
                 std::string chunk;
                 if (web_h->try_pop_sse_chunk(chunk)) {
                     sink.write(chunk.data(), chunk.size());
                 } else {
-                    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+                    const auto now = std::chrono::steady_clock::now();
+                    if (now - last_heartbeat >= std::chrono::seconds(1)) {
+                        static constexpr char heartbeat[] = ": heartbeat\n\n";
+                        sink.write(heartbeat, sizeof(heartbeat) - 1);
+                        last_heartbeat = now;
+                    } else {
+                        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+                    }
                 }
-                return true;
+                return sink.is_writable();
             },
             [] {
                 std::lock_guard<std::mutex> lk(g_sse_slot_mutex);
