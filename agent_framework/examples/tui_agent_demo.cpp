@@ -1,12 +1,13 @@
 /**
  * @file tui_agent_demo.cpp
- * @brief WP2.U Track T：ncurses 全屏 + TuiHandler + 同 cli 图路径
+ * @brief WP2.U Track T：FTXUI 全屏 + TuiHandler + 同 cli 图路径
  *
- * 构建：-DAGENT_BUILD_TUI=ON（需系统 ncurses / ncursesw 开发包）
+ * 构建：-DAGENT_BUILD_TUI=ON（需初始化 3rd-party/FTXUI 子模块）
  */
 
 #include "CLI11.hpp"
 #include "common/agent_example_bootstrap.hpp"
+#include "common/ftxui_console_view.hpp"
 
 #include <agent/agent/execution_context.hpp>
 #include <agent/agent/task_state_machine.hpp>
@@ -23,24 +24,9 @@
 #include <agent/ui/presentation_model.hpp>
 #include <agent/agent/user_input_preprocessor.hpp>
 
-#include <clocale>
-#include <cwchar>
-#include <cwctype>
-
-#if defined(__has_include)
-#if __has_include(<ncursesw/ncurses.h>)
-#include <ncursesw/ncurses.h>
-#else
-#include <curses.h>
-#endif
-#else
-#include <curses.h>
-#endif
-
 #include <algorithm>
 #include <atomic>
 #include <cstdlib>
-#include <cstring>
 #include <iostream>
 #include <memory>
 #include <mutex>
@@ -194,115 +180,10 @@ int run_graph_ui(tf::Executor& executor,
     return 0;
 }
 
-/**
- * @brief UTF-8 → 显示行（wcwidth 计宽），供 CJK 与 ncursesw 使用
- */
-void utf8_wrap_to_wlines(const std::string& text, int max_cols, std::vector<std::wstring>* out_lines) {
-    out_lines->clear();
-    if (max_cols < 1) {
-        max_cols = 1;
-    }
-    std::wstring cur;
-    int col = 0;
-    std::mbstate_t st{};
-    std::memset(&st, 0, sizeof(st));
-    for (std::size_t i = 0; i < text.size();) {
-        wchar_t wc = 0;
-        const std::size_t n = std::mbrtowc(&wc, text.data() + i, text.size() - i, &st);
-        if (n == static_cast<std::size_t>(-2)) {
-            break;
-        }
-        if (n == static_cast<std::size_t>(-1) || n == 0) {
-            ++i;
-            std::memset(&st, 0, sizeof(st));
-            continue;
-        }
-        if (wc == L'\n') {
-            out_lines->push_back(std::move(cur));
-            cur.clear();
-            col = 0;
-            i += n;
-            continue;
-        }
-        int w = wcwidth(wc);
-        if (w < 0) {
-            w = 0;
-        }
-        if (col + w > max_cols && !cur.empty()) {
-            out_lines->push_back(std::move(cur));
-            cur.clear();
-            col = 0;
-        }
-        cur.push_back(wc);
-        col += w;
-        i += n;
-    }
-    if (!cur.empty()) {
-        out_lines->push_back(std::move(cur));
-    }
-}
-
-std::string wstring_to_utf8(const std::wstring& w) {
-    std::string line;
-    std::mbstate_t st{};
-    std::memset(&st, 0, sizeof(st));
-    char buf[16];
-    for (wchar_t wc : w) {
-        const std::size_t n = std::wcrtomb(buf, wc, &st);
-        if (n != static_cast<std::size_t>(-1) && n > 0) {
-            line.append(buf, n);
-        }
-    }
-    return line;
-}
-
-std::string conversation_text(const UiPresentationSnapshot& snap) {
-    std::string out;
-    for (const auto& turn : snap.turns) {
-        if (!out.empty()) out += "\n";
-        out += turn.role == UiTurnRole::User ? "YOU" : turn.role == UiTurnRole::Assistant ? "AGENT" : "SYSTEM";
-        if (turn.streaming) out += "  [streaming]";
-        out += "\n" + turn.content + "\n";
-    }
-    if (out.empty()) out = "READY\n\nStart a verifiable research task. Tool activity will remain visible beside the answer.";
-    return out;
-}
-
-std::string activity_text(const UiPresentationSnapshot& snap) {
-    std::string out;
-    for (const auto& tool : snap.tools) {
-        out += std::string(UiPresentationModel::state_name(tool.state)) + "  " + tool.tool_name;
-        if (tool.duration_ms > 0) out += "  " + std::to_string(tool.duration_ms) + " ms";
-        out += "\n";
-        if (!tool.arguments.empty()) out += "  args: " + tool.arguments.dump() + "\n";
-        if (!tool.result.empty()) out += "  result: " + tool.result.dump() + "\n";
-        out += "\n";
-    }
-    return out.empty() ? "No tool calls yet.\n\nArguments, results, and duration appear here." : out;
-}
-
-void draw_panel(WINDOW* w, const char* title, const std::string& text) {
-    werase(w);
-    box(w, 0, 0);
-    wattron(w, A_BOLD | COLOR_PAIR(1));
-    mvwprintw(w, 0, 2, " %s ", title);
-    wattroff(w, A_BOLD | COLOR_PAIR(1));
-    int rows = 0, cols = 0;
-    getmaxyx(w, rows, cols);
-    std::vector<std::wstring> lines;
-    utf8_wrap_to_wlines(text, std::max(1, cols - 2), &lines);
-    const int room = std::max(0, rows - 2);
-    const int skip = std::max(0, static_cast<int>(lines.size()) - room);
-    for (int r = 0; r < room && skip + r < static_cast<int>(lines.size()); ++r) {
-        mvwaddnwstr(w, r + 1, 1, lines[static_cast<std::size_t>(skip + r)].c_str(), -1);
-    }
-    wrefresh(w);
-}
-
 } // namespace
 
 int main(int argc, char** argv) {
-    CLI::App app("tui_agent_demo — WP2.U ncursesw + TuiHandler + MCP/Skills");
+    CLI::App app("tui_agent_demo — FTXUI 7.0.1 + TuiHandler + MCP/Skills");
     std::string prompt_arg;
     std::string provider_arg;
     std::string cursor_mcp_json_arg;
@@ -440,41 +321,7 @@ int main(int argc, char** argv) {
         cfg.max_iterations = max_iterations;
     }
 
-    std::clog << "[tui_agent_demo] starting fullscreen TUI (UTF-8 / wide ncurses)...\n" << std::flush;
-
-    initscr();
-    cbreak();
-    noecho();
-    keypad(stdscr, TRUE);
-    curs_set(1);
-    if (has_colors()) {
-        start_color(); use_default_colors();
-        init_pair(1, COLOR_CYAN, -1);
-        init_pair(2, COLOR_GREEN, -1);
-        init_pair(3, COLOR_RED, -1);
-    }
-
-    int rows = 0;
-    int cols = 0;
-    getmaxyx(stdscr, rows, cols);
-    if (rows < 8 || cols < 40) {
-        endwin();
-        std::cerr << "[tui_agent_demo] terminal too small\n";
-        return 1;
-    }
-
-    const int header_h = 2;
-    const int input_h = 5;
-    const int status_h = 1;
-    const int body_h = rows - header_h - input_h - status_h;
-    const bool wide_layout = cols >= 110;
-    const int left_w = wide_layout ? 22 : 0;
-    const int right_w = wide_layout ? 34 : 0;
-    WINDOW* left_win = wide_layout ? newwin(body_h, left_w, header_h, 0) : nullptr;
-    WINDOW* out_win = newwin(body_h, cols - left_w - right_w, header_h, left_w);
-    WINDOW* activity_win = wide_layout ? newwin(body_h, right_w, header_h, cols - right_w) : nullptr;
-    WINDOW* in_win = newwin(input_h, cols, rows - input_h - status_h, 0);
-    wtimeout(in_win, 50);
+    std::clog << "[tui_agent_demo] starting fullscreen TUI (FTXUI 7.0.1 / UTF-8)...\n" << std::flush;
 
     auto presentation = std::make_shared<UiPresentationModel>();
     const char* provider_env = std::getenv("AGENT_LLM_PROVIDER");
@@ -547,6 +394,8 @@ int main(int argc, char** argv) {
         proc.control_actions = std::move(pending);
         if (handled_skill_control && proc.llm_user_text.find_first_not_of(" \t\r\n") == std::string::npos &&
             proc.control_actions.empty()) {
+            presentation->complete(json{{"final_answer", "skill control completed"},
+                                        {"kind", "skill_control"}});
             std::lock_guard<std::mutex> lock(control_mutex);
             if (active_control == control) active_control.reset();
             return;
@@ -563,118 +412,69 @@ int main(int argc, char** argv) {
         }
     };
 
-    if (!prompt_arg.empty()) {
-        agent_busy = true;
-        std::thread([&, prompt_arg]() {
-            run_line(prompt_arg);
-            agent_busy = false;
-        }).detach();
-    }
+    std::mutex worker_mutex;
+    std::thread worker;
+    example::FtxuiConsoleView* view_ptr = nullptr;
 
-    std::wstring input_wline;
-    bool running = true;
-    while (running && !g_shutdown.load()) {
-        const UiPresentationSnapshot snap = tui_h->presentation_snapshot();
-        attron(A_BOLD | COLOR_PAIR(1));
-        mvprintw(0, 1, "SCIENTIFIC CONSOLE");
-        attroff(A_BOLD | COLOR_PAIR(1));
-        mvprintw(0, 23, "Session: %s  Model: %s  Provider: %s", snap.session_id.c_str(),
-                 snap.model.c_str(), snap.provider.c_str());
-        mvprintw(1, 1, "State: %s  Connection: %s", UiPresentationModel::state_name(snap.run_state),
-                 snap.connection_label.c_str());
-        clrtoeol(); refresh();
-        std::string capabilities =
-            "SESSION\n  orbital-analysis\n\nTOOLS\n  FS\n  WEB\n  EXPR\n  DRAW\n  SKILLS\n  MCP";
-        std::string skill_line = "Skills disabled  (configure --skills-root to enable)";
-        if (deps.skills && deps.skills->manager) {
-            const auto skill_status = deps.skills->manager->status();
-            const std::string active = skill_status["activeSkill"].is_string()
-                ? skill_status["activeSkill"].get<std::string>() : "-";
-            capabilities += "\n\nSKILLS\n  indexed " +
-                            std::to_string(skill_status.value("skills", std::size_t{0})) +
-                            "\n  active " + active;
-            skill_line = "Skills gen=" +
-                         std::to_string(skill_status.value("generation", 0ULL)) +
-                         " count=" +
-                         std::to_string(skill_status.value("skills", std::size_t{0})) +
-                         " active=" + active + "  /skills status";
-        }
-        if (left_win) draw_panel(left_win, "CAPABILITIES", capabilities);
-        draw_panel(out_win, "CONVERSATION", conversation_text(snap));
-        if (activity_win) draw_panel(activity_win, "TOOL ACTIVITY", activity_text(snap));
+    auto cancel_active = [&] {
+        std::lock_guard<std::mutex> lock(control_mutex);
+        if (active_control) active_control->request_cancel();
+    };
 
-        werase(in_win); box(in_win, 0, 0);
-        wattron(in_win, A_BOLD | COLOR_PAIR(1)); mvwprintw(in_win, 0, 2, " COMPOSER "); wattroff(in_win, A_BOLD | COLOR_PAIR(1));
-        mvwaddwstr(in_win, 1, 2, L"> ");
-        mvwaddnwstr(in_win, 1, 4, input_wline.c_str(), -1);
-        mvwprintw(in_win, 2, 2, "%.*s", std::max(0, cols - 4), skill_line.c_str());
-        mvwprintw(in_win, 3, 2, "Enter send  Esc stop  Ctrl+C quit  %s",
-                  agent_busy.load() ? "RUNNING" : "READY");
-        wrefresh(in_win);
-        move(rows - 1, 1);
-        clrtoeol();
-        printw("%zu turns  %zu tools  %s", snap.turns.size(), snap.tools.size(),
-               wide_layout ? "three-panel" : "compact");
-        refresh();
-
-        wint_t ch = 0;
-        const int ret = wget_wch(in_win, &ch);
-        if (ret == ERR) {
-            continue;
-        }
-        if (ret == KEY_CODE_YES) {
-            if (ch == 3) { // Ctrl+C
-                running = false;
-                break;
-            }
-            if (ch == KEY_RESIZE) continue;
-            if (ch == KEY_BACKSPACE || ch == KEY_DC || ch == 127) {
-                if (!input_wline.empty()) {
-                    input_wline.pop_back();
+    auto launch_line = [&](std::string line) {
+        if (line.empty() || agent_busy.exchange(true)) return;
+        {
+            std::lock_guard<std::mutex> lock(worker_mutex);
+            if (worker.joinable()) worker.join();
+            worker = std::thread([&, line = std::move(line)] {
+                run_line(line);
+                agent_busy.store(false);
+                if (view_ptr) {
+                    view_ptr->set_busy(false);
+                    view_ptr->request_refresh();
                 }
-                continue;
-            }
-            if (ch == KEY_ENTER || ch == L'\n' || ch == L'\r' || ch == 10 || ch == 13) {
-                if (!input_wline.empty() && !agent_busy.load()) {
-                    std::string line = wstring_to_utf8(input_wline);
-                    input_wline.clear();
-                    agent_busy = true;
-                    std::thread([&, line]() {
-                        run_line(line);
-                        agent_busy = false;
-                    }).detach();
-                }
-                continue;
-            }
-            continue;
+            });
         }
-        if (ch == 27) {
-            std::lock_guard<std::mutex> lock(control_mutex);
-            if (active_control) active_control->request_cancel();
-            continue;
-        }
-        if (ch == L'\n' || ch == L'\r' || ch == 10 || ch == 13) {
-            if (!input_wline.empty() && !agent_busy.load()) {
-                std::string line = wstring_to_utf8(input_wline);
-                input_wline.clear();
-                agent_busy = true;
-                std::thread([&, line]() {
-                    run_line(line);
-                    agent_busy = false;
-                }).detach();
-            }
-            continue;
-        }
-        if (ch >= 32) {
-            input_wline.push_back(static_cast<wchar_t>(ch));
-        }
-    }
+        if (view_ptr) view_ptr->set_busy(true);
+    };
 
-    g_shutdown = true;
-    delwin(out_win);
-    if (left_win) delwin(left_win);
-    if (activity_win) delwin(activity_win);
-    delwin(in_win);
-    endwin();
-    return 0;
+    auto skill_status_provider = [&]() {
+        example::FtxuiSkillStatus result;
+        if (!deps.skills || !deps.skills->manager) return result;
+        const auto status = deps.skills->manager->status();
+        result.enabled = true;
+        result.count = status.value("skills", std::size_t{0});
+        result.generation = status.value("generation", std::uint64_t{0});
+        const auto active = status.find("activeSkill");
+        result.active = active != status.end() && active->is_string()
+                            ? active->get<std::string>()
+                            : "-";
+        if (result.active.empty()) result.active = "-";
+        return result;
+    };
+
+    example::FtxuiConsoleCallbacks callbacks;
+    callbacks.on_submit = [&](std::string line) { launch_line(std::move(line)); };
+    callbacks.on_cancel = cancel_active;
+    callbacks.on_quit = [&] {
+        g_shutdown.store(true);
+        cancel_active();
+    };
+    example::FtxuiConsoleView view(
+        [tui_h] { return tui_h->presentation_snapshot(); },
+        skill_status_provider,
+        std::move(callbacks));
+    view_ptr = &view;
+
+    if (!prompt_arg.empty()) launch_line(prompt_arg);
+    const int rc = view.run();
+
+    g_shutdown.store(true);
+    cancel_active();
+    {
+        std::lock_guard<std::mutex> lock(worker_mutex);
+        if (worker.joinable()) worker.join();
+    }
+    view_ptr = nullptr;
+    return rc;
 }

@@ -146,7 +146,7 @@ endif()
 option(AGENT_BUILD_IMGUI
        "Build imgui_agent_demo (GLFW + OpenGL3 + Dear ImGui; ImPlot/ImPlot3D from 3rd-party submodules if present)"
        OFF)
-option(AGENT_BUILD_TUI "Build tui_agent_demo (ncurses)" OFF)
+option(AGENT_BUILD_TUI "Build tui_agent_demo (FTXUI)" OFF)
 option(AGENT_BUILD_WEB_UI "Build web_ui_demo (httplib + static assets + SSE)" OFF)
 
 # 包含目录
@@ -926,40 +926,42 @@ if(AGENT_BUILD_TUI)
         if(NOT EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/../3rd-party/CLI11/CLI11.hpp)
             message(WARNING "tui_agent_demo: missing CLI11 (same as cli_agent_demo)")
         else()
-            # 宽字符 API 必须链 libncursesw。仅用 FindCurses 时，若工程曾缓存过窄库，
-            # CURSES_LIBRARIES 可能一直是 -lcurses，导致 waddnwstr/wget_wch 链接失败。
-            if(WIN32 AND NOT MINGW)
-                set(CURSES_NEED_WIDE TRUE)
-                find_package(Curses REQUIRED)
-                set(_tui_curses_includes ${CURSES_INCLUDE_DIR})
-                set(_tui_curses_libs ${CURSES_LIBRARIES})
-            else()
-                find_library(AGENT_TUI_NCURSESW_LIBRARY
-                    NAMES ncursesw ncursesw6 ncursesw.dylib
-                    REQUIRED)
-                find_path(AGENT_TUI_NCURSES_INCLUDE
-                    NAMES ncursesw/ncurses.h ncurses/ncurses.h curses.h
-                    PATHS /opt/homebrew/opt/ncurses/include /usr/local/opt/ncurses/include)
-                if(NOT AGENT_TUI_NCURSES_INCLUDE)
-                    message(FATAL_ERROR "tui_agent_demo: ncursesw headers not found (install libncursesw5-dev / ncurses-devel)")
-                endif()
-                set(_tui_curses_includes ${AGENT_TUI_NCURSES_INCLUDE})
-                set(_tui_curses_libs ${AGENT_TUI_NCURSESW_LIBRARY})
-                message(STATUS "WP2.U: tui_agent_demo ncursesw lib=${AGENT_TUI_NCURSESW_LIBRARY}")
+            set(_agent_ftxui_dir ${CMAKE_CURRENT_SOURCE_DIR}/../3rd-party/FTXUI)
+            if(NOT EXISTS ${_agent_ftxui_dir}/CMakeLists.txt)
+                message(FATAL_ERROR
+                    "tui_agent_demo: FTXUI submodule is missing; run: "
+                    "git submodule update --init --recursive 3rd-party/FTXUI")
             endif()
 
-            add_executable(tui_agent_demo examples/tui_agent_demo.cpp)
+            set(FTXUI_BUILD_DOCS OFF CACHE BOOL "" FORCE)
+            set(FTXUI_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+            set(FTXUI_BUILD_MODULES OFF CACHE BOOL "" FORCE)
+            set(FTXUI_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+            set(FTXUI_BUILD_TESTS_FUZZER OFF CACHE BOOL "" FORCE)
+            set(FTXUI_CLANG_TIDY OFF CACHE BOOL "" FORCE)
+            set(FTXUI_DEV_WARNINGS OFF CACHE BOOL "" FORCE)
+            set(FTXUI_ENABLE_COVERAGE OFF CACHE BOOL "" FORCE)
+            set(FTXUI_ENABLE_INSTALL OFF CACHE BOOL "" FORCE)
+            set(FTXUI_ENABLE_CCACHE OFF CACHE BOOL "" FORCE)
+            set(FTXUI_QUIET ON CACHE BOOL "" FORCE)
+            if(NOT TARGET ftxui::ftxui)
+                add_subdirectory(${_agent_ftxui_dir} ${CMAKE_CURRENT_BINARY_DIR}/ftxui EXCLUDE_FROM_ALL)
+            endif()
+
+            add_executable(tui_agent_demo
+                examples/tui_agent_demo.cpp
+                examples/common/ftxui_console_view.cpp)
             target_include_directories(tui_agent_demo PRIVATE
-                ${CMAKE_CURRENT_SOURCE_DIR}/../3rd-party/CLI11
-                ${_tui_curses_includes})
-            target_link_libraries(tui_agent_demo PRIVATE agent_framework ${_tui_curses_libs})
+                ${CMAKE_CURRENT_SOURCE_DIR}/../3rd-party/CLI11)
+            target_link_libraries(tui_agent_demo PRIVATE agent_framework ftxui::ftxui)
+            target_compile_definitions(tui_agent_demo PRIVATE AGENT_TUI_BACKEND_FTXUI=1)
             if(CMAKE_USE_PTHREADS_INIT)
                 target_link_libraries(tui_agent_demo PRIVATE Threads::Threads)
             endif()
             if(MSVC AND CMAKE_CXX_STANDARD GREATER_EQUAL 20)
                 target_compile_options(tui_agent_demo PRIVATE /std:c++20)
             endif()
-            message(STATUS "WP2.U: tui_agent_demo target enabled (AGENT_BUILD_TUI=ON)")
+            message(STATUS "WP2.U: tui_agent_demo target enabled with FTXUI 7.0.1 (AGENT_BUILD_TUI=ON)")
         endif()
     else()
         message(WARNING "AGENT_BUILD_TUI=ON but examples/tui_agent_demo.cpp missing")
@@ -998,6 +1000,18 @@ if(BUILD_TESTING)
         target_link_libraries(test_ui_presentation_model PRIVATE agent_framework)
         add_test(NAME ui_presentation_model COMMAND test_ui_presentation_model)
         set_tests_properties(ui_presentation_model PROPERTIES LABELS "rich-ui;scientific-console")
+    endif()
+    if(AGENT_BUILD_TUI AND TARGET ftxui::ftxui AND
+       EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_ftxui_console_view.cpp)
+        add_executable(test_ftxui_console_view
+            tests/test_ftxui_console_view.cpp
+            examples/common/ftxui_console_view.cpp)
+        target_include_directories(test_ftxui_console_view PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/examples)
+        target_link_libraries(test_ftxui_console_view PRIVATE agent_framework ftxui::ftxui)
+        add_test(NAME ftxui_console_view COMMAND test_ftxui_console_view)
+        set_tests_properties(ftxui_console_view PROPERTIES
+            LABELS "rich-ui;scientific-console;ftxui")
     endif()
     if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/scripts/test_run_ui_launcher.sh)
         add_test(
