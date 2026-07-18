@@ -705,7 +705,23 @@ ProcessedUserInput UserInputPreprocessor::process(std::string_view raw_user_text
                 } else if (uri.scheme() == ResourceScheme::Mcp) {
                     if (!ctx.resources->mcp_allowed(uri.authority()))
                         throw std::runtime_error("mcp_resource_service_denied");
-                    throw std::runtime_error("mcp_resource_injection_requires_resource_api");
+                    if (!opt_.toolbus) throw std::runtime_error("injection_toolbus_unavailable");
+                    const auto contents =
+                        opt_.toolbus->read_mcp_resource(uri.authority(), uri.path()).get();
+                    if (contents.empty()) throw std::runtime_error("mcp_resource_empty");
+                    const std::size_t max_bytes = file_inject_max_bytes();
+                    for (const auto& content : contents) {
+                        if (content.blob.has_value())
+                            throw std::runtime_error("mcp_resource_binary_not_injectable");
+                        if (!content.text.has_value())
+                            throw std::runtime_error("mcp_resource_content_malformed");
+                        const std::size_t separator = text.empty() ? 0U : 1U;
+                        if (text.size() > max_bytes || content.text->size() > max_bytes - text.size() ||
+                            separator > max_bytes - text.size() - content.text->size())
+                            throw std::runtime_error("mcp_resource_too_large");
+                        if (separator != 0U) text.push_back('\n');
+                        text.append(*content.text);
+                    }
                 } else {
                     throw std::runtime_error("resource_scheme_not_injectable");
                 }

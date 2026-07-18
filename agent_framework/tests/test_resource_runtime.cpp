@@ -47,6 +47,11 @@ Body
     assert(rejects("workspace://../secret"));
     assert(rejects("skill://sample/../../secret"));
     assert(rejects("mcp://service"));
+    const auto opaque_mcp = ResourceUri::parse("mcp://filesystem/file:///home/data.txt");
+    assert(opaque_mcp.authority() == "filesystem");
+    assert(opaque_mcp.path() == "file:///home/data.txt");
+    assert(opaque_mcp.str() == "mcp://filesystem/file:///home/data.txt");
+    assert(rejects(std::string("mcp://filesystem/memory://bad\nvalue")));
 
     SessionResourceContext context(workspace, {skills}, {}, cache, registry.snapshot());
     assert(context.resolve_local(workspace_uri) == fs::weakly_canonical(workspace / "docs/input.md"));

@@ -30,6 +30,41 @@ using namespace agent_framework;
 
 namespace {
 
+class ResourceMcpTransport final : public MCPTransportInterface {
+public:
+    bool connect(const std::string&) override { connected_ = true; return true; }
+    void disconnect() override { connected_ = false; }
+    bool is_connected() const override { return connected_; }
+    MCPTransport get_transport_type() const override { return MCPTransport::HTTP; }
+    void send_notification(const json&) override {}
+    json transceive(const json& request) override {
+        const auto id = request.at("id").get<std::int64_t>();
+        const std::string method = request.at("method").get<std::string>();
+        if (method == "initialize") {
+            return json{{"jsonrpc", "2.0"}, {"id", id},
+                        {"result", {{"protocolVersion", "2024-11-05"},
+                                    {"capabilities", {{"resources", json::object()}}}}}};
+        }
+        if (method == "tools/list") {
+            return json{{"jsonrpc", "2.0"}, {"id", id},
+                        {"result", {{"tools", json::array()}}}};
+        }
+        if (method == "resources/read") {
+            const std::string uri = request.at("params").at("uri").get<std::string>();
+            json content{{"uri", uri}, {"mimeType", "text/plain"}};
+            if (uri == "memory://blob") content["blob"] = "AAEC";
+            else if (uri == "memory://large") content["text"] = std::string(64, 'x');
+            else content["text"] = "REMOTE_RESOURCE";
+            return json{{"jsonrpc", "2.0"}, {"id", id},
+                        {"result", {{"contents", json::array({std::move(content)})}}}};
+        }
+        return json{{"jsonrpc", "2.0"}, {"id", id},
+                    {"error", {{"code", -32601}, {"message", "unknown method"}}}};
+    }
+private:
+    bool connected_ = false;
+};
+
 void set_allowlist_empty() {
     (void)::unsetenv("AGENT_TOOL_ALLOWLIST");
 }
@@ -300,6 +335,43 @@ Body
     assert(!denied.tier_a_violations.empty());
 }
 
+void u11_mcp_resource_injection() {
+    const fs::path base = fs::temp_directory_path() / "wp27_mcp_resource";
+    std::error_code ec;
+    fs::remove_all(base, ec);
+    fs::create_directories(base / "workspace");
+    auto resources = std::make_shared<SessionResourceContext>(
+        base / "workspace", std::vector<fs::path>{}, fs::path{}, base / "cache");
+    resources->set_allowed_mcp_services({"memory"});
+    auto bus = std::make_shared<ToolBus>();
+    auto client = MCPClient::create_with_transport(std::make_unique<ResourceMcpTransport>(), true);
+    bus->register_mcp_service("memory", client);
+    PreprocessOptions options;
+    options.toolbus = bus;
+    UserInputPreprocessor preprocessor(options);
+    ExecutionContext context = ctx();
+    context.resources = resources;
+
+    auto text = preprocessor.process("use @{mcp://memory/memory://doc}", context);
+    assert(text.tier_a_violations.empty());
+    assert(text.injected_context.size() == 1U);
+    assert(text.injected_context[0].text_utf8 == "REMOTE_RESOURCE");
+
+    auto denied = preprocessor.process("@{mcp://other/memory://doc}", context);
+    assert(!denied.tier_a_violations.empty());
+    assert(denied.tier_a_violations[0].find("mcp_resource_service_denied") != std::string::npos);
+
+    auto binary = preprocessor.process("@{mcp://memory/memory://blob}", context);
+    assert(!binary.tier_a_violations.empty());
+    assert(binary.tier_a_violations[0].find("mcp_resource_binary_not_injectable") != std::string::npos);
+
+    (void)::setenv("AGENT_INPUT_FILE_INJECT_MAX_BYTES", "16", 1);
+    auto large = preprocessor.process("@{mcp://memory/memory://large}", context);
+    assert(!large.tier_a_violations.empty());
+    assert(large.tier_a_violations[0].find("mcp_resource_too_large") != std::string::npos);
+    (void)::unsetenv("AGENT_INPUT_FILE_INJECT_MAX_BYTES");
+}
+
 } // namespace
 
 int main() {
@@ -314,6 +386,7 @@ int main() {
     u8_injection_budget();
     u9_skills_commands();
     u10_resource_uri_injection();
+    u11_mcp_resource_injection();
     std::cout << "test_user_input_preprocessor: ok\n";
     return 0;
 }

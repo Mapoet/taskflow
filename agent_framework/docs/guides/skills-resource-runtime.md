@@ -35,7 +35,18 @@ Activation binds declared Tool, MCP, Prompt, and Template capabilities through `
 - `workspace://path`: a file below `AGENT_FS_ROOT`.
 - `skill://skill-id/path`: a declared, read-only resource from a pinned Skill package.
 - `skill-cache://skill-id/path`: internal writable cache namespace; not injectable into prompts.
-- `mcp://service/resource`: reserved remote resource namespace. The current MCP client implements tools, not the MCP Resources protocol, so prompt injection returns an explicit `mcp_resource_injection_requires_resource_api` diagnostic.
+- `mcp://service/resource-uri`: a remote MCP Resources namespace. `service` must be registered
+  in `ToolBus` and allowed by the pinned `SessionResourceContext`; the remainder is passed
+  unchanged to MCP `resources/read` and is never resolved as a local path. For example,
+  `@{mcp://filesystem/file:///home/data/input.txt}` sends `file:///home/data/input.txt` to
+  the registered `filesystem` server.
+
+MCP resource injection requires the server to advertise the `resources` capability during
+`initialize`. Text contents are concatenated in response order and share the existing injection
+budget. Binary `blob` contents are rejected with `mcp_resource_binary_not_injectable`; malformed,
+empty, unauthorized, unknown-service, and oversized responses remain explicit Tier-A violations.
+`AGENT_MCP_RESOURCE_MAX_BYTES` limits the raw MCP response payload (default 256 KiB), while
+`AGENT_INPUT_FILE_INJECT_MAX_BYTES` independently limits text admitted into one prompt resource.
 
 Inject local resources with:
 

@@ -17,6 +17,8 @@ inline constexpr std::string_view k_method_initialize = "initialize";
 inline constexpr std::string_view k_method_notifications_initialized = "notifications/initialized";
 inline constexpr std::string_view k_method_tools_list = "tools/list";
 inline constexpr std::string_view k_method_tools_call = "tools/call";
+inline constexpr std::string_view k_method_resources_list = "resources/list";
+inline constexpr std::string_view k_method_resources_read = "resources/read";
 
 } // namespace mcp_protocol
 } // namespace agent_framework

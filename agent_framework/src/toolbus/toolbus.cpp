@@ -366,7 +366,12 @@ void ToolBus::register_mcp_service(const std::string& service_name, std::shared_
     }
     load_allowlist_once();
     const auto& al = allowlist();
-    std::vector<ToolMeta> metas = client->list_tools().get();
+    std::vector<ToolMeta> metas;
+    if (client->supports_tools() || !client->supports_resources()) {
+        // Keep the historical fallback for pre-capability MCP tool servers while allowing
+        // standards-compliant resource-only servers to register without tools/list.
+        metas = client->list_tools().get();
+    }
     for (const auto& m : metas) {
         const std::string reg = service_name + "__" + m.name;
         if (al.has_value() && al->count(reg) == 0U) {
@@ -374,7 +379,7 @@ void ToolBus::register_mcp_service(const std::string& service_name, std::shared_
         }
     }
     std::lock_guard<std::mutex> lock(tools_mutex_);
-    if (mcp_services_.count(service_name) != 0U) {
+    if (mcp_clients_.count(service_name) != 0U) {
         throw std::invalid_argument("register_mcp_service: service already registered: " + service_name);
     }
     for (const auto& m : metas) {
@@ -392,7 +397,40 @@ void ToolBus::register_mcp_service(const std::string& service_name, std::shared_
         }
         tools_.emplace(reg, std::make_shared<MCPProxyTool>(client, reg, m.name, tm));
     }
-    mcp_services_.insert(service_name);
+    mcp_clients_.emplace(service_name, std::move(client));
+}
+
+bool ToolBus::has_mcp_service(std::string_view service_name) const {
+    std::lock_guard<std::mutex> lock(tools_mutex_);
+    return mcp_clients_.count(std::string(service_name)) != 0U;
+}
+
+std::future<MCPResourceListResult> ToolBus::list_mcp_resources(
+    const std::string& service_name, std::string cursor,
+    std::function<bool()> cancellation_requested) const {
+    std::shared_ptr<MCPClient> client;
+    {
+        std::lock_guard<std::mutex> lock(tools_mutex_);
+        const auto it = mcp_clients_.find(service_name);
+        if (it == mcp_clients_.end())
+            throw std::runtime_error("mcp_resource_service_unknown:" + service_name);
+        client = it->second;
+    }
+    return client->list_resources(std::move(cursor), std::move(cancellation_requested));
+}
+
+std::future<std::vector<MCPResourceContent>> ToolBus::read_mcp_resource(
+    const std::string& service_name, std::string uri,
+    std::function<bool()> cancellation_requested) const {
+    std::shared_ptr<MCPClient> client;
+    {
+        std::lock_guard<std::mutex> lock(tools_mutex_);
+        const auto it = mcp_clients_.find(service_name);
+        if (it == mcp_clients_.end())
+            throw std::runtime_error("mcp_resource_service_unknown:" + service_name);
+        client = it->second;
+    }
+    return client->read_resource(std::move(uri), std::move(cancellation_requested));
 }
 
 void ToolBus::register_api_tool(const std::string& /*name*/, const std::string& /*endpoint*/,

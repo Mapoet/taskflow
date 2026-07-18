@@ -34,6 +34,15 @@ std::string normalize_path(std::string_view raw) {
     return out;
 }
 
+std::string opaque_mcp_identifier(std::string_view raw) {
+    if (raw.empty()) throw std::invalid_argument("MCP resource identifier must be non-empty");
+    for (unsigned char c : raw) {
+        if (c < 0x20U || c == 0x7fU)
+            throw std::invalid_argument("MCP resource identifier contains a control character");
+    }
+    return std::string(raw);
+}
+
 } // namespace
 
 ResourceUri ResourceUri::parse(std::string_view value) {
@@ -56,7 +65,10 @@ ResourceUri ResourceUri::parse(std::string_view value) {
     if (slash == std::string_view::npos) throw std::invalid_argument("resource URI requires authority/path");
     uri.authority_ = std::string(rest.substr(0, slash));
     if (!valid_authority(uri.authority_)) throw std::invalid_argument("invalid resource URI authority");
-    uri.path_ = normalize_path(rest.substr(slash + 1));
+    if (uri.scheme_ == ResourceScheme::Mcp)
+        uri.path_ = opaque_mcp_identifier(rest.substr(slash + 1));
+    else
+        uri.path_ = normalize_path(rest.substr(slash + 1));
     return uri;
 }
 

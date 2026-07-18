@@ -13,10 +13,31 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <vector>
 
 namespace agent_framework {
+
+struct MCPResource {
+    std::string uri;
+    std::string name;
+    std::string description;
+    std::string mime_type;
+    std::optional<std::uint64_t> size;
+};
+
+struct MCPResourceListResult {
+    std::vector<MCPResource> resources;
+    std::optional<std::string> next_cursor;
+};
+
+struct MCPResourceContent {
+    std::string uri;
+    std::string mime_type;
+    std::optional<std::string> text;
+    std::optional<std::string> blob;
+};
 
 class MCPTransportInterface {
 public:
@@ -160,6 +181,12 @@ public:
     std::future<std::vector<ToolMeta>> list_tools();
     std::future<json> call_tool(const std::string& name, const json& arguments,
                                 std::function<bool()> cancellation_requested = {});
+    bool supports_resources() const noexcept;
+    bool supports_tools() const noexcept;
+    std::future<MCPResourceListResult> list_resources(
+        std::string cursor = {}, std::function<bool()> cancellation_requested = {});
+    std::future<std::vector<MCPResourceContent>> read_resource(
+        std::string uri, std::function<bool()> cancellation_requested = {});
     bool ping();
     void disconnect();
     bool is_connected() const;
@@ -179,6 +206,8 @@ private:
     std::mutex cache_mutex_;
     std::mutex rpc_mutex_;
     std::atomic<std::int64_t> next_id_{1};
+    bool resources_supported_ = false;
+    bool tools_supported_ = false;
 };
 
 } // namespace agent_framework

@@ -7,6 +7,8 @@
 #include <agent/mcp_client/mcp_protocol.hpp>
 
 #include <future>
+#include <cstdlib>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -60,7 +62,16 @@ void MCPClient::handshake() {
                    {"capabilities", json::object()},
                    {"clientInfo",
                     json{{"name", "agent_framework"}, {"version", "1.0.0"}}}};
-    (void)send_jsonrpc_request(std::string(mcp_protocol::k_method_initialize), params);
+    const json result =
+        send_jsonrpc_request(std::string(mcp_protocol::k_method_initialize), params);
+    resources_supported_ = result.contains("capabilities") &&
+                           result["capabilities"].is_object() &&
+                           result["capabilities"].contains("resources") &&
+                           result["capabilities"]["resources"].is_object();
+    tools_supported_ = result.contains("capabilities") &&
+                       result["capabilities"].is_object() &&
+                       result["capabilities"].contains("tools") &&
+                       result["capabilities"]["tools"].is_object();
     json note = {{"jsonrpc", std::string(mcp_protocol::k_jsonrpc_version)},
                  {"method", std::string(mcp_protocol::k_method_notifications_initialized)},
                  {"params", json::object()}};
@@ -206,6 +217,137 @@ std::future<json> MCPClient::call_tool(const std::string& name, const json& argu
                         {"code", "mcp_jsonrpc_error"},
                         {"details", json::object()}};
         }
+    });
+}
+
+namespace {
+
+std::size_t mcp_resource_max_bytes() {
+    constexpr std::size_t fallback = 256U * 1024U;
+    const char* raw = std::getenv("AGENT_MCP_RESOURCE_MAX_BYTES");
+    if (!raw || !*raw) return fallback;
+    char* end = nullptr;
+    const unsigned long long parsed = std::strtoull(raw, &end, 10);
+    if (end == raw || *end != '\0' || parsed == 0 ||
+        parsed > static_cast<unsigned long long>(std::numeric_limits<std::size_t>::max())) {
+        return fallback;
+    }
+    return static_cast<std::size_t>(parsed);
+}
+
+std::string optional_string(const json& object, const char* key) {
+    if (!object.contains(key) || object[key].is_null()) return {};
+    if (!object[key].is_string())
+        throw std::runtime_error(std::string("MCP resources: ") + key + " must be a string");
+    return object[key].get<std::string>();
+}
+
+} // namespace
+
+bool MCPClient::supports_resources() const noexcept {
+    return resources_supported_;
+}
+
+bool MCPClient::supports_tools() const noexcept {
+    return tools_supported_;
+}
+
+std::future<MCPResourceListResult> MCPClient::list_resources(
+    std::string cursor, std::function<bool()> cancellation_requested) {
+    return std::async(std::launch::async,
+                      [this, cursor = std::move(cursor),
+                       cancellation_requested = std::move(cancellation_requested)]() {
+        if (!resources_supported_)
+            throw std::runtime_error("mcp_resources_unsupported");
+        json params = json::object();
+        if (!cursor.empty()) params["cursor"] = cursor;
+        const json result = send_jsonrpc_request(
+            std::string(mcp_protocol::k_method_resources_list), params, cancellation_requested);
+        if (!result.is_object() || !result.contains("resources") ||
+            !result["resources"].is_array())
+            throw std::runtime_error("MCP resources/list: resources must be an array");
+        constexpr std::size_t max_resources_per_page = 10000U;
+        if (result["resources"].size() > max_resources_per_page)
+            throw std::runtime_error("MCP resources/list: resource page exceeds limit");
+        MCPResourceListResult out;
+        out.resources.reserve(result["resources"].size());
+        for (const auto& item : result["resources"]) {
+            if (!item.is_object() || !item.contains("uri") || !item["uri"].is_string() ||
+                !item.contains("name") || !item["name"].is_string())
+                throw std::runtime_error("MCP resources/list: resource requires string uri and name");
+            MCPResource resource;
+            resource.uri = item["uri"].get<std::string>();
+            resource.name = item["name"].get<std::string>();
+            if (resource.uri.empty() || resource.name.empty())
+                throw std::runtime_error("MCP resources/list: resource uri and name must be non-empty");
+            resource.description = optional_string(item, "description");
+            resource.mime_type = optional_string(item, "mimeType");
+            if (item.contains("size") && !item["size"].is_null()) {
+                if (!item["size"].is_number_unsigned() && !item["size"].is_number_integer())
+                    throw std::runtime_error("MCP resources/list: size must be a non-negative integer");
+                if (item["size"].is_number_unsigned()) {
+                    resource.size = item["size"].get<std::uint64_t>();
+                } else {
+                    const auto value = item["size"].get<std::int64_t>();
+                    if (value < 0)
+                        throw std::runtime_error("MCP resources/list: size must be non-negative");
+                    resource.size = static_cast<std::uint64_t>(value);
+                }
+            }
+            out.resources.push_back(std::move(resource));
+        }
+        if (result.contains("nextCursor") && !result["nextCursor"].is_null()) {
+            if (!result["nextCursor"].is_string())
+                throw std::runtime_error("MCP resources/list: nextCursor must be a string");
+            std::string next = result["nextCursor"].get<std::string>();
+            if (next.size() > 8192U)
+                throw std::runtime_error("MCP resources/list: nextCursor exceeds limit");
+            if (!next.empty()) out.next_cursor = std::move(next);
+        }
+        return out;
+    });
+}
+
+std::future<std::vector<MCPResourceContent>> MCPClient::read_resource(
+    std::string uri, std::function<bool()> cancellation_requested) {
+    return std::async(std::launch::async,
+                      [this, uri = std::move(uri),
+                       cancellation_requested = std::move(cancellation_requested)]() {
+        if (!resources_supported_)
+            throw std::runtime_error("mcp_resources_unsupported");
+        if (uri.empty()) throw std::invalid_argument("mcp_resource_uri_empty");
+        const json result = send_jsonrpc_request(
+            std::string(mcp_protocol::k_method_resources_read), json{{"uri", uri}},
+            cancellation_requested);
+        if (!result.is_object() || !result.contains("contents") ||
+            !result["contents"].is_array())
+            throw std::runtime_error("MCP resources/read: contents must be an array");
+        if (result["contents"].size() > 1024U)
+            throw std::runtime_error("MCP resources/read: content count exceeds limit");
+        const std::size_t max_bytes = mcp_resource_max_bytes();
+        std::size_t total = 0;
+        std::vector<MCPResourceContent> out;
+        out.reserve(result["contents"].size());
+        for (const auto& item : result["contents"]) {
+            if (!item.is_object() || !item.contains("uri") || !item["uri"].is_string())
+                throw std::runtime_error("MCP resources/read: content requires string uri");
+            const bool has_text = item.contains("text") && item["text"].is_string();
+            const bool has_blob = item.contains("blob") && item["blob"].is_string();
+            if (has_text == has_blob)
+                throw std::runtime_error(
+                    "MCP resources/read: content requires exactly one string text or blob");
+            MCPResourceContent content;
+            content.uri = item["uri"].get<std::string>();
+            content.mime_type = optional_string(item, "mimeType");
+            if (has_text) content.text = item["text"].get<std::string>();
+            else content.blob = item["blob"].get<std::string>();
+            const std::size_t bytes = has_text ? content.text->size() : content.blob->size();
+            if (total > max_bytes || bytes > max_bytes - total)
+                throw std::runtime_error("mcp_resource_too_large");
+            total += bytes;
+            out.push_back(std::move(content));
+        }
+        return out;
     });
 }
 

@@ -13,7 +13,6 @@
 #include <vector>
 #include <map>
 #include <memory>
-#include <unordered_set>
 #include <functional>
 #include <future>
 #include <mutex>
@@ -296,6 +295,13 @@ public:
      */
     void register_mcp_service(const std::string& service_name,
                               std::shared_ptr<MCPClient> client);
+    bool has_mcp_service(std::string_view service_name) const;
+    std::future<MCPResourceListResult> list_mcp_resources(
+        const std::string& service_name, std::string cursor = {},
+        std::function<bool()> cancellation_requested = {}) const;
+    std::future<std::vector<MCPResourceContent>> read_mcp_resource(
+        const std::string& service_name, std::string uri,
+        std::function<bool()> cancellation_requested = {}) const;
 
     /**
      * @brief 注册 API 工具
@@ -386,7 +392,7 @@ private:
 
     std::map<std::string, std::shared_ptr<ToolInterface>> tools_;
     mutable std::mutex tools_mutex_;
-    std::unordered_set<std::string> mcp_services_;
+    std::map<std::string, std::shared_ptr<MCPClient>> mcp_clients_;
     std::vector<ToolCallHook> hooks_;
     mutable std::mutex hooks_mutex_;
     mutable std::mutex default_tools_mutex_;
