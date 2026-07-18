@@ -43,6 +43,7 @@ inline std::string cursor_mcp_config_path(const std::string& explicit_path) {
 }
 
 inline std::shared_ptr<SkillServices> discover_skill_services(const BootstrapOptions& options) {
+    if(env_truthy("AGENT_SKILLS_DISABLED")) return nullptr;
     if(!options.skills_root.empty()) {
 #if defined(_WIN32)
         _putenv_s("AGENT_SKILLS_DIR", options.skills_root.string().c_str());

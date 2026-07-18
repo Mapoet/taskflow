@@ -7,6 +7,9 @@
 #include <agent/toolbus/toolbus.hpp>
 #include <agent/core/types.hpp>
 #include <agent/agent/user_input_preprocessor.hpp>
+#include <agent/resources/session_resource_context.hpp>
+#include <agent/skills/skill_loader.hpp>
+#include <agent/skills/skill_registry.hpp>
 
 #include <cassert>
 #include <cstdlib>
@@ -238,6 +241,65 @@ void u8_injection_budget() {
     (void)::unsetenv("AGENT_BUDGET_MAX_INJECTION_BYTES");
 }
 
+void u9_skills_commands() {
+    (void)::setenv("AGENT_INPUT_STRICT", "1", 1);
+    UserInputPreprocessor p(PreprocessOptions{});
+    auto list = p.process("/skills list", ctx());
+    assert(list.tier_a_violations.empty());
+    assert(list.control_actions.size() == 1);
+    assert(list.control_actions[0].command == "skills.list");
+    auto activate = p.process("/skills activate example", ctx());
+    assert(activate.control_actions[0].args.value("id", "") == "example");
+    auto create = p.process("/skills create example --description useful research skill", ctx());
+    assert(create.control_actions[0].command == "skills.create");
+    assert(create.control_actions[0].args.value("description", "") == "useful research skill");
+    auto invalid = p.process("/skills activate", ctx());
+    assert(!invalid.tier_a_violations.empty());
+}
+
+void u10_resource_uri_injection() {
+    const fs::path base = fs::temp_directory_path() / "wp27_resource_uri";
+    const fs::path workspace = base / "workspace";
+    const fs::path skills = base / "skills";
+    std::error_code ec;
+    fs::remove_all(base, ec);
+    fs::create_directories(workspace);
+    fs::create_directories(skills / "sample/references");
+    { std::ofstream(workspace / "input.md") << "WORKSPACE_RESOURCE"; }
+    { std::ofstream(skills / "sample/references/data.md") << "SKILL_RESOURCE"; }
+    { std::ofstream(skills / "sample/SKILL.md") << R"(---
+name: sample
+description: Injection fixture
+references: [references/data.md]
+---
+Body
+)"; }
+    (void)::setenv("AGENT_FS_ROOT", workspace.string().c_str(), 1);
+    (void)::setenv("AGENT_FS_MAX_READ_BYTES", "65536", 1);
+    (void)::setenv("AGENT_FS_MAX_WRITE_BYTES", "65536", 1);
+    auto registry = std::make_shared<SkillRegistry>(skills);
+    registry->scan_or_reload();
+    auto loader = std::make_shared<SkillLoader>(*registry);
+    auto resources = std::make_shared<SessionResourceContext>(
+        workspace, std::vector<fs::path>{skills}, fs::path{}, base / "cache", registry->snapshot());
+    auto bus = std::make_shared<ToolBus>();
+    register_builtin_fs_tools_if_configured(*bus);
+    PreprocessOptions opt;
+    opt.toolbus = bus;
+    UserInputPreprocessor prep(opt);
+    ExecutionContext context = ctx();
+    context.resources = resources;
+    context.skill_loader = loader;
+    auto output = prep.process(
+        "@{workspace://input.md} @{skill://sample/references/data.md}", context);
+    assert(output.tier_a_violations.empty());
+    assert(output.injected_context.size() == 2);
+    assert(output.injected_context[0].text_utf8 == "WORKSPACE_RESOURCE");
+    assert(output.injected_context[1].text_utf8 == "SKILL_RESOURCE");
+    auto denied = prep.process("@{skill://sample/../secret}", context);
+    assert(!denied.tier_a_violations.empty());
+}
+
 } // namespace
 
 int main() {
@@ -250,6 +312,8 @@ int main() {
     u6_multiline_cmd_strip();
     u7_url_mock();
     u8_injection_budget();
+    u9_skills_commands();
+    u10_resource_uri_injection();
     std::cout << "test_user_input_preprocessor: ok\n";
     return 0;
 }
