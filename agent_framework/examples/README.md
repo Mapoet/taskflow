@@ -30,3 +30,7 @@ Skills-specific and rich UI applications otherwise scan Cursor's two default Ski
 
 Examples that require an LLM, remote MCP service, A2A peer, or graphical display are build-tested
 offline and run only when their corresponding environment and optional build flag are available.
+TUI Skill management is available through `/skills list|status|reload|validate|create|activate|deactivate`.
+Use `tools/run_ui.sh --skills-root PATH --skill-authoring-root PATH`; resource injection accepts
+`@{workspace://path}` and declared `@{skill://id/path}` references. See
+[`docs/guides/skills-resource-runtime.md`](../docs/guides/skills-resource-runtime.md).
