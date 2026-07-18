@@ -3,6 +3,7 @@
 #include <agent/toolbus/toolbus.hpp>
 
 #include <cassert>
+#include <cstdlib>
 #include <cstdio>
 #include <fstream>
 #include <iostream>
@@ -133,16 +134,51 @@ void exercise_toolbus_legacy_config(const std::string& executable) {
 #endif
 }
 
+void exercise_toolbus_safe_root_and_service_filter(const std::string& executable) {
+#if defined(_WIN32)
+    (void)executable;
+#else
+    const std::string root = "/tmp/agent-framework-safe-root";
+    assert(::setenv("AGENT_FS_ROOT", root.c_str(), 1) == 0);
+    const std::string path =
+        "/tmp/agent-framework-mcp-filter-" + std::to_string(::getpid()) + ".json";
+    const json config =
+        {{"mcpServers",
+          {{"filesystem",
+            {{"command", executable},
+             {"args", json::array({"--server", "jsonl", "${AGENT_FS_ROOT}"})}}},
+           {"python_execute", {{"command", "/definitely/not/a/server"}}}}}};
+    {
+        std::ofstream out(path);
+        assert(out);
+        out << config.dump(2);
+    }
+    ToolBus bus;
+    const auto imported =
+        bus.register_mcp_from_cursor_config(path, true, {"python_execute"});
+    (void)std::remove(path.c_str());
+    assert(imported.failures.empty());
+    assert(imported.registered_services == std::vector<std::string>{"filesystem"});
+    assert(imported.skipped_services == std::vector<std::string>{"python_execute"});
+    assert(bus.list_all_tools() == std::vector<std::string>{"filesystem__echo"});
+#endif
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
-    if (argc == 3 && std::string(argv[1]) == "--server") {
+    if (argc >= 3 && std::string(argv[1]) == "--server") {
+        if (argc >= 4) {
+            const char* expected = std::getenv("AGENT_FS_ROOT");
+            if (!expected || argv[3] != std::string(expected)) return 4;
+        }
         return run_server(std::string(argv[2]) == "legacy" ? MCPStdioFraming::ContentLength
                                                            : MCPStdioFraming::JsonLines);
     }
     exercise_client(argv[0], MCPStdioFraming::JsonLines, "jsonl");
     exercise_client(argv[0], MCPStdioFraming::ContentLength, "legacy");
     exercise_toolbus_legacy_config(argv[0]);
+    exercise_toolbus_safe_root_and_service_filter(argv[0]);
     std::cout << "test_mcp_stdio_transport: ok\n";
     return 0;
 }

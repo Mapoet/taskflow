@@ -67,6 +67,29 @@ make -j$(nproc)
 ./build/examples/multimodal_agent
 ```
 
+### 启动 Scientific Console
+
+统一启动器可选择 TUI、ImGui 或 Web 三种界面；三端共用会话、工具活动与运行状态模型，并默认启用 FS、Web、ExprTk、Draw、Skills 和 Cursor MCP 工具集成。
+
+```bash
+# 终端全屏界面（默认）
+agent_framework/tools/run_ui.sh --ui tui
+
+# 原生桌面界面
+agent_framework/tools/run_ui.sh --ui imgui
+
+# 浏览器界面，默认访问 http://127.0.0.1:8080/
+agent_framework/tools/run_ui.sh --ui web
+
+# 不调用 LLM，加载确定性的展示/视觉验证状态
+agent_framework/tools/run_ui.sh --ui web --demo-state
+
+# 暂时跳过离线服务，其余 Cursor MCP 服务仍照常导入
+agent_framework/tools/run_ui.sh --ui web --skip-mcp-service python_execute
+```
+
+交互约定：`Enter` 提交，`Shift+Enter`（Web）换行，运行中可使用 `Esc` 取消；TUI 使用 `Ctrl+C` 退出。可通过 `--no-cursor-mcp` 禁用全部 Cursor MCP 导入，通过可重复的 `--skip-mcp-service` 只跳过故障服务，通过 `--fs-root` 设置文件系统工具沙箱根目录。安全配置模板见 `agent_framework/examples/configs/cursor-mcp-safe.example.json`；不要把令牌或带密钥的 URL 提交到仓库。完整参数见 `agent_framework/tools/run_ui.sh --help`。
+
 ## 目录结构
 
 ```

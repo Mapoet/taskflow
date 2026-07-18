@@ -42,6 +42,12 @@ int main() {
     model.cancel();
     assert(model.snapshot().run_state == UiRunState::Cancelled);
 
+    model.add_system_notice("MCP unavailable: python_execute", true);
+    s = model.snapshot();
+    assert(s.turns.back().role == UiTurnRole::System);
+    assert(s.turns.back().error);
+    assert(s.turns.back().content.find("python_execute") != std::string::npos);
+
     model.load_demo_state();
     s = model.snapshot();
     assert(s.run_state == UiRunState::Completed);

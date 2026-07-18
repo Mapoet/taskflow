@@ -9,6 +9,7 @@
 #include "common/agent_example_bootstrap.hpp"
 
 #include <agent/agent/execution_context.hpp>
+#include <agent/agent/task_state_machine.hpp>
 #include <agent/graph_executor/graph_executor.hpp>
 #include <agent/internal/agent_thread_state.hpp>
 #include <agent/llm_client/llm_client.hpp>
@@ -40,6 +41,8 @@ using json = nlohmann::json;
 using namespace agent_framework;
 
 std::atomic<bool> g_agent_busy{false};
+std::mutex g_control_mutex;
+std::shared_ptr<TaskControl> g_active_control;
 
 std::mutex g_sse_slot_mutex;
 bool g_sse_slot_taken = false;
@@ -76,18 +79,18 @@ std::string resolve_cursor_mcp_config_path(const std::string& cli_path) {
     return example::cursor_mcp_config_path(cli_path);
 }
 
-void import_cursor_mcp_tools(ToolBus& bus, const std::string& config_path_arg, bool dbg,
-                            std::size_t* out_mcp_services) {
+example::BootstrapResult import_cursor_mcp_tools(ToolBus& bus, const std::string& config_path_arg,
+                                                 bool dbg) {
     example::BootstrapOptions options;
     options.cursor_mcp_config = config_path_arg;
     options.use_cursor_skill_roots = false;
     options.import_cursor_mcp = true;
     options.verbose = dbg;
     const auto boot = example::bootstrap_agent_services(bus, options);
-    *out_mcp_services = boot.mcp_services;
     if(dbg) {
         for(const auto& diagnostic : boot.diagnostics) std::clog << "[bootstrap] " << diagnostic << '\n';
     }
+    return boot;
 }
 
 std::shared_ptr<SkillServices> resolve_skills_services(bool dbg) {
@@ -141,7 +144,8 @@ int run_graph_ui(tf::Executor& executor,
                  const AgentConfig& cfg,
                  const AgentWorkflowDeps& deps,
                  const std::shared_ptr<internal::AgentThreadState>& state,
-                 UIManager& ui) {
+                 UIManager& ui,
+                 const std::shared_ptr<TaskControl>& control) {
     GraphExecutor gx;
     ReactCliRunRequest req;
     req.config = cfg;
@@ -152,12 +156,26 @@ int run_graph_ui(tf::Executor& executor,
     req.options.graph_options.stream_callback = [&ui](std::string_view tok) {
         ui.stream_token("default", tok);
     };
+    req.options.graph_options.task_control = control;
+    req.options.graph_options.tool_execution_observer = [&ui](const ToolExecutionEvent& event) {
+        json payload{{"tool_name", event.tool_name},
+                     {"tool_call_id", event.tool_call_id},
+                     {"arguments", event.arguments}};
+        if (event.phase == ToolExecutionPhase::Completed) payload["result"] = event.result;
+        ui.dispatch_message(event.phase == ToolExecutionPhase::Started ? "tool_started"
+                                                                       : "tool_completed",
+                            payload);
+    };
     req.options.graph_options.skill_event_sink = [](const SkillEvent& event) {
         std::clog << example::skill_event_json(event).dump() << '\n';
     };
     try {
         WorkflowResult wr = gx.run_react_cli_sync(executor, req);
         if (!wr.success) {
+            if (control && control->is_cancel_requested()) {
+                ui.dispatch_message("run_cancelled", json{{"message", "Run cancelled by user"}});
+                return 0;
+            }
             ui.dispatch_error(wr.error_message.value_or("run_react_cli_sync failed"));
             return wr.exit_code != 0 ? wr.exit_code : 1;
         }
@@ -179,6 +197,7 @@ int main(int argc, char** argv) {
     int max_iterations = -1;
     bool verbose = false;
     bool no_cursor_mcp = false;
+    bool demo_state = false;
     app.add_option("--port", port, "Listen port")->check(CLI::PositiveNumber);
     app.add_option("-p,--prompt", prompt_arg, "Optional single-turn on startup");
     app.add_option("--provider", provider_arg, "Override AGENT_LLM_PROVIDER");
@@ -187,6 +206,8 @@ int main(int argc, char** argv) {
                    "Cursor mcp.json (else AGENT_TEST_CURSOR_MCP_JSON, else ToolBus default)");
     app.add_flag("--no-cursor-mcp", no_cursor_mcp,
                  "Skip MCP (or AGENT_TEST_SKIP_CURSOR_MCP / AGENT_CLI_SKIP_CURSOR_MCP)");
+    app.add_flag("--demo-state", demo_state,
+                 "Load deterministic Scientific Console content without invoking the LLM");
     app.add_flag("-v,--verbose", verbose, "AGENT_LOG_LEVEL=debug");
     CLI11_PARSE(app, argc, argv);
 
@@ -224,12 +245,14 @@ int main(int argc, char** argv) {
     register_demo_tools(*bus);
 
     std::size_t mcp_services = 0;
+    example::BootstrapResult mcp_boot;
     if (!skip_cursor_mcp) {
         std::clog << "[web_ui_demo] loading Cursor MCP config (--no-cursor-mcp to skip)...\n"
  "  (AGENT_MCP_REQUEST_TIMEOUT_MS per request; transport default 60000 ms)\n"
                   << std::flush;
         const std::string mcp_cfg = resolve_cursor_mcp_config_path(cursor_mcp_json_arg);
-        import_cursor_mcp_tools(*bus, mcp_cfg, mcp_dbg, &mcp_services);
+        mcp_boot = import_cursor_mcp_tools(*bus, mcp_cfg, mcp_dbg);
+        mcp_services = mcp_boot.mcp_services;
         if (!mcp_dbg && mcp_services > 0) {
             std::clog << "[web_ui_demo] cursor_mcp: " << mcp_services << " service(s) registered\n";
         }
@@ -299,6 +322,11 @@ int main(int argc, char** argv) {
     auto executor = std::make_shared<tf::Executor>();
 
     auto run_line = [&](const std::string& line) {
+        auto control = std::make_shared<TaskControl>();
+        {
+            std::lock_guard<std::mutex> lock(g_control_mutex);
+            g_active_control = control;
+        }
         state->skill_prompt_cache.reset();
         state->active_skill_id.reset();
         state->pending_injected_context.clear();
@@ -313,14 +341,44 @@ int main(int argc, char** argv) {
             for (const auto& v : proc.tier_a_violations) {
                 ui.dispatch_error(v);
             }
+            std::lock_guard<std::mutex> lock(g_control_mutex);
+            if (g_active_control == control) g_active_control.reset();
             return;
         }
         apply_processed_to_agent_state(std::move(proc), ectx, *state);
-        (void)run_graph_ui(*executor, cfg, deps, state, ui);
+        (void)run_graph_ui(*executor, cfg, deps, state, ui, control);
+        {
+            std::lock_guard<std::mutex> lock(g_control_mutex);
+            if (g_active_control == control) g_active_control.reset();
+        }
     };
 
-    if (!prompt_arg.empty()) {
-        std::thread([run_line, prompt_arg]() { run_line(prompt_arg); }).detach();
+    const char* provider_env = std::getenv("AGENT_LLM_PROVIDER");
+    auto emit_bootstrap = [&]() {
+        ui.dispatch_message("runtime", json{{"session", "orbital-analysis"},
+                                            {"provider", provider_env && *provider_env ? provider_env : "OpenAI"},
+                                            {"model", cfg.model_config.model_name.empty() ? "provider default" : cfg.model_config.model_name},
+                                            {"connection", skip_cursor_mcp ? "Core tools ready" :
+                                             mcp_boot.diagnostics.empty() ? "MCP connected" : "MCP partial"}});
+        for (const auto& diagnostic : mcp_boot.diagnostics)
+            ui.dispatch_message("mcp_status", json{{"level", "error"}, {"message", "MCP unavailable: " + diagnostic}});
+        for (const auto& service : mcp_boot.skipped_mcp_services)
+            ui.dispatch_message("mcp_status", json{{"level", "info"}, {"message", "MCP skipped by policy: " + service}});
+        if (!demo_state) return;
+        ui.dispatch_message("demo_user", json{{"content", "Plot sin(x) from 0 to 2π and find its maximum value and location."}});
+        ui.stream_token("default", "I evaluated the expression over [0, 2π] and generated a plot.\n\nThe maximum value is 1.0000 at x = π/2 ≈ 1.5708 rad.");
+        ui.dispatch_message("tool_started", json{{"tool_name", "fs_search"}, {"tool_call_id", "demo-fs"}, {"arguments", json{{"query", "*.cpp"}, {"path", "/workspace/src"}}}});
+        ui.dispatch_message("tool_completed", json{{"tool_name", "fs_search"}, {"tool_call_id", "demo-fs"}, {"arguments", json{{"query", "*.cpp"}}}, {"result", json{{"matches", 18}, {"top", "agent.cpp, tool_mgr.cpp, plot_tool.cpp"}}}});
+        ui.dispatch_message("tool_started", json{{"tool_name", "web_search"}, {"tool_call_id", "demo-web"}, {"arguments", json{{"query", "sin(x) maximum 0 to 2pi"}}}});
+        ui.dispatch_message("tool_completed", json{{"tool_name", "web_search"}, {"tool_call_id", "demo-web"}, {"arguments", json{{"query", "sin(x) maximum 0 to 2pi"}}}, {"result", json{{"sources", 5}, {"status", "verified"}}}});
+        ui.dispatch_message("tool_started", json{{"tool_name", "expr_eval"}, {"tool_call_id", "demo-expr"}, {"arguments", json{{"expression", "max(sin(x))"}}}});
+        ui.dispatch_message("tool_completed", json{{"tool_name", "expr_eval"}, {"tool_call_id", "demo-expr"}, {"arguments", json{{"expression", "max(sin(x))"}}}, {"result", json{{"value", 1.0}, {"x", 1.5708}}}});
+        ui.dispatch_final_result(json{{"final_answer", "demo"}, {"iteration", 3}, {"history_size", 6}});
+    };
+
+    if (!demo_state && !prompt_arg.empty()) {
+        g_agent_busy = true;
+        std::thread([run_line, prompt_arg]() { run_line(prompt_arg); g_agent_busy = false; }).detach();
     }
 
     httplib::Server svr;
@@ -353,7 +411,23 @@ int main(int argc, char** argv) {
         }
     });
 
-    svr.Get("/ui/sse", [web_h](const httplib::Request& req, httplib::Response& res) {
+    svr.Post("/ui/cancel", [&](const httplib::Request&, httplib::Response& res) {
+        std::shared_ptr<TaskControl> control;
+        {
+            std::lock_guard<std::mutex> lock(g_control_mutex);
+            control = g_active_control;
+        }
+        if (!control || !g_agent_busy.load()) {
+            res.status = 409;
+            res.set_content(R"({"cancelled":false,"reason":"no active run"})", "application/json");
+            return;
+        }
+        control->request_cancel();
+        res.status = 202;
+        res.set_content(R"({"cancelled":true})", "application/json");
+    });
+
+    svr.Get("/ui/sse", [web_h, &emit_bootstrap](const httplib::Request& req, httplib::Response& res) {
         std::string session = req.get_param_value("session");
         if (session.empty()) {
             session = "default";
@@ -373,6 +447,7 @@ int main(int argc, char** argv) {
             }
             g_sse_slot_taken = true;
         }
+        emit_bootstrap();
         res.status = 200;
         res.set_header("Cache-Control", "no-cache");
         res.set_header("Connection", "keep-alive");

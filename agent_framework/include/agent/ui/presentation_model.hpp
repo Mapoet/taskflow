@@ -58,6 +58,7 @@ public:
     void complete(const json& result);
     void fail(std::string message);
     void cancel(std::string message = "Run cancelled");
+    void add_system_notice(std::string message, bool error = false);
     void observe_tool(const ToolExecutionEvent& event);
     void reset();
     void load_demo_state();

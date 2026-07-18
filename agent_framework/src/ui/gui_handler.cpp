@@ -4,6 +4,7 @@
  */
 
 #include <agent/ui/ui_manager.hpp>
+#include <agent/ui/presentation_model.hpp>
 
 #include <cstdlib>
 #include <ctime>
@@ -25,8 +26,11 @@ std::size_t imgui_queue_drain_max_from_env() {
 
 } // namespace
 
-ImGuiHandler::ImGuiHandler(std::shared_ptr<ThreadSafeQueue<StreamMessage>> queue, std::string session_id)
-    : queue_(std::move(queue)), session_id_(std::move(session_id)) {}
+ImGuiHandler::ImGuiHandler(std::shared_ptr<ThreadSafeQueue<StreamMessage>> queue,
+                           std::string session_id,
+                           std::shared_ptr<UiPresentationModel> presentation)
+    : queue_(std::move(queue)), session_id_(std::move(session_id)),
+      presentation_(std::move(presentation)) {}
 
 void ImGuiHandler::push_message(const std::string& type, const std::string& content) {
     if (!queue_ || !active_) {
@@ -45,6 +49,7 @@ void ImGuiHandler::handle_stream_token(std::string_view token) {
         return;
     }
     streamed_utf8_bytes_.fetch_add(static_cast<std::size_t>(token.size()), std::memory_order_relaxed);
+    if (presentation_) presentation_->append_stream_token(token);
     push_message("token", std::string(token));
 }
 
@@ -53,6 +58,7 @@ void ImGuiHandler::handle_final_result(const json& result) {
         return;
     }
     const std::size_t streamed = streamed_utf8_bytes_.exchange(0, std::memory_order_acq_rel);
+    if (presentation_) presentation_->complete(result);
     // WP1.6 / phase-1-wp6 §4.3：若本轮已有流式正文，终稿只推元数据，避免与 token 重复。
     // 若本轮无流式（例如模型一次出终稿），必须把 final_answer 推入队列，否则 GUI 无正文可显示。
     if (result.contains("final_answer") && result["final_answer"].is_string()) {
@@ -86,6 +92,7 @@ void ImGuiHandler::handle_error(const std::string& error_message) {
     if (!active_) {
         return;
     }
+    if (presentation_) presentation_->fail(error_message);
     push_message("error", error_message);
 }
 

@@ -9,8 +9,10 @@
 
 #include "CLI11.hpp"
 #include "common/agent_example_bootstrap.hpp"
+#include "common/imgui_console_view.hpp"
 
 #include <agent/agent/execution_context.hpp>
+#include <agent/agent/task_state_machine.hpp>
 #include <agent/graph_executor/graph_executor.hpp>
 #include <agent/internal/agent_thread_state.hpp>
 #include <agent/llm_client/llm_client.hpp>
@@ -20,6 +22,7 @@
 #include <agent/toolbus/toolbus.hpp>
 #include <agent/core/types.hpp>
 #include <agent/ui/ui_manager.hpp>
+#include <agent/ui/presentation_model.hpp>
 #include <agent/agent/user_input_preprocessor.hpp>
 
 #include <imgui.h>
@@ -165,18 +168,18 @@ std::string resolve_cursor_mcp_config_path(const std::string& cli_path) {
     return example::cursor_mcp_config_path(cli_path);
 }
 
-void import_cursor_mcp_tools(ToolBus& bus, const std::string& config_path_arg, bool dbg,
-                            std::size_t* out_mcp_services) {
+example::BootstrapResult import_cursor_mcp_tools(ToolBus& bus, const std::string& config_path_arg,
+                                                 bool dbg) {
     example::BootstrapOptions options;
     options.cursor_mcp_config = config_path_arg;
     options.use_cursor_skill_roots = false;
     options.import_cursor_mcp = true;
     options.verbose = dbg;
     const auto boot = example::bootstrap_agent_services(bus, options);
-    *out_mcp_services = boot.mcp_services;
     if(dbg) {
         for(const auto& diagnostic : boot.diagnostics) std::clog << "[bootstrap] " << diagnostic << '\n';
     }
+    return boot;
 }
 
 std::shared_ptr<SkillServices> resolve_skills_services(bool dbg) {
@@ -230,7 +233,9 @@ int run_graph_ui(tf::Executor& executor,
                  const AgentConfig& cfg,
                  const AgentWorkflowDeps& deps,
                  const std::shared_ptr<internal::AgentThreadState>& state,
-                 UIManager& ui) {
+                 UIManager& ui,
+                 const std::shared_ptr<TaskControl>& control,
+                 const std::shared_ptr<UiPresentationModel>& presentation) {
     GraphExecutor gx;
     ReactCliRunRequest req;
     req.config = cfg;
@@ -243,12 +248,20 @@ int run_graph_ui(tf::Executor& executor,
             ui.stream_token("default", tok);
         }
     };
+    req.options.graph_options.task_control = control;
+    req.options.graph_options.tool_execution_observer = [presentation](const ToolExecutionEvent& event) {
+        if (presentation) presentation->observe_tool(event);
+    };
     req.options.graph_options.skill_event_sink = [](const SkillEvent& event) {
         std::clog << example::skill_event_json(event).dump() << '\n';
     };
     try {
         WorkflowResult wr = gx.run_react_cli_sync(executor, req);
         if (!wr.success) {
+            if (control && control->is_cancel_requested()) {
+                if (presentation) presentation->cancel();
+                return 0;
+            }
             ui.dispatch_error(wr.error_message.value_or("run_react_cli_sync failed"));
             return wr.exit_code != 0 ? wr.exit_code : 1;
         }
@@ -276,6 +289,7 @@ int main(int argc, char** argv) {
     int max_iterations = -1;
     bool verbose = false;
     bool no_cursor_mcp = false;
+    bool demo_state = false;
     app.add_option("-p,--prompt", prompt_arg, "Optional single-turn: run then keep window open");
     app.add_option("--provider", provider_arg, "Override AGENT_LLM_PROVIDER");
     app.add_option("--max-iterations", max_iterations, "Override max_iterations");
@@ -283,6 +297,8 @@ int main(int argc, char** argv) {
                    "Cursor mcp.json (else AGENT_TEST_CURSOR_MCP_JSON, else ToolBus default)");
     app.add_flag("--no-cursor-mcp", no_cursor_mcp,
                  "Skip MCP (or AGENT_TEST_SKIP_CURSOR_MCP / AGENT_CLI_SKIP_CURSOR_MCP)");
+    app.add_flag("--demo-state", demo_state,
+                 "Load deterministic Scientific Console content without invoking the LLM");
     app.add_flag("-v,--verbose", verbose, "AGENT_LOG_LEVEL=debug");
     CLI11_PARSE(app, argc, argv);
 
@@ -320,12 +336,14 @@ int main(int argc, char** argv) {
     register_demo_tools(*bus);
 
     std::size_t mcp_services = 0;
+    example::BootstrapResult mcp_boot;
     if (!skip_cursor_mcp) {
         std::clog << "[imgui_agent_demo] loading Cursor MCP config (--no-cursor-mcp to skip)...\n"
                       "  (AGENT_MCP_REQUEST_TIMEOUT_MS per request; transport default 60000 ms)\n"
                   << std::flush;
         const std::string mcp_cfg = resolve_cursor_mcp_config_path(cursor_mcp_json_arg);
-        import_cursor_mcp_tools(*bus, mcp_cfg, mcp_dbg, &mcp_services);
+        mcp_boot = import_cursor_mcp_tools(*bus, mcp_cfg, mcp_dbg);
+        mcp_services = mcp_boot.mcp_services;
         if (!mcp_dbg && mcp_services > 0) {
             std::clog << "[imgui_agent_demo] cursor_mcp: " << mcp_services << " service(s) registered\n";
         }
@@ -410,6 +428,7 @@ int main(int argc, char** argv) {
 #endif
     ImGuiIO& io = ImGui::GetIO();
     ImGui::StyleColorsDark();
+    example::apply_scientific_console_theme();
     if (!try_load_imgui_cjk_font(io)) {
         std::clog << "[imgui_agent_demo] CJK font not loaded (Chinese may show as ?). Set "
                      "AGENT_IMGUI_FONT_PATH to a .ttf/.ttc with CJK, or install fonts-noto-cjk / wqy.\n";
@@ -418,7 +437,18 @@ int main(int argc, char** argv) {
     ImGui_ImplOpenGL3_Init(glsl_version);
 
     auto queue = std::make_shared<ThreadSafeQueue<StreamMessage>>();
-    auto imgui_handler = std::make_unique<ImGuiHandler>(queue, "default");
+    auto presentation = std::make_shared<UiPresentationModel>();
+    const char* provider_env = std::getenv("AGENT_LLM_PROVIDER");
+    presentation->set_runtime_metadata("orbital-analysis",
+                                       provider_env && *provider_env ? provider_env : "OpenAI",
+                                       cfg.model_config.model_name.empty() ? "provider default" : cfg.model_config.model_name,
+                                       skip_cursor_mcp ? "Core tools ready" :
+                                       mcp_boot.diagnostics.empty() ? "MCP connected" : "MCP partial");
+    for (const auto& diagnostic : mcp_boot.diagnostics)
+        presentation->add_system_notice("MCP unavailable: " + diagnostic, true);
+    for (const auto& service : mcp_boot.skipped_mcp_services)
+        presentation->add_system_notice("MCP skipped by policy: " + service);
+    auto imgui_handler = std::make_unique<ImGuiHandler>(queue, "default", presentation);
     ImGuiHandler* imgui_h = imgui_handler.get();
 
     UIManager ui;
@@ -427,11 +457,17 @@ int main(int argc, char** argv) {
     auto state = std::make_shared<internal::AgentThreadState>();
     tf::Executor executor;
 
-    std::string stream_text;
-    std::string aux_text;
     std::atomic<bool> agent_busy{false};
+    std::mutex control_mutex;
+    std::shared_ptr<TaskControl> active_control;
 
     auto run_line = [&](const std::string& line) {
+        presentation->begin_user_turn(line);
+        auto control = std::make_shared<TaskControl>();
+        {
+            std::lock_guard<std::mutex> lock(control_mutex);
+            active_control = control;
+        }
         state->skill_prompt_cache.reset();
         state->active_skill_id.reset();
         state->pending_injected_context.clear();
@@ -449,11 +485,19 @@ int main(int argc, char** argv) {
             return;
         }
         apply_processed_to_agent_state(std::move(proc), ectx, *state);
-        (void)run_graph_ui(executor, cfg, deps, state, ui);
+        (void)run_graph_ui(executor, cfg, deps, state, ui, control, presentation);
+        {
+            std::lock_guard<std::mutex> lock(control_mutex);
+            if (active_control == control) active_control.reset();
+        }
     };
 
-    if (!prompt_arg.empty()) {
+    if (demo_state) {
+        presentation->load_demo_state();
+    } else if (!prompt_arg.empty()) {
+        agent_busy = true;
         run_line(prompt_arg);
+        agent_busy = false;
     }
 
     char input_buf[4096] = {};
@@ -462,99 +506,25 @@ int main(int argc, char** argv) {
         glfwPollEvents();
 
         std::vector<StreamMessage> drained;
-        const std::size_t n = imgui_h->drain_messages(drained, 256);
-        for (std::size_t i = 0; i < n; ++i) {
-            const StreamMessage& m = drained[i];
-            if (m.message_type == "token") {
-                stream_text += m.content;
-            } else if (m.message_type == "final") {
-                stream_text += std::string("\n") + m.content + "\n";
-            } else if (m.message_type == "error") {
-                stream_text += std::string("\n[error] ") + m.content + "\n";
-            } else if (m.message_type.size() > 4 && m.message_type.compare(0, 4, "aux:") == 0) {
-                aux_text += m.content;
-                aux_text += "\n";
-            }
-        }
+        (void)imgui_h->drain_messages(drained, 256);
 
         ImGui_ImplOpenGL3_NewFrame();
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
 
-        ImGui::SetNextWindowPos(ImVec2(24.0f, 24.0f), ImGuiCond_FirstUseEver);
-        ImGui::SetNextWindowSize(ImVec2(720.0f, 400.0f), ImGuiCond_FirstUseEver);
-        ImGui::Begin("Output");
-        ImGui::BeginChild("scroll", ImVec2(0, -120), true, ImGuiWindowFlags_HorizontalScrollbar);
-        ImGui::TextUnformatted(stream_text.c_str());
-        ImGui::EndChild();
-        if (!aux_text.empty()) {
-            ImGui::Separator();
-            ImGui::TextUnformatted(aux_text.c_str());
+        auto action = example::render_scientific_console(
+            presentation->snapshot(), input_buf, sizeof(input_buf), agent_busy.load());
+        if (action.send && !agent_busy.exchange(true)) {
+            std::thread([&, line = std::move(action.prompt)]() {
+                run_line(line);
+                agent_busy = false;
+            }).detach();
         }
-        ImGui::End();
-
-        ImGui::SetNextWindowPos(ImVec2(24.0f, 440.0f), ImGuiCond_FirstUseEver);
-        ImGui::SetNextWindowSize(ImVec2(720.0f, 220.0f), ImGuiCond_FirstUseEver);
-        ImGui::Begin("Input");
-        ImGui::InputTextMultiline("##user", input_buf, sizeof(input_buf), ImVec2(-1, 80));
-        if (ImGui::Button("Send") && !agent_busy.load()) {
-            std::string line(input_buf);
-            if (!line.empty()) {
-                agent_busy = true;
-                std::thread([&, line]() {
-                    run_line(line);
-                    agent_busy = false;
-                }).detach();
-            }
+        if (action.cancel) {
+            std::lock_guard<std::mutex> lock(control_mutex);
+            if (active_control) active_control->request_cancel();
         }
-        ImGui::SameLine();
-        if (ImGui::Button("Quit")) {
-            glfwSetWindowShouldClose(window, 1);
-        }
-        ImGui::Text("agent_busy=%s", agent_busy.load() ? "yes" : "no");
-        ImGui::End();
-
-#if defined(AGENT_HAS_IMPLOT) || defined(AGENT_HAS_IMPLOT3D)
-        ImGui::SetNextWindowPos(ImVec2(760.0f, 24.0f), ImGuiCond_FirstUseEver);
-        ImGui::SetNextWindowSize(ImVec2(500.0f, 520.0f), ImGuiCond_FirstUseEver);
-        ImGui::Begin("Plots (submodule demo)");
-#if defined(AGENT_HAS_IMPLOT)
-        if (ImPlot::BeginPlot("2D")) {
-            static float xs[64];
-            static float ys[64];
-            static bool inited_2d = false;
-            if (!inited_2d) {
-                for (int i = 0; i < 64; ++i) {
-                    xs[i] = static_cast<float>(i) * 0.1f;
-                    ys[i] = std::sin(xs[i]);
-                }
-                inited_2d = true;
-            }
-            ImPlot::PlotLine("sin", xs, ys, 64);
-            ImPlot::EndPlot();
-        }
-#endif
-#if defined(AGENT_HAS_IMPLOT3D)
-        if (ImPlot3D::BeginPlot("3D")) {
-            static float xa[64];
-            static float ya[64];
-            static float za[64];
-            static bool inited_3d = false;
-            if (!inited_3d) {
-                for (int i = 0; i < 64; ++i) {
-                    const float t = static_cast<float>(i) / 63.0F * 6.2831855F * 2.0F;
-                    xa[i] = std::cos(t);
-                    ya[i] = std::sin(t);
-                    za[i] = t * 0.08F;
-                }
-                inited_3d = true;
-            }
-            ImPlot3D::PlotLine("helix", xa, ya, za, 64);
-            ImPlot3D::EndPlot();
-        }
-#endif
-        ImGui::End();
-#endif
+        if (action.quit) glfwSetWindowShouldClose(window, 1);
 
         ImGui::Render();
         int display_w = 0;

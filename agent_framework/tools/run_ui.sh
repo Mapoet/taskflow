@@ -32,6 +32,8 @@ Options:
   --port N                 Web listen port (default: 8080; web only)
   --cursor-mcp-json PATH   Cursor mcp.json path
   --no-cursor-mcp          Disable Cursor MCP import
+  --skip-mcp-service NAME  Skip one Cursor MCP service (repeatable)
+  --demo-state             Load deterministic UI sample data without an LLM call
   --no-build               Run an existing selected binary without configuring
   --reconfigure            Remove the selected build directory before configure
   --dry-run                Validate and print the redacted launch plan only
@@ -84,11 +86,13 @@ PORT="${AGENT_WEB_UI_PORT:-8080}"
 MCP_TIMEOUT_MS="${AGENT_MCP_REQUEST_TIMEOUT_MS:-60000}"
 CURSOR_MCP_JSON=""
 NO_CURSOR_MCP=0
+DEMO_STATE=0
 NO_BUILD=0
 RECONFIGURE=0
 DRY_RUN=0
 VERBOSE=0
 UI_EXTRA_ARGS=()
+SKIP_MCP_SERVICES=()
 
 while (($#)); do
     case "$1" in
@@ -115,6 +119,9 @@ while (($#)); do
         --cursor-mcp-json) (($# >= 2)) || die "--cursor-mcp-json requires a path"; CURSOR_MCP_JSON="$2"; shift 2 ;;
         --cursor-mcp-json=*) CURSOR_MCP_JSON="${1#*=}"; shift ;;
         --no-cursor-mcp) NO_CURSOR_MCP=1; shift ;;
+        --skip-mcp-service) (($# >= 2)) || die "--skip-mcp-service requires a name"; SKIP_MCP_SERVICES+=("$2"); shift 2 ;;
+        --skip-mcp-service=*) SKIP_MCP_SERVICES+=("${1#*=}"); shift ;;
+        --demo-state) DEMO_STATE=1; shift ;;
         --no-build) NO_BUILD=1; shift ;;
         --reconfigure) RECONFIGURE=1; shift ;;
         --dry-run) DRY_RUN=1; shift ;;
@@ -184,6 +191,14 @@ export AGENT_EXPR_ENABLE="${AGENT_EXPR_ENABLE:-1}"
 export AGENT_DRAW_ENABLE="${AGENT_DRAW_ENABLE:-1}"
 export AGENT_SKILL_INJECT_CATALOG="${AGENT_SKILL_INJECT_CATALOG:-1}"
 export AGENT_MCP_REQUEST_TIMEOUT_MS="${MCP_TIMEOUT_MS}"
+if ((${#SKIP_MCP_SERVICES[@]})); then
+    CLI_SKIP_MCP_SERVICES="$(IFS=,; printf '%s' "${SKIP_MCP_SERVICES[*]}")"
+    if [[ -n "${AGENT_MCP_SKIP_SERVICES:-}" ]]; then
+        export AGENT_MCP_SKIP_SERVICES="${AGENT_MCP_SKIP_SERVICES},${CLI_SKIP_MCP_SERVICES}"
+    else
+        export AGENT_MCP_SKIP_SERVICES="${CLI_SKIP_MCP_SERVICES}"
+    fi
+fi
 ((VERBOSE == 0)) || export AGENT_LOG_LEVEL=debug
 
 case "${UI}" in
@@ -217,6 +232,7 @@ RUN_CMD=("${BINARY}")
 [[ -z "${MAX_ITERATIONS}" ]] || RUN_CMD+=(--max-iterations "${MAX_ITERATIONS}")
 [[ -z "${CURSOR_MCP_JSON}" ]] || RUN_CMD+=(--cursor-mcp-json "${CURSOR_MCP_JSON}")
 ((NO_CURSOR_MCP == 0)) || RUN_CMD+=(--no-cursor-mcp)
+((DEMO_STATE == 0)) || RUN_CMD+=(--demo-state)
 ((VERBOSE == 0)) || RUN_CMD+=(--verbose)
 RUN_CMD+=("${UI_EXTRA_ARGS[@]}")
 
@@ -236,7 +252,9 @@ printf '  model:      %s\n' "${AGENT_LLM_MODEL:-<provider default>}"
 printf '  web/expr/draw: %s/%s/%s\n' "${AGENT_WEB_ENABLE}" "${AGENT_EXPR_ENABLE}" "${AGENT_DRAW_ENABLE}"
 printf '  skills catalog: %s\n' "${AGENT_SKILL_INJECT_CATALOG}"
 printf '  Cursor MCP: %s\n' "$([[ ${NO_CURSOR_MCP} -eq 1 ]] && printf disabled || printf enabled)"
+printf '  demo state: %s\n' "$([[ ${DEMO_STATE} -eq 1 ]] && printf enabled || printf disabled)"
 printf '  MCP timeout: %s ms\n' "${AGENT_MCP_REQUEST_TIMEOUT_MS}"
+printf '  skipped MCP: %s\n' "${AGENT_MCP_SKIP_SERVICES:-<none>}"
 [[ "${UI}" != web ]] || printf '  web URL:     http://127.0.0.1:%s/\n' "${PORT}"
 printf '  API credential: configured (redacted)\n'
 [[ -z "${ENV_FILE}" ]] || printf '  env file:   %s\n' "${ENV_FILE}"

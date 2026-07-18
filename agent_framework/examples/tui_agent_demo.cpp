@@ -9,6 +9,7 @@
 #include "common/agent_example_bootstrap.hpp"
 
 #include <agent/agent/execution_context.hpp>
+#include <agent/agent/task_state_machine.hpp>
 #include <agent/graph_executor/graph_executor.hpp>
 #include <agent/internal/agent_thread_state.hpp>
 #include <agent/llm_client/llm_client.hpp>
@@ -18,6 +19,7 @@
 #include <agent/ui/tui_handler.hpp>
 #include <agent/core/types.hpp>
 #include <agent/ui/ui_manager.hpp>
+#include <agent/ui/presentation_model.hpp>
 #include <agent/agent/user_input_preprocessor.hpp>
 
 #include <clocale>
@@ -34,6 +36,7 @@
 #include <curses.h>
 #endif
 
+#include <algorithm>
 #include <atomic>
 #include <cstdlib>
 #include <cstring>
@@ -86,18 +89,18 @@ std::string resolve_cursor_mcp_config_path(const std::string& cli_path) {
     return example::cursor_mcp_config_path(cli_path);
 }
 
-void import_cursor_mcp_tools(ToolBus& bus, const std::string& config_path_arg, bool dbg,
-                            std::size_t* out_mcp_services) {
+example::BootstrapResult import_cursor_mcp_tools(ToolBus& bus, const std::string& config_path_arg,
+                                                 bool dbg) {
     example::BootstrapOptions options;
     options.cursor_mcp_config = config_path_arg;
     options.use_cursor_skill_roots = false;
     options.import_cursor_mcp = true;
     options.verbose = dbg;
     const auto boot = example::bootstrap_agent_services(bus, options);
-    *out_mcp_services = boot.mcp_services;
     if(dbg) {
         for(const auto& diagnostic : boot.diagnostics) std::clog << "[bootstrap] " << diagnostic << '\n';
     }
+    return boot;
 }
 
 std::shared_ptr<SkillServices> resolve_skills_services(bool dbg) {
@@ -151,7 +154,9 @@ int run_graph_ui(tf::Executor& executor,
                  const AgentConfig& cfg,
                  const AgentWorkflowDeps& deps,
                  const std::shared_ptr<internal::AgentThreadState>& state,
-                 UIManager& ui) {
+                 UIManager& ui,
+                 const std::shared_ptr<TaskControl>& control,
+                 const std::shared_ptr<UiPresentationModel>& presentation) {
     GraphExecutor gx;
     ReactCliRunRequest req;
     req.config = cfg;
@@ -164,12 +169,20 @@ int run_graph_ui(tf::Executor& executor,
             ui.stream_token("default", tok);
         }
     };
+    req.options.graph_options.task_control = control;
+    req.options.graph_options.tool_execution_observer = [presentation](const ToolExecutionEvent& event) {
+        if (presentation) presentation->observe_tool(event);
+    };
     req.options.graph_options.skill_event_sink = [](const SkillEvent& event) {
         std::clog << example::skill_event_json(event).dump() << '\n';
     };
     try {
         WorkflowResult wr = gx.run_react_cli_sync(executor, req);
         if (!wr.success) {
+            if (control && control->is_cancel_requested()) {
+                if (presentation) presentation->cancel();
+                return 0;
+            }
             ui.dispatch_error(wr.error_message.value_or("run_react_cli_sync failed"));
             return wr.exit_code != 0 ? wr.exit_code : 1;
         }
@@ -242,22 +255,45 @@ std::string wstring_to_utf8(const std::wstring& w) {
     return line;
 }
 
-void draw_wrapped_w(WINDOW* w, int max_rows, int max_cols, const std::string& text) {
+std::string conversation_text(const UiPresentationSnapshot& snap) {
+    std::string out;
+    for (const auto& turn : snap.turns) {
+        if (!out.empty()) out += "\n";
+        out += turn.role == UiTurnRole::User ? "YOU" : turn.role == UiTurnRole::Assistant ? "AGENT" : "SYSTEM";
+        if (turn.streaming) out += "  [streaming]";
+        out += "\n" + turn.content + "\n";
+    }
+    if (out.empty()) out = "READY\n\nStart a verifiable research task. Tool activity will remain visible beside the answer.";
+    return out;
+}
+
+std::string activity_text(const UiPresentationSnapshot& snap) {
+    std::string out;
+    for (const auto& tool : snap.tools) {
+        out += std::string(UiPresentationModel::state_name(tool.state)) + "  " + tool.tool_name;
+        if (tool.duration_ms > 0) out += "  " + std::to_string(tool.duration_ms) + " ms";
+        out += "\n";
+        if (!tool.arguments.empty()) out += "  args: " + tool.arguments.dump() + "\n";
+        if (!tool.result.empty()) out += "  result: " + tool.result.dump() + "\n";
+        out += "\n";
+    }
+    return out.empty() ? "No tool calls yet.\n\nArguments, results, and duration appear here." : out;
+}
+
+void draw_panel(WINDOW* w, const char* title, const std::string& text) {
     werase(w);
-    if (max_rows <= 0 || max_cols <= 0) {
-        wrefresh(w);
-        return;
-    }
+    box(w, 0, 0);
+    wattron(w, A_BOLD | COLOR_PAIR(1));
+    mvwprintw(w, 0, 2, " %s ", title);
+    wattroff(w, A_BOLD | COLOR_PAIR(1));
+    int rows = 0, cols = 0;
+    getmaxyx(w, rows, cols);
     std::vector<std::wstring> lines;
-    utf8_wrap_to_wlines(text, max_cols, &lines);
-    int skip = 0;
-    if (static_cast<int>(lines.size()) > max_rows) {
-        skip = static_cast<int>(lines.size()) - max_rows;
-    }
-    for (int r = 0; r < max_rows && skip + r < static_cast<int>(lines.size()); ++r) {
-        const std::wstring& ln = lines[static_cast<std::size_t>(skip + r)];
-        // n = -1：整行宽字符（勿用 byte 长度，避免与 ncursesw 语义混淆）
-        mvwaddnwstr(w, r, 0, ln.c_str(), -1);
+    utf8_wrap_to_wlines(text, std::max(1, cols - 2), &lines);
+    const int room = std::max(0, rows - 2);
+    const int skip = std::max(0, static_cast<int>(lines.size()) - room);
+    for (int r = 0; r < room && skip + r < static_cast<int>(lines.size()); ++r) {
+        mvwaddnwstr(w, r + 1, 1, lines[static_cast<std::size_t>(skip + r)].c_str(), -1);
     }
     wrefresh(w);
 }
@@ -272,6 +308,7 @@ int main(int argc, char** argv) {
     int max_iterations = -1;
     bool verbose = false;
     bool no_cursor_mcp = false;
+    bool demo_state = false;
     app.add_option("-p,--prompt", prompt_arg, "Optional single-turn then interactive");
     app.add_option("--provider", provider_arg, "Override AGENT_LLM_PROVIDER");
     app.add_option("--max-iterations", max_iterations, "Override max_iterations");
@@ -279,6 +316,8 @@ int main(int argc, char** argv) {
                    "Cursor mcp.json (else AGENT_TEST_CURSOR_MCP_JSON, else ToolBus default)");
     app.add_flag("--no-cursor-mcp", no_cursor_mcp,
                  "Skip MCP (or AGENT_TEST_SKIP_CURSOR_MCP / AGENT_CLI_SKIP_CURSOR_MCP)");
+    app.add_flag("--demo-state", demo_state,
+                 "Load deterministic Scientific Console content without invoking the LLM");
     app.add_flag("-v,--verbose", verbose, "AGENT_LOG_LEVEL=debug");
     CLI11_PARSE(app, argc, argv);
 
@@ -318,12 +357,14 @@ int main(int argc, char** argv) {
     register_demo_tools(*bus);
 
     std::size_t mcp_services = 0;
+    example::BootstrapResult mcp_boot;
     if (!skip_cursor_mcp) {
         std::clog << "[tui_agent_demo] loading Cursor MCP config (--no-cursor-mcp to skip)...\n"
  "  (AGENT_MCP_REQUEST_TIMEOUT_MS per request; transport default 60000 ms)\n"
                   << std::flush;
         const std::string mcp_cfg = resolve_cursor_mcp_config_path(cursor_mcp_json_arg);
-        import_cursor_mcp_tools(*bus, mcp_cfg, mcp_dbg, &mcp_services);
+        mcp_boot = import_cursor_mcp_tools(*bus, mcp_cfg, mcp_dbg);
+        mcp_services = mcp_boot.mcp_services;
         if (!mcp_dbg && mcp_services > 0) {
             std::clog << "[tui_agent_demo] cursor_mcp: " << mcp_services << " service(s) registered\n";
         }
@@ -376,6 +417,12 @@ int main(int argc, char** argv) {
     noecho();
     keypad(stdscr, TRUE);
     curs_set(1);
+    if (has_colors()) {
+        start_color(); use_default_colors();
+        init_pair(1, COLOR_CYAN, -1);
+        init_pair(2, COLOR_GREEN, -1);
+        init_pair(3, COLOR_RED, -1);
+    }
 
     int rows = 0;
     int cols = 0;
@@ -386,13 +433,33 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    const int input_h = 3;
-    WINDOW* out_win = newwin(rows - input_h, cols, 0, 0);
-    WINDOW* in_win = newwin(input_h, cols, rows - input_h, 0);
-    scrollok(out_win, TRUE);
+    const int header_h = 2;
+    const int input_h = 5;
+    const int status_h = 1;
+    const int body_h = rows - header_h - input_h - status_h;
+    const bool wide_layout = cols >= 110;
+    const int left_w = wide_layout ? 22 : 0;
+    const int right_w = wide_layout ? 34 : 0;
+    WINDOW* left_win = wide_layout ? newwin(body_h, left_w, header_h, 0) : nullptr;
+    WINDOW* out_win = newwin(body_h, cols - left_w - right_w, header_h, left_w);
+    WINDOW* activity_win = wide_layout ? newwin(body_h, right_w, header_h, cols - right_w) : nullptr;
+    WINDOW* in_win = newwin(input_h, cols, rows - input_h - status_h, 0);
     wtimeout(in_win, 50);
 
-    auto tui_handler = std::make_unique<TuiHandler>();
+    auto presentation = std::make_shared<UiPresentationModel>();
+    const char* provider_env = std::getenv("AGENT_LLM_PROVIDER");
+    presentation->set_runtime_metadata("orbital-analysis",
+                                       provider_env && *provider_env ? provider_env : "OpenAI",
+                                       cfg.model_config.model_name.empty() ? "provider default" : cfg.model_config.model_name,
+                                       skip_cursor_mcp ? "Core tools ready" :
+                                       mcp_boot.diagnostics.empty() ? "MCP connected" : "MCP partial");
+    if (demo_state) presentation->load_demo_state();
+    for (const auto& diagnostic : mcp_boot.diagnostics)
+        presentation->add_system_notice("MCP unavailable: " + diagnostic, true);
+    for (const auto& service : mcp_boot.skipped_mcp_services)
+        presentation->add_system_notice("MCP skipped by policy: " + service);
+
+    auto tui_handler = std::make_unique<TuiHandler>(presentation);
     TuiHandler* tui_h = tui_handler.get();
 
     UIManager ui;
@@ -402,9 +469,17 @@ int main(int argc, char** argv) {
     tf::Executor executor;
 
     std::atomic<bool> agent_busy{false};
+    std::mutex control_mutex;
+    std::shared_ptr<TaskControl> active_control;
 
     auto run_line = [&](const std::string& line) {
         std::lock_guard<std::mutex> run_lk(g_tui_agent_run_mutex);
+        presentation->begin_user_turn(line);
+        auto control = std::make_shared<TaskControl>();
+        {
+            std::lock_guard<std::mutex> lock(control_mutex);
+            active_control = control;
+        }
         state->skill_prompt_cache.reset();
         state->active_skill_id.reset();
         state->pending_injected_context.clear();
@@ -419,10 +494,16 @@ int main(int argc, char** argv) {
             for (const auto& v : proc.tier_a_violations) {
                 ui.dispatch_error(v);
             }
+            std::lock_guard<std::mutex> lock(control_mutex);
+            if (active_control == control) active_control.reset();
             return;
         }
         apply_processed_to_agent_state(std::move(proc), ectx, *state);
-        (void)run_graph_ui(executor, cfg, deps, state, ui);
+        (void)run_graph_ui(executor, cfg, deps, state, ui, control, presentation);
+        {
+            std::lock_guard<std::mutex> lock(control_mutex);
+            if (active_control == control) active_control.reset();
+        }
     };
 
     if (!prompt_arg.empty()) {
@@ -436,19 +517,31 @@ int main(int argc, char** argv) {
     std::wstring input_wline;
     bool running = true;
     while (running && !g_shutdown.load()) {
-        TuiHandler::DisplaySnapshot snap = tui_h->snapshot();
-        const std::string merged = snap.stream + (snap.aux.empty() ? std::string() : std::string("\n--- aux ---\n") + snap.aux);
-        int o_rows = 0;
-        int o_cols = 0;
-        getmaxyx(out_win, o_rows, o_cols);
-        draw_wrapped_w(out_win, o_rows, o_cols, merged);
+        const UiPresentationSnapshot snap = tui_h->presentation_snapshot();
+        attron(A_BOLD | COLOR_PAIR(1));
+        mvprintw(0, 1, "SCIENTIFIC CONSOLE");
+        attroff(A_BOLD | COLOR_PAIR(1));
+        mvprintw(0, 23, "Session: %s  Model: %s  Provider: %s", snap.session_id.c_str(),
+                 snap.model.c_str(), snap.provider.c_str());
+        mvprintw(1, 1, "State: %s  Connection: %s", UiPresentationModel::state_name(snap.run_state),
+                 snap.connection_label.c_str());
+        clrtoeol(); refresh();
+        if (left_win) draw_panel(left_win, "CAPABILITIES", "SESSION\n  orbital-analysis\n\nTOOLS\n  FS\n  WEB\n  EXPR\n  DRAW\n  SKILLS\n  MCP");
+        draw_panel(out_win, "CONVERSATION", conversation_text(snap));
+        if (activity_win) draw_panel(activity_win, "TOOL ACTIVITY", activity_text(snap));
 
-        werase(in_win);
-        mvwaddwstr(in_win, 0, 0, L"> ");
-        mvwaddnwstr(in_win, 0, 2, input_wline.c_str(), -1);
-        mvwprintw(in_win, 1, 0, "Enter=send Ctrl+C=quit  busy=%s",
-                  agent_busy.load() ? "yes" : "no ");
+        werase(in_win); box(in_win, 0, 0);
+        wattron(in_win, A_BOLD | COLOR_PAIR(1)); mvwprintw(in_win, 0, 2, " COMPOSER "); wattroff(in_win, A_BOLD | COLOR_PAIR(1));
+        mvwaddwstr(in_win, 1, 2, L"> ");
+        mvwaddnwstr(in_win, 1, 4, input_wline.c_str(), -1);
+        mvwprintw(in_win, 3, 2, "Enter send  Esc stop  Ctrl+C quit  %s",
+                  agent_busy.load() ? "RUNNING" : "READY");
         wrefresh(in_win);
+        move(rows - 1, 1);
+        clrtoeol();
+        printw("%zu turns  %zu tools  %s", snap.turns.size(), snap.tools.size(),
+               wide_layout ? "three-panel" : "compact");
+        refresh();
 
         wint_t ch = 0;
         const int ret = wget_wch(in_win, &ch);
@@ -460,6 +553,7 @@ int main(int argc, char** argv) {
                 running = false;
                 break;
             }
+            if (ch == KEY_RESIZE) continue;
             if (ch == KEY_BACKSPACE || ch == KEY_DC || ch == 127) {
                 if (!input_wline.empty()) {
                     input_wline.pop_back();
@@ -478,6 +572,11 @@ int main(int argc, char** argv) {
                 }
                 continue;
             }
+            continue;
+        }
+        if (ch == 27) {
+            std::lock_guard<std::mutex> lock(control_mutex);
+            if (active_control) active_control->request_cancel();
             continue;
         }
         if (ch == L'\n' || ch == L'\r' || ch == 10 || ch == 13) {
@@ -499,6 +598,8 @@ int main(int argc, char** argv) {
 
     g_shutdown = true;
     delwin(out_win);
+    if (left_win) delwin(left_win);
+    if (activity_win) delwin(activity_win);
     delwin(in_win);
     endwin();
     return 0;

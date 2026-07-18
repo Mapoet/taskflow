@@ -5,6 +5,7 @@
  
 #include <agent/toolbus/toolbus.hpp>
 
+#include <algorithm>
 #include <cassert>
 #include <cstdlib>
 #include <iostream>
@@ -14,7 +15,7 @@ namespace {
 
 using namespace agent_framework;
 
-void test_import_failures_are_collected() {
+void test_import_failures_are_collected(bool smoke) {
     // 缩短超时，避免连接失败时等待过久（HTTP/stdio 都会尽快失败）。
     (void)::setenv("AGENT_MCP_REQUEST_TIMEOUT_MS", "5000", 1);
 
@@ -53,12 +54,33 @@ void test_import_failures_are_collected() {
             }
         }
     }
+
+    if (smoke) {
+        const auto names = bus.list_all_tools();
+        const auto has = [&](const std::string& name) {
+            return std::find(names.begin(), names.end(), name) != names.end();
+        };
+        assert(has("filesystem__list_allowed_directories"));
+        const json fs = bus.call_tool("filesystem__list_allowed_directories", json::object()).get();
+        assert(!fs.contains("error"));
+        std::cout << "cursor_mcp_smoke: filesystem=ok\n";
+
+        assert(has("playwright__playwright_navigate"));
+        const json browser = bus.call_tool(
+            "playwright__playwright_navigate",
+            json{{"url", "about:blank"}, {"headless", true}, {"width", 960}, {"height", 640}}).get();
+        std::cout << "cursor_mcp_smoke: playwright_result=" << browser.dump() << "\n" << std::flush;
+        assert(!browser.contains("error"));
+        assert(!browser.value("isError", false));
+        std::cout << "cursor_mcp_smoke: playwright=ok\n";
+    }
 }
 
 } // namespace
 
-int main() {
-    test_import_failures_are_collected();
+int main(int argc, char** argv) {
+    const bool smoke = argc == 2 && std::string(argv[1]) == "--smoke";
+    test_import_failures_are_collected(smoke);
     std::cout << "test_cursor_mcp_import_wp3: ok\n";
     return 0;
 }

@@ -98,6 +98,12 @@ void UiPresentationModel::cancel(std::string message) {
     trim_locked();
 }
 
+void UiPresentationModel::add_system_notice(std::string message, bool error) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    state_.turns.push_back({UiTurnRole::System, std::move(message), now_ms(), false, error});
+    trim_locked();
+}
+
 bool UiPresentationModel::result_is_error(const json& result) {
     if (!result.is_object()) return false;
     if (result.contains("error")) return true;

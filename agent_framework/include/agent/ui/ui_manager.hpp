@@ -26,6 +26,8 @@
 
 namespace agent_framework {
 
+class UiPresentationModel;
+
 // ============================================================================
 // UI 处理器接口
 // ============================================================================
@@ -114,7 +116,8 @@ public:
      * @param session_id 会话 id（单用户 demo 默认 default）
      */
     explicit ImGuiHandler(std::shared_ptr<ThreadSafeQueue<StreamMessage>> queue,
-                         std::string session_id = "default");
+                         std::string session_id = "default",
+                         std::shared_ptr<UiPresentationModel> presentation = {});
 
     void handle_stream_token(std::string_view token) override;
     void handle_final_result(const json& result) override;
@@ -135,6 +138,7 @@ private:
     bool active_ = true;
     /** UTF-8 bytes pushed via handle_stream_token this turn (reset in handle_final_result). */
     std::atomic<std::size_t> streamed_utf8_bytes_{0};
+    std::shared_ptr<UiPresentationModel> presentation_;
 
     void push_message(const std::string& type, const std::string& content);
 };

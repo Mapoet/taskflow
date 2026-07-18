@@ -1,28 +1,106 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8"/>
-  <meta name="viewport" content="width=device-width, initial-scale=1"/>
-  <title>web_ui_demo (WP2.U)</title>
-  <style>
-    body { font-family: system-ui, sans-serif; margin: 1rem; max-width: 56rem; }
-    #out { white-space: pre-wrap; border: 1px solid #ccc; padding: 0.75rem; min-height: 12rem; background: #fafafa; }
-    #aux { white-space: pre-wrap; font-size: 0.85rem; color: #444; margin-top: 0.5rem; }
-    #prompt { width: 100%; box-sizing: border-box; padding: 0.5rem; }
-    button { margin-top: 0.5rem; padding: 0.35rem 0.75rem; }
-    .status { font-size: 0.85rem; color: #666; margin-top: 0.35rem; }
-  </style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Scientific Console · Agent Framework</title>
+  <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-  <h1>Agent Framework — Web UI demo</h1>
-  <p>SSE: <code>/ui/sse?session=default</code> (single tab recommended). Submit runs the same ReAct graph as <code>cli_agent_demo</code>.</p>
-  <div id="out"></div>
-  <div id="aux"></div>
-  <textarea id="prompt" rows="3" placeholder="Ask something (e.g. What is 2+3? Use add.)"></textarea>
-  <div>
-    <button type="button" id="send">Send</button>
+  <div class="app-shell">
+    <header class="topbar">
+      <div class="brand-block">
+        <button class="icon-button rail-toggle" id="rail-toggle" type="button" aria-label="Toggle navigation">Menu</button>
+        <strong>SCIENTIFIC CONSOLE</strong>
+      </div>
+      <div class="runtime-strip" aria-label="Runtime status">
+        <span>Session: <b id="session-name">default</b></span>
+        <span>Model: <b id="model-name">provider default</b></span>
+        <span>Provider: <b id="provider-name">OpenAI</b></span>
+        <span class="connection" id="connection-state" data-state="connecting">Connecting</span>
+      </div>
+      <button class="command-button" id="command-button" type="button" aria-label="Open command palette">Command palette <kbd>Ctrl K</kbd></button>
+    </header>
+
+    <aside class="left-rail" id="left-rail" aria-label="Workspace navigation">
+      <section class="rail-section">
+        <div class="section-heading"><span>SESSION</span><span class="muted">ACTIVE</span></div>
+        <button class="session-item selected" type="button">
+          <span><b id="rail-session-name">default</b><small>Scientific workspace</small></span>
+          <span class="status-word">Ready</span>
+        </button>
+      </section>
+      <section class="rail-section capabilities">
+        <div class="section-heading"><span>CAPABILITIES</span></div>
+        <ul>
+          <li><span>File system</span><small>FS</small></li>
+          <li><span>Web research</span><small>WEB</small></li>
+          <li><span>Expression engine</span><small>EXPR</small></li>
+          <li><span>Plot &amp; draw</span><small>DRAW</small></li>
+          <li><span>Skills</span><small>SKILL</small></li>
+          <li><span>MCP services</span><small>MCP</small></li>
+        </ul>
+      </section>
+      <section class="rail-footer">
+        <span>Agent Framework</span>
+        <small>FS jail enabled</small>
+      </section>
+    </aside>
+
+    <main class="conversation-panel" aria-label="Conversation">
+      <div class="conversation-header">
+        <div><span class="eyebrow">ACTIVE SESSION</span><h1 id="conversation-title">Scientific workspace</h1></div>
+        <button class="quiet-button" id="clear-button" type="button">Clear view</button>
+      </div>
+      <div class="conversation" id="conversation" aria-live="polite" aria-busy="false">
+        <section class="empty-state" id="empty-state">
+          <span class="eyebrow">READY</span>
+          <h2>Start a verifiable research task</h2>
+          <p>Ask the agent to inspect files, search the web, evaluate an expression, or create a scientific artifact. Tool activity will remain visible beside the answer.</p>
+        </section>
+      </div>
+      <form class="composer" id="composer">
+        <label class="sr-only" for="prompt">Message</label>
+        <textarea id="prompt" rows="3" placeholder="Ask a question or describe a task…" autocomplete="off"></textarea>
+        <div class="composer-actions">
+          <div class="context-actions" aria-label="Available context actions">
+            <span>Attach</span><span>Files</span><span>Expression</span><span>Draw</span><span>Skill</span><span>MCP</span>
+          </div>
+          <div class="submit-actions">
+            <span class="keyboard-hint"><kbd>Enter</kbd> send · <kbd>Shift Enter</kbd> newline</span>
+            <button class="stop-button" id="stop" type="button" hidden>Stop</button>
+            <button class="send-button" id="send" type="submit">Send</button>
+          </div>
+        </div>
+      </form>
+    </main>
+
+    <aside class="activity-panel" id="activity-panel" aria-label="Tool activity">
+      <div class="activity-header">
+        <div><span class="eyebrow">EXECUTION</span><h2>Tool activity</h2></div>
+        <button class="quiet-button activity-close" id="activity-close" type="button">Close</button>
+      </div>
+      <div class="activity-summary"><span id="activity-count">0 events</span><span id="run-state" data-state="idle">Idle</span></div>
+      <div class="activity-list" id="activity-list">
+        <p class="activity-empty" id="activity-empty">Tool calls will appear here with arguments, results, and duration.</p>
+      </div>
+    </aside>
+
+    <footer class="statusbar">
+      <span id="status-message">Connecting to event stream…</span>
+      <span><b id="message-count">0</b> turns · <b id="tool-count">0</b> tools</span>
+    </footer>
   </div>
-  <div class="status" id="status">Disconnected</div>
+
+  <dialog id="command-dialog" class="command-dialog">
+    <form method="dialog">
+      <label for="command-input">Command palette</label>
+      <input id="command-input" type="search" placeholder="Type a command…">
+      <div class="command-list"><button value="close">Focus composer</button><button value="close">Toggle activity</button><button value="close">Clear view</button></div>
+      <button class="quiet-button" value="close">Close</button>
+    </form>
+  </dialog>
   <script src="app.js"></script>
 </body>
 </html>

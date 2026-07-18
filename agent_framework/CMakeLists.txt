@@ -877,7 +877,9 @@ if(AGENT_BUILD_IMGUI)
     endif()
 
     if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/examples/imgui_agent_demo.cpp)
-        add_executable(imgui_agent_demo examples/imgui_agent_demo.cpp)
+        add_executable(imgui_agent_demo
+            examples/imgui_agent_demo.cpp
+            examples/common/imgui_console_view.cpp)
         # ASan+LSan: X11/libX11 XIM leaks under GLFW are known; point LSan at suppressions (see tools/).
         target_compile_definitions(imgui_agent_demo PRIVATE
             "AGENT_IMG_LSAN_SUPP_PATH=\"${CMAKE_CURRENT_SOURCE_DIR}/tools/lsan_suppressions_imgui.txt\"")
@@ -990,6 +992,12 @@ if(BUILD_TESTING)
             NAME ui_launcher_script
             COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/tests/scripts/test_run_ui_launcher.sh)
         set_tests_properties(ui_launcher_script PROPERTIES LABELS "rich-ui;ui-launcher")
+    endif()
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/scripts/test_web_ui_static.sh)
+        add_test(NAME web_ui_static_contract
+                 COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/tests/scripts/test_web_ui_static.sh)
+        set_tests_properties(web_ui_static_contract PROPERTIES
+            LABELS "rich-ui;scientific-console;web-ui")
     endif()
     if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_public_header_layout.cpp)
         add_executable(test_public_header_layout tests/test_public_header_layout.cpp)
@@ -1502,6 +1510,15 @@ if(BUILD_TESTING)
         endif()
         add_test(NAME imgui_handler_queue_wpu_u2 COMMAND test_imgui_handler_queue)
         set_tests_properties(imgui_handler_queue_wpu_u2 PROPERTIES ENVIRONMENT "AGENT_TOOL_ALLOWLIST=")
+    endif()
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_tui_handler.cpp)
+        add_executable(test_tui_handler tests/test_tui_handler.cpp)
+        target_link_libraries(test_tui_handler PRIVATE agent_framework)
+        if(CMAKE_USE_PTHREADS_INIT)
+            target_link_libraries(test_tui_handler PRIVATE Threads::Threads)
+        endif()
+        add_test(NAME tui_handler_scientific_console COMMAND test_tui_handler)
+        set_tests_properties(tui_handler_scientific_console PROPERTIES ENVIRONMENT "AGENT_TOOL_ALLOWLIST=")
     endif()
     if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_working_memory_metrics.cpp)
         add_executable(test_working_memory_metrics tests/test_working_memory_metrics.cpp)

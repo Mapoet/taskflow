@@ -64,12 +64,15 @@ grep -Fq -- 'interface:  imgui (imgui_agent_demo)' <<<"${IMGUI_OUTPUT}" || fail 
 grep -Fq -- '-DAGENT_BUILD_IMGUI=ON' <<<"${IMGUI_OUTPUT}" || fail "ImGui CMake option missing"
 grep -Fq -- '--target imgui_agent_demo' <<<"${IMGUI_OUTPUT}" || fail "ImGui build target missing"
 
-WEB_OUTPUT="$(dry_run_ui web --port 9090)"
+WEB_OUTPUT="$(dry_run_ui web --port 9090 --demo-state --skip-mcp-service python_execute --skip-mcp-service playwright)"
 grep -Fq -- 'interface:  web (web_ui_demo)' <<<"${WEB_OUTPUT}" || fail "Web selection missing"
 grep -Fq -- '-DAGENT_BUILD_WEB_UI=ON' <<<"${WEB_OUTPUT}" || fail "Web CMake option missing"
 grep -Fq -- '--target web_ui_demo' <<<"${WEB_OUTPUT}" || fail "Web build target missing"
 grep -Fq -- 'web URL:     http://127.0.0.1:9090/' <<<"${WEB_OUTPUT}" || fail "Web URL missing"
 grep -Fq -- '--port 9090' <<<"${WEB_OUTPUT}" || fail "Web port forwarding missing"
+grep -Fq -- 'demo state: enabled' <<<"${WEB_OUTPUT}" || fail "demo-state summary missing"
+grep -Fq -- '--demo-state' <<<"${WEB_OUTPUT}" || fail "demo-state forwarding missing"
+grep -Fq -- 'skipped MCP: python_execute,playwright' <<<"${WEB_OUTPUT}" || fail "MCP service filter missing"
 
 SECRET='launcher-secret-must-not-leak'
 OUTPUT="$(run_clean \

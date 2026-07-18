@@ -365,6 +365,7 @@ public:
 
     struct CursorMcpImportResult {
         std::vector<std::string> registered_services;
+        std::vector<std::string> skipped_services;
         std::vector<CursorMcpImportFailure> failures;
     };
 
@@ -376,10 +377,12 @@ public:
      *
      * @param config_path 配置文件路径；空表示优先读 env AGENT_MCP_CONFIG_PATH，否则默认 ~/.cursor/mcp.json
      * @param register_all true 表示注册 mcpServers 下所有 server；false 预留（仅一个 server）扩展
+     * @param skip_services 本次导入明确跳过的服务名；其他服务仍 best-effort 注册
      * @return 注册结果（best-effort：失败不会阻断其他 server）
      */
     CursorMcpImportResult register_mcp_from_cursor_config(const std::string& config_path = "",
-                                                         bool register_all = true);
+                                                         bool register_all = true,
+                                                         const std::vector<std::string>& skip_services = {});
 
 private:
     friend struct detail::ToolBusCallHookTestPeer;

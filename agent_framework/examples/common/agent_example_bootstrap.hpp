@@ -4,6 +4,7 @@
 #include <agent/skills/skill_services.hpp>
 #include <agent/toolbus/toolbus.hpp>
 
+#include <algorithm>
 #include <cstdlib>
 #include <filesystem>
 #include <functional>
@@ -20,13 +21,33 @@ struct BootstrapOptions {
     bool use_cursor_skill_roots = true;
     bool import_cursor_mcp = true;
     bool verbose = false;
+    std::vector<std::string> skip_mcp_services;
 };
 
 struct BootstrapResult {
     std::shared_ptr<SkillServices> skills;
     std::size_t mcp_services = 0;
+    std::vector<std::string> registered_mcp_services;
+    std::vector<std::string> skipped_mcp_services;
     std::vector<std::string> diagnostics;
 };
+
+inline std::vector<std::string> comma_separated_env(const char* name) {
+    std::vector<std::string> values;
+    const char* raw = std::getenv(name);
+    if(!raw || !*raw) return values;
+    std::string item;
+    for(const char ch : std::string(raw)) {
+        if(ch == ',') {
+            if(!item.empty()) values.push_back(item);
+            item.clear();
+        } else if(ch != ' ' && ch != '\t' && ch != '\n' && ch != '\r') {
+            item.push_back(ch);
+        }
+    }
+    if(!item.empty()) values.push_back(item);
+    return values;
+}
 
 inline bool env_truthy(const char* name) {
     const char* value = std::getenv(name);
@@ -64,9 +85,16 @@ inline BootstrapResult bootstrap_agent_services(ToolBus& bus, const BootstrapOpt
 
     if(options.import_cursor_mcp) {
         const auto config = cursor_mcp_config_path(options.cursor_mcp_config);
+        auto skipped = options.skip_mcp_services;
+        const auto env_skipped = comma_separated_env("AGENT_MCP_SKIP_SERVICES");
+        skipped.insert(skipped.end(), env_skipped.begin(), env_skipped.end());
+        std::sort(skipped.begin(), skipped.end());
+        skipped.erase(std::unique(skipped.begin(), skipped.end()), skipped.end());
         try {
-            const auto imported = bus.register_mcp_from_cursor_config(config, true);
+            const auto imported = bus.register_mcp_from_cursor_config(config, true, skipped);
             result.mcp_services = imported.registered_services.size();
+            result.registered_mcp_services = imported.registered_services;
+            result.skipped_mcp_services = imported.skipped_services;
             for(const auto& failure : imported.failures)
                 result.diagnostics.push_back(failure.service_name + ": " + failure.reason);
         } catch(const std::exception& exception) {

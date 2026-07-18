@@ -10,6 +10,7 @@
 
 #include <agent/core/types.hpp>
 #include <agent/ui/ui_manager.hpp>
+#include <agent/ui/presentation_model.hpp>
 
 #include <mutex>
 #include <string>
@@ -21,7 +22,7 @@ namespace agent_framework {
  */
 class TuiHandler : public UIHandler {
 public:
-    TuiHandler();
+    explicit TuiHandler(std::shared_ptr<UiPresentationModel> presentation = {});
 
     void handle_stream_token(std::string_view token) override;
     void handle_final_result(const json& result) override;
@@ -36,6 +37,7 @@ public:
     };
 
     DisplaySnapshot snapshot() const;
+    UiPresentationSnapshot presentation_snapshot() const;
 
 private:
     void append_capped(std::string& buf, std::string_view chunk, std::size_t max_bytes);
@@ -43,6 +45,7 @@ private:
     mutable std::mutex mutex_;
     std::string stream_text_;
     std::string aux_text_;
+    std::shared_ptr<UiPresentationModel> presentation_;
     bool active_ = true;
     static constexpr std::size_t k_max_stream_bytes = 64 * 1024;
     static constexpr std::size_t k_max_aux_bytes = 16 * 1024;

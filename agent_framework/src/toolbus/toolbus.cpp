@@ -207,12 +207,20 @@ std::string mcp_config_parent_abs(const std::string& config_path) {
 }
 
 void expand_mcp_stdio_args(std::vector<std::string>& args, const std::string& config_parent_abs) {
-    constexpr const char* k_token = "${CONFIG_DIR}";
+    const std::vector<std::pair<std::string, std::string>> replacements = {
+        {"${CONFIG_DIR}", config_parent_abs},
+        {"${AGENT_FS_ROOT}", env_or_empty("AGENT_FS_ROOT")},
+    };
     for (std::string& a : args) {
-        std::size_t pos = 0;
-        while ((pos = a.find(k_token, pos)) != std::string::npos) {
-            a.replace(pos, std::strlen(k_token), config_parent_abs);
-            pos += config_parent_abs.size();
+        for (const auto& replacement : replacements) {
+            if (replacement.second.empty() && a.find(replacement.first) != std::string::npos) {
+                throw std::invalid_argument(replacement.first + " is used but its environment variable is unset");
+            }
+            std::size_t pos = 0;
+            while ((pos = a.find(replacement.first, pos)) != std::string::npos) {
+                a.replace(pos, replacement.first.size(), replacement.second);
+                pos += replacement.second.size();
+            }
         }
     }
 }
@@ -525,7 +533,8 @@ std::vector<std::string> ToolBus::list_all_tools() const {
 }
 
 ToolBus::CursorMcpImportResult ToolBus::register_mcp_from_cursor_config(const std::string& config_path,
-                                                                        bool register_all) {
+                                                                        bool register_all,
+                                                                        const std::vector<std::string>& skip_services) {
     (void)register_all;
     CursorMcpImportResult result;
 
@@ -546,9 +555,15 @@ ToolBus::CursorMcpImportResult ToolBus::register_mcp_from_cursor_config(const st
     const std::string config_parent_abs = mcp_config_parent_abs(path);
 
     const json& servers = doc["mcpServers"];
+    const std::unordered_set<std::string> skipped(skip_services.begin(), skip_services.end());
     for (auto it = servers.begin(); it != servers.end(); ++it) {
         const std::string service_name = it.key();
         const json& s = it.value();
+        if (skipped.count(service_name) != 0U) {
+            result.skipped_services.push_back(service_name);
+            std::clog << "[ToolBus] MCP: skipping \"" << service_name << "\" by policy\n" << std::flush;
+            continue;
+        }
         if (!s.is_object()) {
             result.failures.push_back(
                 CursorMcpImportFailure{service_name, "server entry must be a JSON object"});

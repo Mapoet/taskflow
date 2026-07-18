@@ -26,7 +26,8 @@ void utf8_erase_prefix_if_over(std::string& s, std::size_t max_bytes) {
 
 } // namespace
 
-TuiHandler::TuiHandler() = default;
+TuiHandler::TuiHandler(std::shared_ptr<UiPresentationModel> presentation)
+    : presentation_(std::move(presentation)) {}
 
 void TuiHandler::append_capped(std::string& buf, std::string_view chunk, std::size_t max_bytes) {
     buf.append(chunk.data(), chunk.size());
@@ -39,6 +40,7 @@ void TuiHandler::handle_stream_token(std::string_view token) {
     }
     std::lock_guard<std::mutex> lock(mutex_);
     append_capped(stream_text_, token, k_max_stream_bytes);
+    if (presentation_) presentation_->append_stream_token(token);
 }
 
 void TuiHandler::handle_final_result(const json& result) {
@@ -46,6 +48,7 @@ void TuiHandler::handle_final_result(const json& result) {
         return;
     }
     std::lock_guard<std::mutex> lock(mutex_);
+    if (presentation_) presentation_->complete(result);
     if (result.contains("final_answer") && result["final_answer"].is_string()) {
         const auto& fa = result["final_answer"].get_ref<const std::string&>();
         std::ostringstream oss;
@@ -74,6 +77,7 @@ void TuiHandler::handle_error(const std::string& error_message) {
         return;
     }
     std::lock_guard<std::mutex> lock(mutex_);
+    if (presentation_) presentation_->fail(error_message);
     append_capped(stream_text_, std::string("\n[error] ") + error_message + "\n", k_max_stream_bytes);
 }
 
@@ -97,6 +101,11 @@ bool TuiHandler::is_active() const {
 TuiHandler::DisplaySnapshot TuiHandler::snapshot() const {
     std::lock_guard<std::mutex> lock(mutex_);
     return DisplaySnapshot{stream_text_, aux_text_};
+}
+
+UiPresentationSnapshot TuiHandler::presentation_snapshot() const {
+    if (presentation_) return presentation_->snapshot();
+    return {};
 }
 
 } // namespace agent_framework
