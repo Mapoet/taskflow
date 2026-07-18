@@ -56,6 +56,7 @@ run_clean "${LAUNCHER}" --help | grep -Fq -- '--ui NAME' || fail "help omits --u
 
 TUI_OUTPUT="$(dry_run_ui tui)"
 grep -Fq -- 'interface:  tui (tui_agent_demo)' <<<"${TUI_OUTPUT}" || fail "TUI selection missing"
+grep -Fq -- 'TUI backend: FTXUI 7.0.1 (vendored submodule)' <<<"${TUI_OUTPUT}" || fail "FTXUI backend missing"
 grep -Fq -- '-DAGENT_BUILD_TUI=ON' <<<"${TUI_OUTPUT}" || fail "TUI CMake option missing"
 grep -Fq -- '--target tui_agent_demo' <<<"${TUI_OUTPUT}" || fail "TUI build target missing"
 

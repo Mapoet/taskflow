@@ -23,8 +23,8 @@ Options:
   --ui NAME                tui, imgui, or web (default: tui)
   --build-dir PATH         CMake build directory (default: build-ui)
   --build-type TYPE        Release or Debug (default: Release)
-  --fs-root PATH           Filesystem jail root (default: repository root)
-  --skills-root PATH       Installed/read-only Skill root
+  --fs-root PATH           Filesystem jail root (default: this repository)
+  --skills-root PATH       Installed/read-only Skill root (default: ~/.cursor/skills)
   --skill-authoring-root PATH  Writable root for /skills create
   --no-skills              Disable Skill discovery and management
   --env-file PATH          Source a trusted local environment file
@@ -80,6 +80,7 @@ UI="${AGENT_UI:-tui}"
 BUILD_DIR="${AGENT_UI_BUILD_DIR:-${AGENT_TUI_BUILD_DIR:-${REPO_ROOT}/build-ui}}"
 BUILD_TYPE="${AGENT_UI_BUILD_TYPE:-${AGENT_TUI_BUILD_TYPE:-Release}}"
 BUILD_JOBS="${AGENT_UI_BUILD_JOBS:-${AGENT_TUI_BUILD_JOBS:-8}}"
+# Workspace FS jail defaults to this repository (taskflow / agent_framework tree).
 FS_ROOT="${AGENT_FS_ROOT:-${REPO_ROOT}}"
 PROVIDER="${AGENT_LLM_PROVIDER:-openai}"
 MODEL="${AGENT_LLM_MODEL:-}"
@@ -88,6 +89,8 @@ MAX_ITERATIONS=""
 PORT="${AGENT_WEB_UI_PORT:-8080}"
 MCP_TIMEOUT_MS="${AGENT_MCP_REQUEST_TIMEOUT_MS:-60000}"
 CURSOR_MCP_JSON=""
+# Prefer an explicit AGENT_SKILLS_DIR; otherwise use Cursor's ~/.cursor/skills.
+DEFAULT_SKILLS_ROOT="${HOME}/.cursor/skills"
 SKILLS_ROOT="${AGENT_SKILLS_DIR:-}"
 SKILL_AUTHORING_ROOT="${AGENT_SKILL_AUTHORING_DIR:-}"
 NO_SKILLS=0
@@ -167,8 +170,26 @@ fi
 if [[ -n "${CURSOR_MCP_JSON}" && ! -r "${CURSOR_MCP_JSON}" ]]; then
     die "Cursor MCP configuration is not readable: ${CURSOR_MCP_JSON}"
 fi
+# ".cursor/skills" is the Cursor user skill root under $HOME.
+case "${SKILLS_ROOT}" in
+    .cursor/skills|./.cursor/skills) SKILLS_ROOT="${HOME}/.cursor/skills" ;;
+esac
+if [[ -z "${SKILLS_ROOT}" && ${NO_SKILLS} -eq 0 ]]; then
+    SKILLS_ROOT="${DEFAULT_SKILLS_ROOT}"
+fi
 if [[ -n "${SKILLS_ROOT}" ]]; then
-    [[ -d "${SKILLS_ROOT}" ]] || die "Skill root is not an existing directory: ${SKILLS_ROOT}"
+    if [[ "${SKILLS_ROOT}" != /* && -d "${REPO_ROOT}/${SKILLS_ROOT}" ]]; then
+        SKILLS_ROOT="${REPO_ROOT}/${SKILLS_ROOT}"
+    fi
+    if [[ ! -d "${SKILLS_ROOT}" ]]; then
+        # Create the default Cursor skill root; reject missing explicit overrides.
+        if [[ "${SKILLS_ROOT}" == "${DEFAULT_SKILLS_ROOT}" || \
+              "${SKILLS_ROOT}" == "$(cd -- "${HOME}" && pwd -P)/.cursor/skills" ]]; then
+            mkdir -p -- "${SKILLS_ROOT}" || die "cannot create Skill root: ${SKILLS_ROOT}"
+        else
+            die "Skill root is not an existing directory: ${SKILLS_ROOT}"
+        fi
+    fi
     SKILLS_ROOT="$(cd -- "${SKILLS_ROOT}" && pwd -P)"
     export AGENT_SKILLS_DIR="${SKILLS_ROOT}"
 fi
@@ -226,6 +247,10 @@ case "${UI}" in
     tui)
         TARGET=tui_agent_demo
         CMAKE_UI_OPTION=-DAGENT_BUILD_TUI=ON
+        TUI_BACKEND="FTXUI 7.0.1 (vendored submodule)"
+        if ((NO_BUILD == 0)) && [[ ! -f "${REPO_ROOT}/3rd-party/FTXUI/CMakeLists.txt" ]]; then
+            die "FTXUI submodule is not initialized; run: git submodule update --init --recursive 3rd-party/FTXUI"
+        fi
         ;;
     imgui)
         TARGET=imgui_agent_demo
@@ -252,6 +277,9 @@ RUN_CMD=("${BINARY}")
 [[ -z "${PROMPT}" ]] || RUN_CMD+=(--prompt "${PROMPT}")
 [[ -z "${MAX_ITERATIONS}" ]] || RUN_CMD+=(--max-iterations "${MAX_ITERATIONS}")
 [[ -z "${CURSOR_MCP_JSON}" ]] || RUN_CMD+=(--cursor-mcp-json "${CURSOR_MCP_JSON}")
+[[ -z "${SKILLS_ROOT}" || ${NO_SKILLS} -ne 0 ]] || RUN_CMD+=(--skills-root "${SKILLS_ROOT}")
+[[ -z "${SKILL_AUTHORING_ROOT}" ]] || RUN_CMD+=(--skill-authoring-root "${SKILL_AUTHORING_ROOT}")
+((NO_SKILLS == 0)) || RUN_CMD+=(--no-skills)
 ((NO_CURSOR_MCP == 0)) || RUN_CMD+=(--no-cursor-mcp)
 ((DEMO_STATE == 0)) || RUN_CMD+=(--demo-state)
 ((VERBOSE == 0)) || RUN_CMD+=(--verbose)
@@ -265,6 +293,7 @@ print_command() {
 
 printf 'Agent Framework UI launch plan\n'
 printf '  interface:  %s (%s)\n' "${UI}" "${TARGET}"
+[[ "${UI}" != tui ]] || printf '  TUI backend: %s\n' "${TUI_BACKEND}"
 printf '  repository: %s\n' "${REPO_ROOT}"
 printf '  build:      %s (%s)\n' "${BUILD_DIR}" "${BUILD_TYPE}"
 printf '  fs jail:    %s\n' "${AGENT_FS_ROOT}"
