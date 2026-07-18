@@ -17,6 +17,8 @@
 | 握手后通知 | `notifications/initialized` |
 | 列举工具 | `tools/list` |
 | 调用工具 | `tools/call` |
+| 列举资源 | `resources/list` |
+| 读取资源 | `resources/read` |
 
 ## stdio 传输帧
 
@@ -51,11 +53,21 @@ Content-Length: <N>\r\n\r\n<body>
 - `tools/list` → `result.tools`：每项含 `name`、`description`（可选）、`inputSchema`（可选）→ 映射为 `ToolMeta::schema`（OpenAI parameters 形态由服务端给出，本客户端不改写）。
 - `tools/call` → `result`：含 `content`、`isError` 等 → **整段 `result` 作为 JSON 返回**给上层（含错误语义时由 `isError` 表达）。
 
+## resources/list 与 resources/read 结果字段（映射）
+
+- `resources/list` → `result.resources`：每项的 `uri`、`name` 必须是非空字符串；
+  `description`、`mimeType`、非负 `size` 可选；`nextCursor` 原样交给调用方继续分页。
+- `resources/read` → `result.contents`：每项必须含字符串 `uri`，并且恰好包含一个
+  字符串 `text` 或 `blob`。客户端保留 `mimeType`，不会把 `blob` 隐式解码为文本。
+- 只有服务在 `initialize.result.capabilities.resources` 中声明 Resources capability 后，
+  客户端才允许调用上述方法。资源-only 服务不需要实现 `tools/list`。
+
 ## 环境变量
 
 | 变量 | 默认 | 说明 |
 | --- | --- | --- |
 | `AGENT_MCP_REQUEST_TIMEOUT_MS` | `60000` | 单次 stdio 读或 HTTP 读超时 |
+| `AGENT_MCP_RESOURCE_MAX_BYTES` | `262144` | 单次 `resources/read` 响应累计 text/blob 字节上限 |
 
 ## 修订记录
 
@@ -63,3 +75,4 @@ Content-Length: <N>\r\n\r\n<body>
 | --- | --- |
 | 2026-03-31 | 初稿：Content-Length stdio、四方法名、HTTP POST 约定。 |
 | 2026-07-17 | stdio 默认切换为规范 JSON Lines，Content-Length 改为显式 legacy 模式；补充 Streamable HTTP/SSE 边界。 |
+| 2026-07-18 | 增加 Resources capability、`resources/list`、`resources/read`、资源-only 服务和响应大小边界。 |

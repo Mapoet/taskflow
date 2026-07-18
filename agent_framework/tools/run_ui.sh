@@ -24,6 +24,9 @@ Options:
   --build-dir PATH         CMake build directory (default: build-ui)
   --build-type TYPE        Release or Debug (default: Release)
   --fs-root PATH           Filesystem jail root (default: repository root)
+  --skills-root PATH       Installed/read-only Skill root
+  --skill-authoring-root PATH  Writable root for /skills create
+  --no-skills              Disable Skill discovery and management
   --env-file PATH          Source a trusted local environment file
   --provider NAME          openai or anthropic
   --model NAME             Override AGENT_LLM_MODEL
@@ -85,6 +88,9 @@ MAX_ITERATIONS=""
 PORT="${AGENT_WEB_UI_PORT:-8080}"
 MCP_TIMEOUT_MS="${AGENT_MCP_REQUEST_TIMEOUT_MS:-60000}"
 CURSOR_MCP_JSON=""
+SKILLS_ROOT="${AGENT_SKILLS_DIR:-}"
+SKILL_AUTHORING_ROOT="${AGENT_SKILL_AUTHORING_DIR:-}"
+NO_SKILLS=0
 NO_CURSOR_MCP=0
 DEMO_STATE=0
 NO_BUILD=0
@@ -104,6 +110,11 @@ while (($#)); do
         --build-type=*) BUILD_TYPE="${1#*=}"; shift ;;
         --fs-root) (($# >= 2)) || die "--fs-root requires a path"; FS_ROOT="$2"; shift 2 ;;
         --fs-root=*) FS_ROOT="${1#*=}"; shift ;;
+        --skills-root) (($# >= 2)) || die "--skills-root requires a path"; SKILLS_ROOT="$2"; shift 2 ;;
+        --skills-root=*) SKILLS_ROOT="${1#*=}"; shift ;;
+        --skill-authoring-root) (($# >= 2)) || die "--skill-authoring-root requires a path"; SKILL_AUTHORING_ROOT="$2"; shift 2 ;;
+        --skill-authoring-root=*) SKILL_AUTHORING_ROOT="${1#*=}"; shift ;;
+        --no-skills) NO_SKILLS=1; shift ;;
         --env-file) (($# >= 2)) || die "--env-file requires a path"; shift 2 ;;
         --env-file=*) shift ;;
         --provider) (($# >= 2)) || die "--provider requires a value"; PROVIDER="$2"; shift 2 ;;
@@ -156,6 +167,16 @@ fi
 if [[ -n "${CURSOR_MCP_JSON}" && ! -r "${CURSOR_MCP_JSON}" ]]; then
     die "Cursor MCP configuration is not readable: ${CURSOR_MCP_JSON}"
 fi
+if [[ -n "${SKILLS_ROOT}" ]]; then
+    [[ -d "${SKILLS_ROOT}" ]] || die "Skill root is not an existing directory: ${SKILLS_ROOT}"
+    SKILLS_ROOT="$(cd -- "${SKILLS_ROOT}" && pwd -P)"
+    export AGENT_SKILLS_DIR="${SKILLS_ROOT}"
+fi
+if [[ -n "${SKILL_AUTHORING_ROOT}" ]]; then
+    SKILL_AUTHORING_ROOT="$(realpath -m -- "${SKILL_AUTHORING_ROOT}")"
+    export AGENT_SKILL_AUTHORING_DIR="${SKILL_AUTHORING_ROOT}"
+fi
+((NO_SKILLS == 0)) || export AGENT_SKILLS_DISABLED=1
 
 PROVIDER="${PROVIDER,,}"
 case "${PROVIDER}" in
@@ -251,6 +272,8 @@ printf '  provider:   %s\n' "${AGENT_LLM_PROVIDER}"
 printf '  model:      %s\n' "${AGENT_LLM_MODEL:-<provider default>}"
 printf '  web/expr/draw: %s/%s/%s\n' "${AGENT_WEB_ENABLE}" "${AGENT_EXPR_ENABLE}" "${AGENT_DRAW_ENABLE}"
 printf '  skills catalog: %s\n' "${AGENT_SKILL_INJECT_CATALOG}"
+printf '  skills root: %s\n' "${AGENT_SKILLS_DIR:-<Cursor defaults>}"
+printf '  skill authoring: %s\n' "${AGENT_SKILL_AUTHORING_DIR:-disabled}"
 printf '  Cursor MCP: %s\n' "$([[ ${NO_CURSOR_MCP} -eq 1 ]] && printf disabled || printf enabled)"
 printf '  demo state: %s\n' "$([[ ${DEMO_STATE} -eq 1 ]] && printf enabled || printf disabled)"
 printf '  MCP timeout: %s ms\n' "${AGENT_MCP_REQUEST_TIMEOUT_MS}"

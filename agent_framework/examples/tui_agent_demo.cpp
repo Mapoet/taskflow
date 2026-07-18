@@ -15,6 +15,7 @@
 #include <agent/llm_client/llm_client.hpp>
 #include <agent/prompt_renderer/prompt_renderer.hpp>
 #include <agent/skills/skill_services.hpp>
+#include <agent/skills/skill_control.hpp>
 #include <agent/toolbus/toolbus.hpp>
 #include <agent/ui/tui_handler.hpp>
 #include <agent/core/types.hpp>
@@ -305,15 +306,22 @@ int main(int argc, char** argv) {
     std::string prompt_arg;
     std::string provider_arg;
     std::string cursor_mcp_json_arg;
+    std::string skills_root_arg;
+    std::string skill_authoring_root_arg;
     int max_iterations = -1;
     bool verbose = false;
     bool no_cursor_mcp = false;
     bool demo_state = false;
+    bool no_skills = false;
     app.add_option("-p,--prompt", prompt_arg, "Optional single-turn then interactive");
     app.add_option("--provider", provider_arg, "Override AGENT_LLM_PROVIDER");
     app.add_option("--max-iterations", max_iterations, "Override max_iterations");
     app.add_option("--cursor-mcp-json", cursor_mcp_json_arg,
                    "Cursor mcp.json (else AGENT_TEST_CURSOR_MCP_JSON, else ToolBus default)");
+    app.add_option("--skills-root", skills_root_arg, "Installed read-only Skill root");
+    app.add_option("--skill-authoring-root", skill_authoring_root_arg,
+                   "Writable root used by /skills create");
+    app.add_flag("--no-skills", no_skills, "Disable Skill discovery and management");
     app.add_flag("--no-cursor-mcp", no_cursor_mcp,
                  "Skip MCP (or AGENT_TEST_SKIP_CURSOR_MCP / AGENT_CLI_SKIP_CURSOR_MCP)");
     app.add_flag("--demo-state", demo_state,
@@ -335,6 +343,27 @@ int main(int argc, char** argv) {
         (void)_putenv_s("AGENT_LLM_PROVIDER", provider_arg.c_str());
 #else
         (void)::setenv("AGENT_LLM_PROVIDER", provider_arg.c_str(), 1);
+#endif
+    }
+    if (!skills_root_arg.empty()) {
+#if defined(_WIN32)
+        (void)_putenv_s("AGENT_SKILLS_DIR", skills_root_arg.c_str());
+#else
+        (void)::setenv("AGENT_SKILLS_DIR", skills_root_arg.c_str(), 1);
+#endif
+    }
+    if (!skill_authoring_root_arg.empty()) {
+#if defined(_WIN32)
+        (void)_putenv_s("AGENT_SKILL_AUTHORING_DIR", skill_authoring_root_arg.c_str());
+#else
+        (void)::setenv("AGENT_SKILL_AUTHORING_DIR", skill_authoring_root_arg.c_str(), 1);
+#endif
+    }
+    if (no_skills) {
+#if defined(_WIN32)
+        (void)_putenv_s("AGENT_SKILLS_DISABLED", "1");
+#else
+        (void)::setenv("AGENT_SKILLS_DISABLED", "1", 1);
 #endif
     }
 
@@ -376,6 +405,7 @@ int main(int argc, char** argv) {
     deps.llm = llm;
     deps.toolbus = bus;
     deps.skills = resolve_skills_services(mcp_dbg);
+    if (deps.skills && deps.skills->manager) deps.skills->manager->attach_toolbus(bus);
 
     AgentConfig cfg;
     cfg.name = "tui_agent_demo";
@@ -486,6 +516,10 @@ int main(int argc, char** argv) {
         state->pending_control_actions.clear();
         state->pending_input_violations.clear();
         ExecutionContext ectx = ExecutionContext::from_environment();
+        if (deps.skills) {
+            ectx.resources = deps.skills->pin_resource_context();
+            ectx.skill_loader = deps.skills->loader;
+        }
         PreprocessOptions popts;
         popts.toolbus = deps.toolbus;
         UserInputPreprocessor prep(popts);
@@ -497,6 +531,29 @@ int main(int argc, char** argv) {
             std::lock_guard<std::mutex> lock(control_mutex);
             if (active_control == control) active_control.reset();
             return;
+        }
+        std::vector<ControlAction> pending;
+        bool handled_skill_control = false;
+        for (const auto& action : proc.control_actions) {
+            auto result = dispatch_skill_control(action, deps.skills ? deps.skills->manager : nullptr);
+            if (!result.handled) {
+                pending.push_back(action);
+                continue;
+            }
+            handled_skill_control = true;
+            if (result.ok) ui.stream_token("default", "\n[skills]\n" + result.text + "\n");
+            else ui.dispatch_error(result.text);
+        }
+        proc.control_actions = std::move(pending);
+        if (handled_skill_control && proc.llm_user_text.find_first_not_of(" \t\r\n") == std::string::npos &&
+            proc.control_actions.empty()) {
+            std::lock_guard<std::mutex> lock(control_mutex);
+            if (active_control == control) active_control.reset();
+            return;
+        }
+        if (deps.skills && deps.skills->manager) {
+            const auto active = deps.skills->manager->active_skill_id();
+            if (!active.empty()) state->active_skill_id = active;
         }
         apply_processed_to_agent_state(std::move(proc), ectx, *state);
         (void)run_graph_ui(executor, cfg, deps, state, ui, control, presentation);
@@ -526,7 +583,23 @@ int main(int argc, char** argv) {
         mvprintw(1, 1, "State: %s  Connection: %s", UiPresentationModel::state_name(snap.run_state),
                  snap.connection_label.c_str());
         clrtoeol(); refresh();
-        if (left_win) draw_panel(left_win, "CAPABILITIES", "SESSION\n  orbital-analysis\n\nTOOLS\n  FS\n  WEB\n  EXPR\n  DRAW\n  SKILLS\n  MCP");
+        std::string capabilities =
+            "SESSION\n  orbital-analysis\n\nTOOLS\n  FS\n  WEB\n  EXPR\n  DRAW\n  SKILLS\n  MCP";
+        std::string skill_line = "Skills disabled  (configure --skills-root to enable)";
+        if (deps.skills && deps.skills->manager) {
+            const auto skill_status = deps.skills->manager->status();
+            const std::string active = skill_status["activeSkill"].is_string()
+                ? skill_status["activeSkill"].get<std::string>() : "-";
+            capabilities += "\n\nSKILLS\n  indexed " +
+                            std::to_string(skill_status.value("skills", std::size_t{0})) +
+                            "\n  active " + active;
+            skill_line = "Skills gen=" +
+                         std::to_string(skill_status.value("generation", 0ULL)) +
+                         " count=" +
+                         std::to_string(skill_status.value("skills", std::size_t{0})) +
+                         " active=" + active + "  /skills status";
+        }
+        if (left_win) draw_panel(left_win, "CAPABILITIES", capabilities);
         draw_panel(out_win, "CONVERSATION", conversation_text(snap));
         if (activity_win) draw_panel(activity_win, "TOOL ACTIVITY", activity_text(snap));
 
@@ -534,6 +607,7 @@ int main(int argc, char** argv) {
         wattron(in_win, A_BOLD | COLOR_PAIR(1)); mvwprintw(in_win, 0, 2, " COMPOSER "); wattroff(in_win, A_BOLD | COLOR_PAIR(1));
         mvwaddwstr(in_win, 1, 2, L"> ");
         mvwaddnwstr(in_win, 1, 4, input_wline.c_str(), -1);
+        mvwprintw(in_win, 2, 2, "%.*s", std::max(0, cols - 4), skill_line.c_str());
         mvwprintw(in_win, 3, 2, "Enter send  Esc stop  Ctrl+C quit  %s",
                   agent_busy.load() ? "RUNNING" : "READY");
         wrefresh(in_win);

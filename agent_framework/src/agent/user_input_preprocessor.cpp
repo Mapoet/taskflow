@@ -11,6 +11,9 @@
 #include <agent/llm_client/llm_client.hpp>
 #include <agent/agent/memory_compaction.hpp>
 #include <agent/toolbus/toolbus.hpp>
+#include <agent/resources/resource_uri.hpp>
+#include <agent/resources/session_resource_context.hpp>
+#include <agent/skills/skill_loader.hpp>
 
 #include <algorithm>
 #include <cctype>
@@ -141,6 +144,48 @@ bool parse_cmd_line(const std::string& line_trimmed, bool strict, const Executio
         out.control_actions.push_back(std::move(a));
         std::clog << "[user_command] OK policy=" << ctx.input_policy_version << " cmd=model.set"
                   << (ctx.session_id ? " session=" + *ctx.session_id : "") << "\n";
+        return true;
+    }
+    if (t0 == "skills") {
+        auto invalid = [&]() {
+            if (strict) out.tier_a_violations.push_back("command_invalid_args:/skills");
+            return true;
+        };
+        if (tok.size() < 2) return invalid();
+        std::string operation = tok[1];
+        for (char& c : operation) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        ControlAction action;
+        action.command = "skills." + operation;
+        action.raw_line = line_trimmed;
+        if (operation == "list" || operation == "status" || operation == "reload" ||
+            operation == "deactivate") {
+            if (tok.size() != 2) return invalid();
+        } else if (operation == "activate" || operation == "validate") {
+            if (tok.size() != 3) return invalid();
+            action.args["id"] = tok[2];
+        } else if (operation == "create") {
+            if (tok.size() < 3) return invalid();
+            action.args["id"] = tok[2];
+            std::string description;
+            if (tok.size() > 3) {
+                if (tok[3] != "--description" || tok.size() < 5) return invalid();
+                for (std::size_t i = 4; i < tok.size(); ++i) {
+                    if (!description.empty()) description.push_back(' ');
+                    description += tok[i];
+                }
+                if (description.size() >= 2 &&
+                    ((description.front() == '"' && description.back() == '"') ||
+                     (description.front() == '\'' && description.back() == '\''))) {
+                    description = description.substr(1, description.size() - 2);
+                }
+            }
+            action.args["description"] = description;
+        } else {
+            return invalid();
+        }
+        out.control_actions.push_back(std::move(action));
+        std::clog << "[user_command] OK policy=" << ctx.input_policy_version
+                  << " cmd=skills." << operation << "\n";
         return true;
     }
 
@@ -622,6 +667,77 @@ ProcessedUserInput UserInputPreprocessor::process(std::string_view raw_user_text
         }
         const bool file_tok = sv.size() >= at + 6 && sv.compare(at, 6, "@file(") == 0;
         const bool url_tok = sv.size() >= at + 5 && sv.compare(at, 5, "@url(") == 0;
+        const bool resource_tok = sv.size() >= at + 2 && sv.compare(at, 2, "@{") == 0;
+        if (resource_tok) {
+            const std::size_t line_end = sv.find('\n', at);
+            const std::size_t close = sv.find('}', at + 2);
+            if (close == std::string::npos || (line_end != std::string::npos && close > line_end)) {
+                if (strict) out.tier_a_violations.push_back("malformed_resource_uri");
+                remove_spans.push_back({at, at + 1});
+                scan = at + 1;
+                continue;
+            }
+            const std::string uri_text(sv.substr(at + 2, close - at - 2));
+            try {
+                const ResourceUri uri = ResourceUri::parse(uri_text);
+                if (!ctx.resources) throw std::runtime_error("resource_context_unavailable");
+                std::string text;
+                if (uri.scheme() == ResourceScheme::Workspace) {
+                    if (!opt_.toolbus) throw std::runtime_error("injection_toolbus_unavailable");
+                    const auto path = ctx.resources->resolve_local(uri);
+                    json fr = opt_.toolbus->call_tool(
+                        "fs_read", json{{"path", path.string()}, {"max_bytes", file_inject_max_bytes()}}).get();
+                    text = extract_fs_read_text(fr);
+                    if (text.empty() && fr.contains("error"))
+                        throw std::runtime_error("workspace_resource_fetch_failed:" + tool_err_summary(fr, 160));
+                } else if (uri.scheme() == ResourceScheme::Skill) {
+                    if (!ctx.skill_loader) throw std::runtime_error("skill_loader_unavailable");
+                    const auto& snapshot = ctx.resources->skill_snapshot();
+                    const auto entry = snapshot.get(uri.authority());
+                    const auto manifest = snapshot.get_manifest(uri.authority());
+                    if (!entry || !manifest) throw std::runtime_error("skill_not_found");
+                    std::string error;
+                    auto loaded = ctx.skill_loader->load_resource_snapshot(
+                        *entry, manifest, uri.path(), SkillResourceKind::AnyDeclared,
+                        file_inject_max_bytes(), &error);
+                    if (!loaded) throw std::runtime_error("skill_resource_fetch_failed:" + error);
+                    text = std::move(*loaded);
+                } else if (uri.scheme() == ResourceScheme::Mcp) {
+                    if (!ctx.resources->mcp_allowed(uri.authority()))
+                        throw std::runtime_error("mcp_resource_service_denied");
+                    if (!opt_.toolbus) throw std::runtime_error("injection_toolbus_unavailable");
+                    const auto contents =
+                        opt_.toolbus->read_mcp_resource(uri.authority(), uri.path()).get();
+                    if (contents.empty()) throw std::runtime_error("mcp_resource_empty");
+                    const std::size_t max_bytes = file_inject_max_bytes();
+                    for (const auto& content : contents) {
+                        if (content.blob.has_value())
+                            throw std::runtime_error("mcp_resource_binary_not_injectable");
+                        if (!content.text.has_value())
+                            throw std::runtime_error("mcp_resource_content_malformed");
+                        const std::size_t separator = text.empty() ? 0U : 1U;
+                        if (text.size() > max_bytes || content.text->size() > max_bytes - text.size() ||
+                            separator > max_bytes - text.size() - content.text->size())
+                            throw std::runtime_error("mcp_resource_too_large");
+                        if (separator != 0U) text.push_back('\n');
+                        text.append(*content.text);
+                    }
+                } else {
+                    throw std::runtime_error("resource_scheme_not_injectable");
+                }
+                const std::string header = injection_header("resource", truncate_utf8(uri.str(), 200));
+                if (!tracker.try_consume(header, text.size()))
+                    throw std::runtime_error("injection_budget_exceeded");
+                out.injected_context.push_back(
+                    {"resource", uri.str(), std::nullopt, std::move(text), 0});
+                out.injected_context.back().byte_length = out.injected_context.back().text_utf8.size();
+            } catch (const std::exception& e) {
+                out.tier_a_violations.push_back(std::string("resource_injection_failed:") + e.what());
+            }
+            remove_spans.push_back({at, close + 1});
+            scan = close + 1;
+            continue;
+        }
         if (!file_tok && !url_tok) {
             if (strict) {
                 bool resolved = false;

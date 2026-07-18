@@ -128,7 +128,9 @@ public:
         bool cancellation_observed = false;
     };
 
-    explicit MockMcpTransport(std::shared_ptr<ControlState> state = {}) : state_(std::move(state)) {}
+    explicit MockMcpTransport(std::shared_ptr<ControlState> state = {},
+                              bool resources_supported = true)
+        : state_(std::move(state)), resources_supported_(resources_supported) {}
     bool connect(const std::string& /*endpoint*/) override {
         connected_ = true;
         return true;
@@ -147,9 +149,15 @@ public:
         const std::string& method = req.at("method").get_ref<const std::string&>();
         std::int64_t id = req.at("id").get<std::int64_t>();
         if (method == "initialize") {
+            json capabilities = json::object();
+            if (resources_supported_) {
+                capabilities["resources"] = json{{"subscribe", false}, {"listChanged", false}};
+            }
+            capabilities["tools"] = json{{"listChanged", false}};
             return json{{"jsonrpc", "2.0"},
                         {"id", id},
-                        {"result", {{"protocolVersion", "2024-11-05"}, {"capabilities", json::object()}}}};
+                        {"result", {{"protocolVersion", "2024-11-05"},
+                                    {"capabilities", std::move(capabilities)}}}};
         }
         if (method == "tools/list") {
             return json{{"jsonrpc", "2.0"},
@@ -167,6 +175,44 @@ public:
                         {"result",
                          {{"content", json::array({{{"type", "text"}, {"text", "42"}}})},
                           {"isError", false}}}};
+        }
+        if (method == "resources/list") {
+            const std::string cursor = req.value("params", json::object()).value("cursor", "");
+            if (cursor.empty()) {
+                return json{{"jsonrpc", "2.0"},
+                            {"id", id},
+                            {"result",
+                             {{"resources",
+                               json::array({{{"uri", "memory://research/one"},
+                                             {"name", "research-one"},
+                                             {"description", "first fixture"},
+                                             {"mimeType", "text/plain"}}})},
+                              {"nextCursor", "page-2"}}}};
+            }
+            return json{{"jsonrpc", "2.0"},
+                        {"id", id},
+                        {"result",
+                         {{"resources",
+                           json::array({{{"uri", "memory://research/two"},
+                                         {"name", "research-two"}}})}}}};
+        }
+        if (method == "resources/read") {
+            const std::string uri = req.at("params").at("uri").get<std::string>();
+            if (uri == "memory://research/blob") {
+                return json{{"jsonrpc", "2.0"},
+                            {"id", id},
+                            {"result", {{"contents", json::array({{{"uri", uri},
+                                                                     {"mimeType", "image/png"},
+                                                                     {"blob", "iVBORw0KGgo="}}})}}}};
+            }
+            if (uri == "memory://research/malformed") {
+                return json{{"jsonrpc", "2.0"}, {"id", id}, {"result", {{"contents", "bad"}}}};
+            }
+            return json{{"jsonrpc", "2.0"},
+                        {"id", id},
+                        {"result", {{"contents", json::array({{{"uri", uri},
+                                                                 {"mimeType", "text/plain"},
+                                                                 {"text", "REMOTE_RESOURCE"}}})}}}};
         }
         return json{{"jsonrpc", "2.0"},
                     {"id", id},
@@ -188,6 +234,7 @@ public:
 private:
     bool connected_ = false;
     std::shared_ptr<ControlState> state_;
+    bool resources_supported_ = true;
 };
 
 void test_parse_jsonrpc() {
@@ -225,6 +272,95 @@ void test_toolbus_mcp_register_and_call() {
     auto tools = bus.export_as_llm_tools();
     assert(tools.size() == 1U);
     assert(tools[0].name == "svc__echo");
+
+    assert(bus.has_mcp_service("svc"));
+    auto page = bus.list_mcp_resources("svc").get();
+    assert(page.resources.size() == 1U);
+    assert(page.resources[0].uri == "memory://research/one");
+    assert(page.next_cursor.has_value() && *page.next_cursor == "page-2");
+    auto second_page = bus.list_mcp_resources("svc", "page-2").get();
+    assert(second_page.resources.size() == 1U);
+    auto contents = bus.read_mcp_resource("svc", "memory://research/one").get();
+    assert(contents.size() == 1U);
+    assert(contents[0].text.has_value() && *contents[0].text == "REMOTE_RESOURCE");
+    try {
+        bus.register_mcp_service("svc", client);
+        assert(false);
+    } catch (const std::invalid_argument& e) {
+        assert(std::string(e.what()).find("already registered") != std::string::npos);
+    }
+}
+
+void test_mcp_resources_protocol_validation() {
+    auto client = MCPClient::create_with_transport(std::make_unique<MockMcpTransport>(), true);
+    assert(client->supports_resources());
+    const auto blob = client->read_resource("memory://research/blob").get();
+    assert(blob.size() == 1U);
+    assert(blob[0].blob.has_value());
+    try {
+        (void)client->read_resource("memory://research/malformed").get();
+        assert(false);
+    } catch (const std::exception& e) {
+        assert(std::string(e.what()).find("contents") != std::string::npos);
+    }
+
+    auto unsupported = MCPClient::create_with_transport(
+        std::make_unique<MockMcpTransport>(nullptr, false), true);
+    assert(!unsupported->supports_resources());
+    try {
+        (void)unsupported->list_resources().get();
+        assert(false);
+    } catch (const std::exception& e) {
+        assert(std::string(e.what()).find("unsupported") != std::string::npos);
+    }
+}
+
+void test_toolbus_resource_only_service_and_unknown_service() {
+    class ResourceOnlyTransport final : public MCPTransportInterface {
+    public:
+        bool connect(const std::string&) override { connected = true; return true; }
+        void disconnect() override { connected = false; }
+        bool is_connected() const override { return connected; }
+        MCPTransport get_transport_type() const override { return MCPTransport::HTTP; }
+        void send_notification(const json&) override {}
+        json transceive(const json& request) override {
+            const auto id = request.at("id").get<std::int64_t>();
+            const std::string method = request.at("method").get<std::string>();
+            if (method == "initialize")
+                return json{{"jsonrpc", "2.0"}, {"id", id},
+                            {"result", {{"protocolVersion", "2024-11-05"},
+                                        {"capabilities", {{"resources", json::object()}}}}}};
+            if (method == "resources/read")
+                return json{{"jsonrpc", "2.0"}, {"id", id},
+                            {"result", {{"contents", json::array({{{"uri", "memory://one"},
+                                                                     {"text", "one"}}})}}}};
+            return json{{"jsonrpc", "2.0"}, {"id", id},
+                        {"error", {{"code", -32601}, {"message", "unsupported"}}}};
+        }
+        bool connected = false;
+    };
+    ToolBus bus;
+    bus.register_mcp_service(
+        "resources", MCPClient::create_with_transport(std::make_unique<ResourceOnlyTransport>(), true));
+    assert(bus.list_all_tools().empty());
+    assert(*bus.read_mcp_resource("resources", "memory://one").get()[0].text == "one");
+    try {
+        (void)bus.read_mcp_resource("missing", "memory://one");
+        assert(false);
+    } catch (const std::exception& e) {
+        assert(std::string(e.what()).find("mcp_resource_service_unknown") != std::string::npos);
+    }
+}
+
+void test_mcp_resource_cancellation() {
+    auto state = std::make_shared<MockMcpTransport::ControlState>();
+    auto client = MCPClient::create_with_transport(std::make_unique<MockMcpTransport>(state), true);
+    try {
+        (void)client->read_resource("memory://research/one", [] { return true; }).get();
+        assert(false);
+    } catch (const std::exception&) {
+    }
+    assert(state->cancellation_observed);
 }
 
 void test_mcp_cancellation_contract() {
@@ -636,6 +772,9 @@ int main(int argc, char** argv) {
     }
     test_parse_jsonrpc();
     test_toolbus_mcp_register_and_call();
+    test_mcp_resources_protocol_validation();
+    test_toolbus_resource_only_service_and_unknown_service();
+    test_mcp_resource_cancellation();
     test_mcp_cancellation_contract();
     test_parse_sse_body_single_line();
     test_parse_sse_body_multi_line_concat();

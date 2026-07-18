@@ -7,6 +7,9 @@
 #include <agent/toolbus/toolbus.hpp>
 #include <agent/core/types.hpp>
 #include <agent/agent/user_input_preprocessor.hpp>
+#include <agent/resources/session_resource_context.hpp>
+#include <agent/skills/skill_loader.hpp>
+#include <agent/skills/skill_registry.hpp>
 
 #include <cassert>
 #include <cstdlib>
@@ -26,6 +29,41 @@ using json = nlohmann::json;
 using namespace agent_framework;
 
 namespace {
+
+class ResourceMcpTransport final : public MCPTransportInterface {
+public:
+    bool connect(const std::string&) override { connected_ = true; return true; }
+    void disconnect() override { connected_ = false; }
+    bool is_connected() const override { return connected_; }
+    MCPTransport get_transport_type() const override { return MCPTransport::HTTP; }
+    void send_notification(const json&) override {}
+    json transceive(const json& request) override {
+        const auto id = request.at("id").get<std::int64_t>();
+        const std::string method = request.at("method").get<std::string>();
+        if (method == "initialize") {
+            return json{{"jsonrpc", "2.0"}, {"id", id},
+                        {"result", {{"protocolVersion", "2024-11-05"},
+                                    {"capabilities", {{"resources", json::object()}}}}}};
+        }
+        if (method == "tools/list") {
+            return json{{"jsonrpc", "2.0"}, {"id", id},
+                        {"result", {{"tools", json::array()}}}};
+        }
+        if (method == "resources/read") {
+            const std::string uri = request.at("params").at("uri").get<std::string>();
+            json content{{"uri", uri}, {"mimeType", "text/plain"}};
+            if (uri == "memory://blob") content["blob"] = "AAEC";
+            else if (uri == "memory://large") content["text"] = std::string(64, 'x');
+            else content["text"] = "REMOTE_RESOURCE";
+            return json{{"jsonrpc", "2.0"}, {"id", id},
+                        {"result", {{"contents", json::array({std::move(content)})}}}};
+        }
+        return json{{"jsonrpc", "2.0"}, {"id", id},
+                    {"error", {{"code", -32601}, {"message", "unknown method"}}}};
+    }
+private:
+    bool connected_ = false;
+};
 
 void set_allowlist_empty() {
     (void)::unsetenv("AGENT_TOOL_ALLOWLIST");
@@ -238,6 +276,102 @@ void u8_injection_budget() {
     (void)::unsetenv("AGENT_BUDGET_MAX_INJECTION_BYTES");
 }
 
+void u9_skills_commands() {
+    (void)::setenv("AGENT_INPUT_STRICT", "1", 1);
+    UserInputPreprocessor p(PreprocessOptions{});
+    auto list = p.process("/skills list", ctx());
+    assert(list.tier_a_violations.empty());
+    assert(list.control_actions.size() == 1);
+    assert(list.control_actions[0].command == "skills.list");
+    auto activate = p.process("/skills activate example", ctx());
+    assert(activate.control_actions[0].args.value("id", "") == "example");
+    auto create = p.process("/skills create example --description useful research skill", ctx());
+    assert(create.control_actions[0].command == "skills.create");
+    assert(create.control_actions[0].args.value("description", "") == "useful research skill");
+    auto invalid = p.process("/skills activate", ctx());
+    assert(!invalid.tier_a_violations.empty());
+}
+
+void u10_resource_uri_injection() {
+    const fs::path base = fs::temp_directory_path() / "wp27_resource_uri";
+    const fs::path workspace = base / "workspace";
+    const fs::path skills = base / "skills";
+    std::error_code ec;
+    fs::remove_all(base, ec);
+    fs::create_directories(workspace);
+    fs::create_directories(skills / "sample/references");
+    { std::ofstream(workspace / "input.md") << "WORKSPACE_RESOURCE"; }
+    { std::ofstream(skills / "sample/references/data.md") << "SKILL_RESOURCE"; }
+    { std::ofstream(skills / "sample/SKILL.md") << R"(---
+name: sample
+description: Injection fixture
+references: [references/data.md]
+---
+Body
+)"; }
+    (void)::setenv("AGENT_FS_ROOT", workspace.string().c_str(), 1);
+    (void)::setenv("AGENT_FS_MAX_READ_BYTES", "65536", 1);
+    (void)::setenv("AGENT_FS_MAX_WRITE_BYTES", "65536", 1);
+    auto registry = std::make_shared<SkillRegistry>(skills);
+    registry->scan_or_reload();
+    auto loader = std::make_shared<SkillLoader>(*registry);
+    auto resources = std::make_shared<SessionResourceContext>(
+        workspace, std::vector<fs::path>{skills}, fs::path{}, base / "cache", registry->snapshot());
+    auto bus = std::make_shared<ToolBus>();
+    register_builtin_fs_tools_if_configured(*bus);
+    PreprocessOptions opt;
+    opt.toolbus = bus;
+    UserInputPreprocessor prep(opt);
+    ExecutionContext context = ctx();
+    context.resources = resources;
+    context.skill_loader = loader;
+    auto output = prep.process(
+        "@{workspace://input.md} @{skill://sample/references/data.md}", context);
+    assert(output.tier_a_violations.empty());
+    assert(output.injected_context.size() == 2);
+    assert(output.injected_context[0].text_utf8 == "WORKSPACE_RESOURCE");
+    assert(output.injected_context[1].text_utf8 == "SKILL_RESOURCE");
+    auto denied = prep.process("@{skill://sample/../secret}", context);
+    assert(!denied.tier_a_violations.empty());
+}
+
+void u11_mcp_resource_injection() {
+    const fs::path base = fs::temp_directory_path() / "wp27_mcp_resource";
+    std::error_code ec;
+    fs::remove_all(base, ec);
+    fs::create_directories(base / "workspace");
+    auto resources = std::make_shared<SessionResourceContext>(
+        base / "workspace", std::vector<fs::path>{}, fs::path{}, base / "cache");
+    resources->set_allowed_mcp_services({"memory"});
+    auto bus = std::make_shared<ToolBus>();
+    auto client = MCPClient::create_with_transport(std::make_unique<ResourceMcpTransport>(), true);
+    bus->register_mcp_service("memory", client);
+    PreprocessOptions options;
+    options.toolbus = bus;
+    UserInputPreprocessor preprocessor(options);
+    ExecutionContext context = ctx();
+    context.resources = resources;
+
+    auto text = preprocessor.process("use @{mcp://memory/memory://doc}", context);
+    assert(text.tier_a_violations.empty());
+    assert(text.injected_context.size() == 1U);
+    assert(text.injected_context[0].text_utf8 == "REMOTE_RESOURCE");
+
+    auto denied = preprocessor.process("@{mcp://other/memory://doc}", context);
+    assert(!denied.tier_a_violations.empty());
+    assert(denied.tier_a_violations[0].find("mcp_resource_service_denied") != std::string::npos);
+
+    auto binary = preprocessor.process("@{mcp://memory/memory://blob}", context);
+    assert(!binary.tier_a_violations.empty());
+    assert(binary.tier_a_violations[0].find("mcp_resource_binary_not_injectable") != std::string::npos);
+
+    (void)::setenv("AGENT_INPUT_FILE_INJECT_MAX_BYTES", "16", 1);
+    auto large = preprocessor.process("@{mcp://memory/memory://large}", context);
+    assert(!large.tier_a_violations.empty());
+    assert(large.tier_a_violations[0].find("mcp_resource_too_large") != std::string::npos);
+    (void)::unsetenv("AGENT_INPUT_FILE_INJECT_MAX_BYTES");
+}
+
 } // namespace
 
 int main() {
@@ -250,6 +384,9 @@ int main() {
     u6_multiline_cmd_strip();
     u7_url_mock();
     u8_injection_budget();
+    u9_skills_commands();
+    u10_resource_uri_injection();
+    u11_mcp_resource_injection();
     std::cout << "test_user_input_preprocessor: ok\n";
     return 0;
 }
