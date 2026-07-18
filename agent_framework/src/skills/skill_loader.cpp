@@ -5,6 +5,7 @@
 
 #include <agent/skills/skill_loader.hpp>
 #include <agent/skills/skill_manifest.hpp>
+#include <agent/context_budget/context_budget.hpp>
 
 #include <agent/internal/skill_frontmatter_parse.hpp>
 
@@ -103,7 +104,7 @@ std::optional<std::string> SkillLoader::load_instructions(const std::string& ski
         const auto cit = cache_.find(cache_key);
         if (cit != cache_.end() && cit->second.second == identity) {
             std::string out = cit->second.first;
-            if (out.size() > max_chars) out.resize(max_chars);
+            if (out.size() > max_chars) out = utf8_safe_truncate(out, max_chars);
             return out;
         }
     }
@@ -124,7 +125,7 @@ std::optional<std::string> SkillLoader::load_instructions(const std::string& ski
         cache_[cache_key] = {full_body, identity};
     }
     if (full_body.size() > max_chars) {
-        full_body.resize(max_chars);
+        full_body = utf8_safe_truncate(full_body, max_chars);
     }
     return full_body;
 }

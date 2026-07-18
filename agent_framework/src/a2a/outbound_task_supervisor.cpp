@@ -5,6 +5,7 @@
 #include <agent/a2a/outbound_task_supervisor.hpp>
 
 #include <agent/a2a/jsonrpc_client.hpp>
+#include <agent/context_budget/context_budget.hpp>
 
 #include <chrono>
 #include <cstdint>
@@ -565,7 +566,7 @@ std::string OutboundTaskSupervisor::format_digest_for_llm(std::size_t max_events
     }
     std::string s = o.str();
     if (s.size() > max_bytes) {
-        s.resize(max_bytes);
+        s = utf8_safe_truncate(s, max_bytes);
         s += "\n…";
     }
     return s;

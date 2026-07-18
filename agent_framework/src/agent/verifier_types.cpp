@@ -4,6 +4,7 @@
  */
 
 #include <agent/agent/verifier_types.hpp>
+#include <agent/context_budget/context_budget.hpp>
 
 #include <cctype>
 #include <optional>
@@ -22,14 +23,7 @@ bool is_known_action(std::string_view a) {
 }
 
 std::string truncate_utf8_bytes(std::string s, std::size_t max_bytes) {
-    if (s.size() <= max_bytes) {
-        return s;
-    }
-    s.resize(max_bytes);
-    while (!s.empty() && (static_cast<unsigned char>(s.back()) & 0xC0U) == 0x80U) {
-        s.pop_back();
-    }
-    return s;
+    return utf8_safe_truncate(s, max_bytes);
 }
 
 std::optional<json> try_strip_markdown_fence(std::string_view raw) {

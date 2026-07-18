@@ -5,6 +5,7 @@
 
 #include <agent/toolbus/toolbus.hpp>
 
+#include <agent/context_budget/context_budget.hpp>
 #include <agent/toolbus/schema_validate.hpp>
 
 #include <future>
@@ -19,11 +20,7 @@ std::string truncate_what(const char* s) {
     if (s == nullptr) {
         return {};
     }
-    std::string out(s);
-    if (out.size() > k_exception_what_max) {
-        out.resize(k_exception_what_max);
-    }
-    return out;
+    return utf8_safe_truncate(s, k_exception_what_max);
 }
 
 std::future<json> make_ready_json_future(json j) {

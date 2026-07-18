@@ -5,6 +5,7 @@
 
 #include <agent/toolbus/fs_sandbox.hpp>
 #include <agent/toolbus/fs_tools.hpp>
+#include <agent/context_budget/context_budget.hpp>
 
 #include <algorithm>
 #include <cstdlib>
@@ -555,7 +556,7 @@ struct FsToolsState {
             while (match_count < max_matches && std::getline(in, line)) {
                 ++line_no;
                 if (line.size() > cfg.max_line_length) {
-                    line.resize(cfg.max_line_length);
+                    line = utf8_safe_truncate(line, cfg.max_line_length);
                     line += "…";
                 }
                 if (!utf8_validate(line)) {

@@ -4,6 +4,7 @@
 
 #include <agent/skills/skill_services.hpp>
 #include <agent/skills/skill_runtime.hpp>
+#include <agent/context_budget/context_budget.hpp>
 
 #include <cstdlib>
 #include <algorithm>
@@ -171,7 +172,7 @@ std::string format_skill_catalog_l1(const SkillRegistry& registry, std::size_t m
             }
         }
         if (d.size() > k_desc_cap) {
-            d.resize(k_desc_cap);
+            d = utf8_safe_truncate(d, k_desc_cap);
         }
         line += d;
         line += '\n';

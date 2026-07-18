@@ -1,5 +1,6 @@
 #include "imgui_console_view.hpp"
 
+#include <agent/context_budget/context_budget.hpp>
 #include <imgui.h>
 
 #include <algorithm>
@@ -29,7 +30,7 @@ ImVec4 state_color(UiRunState state) {
 
 std::string compact_json(const json& value, std::size_t cap = 420) {
     std::string out = value.dump(2);
-    if (out.size() > cap) out = out.substr(0, cap) + "\n…";
+    if (out.size() > cap) out = utf8_safe_truncate(out, cap) + "\n…";
     return out;
 }
 

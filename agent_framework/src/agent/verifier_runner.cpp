@@ -7,6 +7,7 @@
 #include <agent/agent/verifier_runner.hpp>
 
 #include <agent/prompt_renderer/prompt_renderer.hpp>
+#include <agent/context_budget/context_budget.hpp>
 
 #include <cctype>
 #include <cstdlib>
@@ -25,14 +26,7 @@ bool env_truthy(const char* key) {
 }
 
 std::string truncate_utf8(std::string s, std::size_t max_bytes) {
-    if (s.size() <= max_bytes) {
-        return s;
-    }
-    s.resize(max_bytes);
-    while (!s.empty() && (static_cast<unsigned char>(s.back()) & 0xC0U) == 0x80U) {
-        s.pop_back();
-    }
-    return s;
+    return utf8_safe_truncate(s, max_bytes);
 }
 
 std::string summarize_message(const Message& m, std::size_t cap) {

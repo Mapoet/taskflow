@@ -69,6 +69,18 @@ void test_b2_utf8_boundary() {
     const std::string t = utf8_safe_truncate(s, 13);
     assert(t.size() <= 13);
     assert(s.compare(0, t.size(), t) == 0);
+
+    const std::string mixed = "A中🛰️B";
+    assert(utf8_safe_truncate(mixed, 0).empty());
+    assert(utf8_safe_truncate(mixed, 1) == "A");
+    assert(utf8_safe_truncate(mixed, 2) == "A");
+    assert(utf8_safe_truncate(mixed, 3) == "A");
+    assert(utf8_safe_truncate(mixed, 4) == "A中");
+    assert(utf8_safe_truncate(mixed, 5) == "A中");
+    assert(utf8_safe_truncate(mixed, 6) == "A中");
+    assert(utf8_safe_truncate(mixed, 7) == "A中");
+    const json wire = {{"text", utf8_safe_truncate(mixed, 7)}};
+    assert(!wire.dump().empty());
 }
 
 void test_b3_combined_earliest_tool_downgraded_first() {

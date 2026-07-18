@@ -187,7 +187,11 @@ std::string utf8_safe_truncate(std::string_view utf8_text, std::size_t max_bytes
         return std::string(utf8_text);
     }
     std::size_t n = max_bytes;
-    while (n > 0 && (static_cast<unsigned char>(utf8_text[n - 1]) & 0xC0u) == 0x80u) {
+    // `n` is the first excluded byte. If it is a continuation byte, the cut falls
+    // inside a code point: rewind over all continuation bytes and exclude its lead
+    // byte as well. Looking at n-1 instead would incorrectly retain a lone lead byte.
+    while (n > 0 && n < utf8_text.size() &&
+           (static_cast<unsigned char>(utf8_text[n]) & 0xC0u) == 0x80u) {
         --n;
     }
     return std::string(utf8_text.substr(0, n));

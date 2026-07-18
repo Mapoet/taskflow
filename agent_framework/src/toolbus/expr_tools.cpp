@@ -4,6 +4,7 @@
  */
 
 #include <agent/toolbus/expr_tools.hpp>
+#include <agent/context_budget/context_budget.hpp>
 #include <agent/core/types.hpp>
 
 #include <algorithm>
@@ -92,10 +93,7 @@ json make_expr_error(const std::string& code, const std::string& message) {
 }
 
 std::string truncate_msg(std::string s, std::size_t max_n) {
-    if (s.size() > max_n) {
-        s.resize(max_n);
-    }
-    return s;
+    return utf8_safe_truncate(s, max_n);
 }
 
 using parser_t = exprtk::parser<double>;

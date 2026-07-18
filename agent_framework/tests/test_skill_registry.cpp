@@ -7,6 +7,7 @@
 
 #include <agent/skills/skill_loader.hpp>
 #include <agent/skills/skill_registry.hpp>
+#include <agent/skills/skill_services.hpp>
 
 #include <cassert>
 #include <cstdlib>
@@ -131,6 +132,32 @@ int main() {
         assert(tiny->size() <= 4U);
     }
     fs::remove_all(base / "route", ec);
+
+    // --- UTF-8 truncation remains JSON-safe in loader and injected L1 catalog ---
+    fs::create_directories(base / "utf8");
+    std::string repeated_description;
+    for (int i = 0; i < 70; ++i) repeated_description += "中";
+    write_file(base / "utf8" / "SKILL.md",
+               "---\nid: utf8\ndescription: " + repeated_description +
+                   "\n---\n中文技能正文\n");
+    {
+        SkillRegistry reg(base);
+        reg.scan_or_reload();
+        assert(reg.get("utf8").has_value());
+
+        SkillLoader loader(reg);
+        const auto tiny = loader.load_instructions("utf8", 2);
+        assert(tiny.has_value());
+        assert(tiny->empty());
+        const json instructions_payload = {{"instructions", *tiny}};
+        assert(!instructions_payload.dump().empty());
+
+        const std::string catalog = format_skill_catalog_l1(reg, 4096);
+        assert(catalog.find("utf8") != std::string::npos);
+        const json catalog_payload = {{"catalog", catalog}};
+        assert(!catalog_payload.dump().empty());
+    }
+    fs::remove_all(base / "utf8", ec);
 
     // --- typed metadata, declared resources, limits, and diagnostics ---
     fs::create_directories(base / "managed" / "references");

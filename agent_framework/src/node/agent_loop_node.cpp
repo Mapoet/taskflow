@@ -70,7 +70,7 @@ std::string trunc_copy(const std::string& s, std::size_t cap) {
     if (s.size() <= cap) {
         return s;
     }
-    return s.substr(0, cap) + "...";
+    return utf8_safe_truncate(s, cap) + "...";
 }
 
 LogLevel log_level_from_env() {

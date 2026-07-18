@@ -49,10 +49,7 @@ std::string trim_copy(std::string_view s) {
 }
 
 std::string truncate_utf8(std::string_view s, std::size_t max_chars) {
-    if (s.size() <= max_chars) {
-        return std::string(s);
-    }
-    return std::string(s.substr(0, max_chars));
+    return utf8_safe_truncate(s, max_chars);
 }
 
 std::string injection_header(std::string_view kind, std::string_view ref_trunc) {
@@ -595,7 +592,7 @@ std::string take_injected_blocks_as_llm_context(std::vector<InjectedContextBlock
     for (auto& b : blocks) {
         std::string ref = b.source_ref;
         if (ref.size() > 200) {
-            ref.resize(200);
+            ref = utf8_safe_truncate(ref, 200);
         }
         out += "\n--- injection:";
         out += b.source_kind;

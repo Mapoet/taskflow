@@ -6,6 +6,7 @@
 #include <agent/toolbus/toolbus.hpp>
 
 #include <agent/mcp_client/mcp_client.hpp>
+#include <agent/context_budget/context_budget.hpp>
 #include <agent/toolbus/schema_validate.hpp>
 
 #include <cctype>
@@ -98,20 +99,11 @@ bool env_hook_throw_abort() {
     return s == "1" || s == "true" || s == "yes" || s == "on";
 }
 
-/** UTF-8 safe prefix: drop trailing continuation bytes if cut mid-codepoint */
 std::string truncate_utf8_chars(const char* what, std::size_t max_bytes) {
     if (what == nullptr) {
         return {};
     }
-    std::string_view sv(what);
-    if (sv.size() <= max_bytes) {
-        return std::string(sv);
-    }
-    std::size_t n = max_bytes;
-    while (n > 0 && (static_cast<unsigned char>(sv[n - 1]) & 0xC0u) == 0x80u) {
-        --n;
-    }
-    return std::string(sv.substr(0, n));
+    return utf8_safe_truncate(what, max_bytes);
 }
 
 /**

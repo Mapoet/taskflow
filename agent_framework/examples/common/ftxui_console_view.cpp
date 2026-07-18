@@ -1,5 +1,7 @@
 #include "ftxui_console_view.hpp"
 
+#include <agent/context_budget/context_budget.hpp>
+
 #include <ftxui/component/app.hpp>
 #include <ftxui/component/component.hpp>
 #include <ftxui/component/component_options.hpp>
@@ -27,8 +29,7 @@ const Color kMuted = Color::GrayDark;
 
 std::string truncate(std::string value, std::size_t max_bytes = 480) {
     if (value.size() <= max_bytes) return value;
-    value.resize(max_bytes);
-    return value + " ...";
+    return utf8_safe_truncate(value, max_bytes) + " ...";
 }
 
 Color state_color(UiRunState state) {
