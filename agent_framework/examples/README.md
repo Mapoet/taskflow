@@ -19,6 +19,8 @@ configuration, and CycloneDX package metadata. It performs no network access or 
 `tui_agent_demo`, and `web_ui_demo` use the same example bootstrap contract for Skill discovery,
 Cursor MCP import, and structured Skill events. `AGENT_SKILLS_DIR` takes precedence; the
 Skills-specific and rich UI applications otherwise scan Cursor's two default Skill roots.
+The fullscreen TUI uses the vendored FTXUI 7.0.1 backend from `3rd-party/FTXUI`; initialize
+submodules recursively before enabling `AGENT_BUILD_TUI`.
 
 ## Focused examples
 

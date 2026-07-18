@@ -42,11 +42,11 @@
 | 项 | 固定约定 |
 |----|-----------|
 | **目标可执行文件** | **`tui_agent_demo`** |
-| **后端** | **`ncurses`**（**系统** 库 **`libncursesw`** **优先**）；**禁止** 在 **默认** CI 镜像 **无 dev 包** 时 **强制** 链接 |
-| **CMake** | **`AGENT_BUILD_TUI`**（**`OFF`** 默认）；**ON** 时 **`find_package(Curses)`** 失败 → **FATAL_ERROR** **并** **文档** 要求安装 **`libncurses-dev`**（或发行版等价名） |
+| **后端** | **FTXUI 7.0.1**，vendored 子模块 `3rd-party/FTXUI`；本表原 ncurses 合同自 FTXUI 迁移后已被取代 |
+| **CMake** | **`AGENT_BUILD_TUI`**（**`OFF`** 默认）；**ON** 时只加入 FTXUI 核心目标；子模块未初始化则给出确定性 FATAL_ERROR 与初始化命令 |
 | **与 CI** | **HEAD** **不** 将 **`tui_agent_demo`** 加入 **必跑** `ctest`；**允许** **编译** job **分轨** |
-| **事件模型** | **实现** **`UIHandler`** **子类** **`TuiHandler`**（**新** 类，**路径** `include/agent/ui/ui_manager.hpp` **或** `tui/tui_handler.hpp`）**或** **复用** **`CLIHandler`** **加** **全屏** 缓冲 — **固定**：**新建** **`TuiHandler : public UIHandler`**，**内部** ncurses **窗口**；**`handle_stream_token`** **追加** 环形缓冲 **UTF-8** **安全** |
-| **输入** | **最小**：**单行** 用户输入 **底栏** **`getstr` 封装`**；**回车** 提交 **等同** CLI **一行** `user_query` |
+| **事件模型** | **`TuiHandler : public UIHandler`** 与 `UiPresentationModel` 保持后端无关；FTXUI view 读取 snapshot，并用线程安全 Custom event 刷新流式输出 |
+| **输入** | FTXUI UTF-8 输入组件；Enter 提交，Escape 取消，Ctrl+C 退出，PageUp/PageDown/滚轮滚动，紧凑布局支持 `1`/`2`/`3` 页面导航 |
 
 ### 2.3 Track W — Web（浏览器 + SSE）
 

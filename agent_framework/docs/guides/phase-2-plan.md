@@ -42,12 +42,12 @@
 | 方向 | 内容 |
 |------|------|
 | **ImGui** | `ImGuiHandler`；渲染线程与流式回调队列/加锁；与 CLI 流式/终稿去重约定一致 |
-| **TUI** | 可选 ncurses 等；独立可执行目标为佳，避免拖垮无头 CI |
+| **TUI** | 可选 vendored FTXUI 7.0.1；独立 `tui_agent_demo` 目标，默认 OFF，避免拖垮无头 CI |
 | **Web** | `WebHandler`、浏览器侧 SSE/WS 与 WP2 HTTP 通道衔接 |
 
 依赖：阶段 1 已稳定的 **`UIHandler` 契约**与图工厂（`build_cli_agent_graph` 等）。
 
-**详案**（Track I/T/W 三选一 M8、`handle_aux_event` + `dispatch_message`、GLFW+ImGui / ncurses / 内置 SSE demo、CI 默认 OFF、与 [phase-1-wp6.md](./phase-1-wp6.md) §4.3 去重）：**[phase-2-wpu.md](./phase-2-wpu.md)**。
+**详案**（Track I/T/W、`handle_aux_event` + `dispatch_message`、GLFW+ImGui / FTXUI / 内置 SSE demo、CI 默认 OFF、与 [phase-1-wp6.md](./phase-1-wp6.md) §4.3 去重）：**[phase-2-wpu.md](./phase-2-wpu.md)**。
 
 ### 1.4 阶段 1 基线衔接（Gap → 阶段 2）
 

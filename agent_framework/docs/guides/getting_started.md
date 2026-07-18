@@ -32,11 +32,12 @@ make -j$(nproc)
 
 ### 完整富界面一键启动
 
-统一启动器支持 TUI、ImGui 和 Web 三种界面。Debian/Ubuntu 首次使用前需具备 C++、CMake，以及所选界面的系统依赖（TUI 通常为 `libncurses-dev`/`libncursesw5-dev`；ImGui 需要 GLFW/OpenGL）。复制配置模板、填写一种 LLM 凭据后，从仓库根目录一键配置、增量构建并启动：
+统一启动器支持 TUI、ImGui 和 Web 三种界面。TUI 后端为仓库内固定版本的 FTXUI 7.0.1，不需要系统 ncurses 开发包；首次使用需初始化子模块。ImGui 仍需要 GLFW/OpenGL 系统依赖。复制配置模板、填写一种 LLM 凭据后，从仓库根目录一键配置、增量构建并启动：
 
 ```bash
 cp agent_framework/examples/configs/ui.env.example .env.ui
 # 编辑 .env.ui；该文件已被 .gitignore 忽略，勿提交真实 API Key。
+git submodule update --init --recursive 3rd-party/FTXUI
 ./agent_framework/tools/run_ui.sh --ui tui
 ./agent_framework/tools/run_ui.sh --ui imgui
 ./agent_framework/tools/run_ui.sh --ui web --port 8080

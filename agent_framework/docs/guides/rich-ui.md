@@ -1,8 +1,10 @@
 # WP2.U：富界面（ImGui / TUI / Web）
 
-本文档对应 [phase-2-wpu.md](./phase-2-wpu.md) 与里程碑 **M8**：在 **`UIManager` / `UIHandler`** 之上提供可选的 **Track I（ImGui）**、**Track T（ncurses TUI）** 或 **Track W（浏览器 + SSE）**。**验收**：三条轨道 **完成其一** 即可；**默认推荐 Track I**。
+本文档对应 [phase-2-wpu.md](./phase-2-wpu.md) 与里程碑 **M8**：在 **`UIManager` / `UIHandler`** 之上提供可选的 **Track I（ImGui）**、**Track T（FTXUI TUI）** 或 **Track W（浏览器 + SSE）**。三种界面共享同一 Agent、ToolBus、Skills、Resources 与 MCP 启动路径。
 
-## 共享行为- **流式**：`UIManager::stream_token(session_id, token)` → 各 handler 的 `handle_stream_token`。
+## 共享行为
+
+- **流式**：`UIManager::stream_token(session_id, token)` → 各 handler 的 `handle_stream_token`。
 - **终稿**：`UIManager::dispatch_final_result(json)` → `handle_final_result`（`final_answer` 等键与 CLI 一致；去重约定见 [phase-1-wp6.md](./phase-1-wp6.md) §4.3）。
 - **错误**：`UIManager::dispatch_error(message)`。
 - **辅助事件**：`UIManager::dispatch_message(type, payload)` → `handle_aux_event`；v1 `type` 闭集：`tool_start`、`tool_end`（与 ToolBus 接线可后续 PR）。ImGui/Web/TUI 将 aux 统一为 `StreamMessage` 的 `aux:*` 或 SSE `kind: aux`。
@@ -12,7 +14,7 @@
 | 选项 | 说明 |
 |------|------|
 | `AGENT_BUILD_IMGUI` | `imgui_agent_demo`；GLFW（FetchContent）+ Dear ImGui（**优先** `3rd-party/imgui` 子模块，否则 FetchContent）。可选 **ImPlot** / **ImPlot3D**：`3rd-party/implot`、`3rd-party/implot3d`（见根目录 `.gitmodules`） |
-| `AGENT_BUILD_TUI` | `tui_agent_demo`；**`find_package(Curses REQUIRED)`**，优先 wide ncurses |
+| `AGENT_BUILD_TUI` | `tui_agent_demo`；仅在启用时加入 vendored **FTXUI 7.0.1**，不依赖系统 curses 包 |
 | `AGENT_BUILD_WEB_UI` | `web_ui_demo`；复用仓库 `3rd-party/httplib` |
 
 根目录配置示例：
@@ -41,9 +43,12 @@ cmake --build build --parallel -t web_ui_demo
 
 ## Track T — `tui_agent_demo`
 
-- **系统包（Debian/Ubuntu）**：`libncurses-dev`（或提供 **ncursesw** 的开发包）。CMake 使用 **`CURSES_NEED_WIDE_CHAR`**，渲染与输入走 **宽字符 API**（`mvwaddnwstr` / `wget_wch`），配合 **`setlocale(LC_ALL, "")`** 与 **UTF-8 按列宽换行**（`wcwidth`），以正确显示 **中文**。
+- **后端**：Mapoet/FTXUI 7.0.1，固定为仓库子模块 `3rd-party/FTXUI`。首次构建先运行 `git submodule update --init --recursive 3rd-party/FTXUI`；无需安装 `libncurses-dev`。
+- **构建隔离**：`AGENT_BUILD_TUI=OFF` 时不会加入 FTXUI；启用后也关闭其 docs/examples/tests/modules/install/developer-warning 等上游附加目标。
+- **响应式布局**：宽终端同时显示 Capabilities、Conversation、Activity；中等宽度保留能力栏并在 Conversation/Activity 间切换；紧凑终端只显示当前页。底部始终保留 UTF-8 输入框、状态和快捷键。
+- **输入与导航**：Enter 提交，Escape 取消当前 Agent 运行，Ctrl+C 安全退出；输入框为空时 `1`/`2`/`3` 切换页面，PageUp/PageDown 或鼠标滚轮滚动。终端 resize 由 FTXUI 自动重排。
 - **Skills / MCP**：与 **`cli_agent_skills_demo`** 对齐——默认合并扫描 `~/.cursor/skills` 与 `~/.cursor/skills-cursor`（可用 **`AGENT_SKILLS_DIR`** 覆写为单根）；默认加载 Cursor **`mcp.json`**（**`--no-cursor-mcp`** 或 `AGENT_CLI_SKIP_CURSOR_MCP` 等跳过）；**`AGENT_SKILL_INJECT_CATALOG`** 可注入技能短表。
-- **运行**：全屏 TUI；底栏输入，回车提交；`Ctrl+C` 退出。类 **`TuiHandler`** 位于 `include/agent/ui/tui_handler.hpp`（缓冲 UTF-8 文本，渲染在 demo 内完成）。
+- **状态边界**：`TuiHandler` 与 `UiPresentationModel` 继续作为后端无关的线程安全状态层；FTXUI 组件只存在于 demo 的 view 模块。Agent worker 可取消、可 join，退出时不会遗留 detached 线程。
 
 推荐从仓库根目录使用统一一键启动器。`--ui` 可选择 `tui`、`imgui` 或 `web`；启动器只启用所选界面的 CMake 开关、只构建对应目标，并在运行前检查凭据与文件系统监禁根。TUI 还会检查交互终端：
 
@@ -82,18 +87,21 @@ cp agent_framework/examples/configs/ui.env.example .env.ui
 
 **构建宏**：`AGENT_WEB_UI_STATIC_ROOT` 指向上述静态目录（由 CMake 定义）。
 
-## 测试| ID | 说明 |
+## 测试
+
+| ID | 说明 |
 |----|------|
 | **U-1** | `ctest -R ui_dispatch_message_wpu_u1` |
 | **U-2** | `ctest -R imgui_handler_queue_wpu_u2`（不创建窗口） |
 | **U-3** | 手动：任选 demo，短 prompt → 流式 → 终稿无全文重复 |
+| **T-FTXUI** | `ctest -R 'ftxui_console_view|tui_handler|ui_presentation_model'`；覆盖宽/中/窄、CJK、工具、Skills 与运行状态 |
 
 ## 许可证摘要（第三方）
 
 - **Dear ImGui**：MIT — [https://github.com/ocornut/imgui](https://github.com/ocornut/imgui)
 - **GLFW**：zlib/libpng 风格 — [https://github.com/glfw/glfw](https://github.com/glfw/glfw)
 - **cpp-httplib**：MIT —仓库 `3rd-party/httplib`
-- **ncurses**：X11 风格（以发行版包说明为准）
+- **FTXUI**：MIT — vendored at `3rd-party/FTXUI`
 
 ## M8 核对清单（DoD）
 

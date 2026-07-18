@@ -26,10 +26,10 @@
 - Modify: `.gitmodules`
 - Add gitlink: `3rd-party/FTXUI`
 
-- [ ] Create `FTXUI` from `skills`.
-- [ ] Add the Mapoet FTXUI submodule at the exact requested path.
-- [ ] Lock and verify commit `c100eab535db2283b78d30fcb6d082a1f84fb683`.
-- [ ] Verify recursive submodule initialization and commit the dependency slice.
+- [x] Create `FTXUI` from `skills`.
+- [x] Add the Mapoet FTXUI submodule at the exact requested path.
+- [x] Lock and verify commit `c100eab535db2283b78d30fcb6d082a1f84fb683`.
+- [x] Verify recursive submodule initialization and commit the dependency slice.
 
 ### Task 2: CMake backend replacement
 
@@ -40,12 +40,12 @@
 - Consumes: `3rd-party/FTXUI/CMakeLists.txt`
 - Produces: `tui_agent_demo` linked to `ftxui::ftxui`
 
-- [ ] Add a configure-time contract test for an initialized FTXUI submodule.
-- [ ] Disable FTXUI docs, examples, tests, modules, install rules, and developer warnings in the parent build.
-- [ ] Add the subdirectory only under `AGENT_BUILD_TUI=ON` with `EXCLUDE_FROM_ALL`.
-- [ ] Remove every Curses lookup, include path, library, and error message.
-- [ ] Link the existing target to `ftxui::ftxui` and define `AGENT_TUI_BACKEND_FTXUI=1`.
-- [ ] Configure and build the dependency slice, then commit it.
+- [x] Add a configure-time contract test for an initialized FTXUI submodule.
+- [x] Disable FTXUI docs, examples, tests, modules, install rules, and developer warnings in the parent build.
+- [x] Add the subdirectory only under `AGENT_BUILD_TUI=ON` with `EXCLUDE_FROM_ALL`.
+- [x] Remove every Curses lookup, include path, library, and error message.
+- [x] Link the existing target to `ftxui::ftxui` and define `AGENT_TUI_BACKEND_FTXUI=1`.
+- [x] Configure and build the dependency slice, then commit it.
 
 ### Task 3: Responsive FTXUI console view
 
@@ -58,11 +58,11 @@
 - Consumes: `UiPresentationSnapshot`, a Skill status JSON provider, submit/cancel/quit callbacks.
 - Produces: `FtxuiConsoleView::run()`, `request_refresh()`, and an in-memory render function for tests.
 
-- [ ] Write failing render tests for wide, medium, compact, CJK, tool, Skill, error, and busy states.
-- [ ] Implement a three-panel wide layout and tabbed compact layout using FTXUI DOM.
-- [ ] Implement focusable UTF-8 input, pane scrolling, keyboard help, status badges, and restrained terminal colors.
-- [ ] Implement thread-safe `Event::Custom` invalidation.
-- [ ] Run the render tests and commit the view slice.
+- [x] Write failing render tests for wide, medium, compact, CJK, tool, Skill, error, and busy states.
+- [x] Implement a three-panel wide layout and tabbed compact layout using FTXUI DOM.
+- [x] Implement focusable UTF-8 input, pane scrolling, keyboard help, status badges, and restrained terminal colors.
+- [x] Implement thread-safe `Event::Custom` invalidation.
+- [x] Run the render tests and commit the view slice.
 
 ### Task 4: Demo controller and lifecycle migration
 
@@ -70,12 +70,12 @@
 - Modify: `agent_framework/examples/tui_agent_demo.cpp`
 - Test: `agent_framework/tests/test_tui_handler.cpp`
 
-- [ ] Remove ncurses headers, wide-character conversion, window allocation, manual wrapping, and polling input.
-- [ ] Preserve the existing bootstrap, MCP import, ToolBus, Skill services, preprocessing, and graph execution path.
-- [ ] Route Enter, Escape, Ctrl+C, focus, scrolling, and resize through FTXUI components/events.
-- [ ] Replace detached Agent work with a joinable worker; cancel and join before destroying UI/controller state.
-- [ ] Preserve all existing CLI flags and deterministic `--demo-state` behavior.
-- [ ] Run handler and controller-focused tests and commit the migration slice.
+- [x] Remove ncurses headers, wide-character conversion, window allocation, manual wrapping, and polling input.
+- [x] Preserve the existing bootstrap, MCP import, ToolBus, Skill services, preprocessing, and graph execution path.
+- [x] Route Enter, Escape, Ctrl+C, focus, scrolling, and resize through FTXUI components/events.
+- [x] Replace detached Agent work with a joinable worker; cancel and join before destroying UI/controller state.
+- [x] Preserve all existing CLI flags and deterministic `--demo-state` behavior.
+- [x] Run handler and controller-focused tests and commit the migration slice.
 
 ### Task 5: Launcher and backend contracts
 
@@ -84,11 +84,11 @@
 - Modify: `agent_framework/tests/scripts/test_run_ui_launcher.sh`
 - Modify: `agent_framework/CMakeLists.txt`
 
-- [ ] Expose `FTXUI 7.0.1` as the selected TUI backend in the redacted dry-run plan.
-- [ ] Verify launcher compatibility and missing-submodule diagnostics.
-- [ ] Verify the built executable has no ncurses/ncursesw linkage.
-- [ ] Register the optional FTXUI render test with the `rich-ui` label.
-- [ ] Run launcher/static UI tests and commit the contract slice.
+- [x] Expose `FTXUI 7.0.1` as the selected TUI backend in the redacted dry-run plan.
+- [x] Verify launcher compatibility and missing-submodule diagnostics.
+- [x] Verify the built executable has no ncurses/ncursesw linkage.
+- [x] Register the optional FTXUI render test with the `rich-ui` label.
+- [x] Run launcher/static UI tests and commit the contract slice.
 
 ### Task 6: Documentation migration
 
@@ -99,17 +99,17 @@
 - Modify: `agent_framework/examples/README.md`
 - Modify: `agent_framework/examples/configs/tui.env.example`
 
-- [ ] Document submodule initialization, build/run commands, layouts, input, shortcuts, and troubleshooting.
-- [ ] Remove current ncurses package requirements and mark historical ncurses contracts as superseded.
-- [ ] Document that FTXUI is optional and only activated by `AGENT_BUILD_TUI`.
-- [ ] Scan active documentation for stale backend claims and commit the docs slice.
+- [x] Document submodule initialization, build/run commands, layouts, input, shortcuts, and troubleshooting.
+- [x] Remove current ncurses package requirements and mark historical ncurses contracts as superseded.
+- [x] Document that FTXUI is optional and only activated by `AGENT_BUILD_TUI`.
+- [x] Scan active documentation for stale backend claims and commit the docs slice.
 
 ### Task 7: Combined build, regression, and visual acceptance
 
-- [ ] Build `tui_agent_demo`, `web_ui_demo`, and `imgui_agent_demo` from the combined branch.
-- [ ] Run FTXUI, rich UI, MCP, MCP Resource, input preprocessing, Skill, launcher, and Web static tests.
-- [ ] Run `git diff --check` and inspect submodule/status/linkage evidence.
-- [ ] Launch a real 160x42 FTXUI terminal and capture the wide layout.
-- [ ] Launch a real 90x30 FTXUI terminal and capture the compact layout.
-- [ ] Fix visual or interaction defects found in screenshots and rerun affected tests.
-- [ ] Complete the plan checklist, commit final fixes, and verify a clean `FTXUI` branch.
+- [x] Build `tui_agent_demo`, `web_ui_demo`, and `imgui_agent_demo` from the combined branch.
+- [x] Run FTXUI, rich UI, MCP, MCP Resource, input preprocessing, Skill, launcher, and Web static tests.
+- [x] Run `git diff --check` and inspect submodule/status/linkage evidence.
+- [x] Launch a real 160x42 FTXUI terminal and capture the wide layout.
+- [x] Launch a real 90x30 FTXUI terminal and capture the compact layout.
+- [x] Fix visual or interaction defects found in screenshots and rerun affected tests.
+- [x] Complete the plan checklist, commit final fixes, and verify a clean `FTXUI` branch.
