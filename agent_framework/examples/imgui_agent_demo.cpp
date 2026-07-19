@@ -10,6 +10,7 @@
 #include "CLI11.hpp"
 #include "common/agent_example_bootstrap.hpp"
 #include "common/imgui_console_view.hpp"
+#include "common/imgui_text_input_support.hpp"
 
 #include <agent/agent/execution_context.hpp>
 #include <agent/agent/task_state_machine.hpp>
@@ -418,6 +419,16 @@ int main(int argc, char** argv) {
 #endif
 
     glfwSetErrorCallback(glfw_error_callback);
+    const auto text_locale = example::initialize_imgui_text_input_locale();
+    std::clog << "[imgui_agent_demo] text input LC_CTYPE: "
+              << (text_locale.before.empty() ? "<unavailable>" : text_locale.before)
+              << " -> " << (text_locale.after.empty() ? "<unavailable>" : text_locale.after)
+              << (text_locale.unicode_ready ? " (Unicode/XIM ready)" : " (CJK IME unavailable)")
+              << '\n';
+    if (!text_locale.unicode_ready) {
+        std::clog << "[imgui_agent_demo] warning: set LANG or LC_CTYPE to a UTF-8 locale "
+                     "before launching (for example C.UTF-8 or zh_CN.UTF-8).\n";
+    }
     if (!glfwInit()) {
         std::cerr << "glfwInit failed\n";
         return 1;
@@ -438,6 +449,7 @@ int main(int argc, char** argv) {
     }
     glfwMakeContextCurrent(window);
     glfwSwapInterval(1);
+    std::clog << "[imgui_agent_demo] GLFW: " << glfwGetVersionString() << '\n';
 
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();

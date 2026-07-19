@@ -825,7 +825,9 @@ if(AGENT_BUILD_IMGUI)
     include(FetchContent)
     set(AGENT_WPU_3RD "${CMAKE_CURRENT_SOURCE_DIR}/../3rd-party")
 
-    find_package(glfw3 3.3 QUIET)
+    # GLFW 3.3.2 and older break Fcitx/XIM CJK input when the process starts in
+    # the C locale (glfw/glfw#1636, fixed in 3.3.3).
+    find_package(glfw3 3.3.3 QUIET)
     if(NOT TARGET glfw)
         FetchContent_Declare(
             glfw_wpu
@@ -891,7 +893,8 @@ if(AGENT_BUILD_IMGUI)
     if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/examples/imgui_agent_demo.cpp)
         add_executable(imgui_agent_demo
             examples/imgui_agent_demo.cpp
-            examples/common/imgui_console_view.cpp)
+            examples/common/imgui_console_view.cpp
+            examples/common/imgui_text_input_support.cpp)
         # ASan+LSan: X11/libX11 XIM leaks under GLFW are known; point LSan at suppressions (see tools/).
         target_compile_definitions(imgui_agent_demo PRIVATE
             "AGENT_IMG_LSAN_SUPP_PATH=\"${CMAKE_CURRENT_SOURCE_DIR}/tools/lsan_suppressions_imgui.txt\"")
@@ -994,6 +997,15 @@ endif()
 
 # 测试（WP1.1 LLM 轻量单测，无第三方框架）
 if(BUILD_TESTING)
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_imgui_text_input_support.cpp)
+        add_executable(test_imgui_text_input_support
+            tests/test_imgui_text_input_support.cpp
+            examples/common/imgui_text_input_support.cpp)
+        add_test(NAME imgui_text_input_locale COMMAND test_imgui_text_input_support)
+        set_tests_properties(imgui_text_input_locale PROPERTIES
+            ENVIRONMENT "LC_ALL=C.UTF-8;LANG=C.UTF-8"
+            LABELS "ui-unit;imgui")
+    endif()
     enable_testing()
     if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_ui_presentation_model.cpp)
         add_executable(test_ui_presentation_model tests/test_ui_presentation_model.cpp)
