@@ -25,6 +25,7 @@ public:
     explicit TuiHandler(std::shared_ptr<UiPresentationModel> presentation = {});
 
     void handle_stream_token(std::string_view token) override;
+    void handle_stream_chunk(UiStreamChannel channel, std::string_view token) override;
     void handle_final_result(const json& result) override;
     void handle_error(const std::string& error_message) override;
     void handle_aux_event(std::string_view type, const json& payload) override;

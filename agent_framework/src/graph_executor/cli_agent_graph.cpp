@@ -88,7 +88,8 @@ void build_cli_agent_graph_impl(workflow::GraphBuilder& builder,
         deps.skills,
         graph_options.task_control,
         graph_options.tool_execution_observer,
-        graph_options.skill_event_sink);
+        graph_options.skill_event_sink,
+        graph_options.thinking_stream_callback);
     (void)loop_node;
     (void)loop_task;
 }

@@ -13,14 +13,19 @@ WebHandler::WebHandler(const std::string& session_id, std::shared_ptr<WebConnect
     : session_id_(session_id), connection_(std::move(connection)) {}
 
 void WebHandler::handle_stream_token(std::string_view token) {
+    handle_stream_chunk(UiStreamChannel::Answer, token);
+}
+
+void WebHandler::handle_stream_chunk(UiStreamChannel channel, std::string_view token) {
     if (!active_) {
         return;
     }
     json j;
-    j["kind"] = "token";
+    const bool thinking = channel == UiStreamChannel::Thinking;
+    j["kind"] = thinking ? "thinking" : "token";
     j["session"] = session_id_;
     j["content"] = std::string(token);
-    send_sse_event("token", j.dump());
+    send_sse_event(thinking ? "thinking" : "token", j.dump());
 }
 
 void WebHandler::handle_final_result(const json& result) {
@@ -38,6 +43,9 @@ void WebHandler::handle_final_result(const json& result) {
     }
     if (result.contains("history_size")) {
         j["history_size"] = result["history_size"];
+    }
+    for (const char* key : {"displayable_reasoning", "reasoning_summary"}) {
+        if (result.contains(key) && result[key].is_string()) j[key] = result[key];
     }
     send_sse_event("final", j.dump());
 }

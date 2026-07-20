@@ -16,9 +16,49 @@ namespace agent_framework {
 enum class UiRunState { Idle, Running, Completed, Failed, Cancelled };
 enum class UiTurnRole { User, Assistant, System };
 
+enum class UiContentBlockKind {
+    Paragraph,
+    Heading,
+    List,
+    Code,
+    Table,
+    MathInline,
+    MathBlock,
+    Mermaid,
+    Image,
+    ThematicBreak,
+    DraftTail,
+};
+
+struct UiAttachment {
+    std::string id;
+    std::string mime;
+    std::string path;
+    std::string caption;
+    std::string tool_call_id;
+    std::size_t byte_size = 0;
+};
+
+struct UiContentBlock {
+    UiContentBlockKind kind = UiContentBlockKind::Paragraph;
+    std::string text;
+    /** Fence info string (for example cpp or mermaid). */
+    std::string info;
+    int heading_level = 0;
+    std::vector<std::vector<std::string>> table_cells;
+    std::string attachment_id;
+    bool stable = true;
+};
+
 struct UiTurn {
     UiTurnRole role = UiTurnRole::Assistant;
+    /** Compatibility mirror of raw_markdown; remove after downstream migration. */
     std::string content;
+    std::string raw_markdown;
+    /** Displayable provider summary only; never raw internal chain-of-thought. */
+    std::string thinking_raw;
+    std::vector<UiContentBlock> blocks;
+    std::vector<UiAttachment> attachments;
     std::int64_t timestamp_ms = 0;
     bool streaming = false;
     bool error = false;
@@ -55,6 +95,8 @@ public:
                               std::string connection_label);
     void begin_user_turn(std::string prompt);
     void append_stream_token(std::string_view token);
+    void append_thinking_token(std::string_view token);
+    bool observe_artifact(const json& payload);
     void complete(const json& result);
     void fail(std::string message);
     void cancel(std::string message = "Run cancelled");

@@ -251,6 +251,26 @@ void test_openai_stream_text() {
     assert(out.is_final);
 }
 
+void test_openai_typed_stream_separates_displayable_summary() {
+    auto fake = std::make_shared<FakeLlmTransport>();
+    fake->sse_chunks = {
+        json::parse(R"({"choices":[{"delta":{"reasoning_content":"private","reasoning_summary":"checked"}}]})"),
+        json::parse(R"({"choices":[{"delta":{"content":"answer"}}]})"),
+    };
+    OpenAIAdapter adapter("sk-test", "https://api.example.com/v1", fake);
+    ModelConfig config; config.model_name = "gpt-test"; config.stream = true; adapter.configure(config);
+    RenderedPrompt prompt; prompt.messages = {{{"role", "user"}, {"content", "hi"}}};
+    std::string answer;
+    std::string thinking;
+    const auto output = adapter.invoke_with_rendered_channels(
+        prompt, [&](std::string_view value) { answer += value; },
+        [&](std::string_view value) { thinking += value; }).get();
+    assert(answer == "answer");
+    assert(thinking == "checked");
+    assert(thinking.find("private") == std::string::npos);
+    assert(output.final_answer == "answer");
+}
+
 void test_openai_stream_transport_cancellation() {
     auto fake = std::make_shared<FakeLlmTransport>();
     fake->sse_chunks = {
@@ -427,6 +447,7 @@ void run_offline_tests() {
     test_openai_nonstream_text();
     test_openai_nonstream_tools();
     test_openai_stream_text();
+    test_openai_typed_stream_separates_displayable_summary();
     test_openai_stream_transport_cancellation();
     test_openai_stream_tools();
     test_anthropic_nonstream();

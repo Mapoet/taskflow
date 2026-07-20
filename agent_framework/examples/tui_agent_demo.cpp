@@ -163,6 +163,9 @@ int run_graph_ui(tf::Executor& executor,
             ui.stream_token("default", tok);
         }
     };
+    req.options.graph_options.thinking_stream_callback = [&ui](std::string_view tok) {
+        if (!g_shutdown.load()) ui.stream_thinking("default", tok);
+    };
     req.options.graph_options.task_control = control;
     req.options.graph_options.tool_execution_observer = [presentation](const ToolExecutionEvent& event) {
         if (presentation) presentation->observe_tool(event);

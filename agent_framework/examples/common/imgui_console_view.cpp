@@ -1,11 +1,19 @@
 #include "imgui_console_view.hpp"
 
 #include <agent/context_budget/context_budget.hpp>
+#include <agent/toolbus/fs_sandbox.hpp>
 #include <imgui.h>
+#include <GL/gl.h>
+
+#define STB_IMAGE_IMPLEMENTATION
+#include <stb_image.h>
 
 #include <algorithm>
 #include <cstdio>
+#include <cstdlib>
+#include <filesystem>
 #include <string>
+#include <unordered_map>
 
 namespace agent_framework::example {
 namespace {
@@ -14,6 +22,54 @@ constexpr ImVec4 kAccent{0.22f, 0.77f, 0.84f, 1.0f};
 constexpr ImVec4 kMuted{0.56f, 0.63f, 0.68f, 1.0f};
 constexpr ImVec4 kSuccess{0.34f, 0.82f, 0.61f, 1.0f};
 constexpr ImVec4 kDanger{0.94f, 0.47f, 0.47f, 1.0f};
+
+struct ArtifactTexture {
+    GLuint id = 0;
+    int width = 0;
+    int height = 0;
+};
+
+std::unordered_map<std::string, ArtifactTexture> g_artifact_textures;
+
+const UiAttachment* find_attachment(const UiTurn& turn, const std::string& id) {
+    const auto it = std::find_if(turn.attachments.begin(), turn.attachments.end(),
+                                 [&](const UiAttachment& value) { return value.id == id; });
+    return it == turn.attachments.end() ? nullptr : &*it;
+}
+
+const ArtifactTexture* load_artifact_texture(const UiAttachment& attachment) {
+    if (attachment.mime != "image/png" && attachment.mime != "image/jpeg" &&
+        attachment.mime != "image/webp" && attachment.mime != "image/gif") return nullptr;
+    if (const auto found = g_artifact_textures.find(attachment.path);
+        found != g_artifact_textures.end()) return &found->second;
+
+    const char* root_env = std::getenv("AGENT_FS_ROOT");
+    if (!root_env || !*root_env) return nullptr;
+    json error;
+    const auto resolved = fs_resolve_under_root(attachment.path, std::filesystem::path(root_env), error);
+    if (!resolved || !std::filesystem::is_regular_file(*resolved) ||
+        std::filesystem::file_size(*resolved) > 16U * 1024U * 1024U) return nullptr;
+
+    int width = 0, height = 0, channels = 0;
+    stbi_uc* pixels = stbi_load(resolved->string().c_str(), &width, &height, &channels, STBI_rgb_alpha);
+    if (!pixels || width <= 0 || height <= 0 || width > 8192 || height > 8192) {
+        stbi_image_free(pixels);
+        return nullptr;
+    }
+    ArtifactTexture texture;
+    texture.width = width;
+    texture.height = height;
+    glGenTextures(1, &texture.id);
+    glBindTexture(GL_TEXTURE_2D, texture.id);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA,
+                 GL_UNSIGNED_BYTE, pixels);
+    stbi_image_free(pixels);
+    const auto [inserted, _] = g_artifact_textures.emplace(attachment.path, texture);
+    return &inserted->second;
+}
 
 const char* role_name(UiTurnRole role) {
     if (role == UiTurnRole::User) return "YOU";
@@ -32,6 +88,91 @@ std::string compact_json(const json& value, std::size_t cap = 420) {
     std::string out = value.dump(2);
     if (out.size() > cap) out = utf8_safe_truncate(out, cap) + "\n…";
     return out;
+}
+
+void render_content_block(const UiTurn& turn, const UiContentBlock& block) {
+    switch (block.kind) {
+        case UiContentBlockKind::Heading: {
+            const float scale = block.heading_level <= 1 ? 1.30f : block.heading_level == 2 ? 1.16f : 1.06f;
+            ImGui::SetWindowFontScale(scale);
+            ImGui::TextColored(ImVec4(0.90f, 0.94f, 0.97f, 1.0f), "%s", block.text.c_str());
+            ImGui::SetWindowFontScale(1.0f);
+            if (block.heading_level <= 2) ImGui::Separator();
+            break;
+        }
+        case UiContentBlockKind::List: {
+            std::size_t begin = 0;
+            while (begin <= block.text.size()) {
+                const auto end = block.text.find('\n', begin);
+                std::string item = block.text.substr(begin, end == std::string::npos ? std::string::npos : end - begin);
+                std::size_t content = item.find(' ');
+                ImGui::BulletText("%s", content == std::string::npos ? item.c_str() : item.c_str() + content + 1);
+                if (end == std::string::npos) break;
+                begin = end + 1;
+            }
+            break;
+        }
+        case UiContentBlockKind::Table: {
+            std::size_t columns = 0;
+            for (const auto& row : block.table_cells) columns = std::max(columns, row.size());
+            if (columns && ImGui::BeginTable("##md-table", static_cast<int>(columns),
+                                             ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg |
+                                                 ImGuiTableFlags_SizingStretchProp)) {
+                for (std::size_t row = 0; row < block.table_cells.size(); ++row) {
+                    ImGui::TableNextRow();
+                    for (std::size_t col = 0; col < columns; ++col) {
+                        ImGui::TableSetColumnIndex(static_cast<int>(col));
+                        const char* value = col < block.table_cells[row].size()
+                                                ? block.table_cells[row][col].c_str() : "";
+                        if (row == 0) ImGui::TextColored(kAccent, "%s", value);
+                        else ImGui::TextWrapped("%s", value);
+                    }
+                }
+                ImGui::EndTable();
+            }
+            break;
+        }
+        case UiContentBlockKind::Code:
+        case UiContentBlockKind::Mermaid:
+        case UiContentBlockKind::MathBlock: {
+            const char* label = block.kind == UiContentBlockKind::Mermaid ? "MERMAID" :
+                                block.kind == UiContentBlockKind::MathBlock ? "MATH" :
+                                block.info.empty() ? "CODE" : block.info.c_str();
+            ImGui::TextColored(kMuted, "%s", label);
+            ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.032f, 0.043f, 0.055f, 1.0f));
+            const float height = std::min(260.0f, std::max(54.0f, ImGui::CalcTextSize(block.text.c_str(), nullptr, false,
+                                                                                     ImGui::GetContentRegionAvail().x - 18.0f).y + 24.0f));
+            ImGui::BeginChild("##md-source", ImVec2(0, height), true);
+            ImGui::TextWrapped("%s", block.text.c_str());
+            ImGui::EndChild();
+            ImGui::PopStyleColor();
+            break;
+        }
+        case UiContentBlockKind::ThematicBreak:
+            ImGui::Separator();
+            break;
+        case UiContentBlockKind::Image:
+            ImGui::TextColored(kAccent, "ARTIFACT");
+            ImGui::SameLine(); ImGui::TextWrapped("%s", block.text.empty() ? block.attachment_id.c_str() : block.text.c_str());
+            if (const auto* attachment = find_attachment(turn, block.attachment_id)) {
+                if (const auto* texture = load_artifact_texture(*attachment)) {
+                    const float available = std::max(80.0f, ImGui::GetContentRegionAvail().x);
+                    const float width_scale = available / static_cast<float>(texture->width);
+                    const float height_scale = 320.0f / static_cast<float>(texture->height);
+                    const float scale = std::min({1.0f, width_scale, height_scale});
+                    ImGui::Image(static_cast<ImTextureID>(texture->id),
+                                 ImVec2(texture->width * scale, texture->height * scale));
+                } else {
+                    ImGui::TextColored(kMuted, "Preview unavailable · %s", attachment->path.c_str());
+                }
+            }
+            break;
+        case UiContentBlockKind::Paragraph:
+        case UiContentBlockKind::MathInline:
+        case UiContentBlockKind::DraftTail:
+            ImGui::TextWrapped("%s", block.text.c_str());
+            break;
+    }
 }
 
 void render_header(const UiPresentationSnapshot& s) {
@@ -101,8 +242,13 @@ void render_conversation(const UiPresentationSnapshot& s, ImGuiConsoleAction& ac
         ImGui::TextColored(turn.error ? kDanger : turn.role == UiTurnRole::Assistant ? kAccent : kMuted,
                            "%s", role_name(turn.role));
         ImGui::SameLine(); ImGui::TextColored(kMuted, turn.streaming ? "streaming" : "");
+        if (!turn.thinking_raw.empty() && ImGui::TreeNode("Reasoning summary")) {
+            ImGui::TextColored(kMuted, "%s", turn.thinking_raw.c_str());
+            ImGui::TreePop();
+        }
         ImGui::PushTextWrapPos(ImGui::GetWindowWidth() - 24);
-        ImGui::TextWrapped("%s", turn.content.c_str());
+        if (turn.blocks.empty()) ImGui::TextWrapped("%s", turn.content.c_str());
+        else for (const auto& block : turn.blocks) render_content_block(turn, block);
         ImGui::PopTextWrapPos();
         ImGui::Spacing(); ImGui::Separator(); ImGui::Spacing();
         ImGui::PopID();
@@ -162,6 +308,13 @@ void render_activity(const UiPresentationSnapshot& s, float width) {
 }
 
 } // namespace
+
+void clear_imgui_artifact_textures() {
+    for (auto& [_, texture] : g_artifact_textures) {
+        if (texture.id != 0) glDeleteTextures(1, &texture.id);
+    }
+    g_artifact_textures.clear();
+}
 
 void apply_scientific_console_theme() {
     ImGuiStyle& style = ImGui::GetStyle();

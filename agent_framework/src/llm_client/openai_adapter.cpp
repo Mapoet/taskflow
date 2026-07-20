@@ -223,12 +223,20 @@ std::future<LLMOutput> OpenAIAdapter::invoke(
 std::future<LLMOutput> OpenAIAdapter::invoke_with_rendered(
     const RenderedPrompt& rendered,
     std::function<void(std::string_view)> stream_callback) {
+    return invoke_with_rendered_channels(rendered, std::move(stream_callback), nullptr);
+}
+
+std::future<LLMOutput> OpenAIAdapter::invoke_with_rendered_channels(
+    const RenderedPrompt& rendered,
+    std::function<void(std::string_view)> answer_callback,
+    std::function<void(std::string_view)> thinking_callback) {
     const char* dbg_env = std::getenv("AGENT_TEST_AGENT_LOOP_DEBUG");
     const bool dbg = dbg_env && std::string(dbg_env) != "0";
     return std::async(std::launch::async,
-                      [this, rendered, cb = std::move(stream_callback), dbg]() mutable {
+                      [this, rendered, cb = std::move(answer_callback),
+                       thinking_cb = std::move(thinking_callback), dbg]() mutable {
         return invoke_with_retries(
-            [this, &rendered, &cb, dbg]() {
+            [this, &rendered, &cb, &thinking_cb, dbg]() {
                 http_transport_->set_http_timeout_sec(config_.http_timeout_sec);
                 const std::string url = base_url_ + "/chat/completions";
                 json body = build_openai_request(rendered);
@@ -274,6 +282,15 @@ std::future<LLMOutput> OpenAIAdapter::invoke_with_rendered(
                                 full_text += piece;
                                 if (cb) {
                                     cb(piece);
+                                }
+                            }
+                            // Never expose provider raw reasoning_content/reasoning. Only fields
+                            // explicitly labelled as a displayable summary enter the UI channel.
+                            const char* summary_keys[] = {"reasoning_summary", "displayable_reasoning"};
+                            for (const char* key : summary_keys) {
+                                if (d.contains(key) && d[key].is_string() && thinking_cb) {
+                                    thinking_cb(d[key].get_ref<const std::string&>());
+                                    break;
                                 }
                             }
                             if (d.contains("tool_calls") && d["tool_calls"].is_array()) {

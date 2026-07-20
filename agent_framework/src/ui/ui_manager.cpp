@@ -84,17 +84,25 @@ void UIManager::dispatch_error(const std::string& error_message) {
     }
 }
 
-void UIManager::stream_token(const std::string& /*session_id*/, std::string_view token) {
+void UIManager::stream_token(const std::string& session_id, std::string_view token) {
+    stream_chunk(session_id, UiStreamChannel::Answer, token);
+}
+
+void UIManager::stream_thinking(const std::string& session_id, std::string_view token) {
+    stream_chunk(session_id, UiStreamChannel::Thinking, token);
+}
+
+void UIManager::stream_chunk(const std::string& session_id, UiStreamChannel channel,
+                             std::string_view token) {
     std::lock_guard<std::mutex> lock(handlers_mutex_);
     for (auto& h : handlers_) {
         if (h && h->is_active()) {
-            h->handle_stream_token(token);
+            h->handle_stream_chunk(channel, token);
         }
     }
-    for (auto& kv : session_handlers_) {
-        if (kv.second && kv.second->is_active()) {
-            kv.second->handle_stream_token(token);
-        }
+    const auto it = session_handlers_.find(session_id);
+    if (it != session_handlers_.end() && it->second && it->second->is_active()) {
+        it->second->handle_stream_chunk(channel, token);
     }
 }
 

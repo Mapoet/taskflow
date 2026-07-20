@@ -32,7 +32,8 @@ ImGuiHandler::ImGuiHandler(std::shared_ptr<ThreadSafeQueue<StreamMessage>> queue
     : queue_(std::move(queue)), session_id_(std::move(session_id)),
       presentation_(std::move(presentation)) {}
 
-void ImGuiHandler::push_message(const std::string& type, const std::string& content) {
+void ImGuiHandler::push_message(const std::string& type, const std::string& content,
+                                UiStreamChannel channel) {
     if (!queue_ || !active_) {
         return;
     }
@@ -41,16 +42,26 @@ void ImGuiHandler::push_message(const std::string& type, const std::string& cont
     m.message_type = type;
     m.content = content;
     m.timestamp = std::time(nullptr);
+    m.channel = channel;
     queue_->push(std::move(m));
 }
 
 void ImGuiHandler::handle_stream_token(std::string_view token) {
+    handle_stream_chunk(UiStreamChannel::Answer, token);
+}
+
+void ImGuiHandler::handle_stream_chunk(UiStreamChannel channel, std::string_view token) {
     if (!active_) {
+        return;
+    }
+    if (channel == UiStreamChannel::Thinking) {
+        if (presentation_) presentation_->append_thinking_token(token);
+        push_message("thinking", std::string(token), channel);
         return;
     }
     streamed_utf8_bytes_.fetch_add(static_cast<std::size_t>(token.size()), std::memory_order_relaxed);
     if (presentation_) presentation_->append_stream_token(token);
-    push_message("token", std::string(token));
+    push_message("token", std::string(token), channel);
 }
 
 void ImGuiHandler::handle_final_result(const json& result) {
@@ -100,6 +111,7 @@ void ImGuiHandler::handle_aux_event(std::string_view type, const json& payload) 
     if (!active_) {
         return;
     }
+    if (presentation_ && type == "artifact") presentation_->observe_artifact(payload);
     std::string mt = std::string("aux:") + std::string(type);
     push_message(mt, payload.dump());
 }

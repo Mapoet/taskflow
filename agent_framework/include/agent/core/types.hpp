@@ -465,11 +465,17 @@ struct WebConnectionInfo {
 /**
  * @brief 流式输出消息
  */
+enum class UiStreamChannel {
+    Answer,
+    Thinking,
+};
+
 struct StreamMessage {
     std::string session_id;        // 会话 ID
-    std::string message_type;      // 消息类型（"token", "final", "error"）
+    std::string message_type;      // 消息类型（"token", "thinking", "final", "error"）
     std::string content;           // 消息内容
     std::time_t timestamp;         // 时间戳
+    UiStreamChannel channel = UiStreamChannel::Answer;
 };
 
 // ============================================================================

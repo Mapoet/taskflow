@@ -1,7 +1,9 @@
 #include <agent/ui/presentation_model.hpp>
+#include <agent/ui/streaming_markdown.hpp>
 
 #include <algorithm>
 #include <chrono>
+#include <iterator>
 #include <utility>
 
 namespace agent_framework {
@@ -41,38 +43,145 @@ void UiPresentationModel::begin_user_turn(std::string prompt) {
     std::lock_guard<std::mutex> lock(mutex_);
     state_.run_state = UiRunState::Running;
     state_.last_error.clear();
-    state_.turns.push_back({UiTurnRole::User, std::move(prompt), now_ms(), false, false});
-    state_.turns.push_back({UiTurnRole::Assistant, {}, now_ms(), true, false});
+    UiTurn user;
+    user.role = UiTurnRole::User;
+    user.content = prompt;
+    user.raw_markdown = std::move(prompt);
+    user.timestamp_ms = now_ms();
+    state_.turns.push_back(std::move(user));
+    UiTurn assistant;
+    assistant.role = UiTurnRole::Assistant;
+    assistant.timestamp_ms = now_ms();
+    assistant.streaming = true;
+    state_.turns.push_back(std::move(assistant));
     trim_locked();
 }
 
 void UiPresentationModel::ensure_assistant_turn_locked() {
     if (state_.turns.empty() || state_.turns.back().role != UiTurnRole::Assistant ||
         !state_.turns.back().streaming) {
-        state_.turns.push_back({UiTurnRole::Assistant, {}, now_ms(), true, false});
+        UiTurn assistant;
+        assistant.role = UiTurnRole::Assistant;
+        assistant.timestamp_ms = now_ms();
+        assistant.streaming = true;
+        state_.turns.push_back(std::move(assistant));
     }
 }
 
 void UiPresentationModel::append_stream_token(std::string_view token) {
+    std::string markdown;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (state_.run_state == UiRunState::Idle) state_.run_state = UiRunState::Running;
+        ensure_assistant_turn_locked();
+        append_utf8_capped(state_.turns.back().content, token, max_text_bytes_);
+        append_utf8_capped(state_.turns.back().raw_markdown, token, max_text_bytes_);
+        markdown = state_.turns.back().raw_markdown;
+        trim_locked();
+    }
+    // Parsing can become moderately expensive for tables/fences. Keep it outside the UI lock.
+    auto blocks = StreamingMarkdownAssembler{}.parse(markdown, false);
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!state_.turns.empty() && state_.turns.back().role == UiTurnRole::Assistant &&
+        state_.turns.back().raw_markdown == markdown) {
+        auto& existing = state_.turns.back().blocks;
+        std::copy_if(existing.begin(), existing.end(), std::back_inserter(blocks),
+                     [](const UiContentBlock& block) {
+                         return block.kind == UiContentBlockKind::Image;
+                     });
+        existing = std::move(blocks);
+    }
+}
+
+void UiPresentationModel::append_thinking_token(std::string_view token) {
     std::lock_guard<std::mutex> lock(mutex_);
     if (state_.run_state == UiRunState::Idle) state_.run_state = UiRunState::Running;
     ensure_assistant_turn_locked();
-    append_utf8_capped(state_.turns.back().content, token, max_text_bytes_);
+    append_utf8_capped(state_.turns.back().thinking_raw, token, max_text_bytes_);
     trim_locked();
 }
 
-void UiPresentationModel::complete(const json& result) {
+bool UiPresentationModel::observe_artifact(const json& payload) {
+    if (!payload.is_object() || !payload.contains("id") || !payload["id"].is_string() ||
+        !payload.contains("mime") || !payload["mime"].is_string() ||
+        !payload.contains("path") || !payload["path"].is_string()) {
+        return false;
+    }
+    const auto& path = payload["path"].get_ref<const std::string&>();
+    if (path.empty() || path.front() == '/' || path.find('\\') != std::string::npos) return false;
+    std::size_t segment_begin = 0;
+    while (segment_begin <= path.size()) {
+        const auto segment_end = path.find('/', segment_begin);
+        const auto segment = std::string_view(path).substr(
+            segment_begin, segment_end == std::string::npos ? std::string::npos
+                                                            : segment_end - segment_begin);
+        if (segment.empty() || segment == "." || segment == "..") return false;
+        if (segment_end == std::string::npos) break;
+        segment_begin = segment_end + 1;
+    }
+    UiAttachment attachment;
+    attachment.id = payload["id"].get<std::string>();
+    attachment.mime = payload["mime"].get<std::string>();
+    attachment.path = path;
+    attachment.caption = payload.value("caption", std::string{});
+    attachment.tool_call_id = payload.value("tool_call_id", std::string{});
+    attachment.byte_size = payload.value("byte_size", std::size_t{0});
+
     std::lock_guard<std::mutex> lock(mutex_);
     ensure_assistant_turn_locked();
-    UiTurn& turn = state_.turns.back();
-    if (turn.content.empty() && result.contains("final_answer") && result["final_answer"].is_string()) {
-        append_utf8_capped(turn.content, result["final_answer"].get_ref<const std::string&>(),
-                           max_text_bytes_);
-    }
-    turn.streaming = false;
-    state_.run_state = UiRunState::Completed;
-    state_.connection_label = "Ready";
+    auto& turn = state_.turns.back();
+    const auto duplicate = std::find_if(turn.attachments.begin(), turn.attachments.end(),
+                                        [&](const UiAttachment& a) { return a.id == attachment.id; });
+    if (duplicate != turn.attachments.end()) return false;
+    UiContentBlock block;
+    block.kind = UiContentBlockKind::Image;
+    block.attachment_id = attachment.id;
+    block.text = attachment.caption;
+    turn.attachments.push_back(std::move(attachment));
+    turn.blocks.push_back(std::move(block));
     trim_locked();
+    return true;
+}
+
+void UiPresentationModel::complete(const json& result) {
+    std::string markdown;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        ensure_assistant_turn_locked();
+        UiTurn& turn = state_.turns.back();
+        if (turn.raw_markdown.empty() && result.contains("final_answer") && result["final_answer"].is_string()) {
+            const auto& answer = result["final_answer"].get_ref<const std::string&>();
+            append_utf8_capped(turn.raw_markdown, answer, max_text_bytes_);
+            append_utf8_capped(turn.content, answer, max_text_bytes_);
+        }
+        // Only explicitly displayable summaries may enter the UI. Raw `reasoning` is internal.
+        if (turn.thinking_raw.empty()) {
+            const char* keys[] = {"displayable_reasoning", "reasoning_summary"};
+            for (const char* key : keys) {
+                if (result.contains(key) && result[key].is_string()) {
+                    append_utf8_capped(turn.thinking_raw, result[key].get_ref<const std::string&>(),
+                                       max_text_bytes_);
+                    break;
+                }
+            }
+        }
+        turn.streaming = false;
+        markdown = turn.raw_markdown;
+        state_.run_state = UiRunState::Completed;
+        state_.connection_label = "Ready";
+        trim_locked();
+    }
+    auto blocks = StreamingMarkdownAssembler{}.parse(markdown, true);
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!state_.turns.empty() && state_.turns.back().role == UiTurnRole::Assistant &&
+        state_.turns.back().raw_markdown == markdown) {
+        auto& existing = state_.turns.back().blocks;
+        std::copy_if(existing.begin(), existing.end(), std::back_inserter(blocks),
+                     [](const UiContentBlock& block) {
+                         return block.kind == UiContentBlockKind::Image;
+                     });
+        existing = std::move(blocks);
+    }
 }
 
 void UiPresentationModel::fail(std::string message) {
@@ -83,7 +192,13 @@ void UiPresentationModel::fail(std::string message) {
         state_.turns.back().error = true;
     }
     state_.last_error = message;
-    state_.turns.push_back({UiTurnRole::System, std::move(message), now_ms(), false, true});
+    UiTurn notice;
+    notice.role = UiTurnRole::System;
+    notice.content = message;
+    notice.raw_markdown = std::move(message);
+    notice.timestamp_ms = now_ms();
+    notice.error = true;
+    state_.turns.push_back(std::move(notice));
     state_.run_state = UiRunState::Failed;
     state_.connection_label = "Error";
     trim_locked();
@@ -92,7 +207,12 @@ void UiPresentationModel::fail(std::string message) {
 void UiPresentationModel::cancel(std::string message) {
     std::lock_guard<std::mutex> lock(mutex_);
     if (!state_.turns.empty() && state_.turns.back().streaming) state_.turns.back().streaming = false;
-    state_.turns.push_back({UiTurnRole::System, std::move(message), now_ms(), false, false});
+    UiTurn notice;
+    notice.role = UiTurnRole::System;
+    notice.content = message;
+    notice.raw_markdown = std::move(message);
+    notice.timestamp_ms = now_ms();
+    state_.turns.push_back(std::move(notice));
     state_.run_state = UiRunState::Cancelled;
     state_.connection_label = "Ready";
     trim_locked();
@@ -100,7 +220,13 @@ void UiPresentationModel::cancel(std::string message) {
 
 void UiPresentationModel::add_system_notice(std::string message, bool error) {
     std::lock_guard<std::mutex> lock(mutex_);
-    state_.turns.push_back({UiTurnRole::System, std::move(message), now_ms(), false, error});
+    UiTurn notice;
+    notice.role = UiTurnRole::System;
+    notice.content = message;
+    notice.raw_markdown = std::move(message);
+    notice.timestamp_ms = now_ms();
+    notice.error = error;
+    state_.turns.push_back(std::move(notice));
     trim_locked();
 }
 
@@ -159,9 +285,16 @@ void UiPresentationModel::reset() {
 void UiPresentationModel::load_demo_state() {
     reset();
     set_runtime_metadata("orbital-analysis", "OpenAI", "deepseek-chat", "MCP connected");
-    begin_user_turn("Plot sin(x) from 0 to 2π and find its maximum value and location.");
-    append_stream_token("I evaluated the expression over [0, 2π] and generated a plot.\n\n"
-                        "The maximum value is **1.0000** at **x = π/2 ≈ 1.5708 rad**.");
+    begin_user_turn("请分析 sin(x) 在 [0, 2π] 上的极值，并给出可复现的计算过程。");
+    append_thinking_token("已检查定义域、驻点和端点；下面只展示可验证的推理摘要。");
+    append_stream_token(
+        "## 计算结果\n\n"
+        "在闭区间 $[0, 2\\pi]$ 上，函数的最大值为 **1**，位置为 "
+        "$x=\\pi/2\\approx1.5708$。\n\n"
+        "| 项目 | 数值 |\n|---|---:|\n| 最大值 | 1.0000 |\n| 横坐标 | 1.5708 rad |\n\n"
+        "```python\nimport numpy as np\nx = np.linspace(0, 2*np.pi, 2048)\ny = np.sin(x)\nprint(x[y.argmax()], y.max())\n```\n\n"
+        "```mermaid\ngraph LR\n  A[定义域] --> B[求导]\n  B --> C[驻点与端点]\n  C --> D[比较函数值]\n```\n\n"
+        "因此，$\\sin(x)$ 在 $x=\\pi/2$ 处取得全局最大值。");
     ToolExecutionEvent a{ToolExecutionPhase::Started, "fs_search", "demo-fs",
                          json{{"query", "*.cpp"}, {"path", "/workspace/src"}}, {}};
     observe_tool(a);
@@ -180,6 +313,10 @@ void UiPresentationModel::load_demo_state() {
     c.phase = ToolExecutionPhase::Completed;
     c.result = json{{"value", 1.0}, {"x", 1.5708}};
     observe_tool(c);
+    (void)observe_artifact(json{{"id", "demo-console-reference"},
+                                {"mime", "image/png"},
+                                {"path", "agent_framework/docs/assets/ui/scientific-console-reference.png"},
+                                {"caption", "Scientific console reference artifact"}});
     complete(json{{"final_answer", "demo"}, {"iteration", 3}});
 }
 

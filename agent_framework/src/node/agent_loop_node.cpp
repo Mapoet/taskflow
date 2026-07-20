@@ -156,7 +156,8 @@ AgentLoopNode::create(
     std::shared_ptr<SkillServices> skills,
     std::shared_ptr<TaskControl> task_control,
     ToolExecutionObserver tool_execution_observer,
-    SkillEventSink skill_event_sink
+    SkillEventSink skill_event_sink,
+    std::function<void(std::string_view)> thinking_stream_callback
 ) {
     (void)memory_store;
     (void)vector_store;
@@ -167,7 +168,8 @@ AgentLoopNode::create(
         bool is_final = false;
     };
 
-    auto body_func = [agent_config, llm_client, toolbus, stream_callback, skills, task_control,
+    auto body_func = [agent_config, llm_client, toolbus, stream_callback, thinking_stream_callback,
+                      skills, task_control,
                       tool_execution_observer, skill_event_sink](
                          const workflow::ValueMap& inps,
                          const workflow::IterationContext&)
@@ -499,7 +501,18 @@ AgentLoopNode::create(
                 }
                 if (stream_callback) stream_callback(chunk);
             };
-            llm_out = llm_client->invoke(llm_in, "", std::move(cancellable_stream)).get();
+            auto cancellable_thinking = [thinking_stream_callback, task_control](std::string_view chunk) {
+                if (task_control) {
+                    task_control->check_deadline_now();
+                    if (task_control->is_cancel_requested())
+                        throw std::runtime_error("execution cancelled during LLM stream");
+                    if (task_control->is_deadline_exceeded())
+                        throw std::runtime_error("execution deadline exceeded during LLM stream");
+                }
+                if (thinking_stream_callback) thinking_stream_callback(chunk);
+            };
+            llm_out = llm_client->invoke_channels(llm_in, "", std::move(cancellable_stream),
+                                                  std::move(cancellable_thinking)).get();
         } catch (const std::exception& e) {
             if (dbg) {
                 std::cout << "[AgentLoop] LLM call threw exception: " << e.what() << "\n";

@@ -16,6 +16,7 @@
 #include <agent/prompt_renderer/prompt_renderer.hpp>
 #include <agent/skills/skill_services.hpp>
 #include <agent/toolbus/toolbus.hpp>
+#include <agent/toolbus/fs_sandbox.hpp>
 #include <agent/core/types.hpp>
 #include <agent/ui/ui_manager.hpp>
 #include <agent/agent/user_input_preprocessor.hpp>
@@ -25,7 +26,10 @@
 #include <atomic>
 #include <chrono>
 #include <cstdlib>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
+#include <iterator>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -162,6 +166,9 @@ int run_graph_ui(tf::Executor& executor,
     req.options.sink.on_final_json = [&ui](const json& j) { ui.dispatch_final_result(j); };
     req.options.graph_options.stream_callback = [&ui](std::string_view tok) {
         ui.stream_token("default", tok);
+    };
+    req.options.graph_options.thinking_stream_callback = [&ui](std::string_view tok) {
+        ui.stream_thinking("default", tok);
     };
     req.options.graph_options.task_control = control;
     req.options.graph_options.tool_execution_observer = [&ui](const ToolExecutionEvent& event) {
@@ -389,14 +396,24 @@ int main(int argc, char** argv) {
         for (const auto& service : mcp_boot.skipped_mcp_services)
             ui.dispatch_message("mcp_status", json{{"level", "info"}, {"message", "MCP skipped by policy: " + service}});
         if (!demo_state) return;
-        ui.dispatch_message("demo_user", json{{"content", "Plot sin(x) from 0 to 2π and find its maximum value and location."}});
-        ui.stream_token("default", "I evaluated the expression over [0, 2π] and generated a plot.\n\nThe maximum value is 1.0000 at x = π/2 ≈ 1.5708 rad.");
+        ui.dispatch_message("demo_user", json{{"content", "分析 sin(x) 在 [0, 2π] 的极值，并给出可复核结果。"}});
+        ui.stream_thinking("default", "已完成符号分析与数值交叉验证；以下仅展示可公开的推理摘要。\n");
+        ui.stream_token("default",
+            "## 计算结论\n\n函数在区间内的最大值为 **1.0000**，位置为 $x = \\pi/2 \\approx 1.5708$ rad。\n\n"
+            "| 指标 | 数值 |\n|---|---:|\n| 最大值 | 1.0000 |\n| 位置 | π/2 |\n\n"
+            "```cpp\ndouble y = std::sin(x);\n```\n\n"
+            "$$\\max_{x \\in [0,2\\pi]} \\sin(x)=1$$\n\n"
+            "```mermaid\ngraph LR\n  Sample --> Evaluate --> Verify\n```\n");
         ui.dispatch_message("tool_started", json{{"tool_name", "fs_search"}, {"tool_call_id", "demo-fs"}, {"arguments", json{{"query", "*.cpp"}, {"path", "/workspace/src"}}}});
         ui.dispatch_message("tool_completed", json{{"tool_name", "fs_search"}, {"tool_call_id", "demo-fs"}, {"arguments", json{{"query", "*.cpp"}}}, {"result", json{{"matches", 18}, {"top", "agent.cpp, tool_mgr.cpp, plot_tool.cpp"}}}});
         ui.dispatch_message("tool_started", json{{"tool_name", "web_search"}, {"tool_call_id", "demo-web"}, {"arguments", json{{"query", "sin(x) maximum 0 to 2pi"}}}});
         ui.dispatch_message("tool_completed", json{{"tool_name", "web_search"}, {"tool_call_id", "demo-web"}, {"arguments", json{{"query", "sin(x) maximum 0 to 2pi"}}}, {"result", json{{"sources", 5}, {"status", "verified"}}}});
         ui.dispatch_message("tool_started", json{{"tool_name", "expr_eval"}, {"tool_call_id", "demo-expr"}, {"arguments", json{{"expression", "max(sin(x))"}}}});
         ui.dispatch_message("tool_completed", json{{"tool_name", "expr_eval"}, {"tool_call_id", "demo-expr"}, {"arguments", json{{"expression", "max(sin(x))"}}}, {"result", json{{"value", 1.0}, {"x", 1.5708}}}});
+        ui.dispatch_message("artifact", json{{"id", "demo-console-reference"},
+                                               {"mime", "image/png"},
+                                               {"path", "agent_framework/docs/assets/ui/scientific-console-reference.png"},
+                                               {"caption", "Scientific console reference artifact"}});
         ui.dispatch_final_result(json{{"final_answer", "demo"}, {"iteration", 3}, {"history_size", 6}});
     };
 
@@ -500,6 +517,51 @@ int main(int argc, char** argv) {
                 std::lock_guard<std::mutex> lk(g_sse_slot_mutex);
                 g_sse_slot_taken = false;
             });
+    });
+
+    // Artifact files are served only from the canonical AGENT_FS_ROOT and only
+    // as a conservative image allowlist. This route intentionally does not
+    // expose arbitrary fs_read capability to the browser.
+    svr.Get(R"(/ui/files/(.*))", [](const httplib::Request& req, httplib::Response& res) {
+        const auto config = load_fs_sandbox_config_from_env();
+        if (!config || req.matches.size() < 2) {
+            res.status = 404;
+            return;
+        }
+        json error;
+        const auto resolved = fs_resolve_under_root(req.matches[1].str(), config->root, error);
+        std::error_code ec;
+        if (!resolved || !std::filesystem::is_regular_file(*resolved, ec) || ec) {
+            res.status = 404;
+            return;
+        }
+        const auto size = std::filesystem::file_size(*resolved, ec);
+        constexpr std::uintmax_t kMaxUiArtifactBytes = 16U * 1024U * 1024U;
+        if (ec || size > kMaxUiArtifactBytes) {
+            res.status = 413;
+            return;
+        }
+        std::string mime;
+        const auto ext = resolved->extension().string();
+        if (ext == ".png") mime = "image/png";
+        else if (ext == ".jpg" || ext == ".jpeg") mime = "image/jpeg";
+        else if (ext == ".webp") mime = "image/webp";
+        else if (ext == ".gif") mime = "image/gif";
+        else {
+            res.status = 415;
+            return;
+        }
+        std::ifstream input(*resolved, std::ios::binary);
+        if (!input) {
+            res.status = 404;
+            return;
+        }
+        std::string bytes((std::istreambuf_iterator<char>(input)),
+                          std::istreambuf_iterator<char>());
+        res.set_header("Cache-Control", "private, max-age=60");
+        res.set_header("Content-Security-Policy", "default-src 'none'; sandbox");
+        res.set_header("X-Content-Type-Options", "nosniff");
+        res.set_content(bytes, mime.c_str());
     });
 
     const std::string mount = AGENT_WEB_UI_STATIC_ROOT;

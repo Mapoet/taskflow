@@ -52,6 +52,8 @@ struct AgentWorkflowDeps {
  */
 struct CliAgentGraphOptions {
     std::function<void(std::string_view)> stream_callback{};
+    /** Explicitly displayable reasoning summary; never raw provider chain-of-thought. */
+    std::function<void(std::string_view)> thinking_stream_callback{};
     std::shared_ptr<TaskControl> task_control{};
     ToolExecutionObserver tool_execution_observer{};
     SkillEventSink skill_event_sink{};

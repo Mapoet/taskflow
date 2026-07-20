@@ -4,6 +4,7 @@
  */
 
 #include <agent/ui/thread_safe_queue.hpp>
+#include <agent/ui/presentation_model.hpp>
 #include <agent/ui/ui_manager.hpp>
 
 #include <cassert>
@@ -37,6 +38,20 @@ void test_aux_event_message_type() {
     assert(h.drain_messages(out, 5) == 1);
     assert(out[0].message_type == "aux:tool_start");
     assert(out[0].content == p.dump());
+}
+
+void test_thinking_channel_is_separate() {
+    auto q = std::make_shared<ThreadSafeQueue<StreamMessage>>();
+    auto presentation = std::make_shared<UiPresentationModel>();
+    presentation->begin_user_turn("question");
+    ImGuiHandler h(q, "default", presentation);
+    h.handle_stream_chunk(UiStreamChannel::Thinking, "displayable summary");
+    std::vector<StreamMessage> out;
+    assert(h.drain_messages(out, 5) == 1);
+    assert(out[0].message_type == "thinking");
+    assert(out[0].channel == UiStreamChannel::Thinking);
+    assert(presentation->snapshot().turns.back().raw_markdown.empty());
+    assert(presentation->snapshot().turns.back().thinking_raw == "displayable summary");
 }
 
 void test_final_pushes_body_when_no_stream() {
@@ -73,6 +88,7 @@ void test_final_meta_only_when_streamed() {
 int main() {
     test_push_drain_order();
     test_aux_event_message_type();
+    test_thinking_channel_is_separate();
     test_final_pushes_body_when_no_stream();
     test_final_meta_only_when_streamed();
     return 0;

@@ -261,6 +261,9 @@ int run_graph_ui(tf::Executor& executor,
             ui.stream_token("default", tok);
         }
     };
+    req.options.graph_options.thinking_stream_callback = [&ui](std::string_view tok) {
+        if (!g_shutdown.load()) ui.stream_thinking("default", tok);
+    };
     req.options.graph_options.task_control = control;
     req.options.graph_options.tool_execution_observer = [presentation](const ToolExecutionEvent& event) {
         if (presentation) presentation->observe_tool(event);
@@ -581,6 +584,7 @@ int main(int argc, char** argv) {
         glfwSwapBuffers(window);
     }
 
+    agent_framework::example::clear_imgui_artifact_textures();
     ImGui_ImplOpenGL3_Shutdown();
     ImGui_ImplGlfw_Shutdown();
 #if defined(AGENT_HAS_IMPLOT3D)

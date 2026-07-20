@@ -27,6 +27,8 @@ struct ImGuiSkillStatus {
 };
 
 void apply_scientific_console_theme();
+/** Release OpenGL textures created for sandboxed image artifacts. Call before GL teardown. */
+void clear_imgui_artifact_textures();
 ImGuiConsoleAction render_scientific_console(const UiPresentationSnapshot& snapshot,
                                              const ImGuiSkillStatus& skills,
                                              char* input, std::size_t input_size,

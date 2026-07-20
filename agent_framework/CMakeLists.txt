@@ -440,6 +440,9 @@ endif()
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/ui/presentation_model.cpp)
     list(APPEND AGENT_SOURCES src/ui/presentation_model.cpp)
 endif()
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/ui/streaming_markdown.cpp)
+    list(APPEND AGENT_SOURCES src/ui/streaming_markdown.cpp)
+endif()
 
 # Node 模块
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/node/node_factory.cpp)
@@ -899,7 +902,8 @@ if(AGENT_BUILD_IMGUI)
         target_compile_definitions(imgui_agent_demo PRIVATE
             "AGENT_IMG_LSAN_SUPP_PATH=\"${CMAKE_CURRENT_SOURCE_DIR}/tools/lsan_suppressions_imgui.txt\"")
         target_include_directories(imgui_agent_demo PRIVATE
-            ${CMAKE_CURRENT_SOURCE_DIR}/../3rd-party/CLI11)
+            ${CMAKE_CURRENT_SOURCE_DIR}/../3rd-party/CLI11
+            ${CMAKE_CURRENT_SOURCE_DIR}/../3rd-party/stb)
         target_link_libraries(imgui_agent_demo PRIVATE agent_framework imgui_wpu glfw OpenGL::GL)
         if(TARGET implot_wpu)
             target_link_libraries(imgui_agent_demo PRIVATE implot_wpu)
@@ -1012,6 +1016,12 @@ if(BUILD_TESTING)
         target_link_libraries(test_ui_presentation_model PRIVATE agent_framework)
         add_test(NAME ui_presentation_model COMMAND test_ui_presentation_model)
         set_tests_properties(ui_presentation_model PROPERTIES LABELS "rich-ui;scientific-console")
+    endif()
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_streaming_markdown.cpp)
+        add_executable(test_streaming_markdown tests/test_streaming_markdown.cpp)
+        target_link_libraries(test_streaming_markdown PRIVATE agent_framework)
+        add_test(NAME streaming_markdown_assembler COMMAND test_streaming_markdown)
+        set_tests_properties(streaming_markdown_assembler PROPERTIES LABELS "rich-ui;ui-unit")
     endif()
     if(AGENT_BUILD_TUI AND TARGET ftxui::ftxui AND
        EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_ftxui_console_view.cpp)

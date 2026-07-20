@@ -128,6 +128,43 @@ std::future<LLMOutput> LLMClient::invoke_with_rendered_prompt(
     return adapter->invoke_with_rendered(rendered, std::move(stream_callback));
 }
 
+std::future<LLMOutput> LLMClient::invoke_channels(
+    const LLMInput& input, const std::string& provider,
+    std::function<void(std::string_view)> answer_callback,
+    std::function<void(std::string_view)> thinking_callback) {
+    const RenderedPrompt rendered = render_prompt(input, provider);
+    if (rendered.context_budget_blocked) {
+        return std::async(std::launch::deferred, []() {
+            LLMOutput output;
+            output.is_final = true;
+            output.final_answer =
+                "[context_budget] blocked: AGENT_CONTEXT_BUDGET_STRICT and combined budget still exceeded "
+                "after truncation";
+            return output;
+        });
+    }
+    return invoke_with_rendered_prompt_channels(rendered, provider, std::move(answer_callback),
+                                                std::move(thinking_callback));
+}
+
+std::future<LLMOutput> LLMClient::invoke_with_rendered_prompt_channels(
+    const RenderedPrompt& rendered, const std::string& provider,
+    std::function<void(std::string_view)> answer_callback,
+    std::function<void(std::string_view)> thinking_callback) {
+    std::shared_ptr<ModelAdapter> adapter;
+    std::string use_provider = provider;
+    {
+        std::lock_guard<std::mutex> lock(adapters_mutex_);
+        if (use_provider.empty()) use_provider = default_provider_;
+        const auto it = adapters_.find(use_provider);
+        if (it == adapters_.end())
+            throw std::invalid_argument("LLMClient: unknown provider: " + use_provider);
+        adapter = it->second;
+    }
+    return adapter->invoke_with_rendered_channels(rendered, std::move(answer_callback),
+                                                  std::move(thinking_callback));
+}
+
 void LLMClient::configure(const std::string& provider, const ModelConfig& config) {
     std::lock_guard<std::mutex> lock(adapters_mutex_);
     const auto it = adapters_.find(provider);

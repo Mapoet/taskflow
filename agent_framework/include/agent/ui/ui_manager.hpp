@@ -47,6 +47,15 @@ public:
     virtual void handle_stream_token(std::string_view token) = 0;
 
     /**
+     * @brief Typed stream channel. The compatibility default forwards answer chunks and
+     *        deliberately ignores thinking chunks so legacy/CLI handlers never expose
+     *        model-internal reasoning by accident.
+     */
+    virtual void handle_stream_chunk(UiStreamChannel channel, std::string_view token) {
+        if (channel == UiStreamChannel::Answer) handle_stream_token(token);
+    }
+
+    /**
      * @brief 处理最终结果
      * @param result 最终结果（JSON 格式）
      */
@@ -120,6 +129,7 @@ public:
                          std::shared_ptr<UiPresentationModel> presentation = {});
 
     void handle_stream_token(std::string_view token) override;
+    void handle_stream_chunk(UiStreamChannel channel, std::string_view token) override;
     void handle_final_result(const json& result) override;
     void handle_error(const std::string& error_message) override;
     void handle_aux_event(std::string_view type, const json& payload) override;
@@ -140,7 +150,8 @@ private:
     std::atomic<std::size_t> streamed_utf8_bytes_{0};
     std::shared_ptr<UiPresentationModel> presentation_;
 
-    void push_message(const std::string& type, const std::string& content);
+    void push_message(const std::string& type, const std::string& content,
+                      UiStreamChannel channel = UiStreamChannel::Answer);
 };
 
 /**
@@ -157,6 +168,7 @@ public:
               std::shared_ptr<WebConnectionInfo> connection);
 
     void handle_stream_token(std::string_view token) override;
+    void handle_stream_chunk(UiStreamChannel channel, std::string_view token) override;
     void handle_final_result(const json& result) override;
     void handle_error(const std::string& error_message) override;
     void handle_aux_event(std::string_view type, const json& payload) override;
@@ -253,6 +265,13 @@ public:
      * @param token token 内容
      */
     void stream_token(const std::string& session_id, std::string_view token);
+
+    /** @brief Stream an explicitly displayable thinking summary. */
+    void stream_thinking(const std::string& session_id, std::string_view token);
+
+    /** @brief Typed stream primitive used by answer/thinking compatibility wrappers. */
+    void stream_chunk(const std::string& session_id, UiStreamChannel channel,
+                      std::string_view token);
 
     /**
      * @brief 移除处理器

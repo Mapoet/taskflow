@@ -53,9 +53,38 @@ void test_u1_dispatch_hits_all_handlers() {
     assert(pa->last_payload == data);
 }
 
+void test_stream_isolated_by_session_and_channel() {
+    UIManager ui;
+    auto ca = std::make_shared<WebConnectionInfo>();
+    ca->session_id = "a";
+    ca->is_active = true;
+    auto cb = std::make_shared<WebConnectionInfo>();
+    cb->session_id = "b";
+    cb->is_active = true;
+    auto a = std::make_unique<WebHandler>("a", ca);
+    auto b = std::make_unique<WebHandler>("b", cb);
+    WebHandler* pa = a.get();
+    WebHandler* pb = b.get();
+    ui.register_web_connection("a", std::move(a));
+    ui.register_web_connection("b", std::move(b));
+
+    ui.stream_token("a", "answer");
+    ui.stream_thinking("a", "summary");
+
+    std::string chunk;
+    assert(pa->try_pop_sse_chunk(chunk));
+    assert(chunk.find("\"kind\":\"token\"") != std::string::npos);
+    assert(chunk.find("answer") != std::string::npos);
+    assert(pa->try_pop_sse_chunk(chunk));
+    assert(chunk.find("\"kind\":\"thinking\"") != std::string::npos);
+    assert(chunk.find("summary") != std::string::npos);
+    assert(!pb->try_pop_sse_chunk(chunk));
+}
+
 } // namespace
 
 int main() {
     test_u1_dispatch_hits_all_handlers();
+    test_stream_isolated_by_session_and_channel();
     return 0;
 }

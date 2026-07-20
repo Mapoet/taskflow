@@ -59,6 +59,19 @@ public:
     ) = 0;
 
     /**
+     * Typed streaming extension. Adapters that can distinguish an explicitly
+     * displayable reasoning summary override this method. The default keeps all
+     * existing adapters source-compatible and emits answer chunks only.
+     */
+    virtual std::future<LLMOutput> invoke_with_rendered_channels(
+        const RenderedPrompt& rendered,
+        std::function<void(std::string_view)> answer_callback,
+        std::function<void(std::string_view)> thinking_callback) {
+        (void)thinking_callback;
+        return invoke_with_rendered(rendered, std::move(answer_callback));
+    }
+
+    /**
      * @brief 获取模型支持的工具列表
      * @return 工具元数据列表
      */
@@ -117,6 +130,10 @@ public:
         const RenderedPrompt& rendered,
         std::function<void(std::string_view)> stream_callback = nullptr
     ) override;
+    std::future<LLMOutput> invoke_with_rendered_channels(
+        const RenderedPrompt& rendered,
+        std::function<void(std::string_view)> answer_callback,
+        std::function<void(std::string_view)> thinking_callback) override;
 
     std::vector<ToolMeta> get_available_tools() const override;
     void configure(const ModelConfig& config) override;
@@ -155,6 +172,10 @@ public:
         const RenderedPrompt& rendered,
         std::function<void(std::string_view)> stream_callback = nullptr
     ) override;
+    std::future<LLMOutput> invoke_with_rendered_channels(
+        const RenderedPrompt& rendered,
+        std::function<void(std::string_view)> answer_callback,
+        std::function<void(std::string_view)> thinking_callback) override;
 
     std::vector<ToolMeta> get_available_tools() const override;
     void configure(const ModelConfig& config) override;
@@ -324,6 +345,18 @@ public:
         const std::string& provider = "",
         std::function<void(std::string_view)> stream_callback = nullptr
     );
+
+    std::future<LLMOutput> invoke_with_rendered_prompt_channels(
+        const RenderedPrompt& rendered,
+        const std::string& provider,
+        std::function<void(std::string_view)> answer_callback,
+        std::function<void(std::string_view)> thinking_callback);
+
+    std::future<LLMOutput> invoke_channels(
+        const LLMInput& input,
+        const std::string& provider,
+        std::function<void(std::string_view)> answer_callback,
+        std::function<void(std::string_view)> thinking_callback);
 
     /**
      * @brief 配置模型参数

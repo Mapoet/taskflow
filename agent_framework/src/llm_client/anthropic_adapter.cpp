@@ -273,9 +273,17 @@ std::future<LLMOutput> AnthropicAdapter::invoke(
 std::future<LLMOutput> AnthropicAdapter::invoke_with_rendered(
     const RenderedPrompt& rendered,
     std::function<void(std::string_view)> stream_callback) {
-    return std::async(std::launch::async, [this, rendered, cb = std::move(stream_callback)]() mutable {
+    return invoke_with_rendered_channels(rendered, std::move(stream_callback), nullptr);
+}
+
+std::future<LLMOutput> AnthropicAdapter::invoke_with_rendered_channels(
+    const RenderedPrompt& rendered,
+    std::function<void(std::string_view)> answer_callback,
+    std::function<void(std::string_view)> thinking_callback) {
+    return std::async(std::launch::async, [this, rendered, cb = std::move(answer_callback),
+                                          thinking_cb = std::move(thinking_callback)]() mutable {
         return invoke_with_retries(
-            [this, &rendered, &cb]() {
+            [this, &rendered, &cb, &thinking_cb]() {
                 http_transport_->set_http_timeout_sec(config_.http_timeout_sec);
                 const std::string url = anthropic_base_ + "/v1/messages";
                 json body = build_anthropic_request(rendered);
@@ -326,6 +334,11 @@ std::future<LLMOutput> AnthropicAdapter::invoke_with_rendered(
                                 if (cb) {
                                     cb(piece);
                                 }
+                            } else if (dt == "summary_text_delta" && d.contains("text") &&
+                                       d["text"].is_string() && thinking_cb) {
+                                // Anthropic thinking_delta is raw internal reasoning and is not
+                                // user-displayable. Only an explicit summary delta is forwarded.
+                                thinking_cb(d["text"].get_ref<const std::string&>());
                             } else if (dt == "input_json_delta" && d.contains("partial_json") &&
                                        d["partial_json"].is_string()) {
                                 tools_by_index[idx].json_frag += d["partial_json"].get<std::string>();

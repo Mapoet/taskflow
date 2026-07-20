@@ -35,10 +35,18 @@ void TuiHandler::append_capped(std::string& buf, std::string_view chunk, std::si
 }
 
 void TuiHandler::handle_stream_token(std::string_view token) {
+    handle_stream_chunk(UiStreamChannel::Answer, token);
+}
+
+void TuiHandler::handle_stream_chunk(UiStreamChannel channel, std::string_view token) {
     if (!active_) {
         return;
     }
     std::lock_guard<std::mutex> lock(mutex_);
+    if (channel == UiStreamChannel::Thinking) {
+        if (presentation_) presentation_->append_thinking_token(token);
+        return;
+    }
     append_capped(stream_text_, token, k_max_stream_bytes);
     if (presentation_) presentation_->append_stream_token(token);
 }
