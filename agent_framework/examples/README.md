@@ -15,10 +15,10 @@ It emits `agent.taskflow/skill-platform-demo/v1` JSON covering validation, resol
 permissions, Doctor, isolated tests, cache verification, runtime/audit events, optional typed
 configuration, and CycloneDX package metadata. It performs no network access or installation.
 
-`cli_agent_demo`, `cli_agent_skills_demo`, `cli_a2a_orchestrator_demo`, `imgui_agent_demo`,
-`tui_agent_demo`, and `web_ui_demo` use the same example bootstrap contract for Skill discovery,
-Cursor MCP import, and structured Skill events. `AGENT_SKILLS_DIR` takes precedence; the
-Skills-specific and rich UI applications otherwise scan Cursor's two default Skill roots.
+`cli_agent_demo`, `imgui_agent_demo`, `tui_agent_demo`, `web_ui_demo`, and `agent_server_demo`
+use the same `LiveRuntime` bootstrap contract for LLM defaults, local and built-in tools, Skill discovery,
+Cursor MCP import, and structured Skill events. `AGENT_SKILLS_DIR` takes precedence; rich UI applications
+otherwise scan Cursor's two default Skill roots.
 The fullscreen TUI uses the vendored FTXUI 7.0.1 backend from `3rd-party/FTXUI`; initialize
 submodules recursively before enabling `AGENT_BUILD_TUI`.
 
@@ -28,7 +28,7 @@ submodules recursively before enabling `AGENT_BUILD_TUI`.
 - `multimodal_agent`: A2A text and structured-data message serialization.
 - `tool_integration`: ToolBus schema validation and asynchronous local invocation.
 - `workflow_custom`: custom source/node/sink workflow.
-- `agent_server_demo`: A2A server used by live integration tests.
+- `agent_server_demo`: Live A2A server; use `tools/run_agent_server.sh` and `configs/server.env.example`.
 
 Examples that require an LLM, remote MCP service, A2A peer, or graphical display are build-tested
 offline and run only when their corresponding environment and optional build flag are available.

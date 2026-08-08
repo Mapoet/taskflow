@@ -1,8 +1,15 @@
 #pragma once
 
+#include <agent/agent_server/agent_server.hpp>
+#include <agent/llm_client/llm_client.hpp>
+#include <agent/prompt_renderer/prompt_renderer.hpp>
 #include <agent/skills/skill_runtime.hpp>
 #include <agent/skills/skill_services.hpp>
+#include <agent/toolbus/draw_tools.hpp>
+#include <agent/toolbus/expr_tools.hpp>
+#include <agent/toolbus/fs_tools.hpp>
 #include <agent/toolbus/toolbus.hpp>
+#include <agent/toolbus/web_tools.hpp>
 
 #include <algorithm>
 #include <cstdint>
@@ -41,6 +48,37 @@ struct SkillUiStatus {
     std::size_t errors = 0;
     std::string root;
     std::string active = "-";
+};
+
+/**
+ * @brief All interactive/live examples share this single construction path.
+ *
+ * Keep UI and server adapters deliberately thin: option parsing belongs to an
+ * executable, while provider defaults, local tools, MCP, Skills, built-ins,
+ * and the common AgentConfig belong here.
+ */
+struct LiveRuntimeOptions {
+    std::string agent_name = "agent-demo";
+    std::filesystem::path skills_root;
+    std::string cursor_mcp_config;
+    std::vector<std::string> skip_mcp_services;
+    std::string provider;
+    std::string model;
+    int max_iterations = -1;
+    bool use_cursor_skill_roots = true;
+    bool import_cursor_mcp = true;
+    bool enable_skills = true;
+    bool enable_tier_b = false;
+    bool verbose = false;
+};
+
+struct LiveRuntime {
+    std::shared_ptr<LLMClient> llm;
+    std::shared_ptr<ToolBus> toolbus;
+    std::shared_ptr<SkillServices> skills;
+    AgentConfig config;
+    InputPolicyConfig input_policy;
+    BootstrapResult bootstrap;
 };
 
 inline void set_environment_override(const char* key, const std::string& value) {
@@ -155,6 +193,111 @@ inline BootstrapResult bootstrap_agent_services(ToolBus& bus, const BootstrapOpt
         }
     }
     return result;
+}
+
+inline void set_env_if_absent(const char* key, const std::string& value) {
+    if(std::getenv(key) != nullptr) return;
+    set_environment_override(key, value);
+}
+
+/** Apply the provider defaults formerly copied into every live demo. */
+inline void apply_live_llm_env_defaults() {
+    if(std::getenv("OPENAI_API_KEY") == nullptr) {
+        if(const char* key = std::getenv("DEEPSEEK_API_KEY"); key && *key)
+            set_environment_override("OPENAI_API_KEY", key);
+    }
+    set_env_if_absent("AGENT_OPENAI_BASE_URL", "https://api.deepseek.com/v1");
+    set_env_if_absent("AGENT_LLM_PROVIDER", "openai");
+    set_env_if_absent("AGENT_HTTP_TIMEOUT_SEC", "120");
+    set_env_if_absent("AGENT_LLM_MAX_RETRIES", "1");
+    if(std::getenv("AGENT_LLM_MODEL") == nullptr) {
+        const char* configured = std::getenv("DEEPSEEK_MODEL");
+        set_environment_override("AGENT_LLM_MODEL",
+                                 configured && *configured ? configured : "deepseek-chat");
+    }
+}
+
+inline ToolMeta live_demo_add_tool_meta() {
+    ToolMeta meta;
+    meta.name = "add";
+    meta.description = "sum two integers";
+    meta.schema = nlohmann::json::parse(R"({"type":"object","properties":{"a":{"type":"integer"},"b":{"type":"integer"}},"required":["a","b"]})");
+    return meta;
+}
+
+inline void register_live_demo_tools(ToolBus& bus) {
+    bus.register_local_tool("add", [](const nlohmann::json& value) {
+        return nlohmann::json{{"result", value.at("a").get<int>() + value.at("b").get<int>()}};
+    }, live_demo_add_tool_meta());
+}
+
+inline std::string live_system_prompt(bool mcp_available, bool skills_enabled) {
+    std::string prompt = mcp_available
+        ? "你是一个能够调用外部工具的助手。若有与问题直接相关的工具，优先调用工具获取可核对的信息；"
+          "若无完全对口工具，可结合现有工具输出与常识推理补全结论。\n"
+        : "你是一个助手。当前未加载 MCP 工具；请基于常识与公开典型情况回答，并明确标注为估算。\n";
+    prompt += "不要编造无法核对的细节；信息不足时请说明假设并给出合理区间。\n";
+    if(skills_enabled)
+        prompt += "若系统提示中带有 Active skill，请优先遵循该技能说明；run_skill_script 的 skill_id 须为已索引技能的 canonical 名，且需配置 allowlist。\n";
+    prompt += "回答使用简体中文，结构清晰。\n";
+    return prompt;
+}
+
+inline LiveRuntime build_live_runtime(const LiveRuntimeOptions& options) {
+    if(options.agent_name.empty()) throw std::invalid_argument("LiveRuntimeOptions.agent_name is required");
+    if(!options.provider.empty()) set_environment_override("AGENT_LLM_PROVIDER", options.provider);
+    if(!options.model.empty()) set_environment_override("AGENT_LLM_MODEL", options.model);
+    apply_live_llm_env_defaults();
+
+    LiveRuntime runtime;
+    runtime.llm = std::make_shared<LLMClient>(LLMClient::from_env());
+    runtime.llm->set_prompt_renderer(std::make_shared<PromptRenderer>());
+    runtime.toolbus = std::make_shared<ToolBus>();
+    register_live_demo_tools(*runtime.toolbus);
+
+    BootstrapOptions bootstrap_options;
+    bootstrap_options.skills_root = options.skills_root;
+    bootstrap_options.cursor_mcp_config = options.cursor_mcp_config;
+    bootstrap_options.use_cursor_skill_roots = options.use_cursor_skill_roots;
+    bootstrap_options.import_cursor_mcp = options.import_cursor_mcp;
+    bootstrap_options.verbose = options.verbose;
+    bootstrap_options.skip_mcp_services = options.skip_mcp_services;
+    if(!options.enable_skills) set_environment_override("AGENT_SKILLS_DISABLED", "1");
+    runtime.bootstrap = bootstrap_agent_services(*runtime.toolbus, bootstrap_options);
+    runtime.skills = runtime.bootstrap.skills;
+    if(runtime.skills && runtime.skills->manager)
+        runtime.skills->manager->attach_toolbus(runtime.toolbus);
+
+    runtime.toolbus->ensure_default_tools_registered([&] {
+        register_builtin_fs_tools_if_configured(*runtime.toolbus);
+        register_builtin_web_tools_if_configured(*runtime.toolbus);
+        register_builtin_expr_tools_if_configured(*runtime.toolbus);
+        register_builtin_draw_tools_if_configured(*runtime.toolbus);
+    });
+    runtime.config.name = options.agent_name;
+    runtime.config.system_prompt = live_system_prompt(runtime.bootstrap.mcp_services > 0,
+                                                      runtime.skills != nullptr);
+    if(runtime.skills && runtime.skills->registry && env_truthy("AGENT_SKILL_INJECT_CATALOG")) {
+        std::size_t cap = 2048;
+        if(const char* raw = std::getenv("AGENT_SKILL_CATALOG_MAX_CHARS")) {
+            const int parsed = std::atoi(raw);
+            if(parsed > 0) cap = static_cast<std::size_t>(parsed);
+        }
+        runtime.config.system_prompt += format_skill_catalog_l1(*runtime.skills->registry, cap);
+    }
+    if(const char* model = std::getenv("AGENT_LLM_MODEL")) runtime.config.model_config.model_name = model;
+    if(options.max_iterations > 0) runtime.config.max_iterations = options.max_iterations;
+    runtime.input_policy.tier_b_enabled = options.enable_tier_b;
+    runtime.input_policy.tier_b_llm = options.enable_tier_b ? runtime.llm : nullptr;
+    return runtime;
+}
+
+inline AgentExecutionProfile to_execution_profile(const LiveRuntime& runtime) {
+    AgentExecutionProfile profile;
+    profile.config = runtime.config;
+    profile.deps = {runtime.llm, runtime.toolbus, runtime.skills};
+    profile.input_policy = runtime.input_policy;
+    return profile;
 }
 
 inline nlohmann::json skill_event_json(const SkillEvent& event) {

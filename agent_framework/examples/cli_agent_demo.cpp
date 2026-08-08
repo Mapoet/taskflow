@@ -242,12 +242,19 @@ int main(int argc, char** argv) {
 
     std::signal(SIGINT, on_sigint_handler);
 
-    apply_live_llm_env_defaults();
-
     CLIHandler cli;
-    std::shared_ptr<LLMClient> llm;
+    example::LiveRuntime runtime;
     try {
-        llm = std::make_shared<LLMClient>(LLMClient::from_env());
+        example::LiveRuntimeOptions options;
+        options.agent_name = "cli_agent_demo";
+        options.cursor_mcp_config = cursor_mcp_json_arg;
+        options.provider = provider_arg;
+        options.max_iterations = max_iterations;
+        options.use_cursor_skill_roots = false;
+        options.import_cursor_mcp = !(no_cursor_mcp || env_truthy("AGENT_TEST_SKIP_CURSOR_MCP") ||
+                                      env_truthy("AGENT_CLI_SKIP_CURSOR_MCP"));
+        options.verbose = verbose || env_truthy("AGENT_TEST_AGENT_LOOP_DEBUG");
+        runtime = example::build_live_runtime(options);
     } catch (const std::exception& e) {
         std::cerr << "[error] LLM init: " << e.what() << "\n"
                   << "Set AGENT_LLM_PROVIDER, OPENAI_API_KEY / ANTHROPIC_API_KEY, or DEEPSEEK_API_KEY "
@@ -255,72 +262,8 @@ int main(int argc, char** argv) {
                      "(see docs/guides/getting_started.md)\n";
         return 1;
     }
-    auto renderer = std::make_shared<PromptRenderer>();
-    llm->set_prompt_renderer(renderer);
-
-    const bool skip_cursor_mcp = no_cursor_mcp || env_truthy("AGENT_TEST_SKIP_CURSOR_MCP") ||
-                                 env_truthy("AGENT_CLI_SKIP_CURSOR_MCP");
-    const bool mcp_dbg = verbose || env_truthy("AGENT_TEST_AGENT_LOOP_DEBUG");
-
-    auto bus = std::make_shared<ToolBus>();
-    try {
-        register_demo_tools(*bus);
-    } catch (const std::exception& e) {
-        std::cerr << "[error] register tools: " << e.what() << '\n';
-        return 1;
-    }
-
-    std::size_t mcp_services = 0;
-    if (!skip_cursor_mcp) {
-        std::clog << "[cli_agent_demo] loading Cursor MCP config (use --no-cursor-mcp to skip)...\n"
-                     "  (each request may block up to AGENT_MCP_REQUEST_TIMEOUT_MS; default 60000 ms)\n"
-                  << std::flush;
-        const std::string mcp_cfg = resolve_cursor_mcp_config_path(cursor_mcp_json_arg);
-        import_cursor_mcp_tools(*bus, mcp_cfg, mcp_dbg, &mcp_services);
-        if (!mcp_dbg && mcp_services > 0) {
-            std::clog << "[cli_agent_demo] cursor_mcp: " << mcp_services << " service(s) registered\n";
-        }
-    } else if (mcp_dbg) {
-        std::clog << "cursor_mcp: skipped (--no-cursor-mcp or skip env)\n";
-    }
-
-    AgentWorkflowDeps deps;
-    deps.llm = llm;
-    deps.toolbus = bus;
-    example::BootstrapOptions skill_options;
-    skill_options.use_cursor_skill_roots = false;
-    deps.skills = example::discover_skill_services(skill_options);
-
-    AgentConfig cfg;
-    cfg.name = "cli_agent_demo";
-    if (!skip_cursor_mcp && mcp_services > 0) {
-        cfg.system_prompt =
-            "你是一个能够调用外部工具的助手。\n"
-            "若有与问题直接相关的工具，优先调用工具获取可核对的信息；若无完全对口工具，可结合现有工具输出与常识推理补全结论。\n"
-            "不要编造无法核对的细节；若信息不足，请明确假设并给出合理区间。\n"
-            "回答使用简体中文，结构清晰。\n";
-    } else {
-        cfg.system_prompt =
-            "你是一个助手。当前未加载 MCP 工具；请基于常识与公开典型情况回答，并明确标注为估算。\n"
-            "不要编造无法核对的细节；信息不足时请说明假设并给出合理区间。\n"
-            "回答使用简体中文，结构清晰。\n";
-    }
-    if (env_truthy("AGENT_SKILL_INJECT_CATALOG") && deps.skills && deps.skills->registry) {
-        std::size_t cap = 2048;
-        if (const char* c = std::getenv("AGENT_SKILL_CATALOG_MAX_CHARS")) {
-            const int v = std::atoi(c);
-            if (v > 0) {
-                cap = static_cast<std::size_t>(v);
-            }
-        }
-        cfg.system_prompt += format_skill_catalog_l1(*deps.skills->registry, cap);
-    }
-    if (const char* m = std::getenv("AGENT_LLM_MODEL")) {
-        cfg.model_config.model_name = m;
-    }
-    if (max_iterations > 0) {
-        cfg.max_iterations = max_iterations;
-    }
+    AgentWorkflowDeps deps{runtime.llm, runtime.toolbus, runtime.skills};
+    AgentConfig cfg = runtime.config;
 
     tf::Executor executor;
 

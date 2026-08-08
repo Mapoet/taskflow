@@ -39,8 +39,18 @@ AgentTaskStatus agent_task_status_from_a2a_state(std::string_view state);
  */
 bool try_parse_task_status_sse(const SseEvent& event, AgentTask& out);
 
+/** Parse a StreamResponse.message delta as a WORKING task carrying one agent message. */
+bool try_parse_task_message_sse(const SseEvent& event, AgentTask& out);
+
 /** @brief StreamResponse.statusUpdate 根对象（ProtoJSON） */
 json stream_response_status_update(const AgentTask& task);
+
+/** StreamResponse.message carrying one append-only LLM delta. */
+json stream_response_message_delta(const std::string& task_id,
+                                   const std::optional<std::string>& context_id,
+                                   std::string_view message_id,
+                                   std::string_view text,
+                                   std::string_view channel);
 
 /** @brief StreamResponse.artifactUpdate 根对象（ProtoJSON） */
 json stream_response_artifact_update(const AgentArtifact& artifact,

@@ -110,6 +110,10 @@ public:
 
     void push_artifact_update(const std::string& task_id, const AgentArtifact& artifact);
 
+    /** Push an A2A StreamResponse.message append delta for an active task. */
+    void push_message_delta(const std::string& task_id, std::string_view text,
+                            std::string_view channel = "answer");
+
     /**
      * @brief WP2.8：向订阅方推送 Verifier 子事件（SSE event 名如 verifier_started / verifier_completed）
      * @param payload 业务字段；实现中会填入 component=verifier 后再序列化
@@ -185,6 +189,7 @@ private:
     static std::string generate_task_id();
     void remove_sse_channel(const std::string& task_id,
                             const std::shared_ptr<internal::SseServerChannel>& ch);
+    void push_execution_status_update(const std::string& task_id, const json& metadata);
 };
 
 } // namespace agent_framework

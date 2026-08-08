@@ -108,6 +108,10 @@ void SSEConnection::handle_sse_event(const std::string& data_payload) {
             }
             return;
         }
+        if (a2a::try_parse_task_message_sse(ev, task)) {
+            if(on_status_update_) on_status_update_(task);
+            return;
+        }
 
         json root = json::parse(data_payload);
         if (root.contains("artifactUpdate") && root["artifactUpdate"].is_object()) {

@@ -62,6 +62,23 @@ Server 启动前必须配置 `AgentExecutionProfile`。每个任务由 Server �
 `ExecutionRequest` 并调用 `GraphExecutor::execute_sync`；旧 `set_task_handler` 双轨接口已删除。
 未显式注入 SessionStore 时，Server 使用 SQLite；测试可注入 `InMemorySessionStore`。
 
+## Live demo 与启动器
+
+`agent_server_demo` 是**仅 Live** 的对外服务示例：它与 `cli_agent_demo`、TUI、Web、ImGui
+共享 `examples/common/agent_example_bootstrap.hpp::build_live_runtime`，统一初始化真实 LLM、
+Cursor MCP、Skills、FS/WEB/Expr/Draw 和提示词。它不提供 mock 角色；确定性 A2A 覆盖应使用进程内
+`AgentServer` + fake adapter 测试。
+
+```bash
+cp agent_framework/examples/configs/server.env.example .env.server
+agent_framework/tools/run_agent_server.sh --port 9001 --fs-root "$PWD"
+```
+
+启动器优先读取 `.env.server`，然后复用 `.env.ui` 的 LLM/MCP/Skills 键；Live 默认启用
+`AGENT_VERIFIER=on`、Tier B、WEB/Expr/Draw，并明确注入 InMemory SessionStore。生产持久会话使用
+`--session sqlite --session-db /secure/path/sessions.sqlite`。`AGENT_FS_ROOT`、
+`AGENT_TOOL_ALLOWLIST`、`AGENT_MCP_SKIP_SERVICES` 与可选 `AGENT_SERVER_AUTH_TOKEN` 都应在部署中显式设置。
+
 - **`TaskControl`**：协作式 **`request_cancel` / `is_cancel_requested`**，以及 **`arm_working_deadline` / `check_deadline_now` / `is_deadline_exceeded`**（进入 `WORKING` 时由 Server 根据超时配置 `arm`）。
 - **`AgentLoopNode::create`** 与 **`build_cli_agent_graph`** 可通过 **`CliAgentGraphOptions::task_control`** 将同一指针注入循环体，在迭代边界观察取消/超时（见 `src/node/agent_loop_node.cpp`）。
 
@@ -100,6 +117,10 @@ Server 启动前必须配置 `AgentExecutionProfile`。每个任务由 Server �
 每个订阅者使用独立有界队列。生产任务线程不会等待慢客户端；队列满时丢弃最旧帧，达到
 `AGENT_SERVER_SSE_MAX_DROPPED` 后停止接收新帧，并在排空现有帧后关闭连接。该策略不会影响
 同一任务的其他订阅者。
+
+SSE 使用 A2A `StreamResponse` 根对象：answer/thinking 增量为 `message`（`metadata.streamChannel` 和
+`metadata.append=true`）；工具、Verifier、Memory 等进度为 `statusUpdate.metadata`；工件为
+`artifactUpdate`。`AgentClient` 将 `message` 增量呈现为携带单段 agent message 的 `WORKING` 更新。
 
 ## 相关代码
 

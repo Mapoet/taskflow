@@ -338,6 +338,26 @@ bool try_parse_task_status_sse(const SseEvent& event, AgentTask& out) {
     return true;
 }
 
+bool try_parse_task_message_sse(const SseEvent& event, AgentTask& out) {
+    json root;
+    try { root = json::parse(event.data); } catch(...) { return false; }
+    if(!root.contains("message") || !root["message"].is_object()) return false;
+    try {
+        out = AgentTask{};
+        if(root.contains("metadata") && root["metadata"].is_object()) {
+            out.task_id = root["metadata"].value("taskId", std::string{});
+            if(root["metadata"].contains("contextId") && root["metadata"]["contextId"].is_string())
+                out.session_id = root["metadata"]["contextId"].get<std::string>();
+        }
+        if(out.task_id.empty()) return false;
+        out.status = AgentTaskStatus::WORKING;
+        out.updated_at = std::chrono::system_clock::now();
+        out.messages.push_back(message_from_a2a_wire(root["message"]));
+        out.metadata = root["message"].value("metadata", json::object());
+        return true;
+    } catch(...) { return false; }
+}
+
 json stream_response_status_update(const AgentTask& task) {
     json su;
     su["taskId"] = task.task_id;
@@ -347,6 +367,23 @@ json stream_response_status_update(const AgentTask& task) {
     su["status"] = task_status_to_wire(task.status, task.updated_at);
     json root;
     root["statusUpdate"] = std::move(su);
+    return root;
+}
+
+json stream_response_message_delta(const std::string& task_id,
+                                   const std::optional<std::string>& context_id,
+                                   std::string_view message_id,
+                                   std::string_view text,
+                                   std::string_view channel) {
+    json message;
+    message["messageId"] = message_id;
+    message["role"] = "ROLE_AGENT";
+    message["parts"] = json::array({json{{"type", "text"}, {"text", text}}});
+    message["metadata"] = {{"streamChannel", channel}, {"append", true}};
+    json root;
+    root["message"] = std::move(message);
+    root["metadata"] = {{"taskId", task_id}};
+    if(context_id) root["metadata"]["contextId"] = *context_id;
     return root;
 }
 

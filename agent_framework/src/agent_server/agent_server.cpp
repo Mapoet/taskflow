@@ -383,7 +383,14 @@ void AgentServer::run_agent_task_on_executor(const std::string& task_id,
             request.session_store = session_store_;
             request.options.react.require_final_json_callback = false;
             request.options.input_already_processed = false;
-            request.input_policy = execution_profile_->input_policy;
+            request.input_policy = profile.input_policy;
+            request.options.react.graph_options.stream_callback = [this, task_id](std::string_view chunk) {
+                if(!chunk.empty()) push_message_delta(task_id, chunk, "answer");
+            };
+            request.options.react.graph_options.thinking_stream_callback = [this, task_id](std::string_view chunk) {
+                // Providers already redact unsupported thinking; do not forward provider-private fields.
+                if(!chunk.empty()) push_message_delta(task_id, chunk, "thinking");
+            };
             request.event_sink = [this, task_id](const ExecutionEvent& event) {
                 json payload = event.payload;
                 payload["event_type"] = static_cast<int>(event.type);
@@ -393,12 +400,23 @@ void AgentServer::run_agent_task_on_executor(const std::string& task_id,
                 payload["sequence"] = event.sequence;
                 payload["timestamp"] = event.timestamp;
                 if (event.child_id) payload["child_id"] = *event.child_id;
-                if (event.type == ExecutionEventType::VerifierStarted) {
-                    push_verifier_sse(task_id, "verifier_started", payload);
-                } else if (event.type == ExecutionEventType::VerifierCompleted) {
-                    push_verifier_sse(task_id, "verifier_completed", payload);
-                } else {
-                    push_verifier_sse(task_id, "execution_event", payload);
+                switch(event.type) {
+                case ExecutionEventType::VerifierStarted:
+                case ExecutionEventType::VerifierCompleted:
+                    payload["component"] = "verifier";
+                    push_execution_status_update(task_id, payload);
+                    break;
+                case ExecutionEventType::ArtifactUpdated:
+                    if(payload.contains("artifact") && payload["artifact"].is_object()) {
+                        try { push_artifact_update(task_id, a2a::artifact_from_a2a_wire(payload["artifact"])); }
+                        catch(...) { push_execution_status_update(task_id, payload); }
+                    } else {
+                        push_execution_status_update(task_id, payload);
+                    }
+                    break;
+                default:
+                    push_execution_status_update(task_id, payload);
+                    break;
                 }
             };
             fut = std::async(std::launch::async,
@@ -660,6 +678,46 @@ void AgentServer::push_task_status_update(const std::string& task_id, const Agen
             }
         }
     }
+}
+
+void AgentServer::push_message_delta(const std::string& task_id, std::string_view text,
+                                     std::string_view channel) {
+    if(text.empty()) return;
+    std::optional<std::string> context_id;
+    {
+        std::lock_guard<std::mutex> lock(tasks_mutex_);
+        const auto it = active_tasks_.find(task_id);
+        if(it == active_tasks_.end()) return;
+        context_id = it->second.session_id;
+    }
+    json payload = a2a::stream_response_message_delta(
+        task_id, context_id, task_id + "-" + std::string(channel), text, channel);
+    apply_wire_payload_cap(payload, ContextBudgetLimits{}.max_wire_message_bytes, nullptr);
+    std::string framed;
+    a2a::append_sse_event(framed, "", payload.dump());
+    std::lock_guard<std::mutex> lock(sse_mutex_);
+    const auto it = sse_subscribers_.find(task_id);
+    if(it == sse_subscribers_.end()) return;
+    for(const auto& subscriber : it->second) if(subscriber) subscriber->push_framed(framed);
+}
+
+void AgentServer::push_execution_status_update(const std::string& task_id, const json& metadata) {
+    AgentTask task;
+    {
+        std::lock_guard<std::mutex> lock(tasks_mutex_);
+        const auto it = active_tasks_.find(task_id);
+        if(it == active_tasks_.end()) return;
+        task = it->second;
+    }
+    json payload = a2a::stream_response_status_update(task);
+    payload["statusUpdate"]["metadata"] = metadata;
+    apply_wire_payload_cap(payload, ContextBudgetLimits{}.max_wire_message_bytes, nullptr);
+    std::string framed;
+    a2a::append_sse_event(framed, "", payload.dump());
+    std::lock_guard<std::mutex> lock(sse_mutex_);
+    const auto it = sse_subscribers_.find(task_id);
+    if(it == sse_subscribers_.end()) return;
+    for(const auto& subscriber : it->second) if(subscriber) subscriber->push_framed(framed);
 }
 
 void AgentServer::push_verifier_sse(const std::string& task_id,
