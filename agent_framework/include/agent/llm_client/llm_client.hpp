@@ -151,7 +151,7 @@ private:
      * @param rendered 渲染后的提示词
      * @return OpenAI API 请求 JSON
      */
-    json build_openai_request(const RenderedPrompt& rendered);
+    json build_openai_request(const RenderedPrompt& rendered, const ModelConfig& config);
 };
 
 /**
@@ -193,7 +193,7 @@ private:
      * @param rendered 渲染后的提示词
      * @return Anthropic API 请求 JSON
      */
-    json build_anthropic_request(const RenderedPrompt& rendered);
+    json build_anthropic_request(const RenderedPrompt& rendered, const ModelConfig& config);
 };
 
 /**

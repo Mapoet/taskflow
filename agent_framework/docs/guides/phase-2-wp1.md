@@ -1,5 +1,7 @@
 # WP2.1：A2A 规范对照层（JSON-RPC 2.0 + SSE 载荷模型）— 实现计划
 
+> **历史计划**：本文保留设计过程；文内 checkbox 是当时的验收草案，不代表当前实现状态。当前事实、源码与 CTest 证据统一以 [phase-3-status.md](./phase-3-status.md) 为准。
+
 本文档将 [phase-2-plan.md](./phase-2-plan.md) **§4 WP2.1** 与交付项 **D2** 中属于「**协议与载荷**」的部分落实为可执行任务。**须先完成 [WP2.1a](./phase-2-wp1a.md)**（`a2a-spec-tracker.md` 初稿含 Card、**通用** `jsonrpc` 层、`wire_card`）；本 WP 接续 **任务 method 表、Task/Message/SSE**。**WP2.1 交付的是与 HTTP 监听无关的编解码与映射**；**httplib 路由、listen、executor 投递** 属 **WP2.2**；**任务状态机与取消语义** 属 **WP2.3**；**AgentClient 改为走 Facade** 属 **WP2.4**。本 WP 与 WP2.1a 共同提供 **唯一权威的线协议契约**（以 `a2a-spec-tracker.md` 为根）。
 
 **文档版本**：0.2

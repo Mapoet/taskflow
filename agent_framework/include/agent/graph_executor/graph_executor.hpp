@@ -32,6 +32,8 @@ class ToolBus;
 class GraphExecutor;
 class ToolEffectJournal;
 class AuditSink;
+class VectorStore;
+class EncoderManager;
 
 namespace internal {
 struct AgentThreadState;
@@ -49,6 +51,9 @@ struct AgentWorkflowDeps {
     std::shared_ptr<SkillServices> skills;
     /** Isolated client for structured memory compaction; never receives ToolBus/Skills. */
     std::shared_ptr<LLMClient> memory_compaction_llm;
+    /** Optional production RAG dependencies; both must be supplied together. */
+    std::shared_ptr<VectorStore> vector_store;
+    std::shared_ptr<EncoderManager> encoder_manager;
 };
 
 /**

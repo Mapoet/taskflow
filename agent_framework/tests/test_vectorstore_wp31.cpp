@@ -22,8 +22,8 @@ Document document(std::string id, std::string content, std::string modality = "t
     value.metadata.doc_id = value.doc_id;
     value.metadata.content = std::move(content);
     value.metadata.modality = std::move(modality);
-    value.metadata.extra_metadata["tenant"] = id == "a" ? "tenant-a" : "tenant-b";
-    value.metadata.extra_metadata["quality"] = id == "a" ? json(2) : json(1);
+    value.metadata.extra_metadata["tenant"] = value.doc_id == "a" ? "tenant-a" : "tenant-b";
+    value.metadata.extra_metadata["quality"] = value.doc_id == "a" ? json(2) : json(1);
     return value;
 }
 }

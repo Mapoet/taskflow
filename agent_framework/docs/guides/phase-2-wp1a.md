@@ -1,5 +1,7 @@
 # WP2.1a：A2A 规范锚点 + Agent Card（Well-Known）+ JSON-RPC 2.0 通用层 — 实现计划
 
+> **历史计划**：本文保留设计过程；文内 checkbox 是当时的验收草案，不代表当前实现状态。当前事实、源码与 CTest 证据统一以 [phase-3-status.md](./phase-3-status.md) 为准。
+
 本文档将 [phase-2-plan.md](./phase-2-plan.md) 中 **WP2.1a**（从 **WP2.1 / D2** 拆出的**前置切片**）落实为可执行任务。
 **WP2.1a** 交付：**可追溯的规范文档**、**发现面（Agent Card）与官方 JSON 的双向映射**、**与 A2A 业务方法无关的 JSON-RPC 2.0 信封编解码**。
 **不交付**：任务类 JSON-RPC `method` 实现、`AgentTask` / `AgentMessage` / `AgentArtifact` 的 wire 映射、SSE 帧与任务事件载荷（属 **WP2.1** 主体，见 [phase-2-wp1.md](./phase-2-wp1.md)）。

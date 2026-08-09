@@ -101,6 +101,8 @@ json agent_thread_state_to_json(const internal::AgentThreadState& s) {
     if (s.skill_prompt_cache) out["skill_prompt_cache"] = *s.skill_prompt_cache;
     if (s.active_skill_id) out["active_skill_id"] = *s.active_skill_id;
     if (s.last_memory_compaction_ts) out["last_memory_compaction_ts"] = *s.last_memory_compaction_ts;
+    if (!s.last_memory_compaction_report.empty())
+        out["last_memory_compaction_report"] = s.last_memory_compaction_report;
     if (s.execution_context) {
         json allowed = json::array();
         for (const auto& v : s.execution_context->allowed_mcp_services) allowed.push_back(v);
@@ -139,6 +141,8 @@ internal::AgentThreadState agent_thread_state_from_json(const json& j) {
     s.verifier_retry_count = j.value("verifier_retry_count", 0);
     s.last_memory_auto_compact_iteration = j.value("last_memory_auto_compact_iteration", -1);
     if (j.contains("last_memory_compaction_ts")) s.last_memory_compaction_ts = j.at("last_memory_compaction_ts").get<std::time_t>();
+    if (j.contains("last_memory_compaction_report") && j.at("last_memory_compaction_report").is_object())
+        s.last_memory_compaction_report = j.at("last_memory_compaction_report");
     if (j.contains("execution_context")) {
         const auto& x = j.at("execution_context");
         ExecutionContext c;

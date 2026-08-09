@@ -1,5 +1,7 @@
 # WP2.5：A2A 认证（服务端校验 + 客户端凭证）— 实现计划
 
+> **历史计划**：本文保留设计过程；文内 checkbox 是当时的验收草案，不代表当前实现状态。当前事实、源码与 CTest 证据统一以 [phase-3-status.md](./phase-3-status.md) 为准。
+
 本文档将 [phase-2-plan.md](./phase-2-plan.md) **§4 WP2.5** 与交付项 **D5** 落实为可执行任务：**Bearer**、**API Key**（Header 与/或 Query）、与 **Agent Card `authentication_scheme`** 声明 **一致** 的校验；**`AgentClient`** 侧 **结构化注入** 与 **文档**；（**可选**）**OAuth 2.0 设备码授权** 最小闭环。
 
 **WP2.5 核心交付（DoD 必达）**：`AgentServer` 在 **所有** 需保护的路由（JSON-RPC、Well-Known 若需保护、SSE）上执行 **统一 `AuthGate`**；**未授权** → **401** + **`WWW-Authenticate`**（Bearer 场景）或 **规范等价**；**`validate_authentication`** 使用 **从 `httplib::Request` 提取的完整头与 query**；**`AgentClient::build_auth_headers`** 与 **`set_authentication` JSON schema** 覆盖 **bearer / api_key** 并与服务端 **逐项对齐**。

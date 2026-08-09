@@ -44,6 +44,8 @@ public:
         const RenderedPrompt& rendered,
         std::function<void(std::string_view)> = nullptr) override {
         ++calls;
+        require(rendered.model_config.has_value(), "request-scoped compaction profile missing");
+        observed_config = rendered.model_config;
         require(rendered.tools_json.empty() || rendered.tools_json == json::array(),
                 "compaction sub-LLM received tools");
         const std::string wire = rendered.rendered_text + json(rendered.messages).dump();
@@ -66,6 +68,7 @@ public:
     std::string get_model_name() const override { return "structured-compactor"; }
     bool supports_multimodal() const override { return false; }
     int calls = 0;
+    std::optional<ModelConfig> observed_config;
 private:
     bool valid_;
 };
@@ -101,8 +104,9 @@ public:
         throw std::logic_error("renderer bypassed");
     }
     std::future<LLMOutput> invoke_with_rendered(
-        const RenderedPrompt&, std::function<void(std::string_view)> = nullptr) override {
+        const RenderedPrompt& rendered, std::function<void(std::string_view)> = nullptr) override {
         ++calls;
+        cancellation_checks.push_back(rendered.cancellation_requested);
         auto promise = std::make_shared<std::promise<LLMOutput>>();
         pending.push_back(promise);
         return promise->get_future();
@@ -113,6 +117,7 @@ public:
     bool supports_multimodal() const override { return false; }
     int calls = 0;
     std::vector<std::shared_ptr<std::promise<LLMOutput>>> pending;
+    std::vector<std::function<bool()>> cancellation_checks;
 };
 }
 
@@ -129,6 +134,10 @@ int main() {
     options.profile.provider = "compact";
     options.profile.timeout_ms = 100;
     options.profile.max_output_bytes = 4096;
+    options.profile.model = "isolated-summary-model";
+    options.profile.temperature = 0.125;
+    options.profile.top_p = 0.75;
+    options.profile.max_output_tokens = 321;
     const auto structured = run_memory_compaction(
         state, MemoryCompactTrigger::manual_compact, options);
     require(structured.did_mutate && structured.strategy_used == "structured",
@@ -139,6 +148,16 @@ int main() {
     require(state.history[1].content.find(structured.source_digest) != std::string::npos,
             "committed source digest differs");
     require(valid_adapter->calls == 1, "unexpected retry count");
+    require(valid_adapter->observed_config &&
+            valid_adapter->observed_config->model_name == "isolated-summary-model" &&
+            valid_adapter->observed_config->temperature == 0.125 &&
+            valid_adapter->observed_config->top_p == 0.75 &&
+            valid_adapter->observed_config->max_tokens == 321 &&
+            !valid_adapter->observed_config->stream,
+            "isolated request profile was not applied");
+    require(state.last_memory_compaction_report.value("source_digest", "") ==
+                structured.source_digest,
+            "exact compaction report was not retained");
 
     auto invalid_adapter = std::make_shared<StructuredAdapter>(false);
     auto invalid_client = client(invalid_adapter);
@@ -171,6 +190,18 @@ int main() {
     require(timed_out.did_mutate && timed_out.strategy_used == "fallback_extractive",
             "timeout did not follow the deterministic fallback chain");
     require(timeout_adapter->calls == 2, "configured retry count was not honored");
+    require(timed_out.log_reason == "structured_timeout", "timeout reason was lost in fallback");
+    require(timeout_adapter->cancellation_checks.size() == 2 &&
+            timeout_adapter->cancellation_checks[0]() && timeout_adapter->cancellation_checks[1](),
+            "timed-out sub-LLM attempts were not cancelled");
+
+    state = history();
+    options.sub_llm_client = nullptr;
+    options.profile.max_retries = 0;
+    const auto isolated_fallback = run_memory_compaction(
+        state, MemoryCompactTrigger::manual_compact, options);
+    require(isolated_fallback.strategy_used == "fallback_extractive",
+            "missing isolated sub-LLM did not fail closed to deterministic fallback");
 
     auto registry = std::make_shared<MemoryCompactorRegistry>();
     auto probe = std::make_shared<ProbeCompactor>();

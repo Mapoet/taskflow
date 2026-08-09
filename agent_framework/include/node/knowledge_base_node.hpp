@@ -18,6 +18,21 @@
 namespace agent_framework {
 namespace node {
 
+struct KnowledgeBaseRetrieval {
+    std::string context;
+    std::vector<RetrievalResult> results;
+    std::vector<Citation> citations;
+};
+
+/** Shared retrieval boundary used by both workflow source nodes and AgentLoop. */
+KnowledgeBaseRetrieval retrieve_knowledge_base(
+    const std::string& query_text,
+    const std::shared_ptr<VectorStore>& vector_store,
+    const std::shared_ptr<EncoderManager>& encoder_manager,
+    int top_k = 5,
+    const std::string& modality = "",
+    const MetadataFilter& metadata_filter = {});
+
 /**
  * @brief 知识库 Source 节点封装类
  * 将向量检索封装为 workflow AnySource，提供查询接口
@@ -59,7 +74,7 @@ public:
         const std::string& modality = ""
     );
 
-private:
+public:
     /**
      * @brief 执行向量检索
      * @param query_text 查询文本
@@ -100,4 +115,3 @@ private:
 } // namespace agent_framework
 
 #endif // __AGENT_NODE_KNOWLEDGE_BASE_NODE_H__
-

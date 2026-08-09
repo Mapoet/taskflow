@@ -64,6 +64,26 @@ int main() {
     impossible.hard_limit_bytes = 5;
     impossible.minimum_retained_bytes[MemorySlotKind::System] = 1;
     impossible.minimum_retained_bytes[MemorySlotKind::Task] = 1;
-    const auto bounded = assemble_memory(input, impossible);
-    require(bounded.report.output_bytes <= 5, "protected slots bypassed hard limit");
+    bool mandatory_rejected = false;
+    try { (void)assemble_memory(input, impossible); }
+    catch(const MemoryAssemblyBudgetError&) { mandatory_rejected = true; }
+    require(mandatory_rejected, "mandatory system/task overflow was silently truncated");
+
+    MemoryAssemblyInput tail_citation;
+    tail_citation.retrieval.push_back(slot(
+        MemorySlotKind::Retrieval, "tail-citation", 1,
+        "very long retrieved evidence body that must be truncated [source:doc-tail]",
+        json{{"citation_id", "doc-tail"}}));
+    MemoryAssemblyPolicy citation_policy;
+    citation_policy.hard_limit_bytes = 24;
+    const auto citation_result = assemble_memory(tail_citation, citation_policy);
+    require(citation_result.text.find("[source:doc-tail]") != std::string::npos,
+            "citation marker at the tail was lost during truncation");
+
+    MemoryAssemblyPolicy token_policy;
+    token_policy.hard_limit_tokens = 10;
+    token_policy.token_estimator = [](std::string_view text) { return text.size(); };
+    const auto token_bounded = assemble_memory(tail_citation, token_policy);
+    require(token_bounded.report.output_tokens <= 10,
+            "configured token hard limit was exceeded");
 }

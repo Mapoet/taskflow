@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <functional>
 #include <map>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -38,13 +39,21 @@ struct MemoryAssemblyInput {
 struct MemoryAssemblyPolicy {
     std::size_t soft_limit_bytes = 0; // 0 means no soft cap
     std::size_t hard_limit_bytes = 0; // 0 means no hard cap
+    std::size_t soft_limit_tokens = 0; // 0 means no soft cap
+    std::size_t hard_limit_tokens = 0; // 0 means no hard cap
     std::size_t default_slot_quota_bytes = 0;
     std::map<MemorySlotKind, std::size_t> slot_quota_bytes;
     std::map<MemorySlotKind, std::size_t> minimum_retained_bytes;
     bool retain_system_and_task = true;
     bool retain_citations = true;
+    bool fail_on_mandatory_overflow = true;
     std::string revision = "memory-assembly-v1";
     std::function<std::size_t(std::string_view)> token_estimator;
+};
+
+class MemoryAssemblyBudgetError : public std::length_error {
+public:
+    using std::length_error::length_error;
 };
 
 struct MemoryAssemblyReport {

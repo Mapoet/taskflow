@@ -1,5 +1,7 @@
 # WP2.4：AgentClient 规范侧（JSON-RPC + wire + SSE）与 Legacy REST 策略 — 实现计划
 
+> **历史计划**：本文保留设计过程；文内 checkbox 是当时的验收草案，不代表当前实现状态。当前事实、源码与 CTest 证据统一以 [phase-3-status.md](./phase-3-status.md) 为准。
+
 本文档将 [phase-2-plan.md](./phase-2-plan.md) **§4 WP2.4** 与交付项 **D4** 落实为可执行任务：**`AgentClient` 与 WP2.1 Facade 一致**（JSON-RPC 信封、`params`/`result` 经 **wire 映射**）；**发现**使用 **WP2.1a Card wire**；**SSE** 解析 **WP2.1 事件名与 `data` schema**；**Legacy REST**（当前 `…/tasks/send` 等）**可选保留**并 **文档标注 deprecated + 移除计划**。
 
 **WP2.4 交付**：运行时 **协议选择**（默认 **A2A JSON-RPC**，可强制 Legacy）；**统一错误模型**（JSON-RPC `error` → C++ 异常或结构化错误类型）；**`HTTPAgentTransport`** 与 **Client** 共用 **同一组 method 名与路径常量**（从头文件或 `a2a_constants.hpp` 读取 tracker 同步值）；**`SSEConnection`（客户端）** 或 **`HttplibClient::get_sse`** 实现 **GET 长流** + **`SseParser` / 内部 `http_sse` 扩展**；**`docs/guides/agent-client.md`**。

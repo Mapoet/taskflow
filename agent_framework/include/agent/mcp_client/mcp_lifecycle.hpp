@@ -17,6 +17,7 @@ enum class CapabilityLifecycleState { Discovered, Validated, Staged, Active, Dra
 struct CapabilityTransportDescriptor {
     std::string kind;              // "http" or "stdio"
     std::string endpoint;          // HTTPS URL for HTTP
+    std::vector<std::string> host_allowlist;
     std::string command;           // absolute executable path for stdio
     std::vector<std::string> arguments;
     std::string executable_digest;
@@ -74,22 +75,36 @@ public:
     void set_development_unsigned_allowed(bool allowed);
     void save(const std::string& path) const;
     void load(const std::string& path);
-    void rehydrate(const std::string& id, McpClientFactory factory);
-    void rebind(const std::string& id, std::shared_ptr<MCPClient> client);
-    void activate(const std::string& id);
-    void drain(const std::string& id);
-    bool remove(const std::string& id);  // false while leased
+    void rehydrate(const std::string& id, McpClientFactory factory,
+                   std::uint64_t revision = 0);
+    void rebind(const std::string& id, std::shared_ptr<MCPClient> client,
+                std::uint64_t revision = 0);
+    void activate(const std::string& id, std::uint64_t revision = 0);
+    void drain(const std::string& id, std::uint64_t revision = 0);
+    bool remove(const std::string& id, std::uint64_t revision = 0);  // false while leased
     CapabilityLease acquire(const std::string& id,
                             std::uint64_t expected_revision = 0,
                             std::string expected_digest = {});
-    std::optional<CapabilityStatus> status(const std::string& id) const;
+    CapabilityLease acquire_for_session(const std::string& id,
+                            const std::string& tenant_id,
+                            const std::string& session_id,
+                            std::uint64_t expected_revision = 0,
+                            std::string expected_digest = {});
+    std::optional<CapabilityStatus> status(const std::string& id,
+                                           std::uint64_t revision = 0) const;
 private:
     struct RegistryState;
     void validate_manifest(const CapabilityManifest& manifest) const;
     void notify(const CapabilityStatus& status) const noexcept;
+    CapabilityLease acquire_impl(const std::string& id,
+                                 std::uint64_t expected_revision,
+                                 std::string expected_digest,
+                                 const std::string* tenant_id,
+                                 const std::string* session_id);
     std::shared_ptr<ToolBus> toolbus_;
     CapabilityAuditSink audit_;
     std::optional<SkillTrustStore> trust_;
+    std::string trust_store_digest_;
     bool require_signature_ = true;
     bool development_unsigned_allowed_ = false;
     std::shared_ptr<RegistryState> state_;

@@ -48,6 +48,9 @@ struct AgentThreadState {
     /** WP2.9：自动压缩节流；`-1` 表示尚未压缩 */
     int last_memory_auto_compact_iteration = -1;
     std::optional<std::time_t> last_memory_compaction_ts;
+    /** Exact last result and per-execution reports; never contain source conversation text. */
+    json last_memory_compaction_report = json::object();
+    std::vector<json> memory_compaction_reports;
 
     /** Last prompt assembly telemetry; contains only counts/digests, never context text. */
     json last_memory_assembly_report = json::object();

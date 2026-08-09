@@ -78,7 +78,7 @@ void build_cli_agent_graph_impl(workflow::GraphBuilder& builder,
         deps.llm,
         deps.toolbus,
         nullptr,
-        nullptr,
+        deps.vector_store,
         {{"SystemPrompt", std::string(internal::kSystemPrompt)},
          {"UserInput", std::string(internal::kUserQuery)},
          {"AgentState", std::string(internal::kAgentState)}},
@@ -90,7 +90,8 @@ void build_cli_agent_graph_impl(workflow::GraphBuilder& builder,
         graph_options.tool_execution_observer,
         graph_options.skill_event_sink,
         graph_options.thinking_stream_callback,
-        deps.memory_compaction_llm);
+        deps.memory_compaction_llm,
+        deps.encoder_manager);
     (void)loop_node;
     (void)loop_task;
 }

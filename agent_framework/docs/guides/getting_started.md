@@ -114,7 +114,7 @@ MCP stdio 默认使用现代 SDK 的 JSON Lines framing，`npx` 首次启动可�
 
 **内建绘图工具（`draw_*`，canvas_ity + stb）**：当编译单元同时具备 **canvas_ity** 与 **`stb_image_write.h`** 时，若 **`AGENT_DRAW_ENABLE`** 未设为关闭值（**`0` / `false` / `off` / `no`**；未设置时默认开启），则注册 **`draw_render`**（内存 PNG → **`png_base64`**）与 **`draw_export`**（在 **`AGENT_FS_ROOT`** 下原子写 PNG，语义对齐 **`fs_write`** 的确认覆盖）。门闩与模板说明见 **[内建 draw_* 工具](./builtin-draw-tools.md)**（**`AGENT_DRAW_MAX_WIDTH`** / **`AGENT_DRAW_MAX_HEIGHT`**、**`AGENT_DRAW_MAX_PIXELS`**、**`AGENT_DRAW_MAX_COMMANDS`**、**`AGENT_DRAW_MAX_OUTPUT_BYTES`**）。子模块初始化示例：`git submodule update --init 3rd-party/canvas_ity 3rd-party/stb`。若设置 **`AGENT_TOOL_ALLOWLIST`**，须将 **`draw_render`** 与 **`draw_export`** 一并列入，否则注册会失败。离线回归：**`ctest -R draw_tools`**。
 
-与 `simple_agent` 区别：`cli_agent_demo` 接真实 **WP1.5** 图（经 **WP2.0** `GraphExecutor::run_react_cli_sync` 统一构图与运行）、**ToolBus** 演示工具 **add**、可选 **Cursor MCP**、**SIGINT** 合作式退出。
+`cli_agent_demo` 接真实 **WP1.5** 图（经 **WP2.0** `GraphExecutor::run_react_cli_sync` 统一构图与运行）、**ToolBus** 演示工具 **add**、可选 **Cursor MCP**、**SIGINT** 合作式退出。
 
 ## WP1.8：Skills（可选）
 
@@ -140,11 +140,14 @@ MCP stdio 默认使用现代 SDK 的 JSON Lines framing，`npx` 首次启动可�
 ## 运行示例
 
 ```bash
-# 运行简单 Agent 示例
-./build/examples/simple_agent
+# Live CLI 与 Live A2A Server
+./build/agent_framework/cli_agent_demo -p "hello"
+./build/agent_framework/agent_server_demo --help
 
-# 运行多模态 Agent 示例
-./build/examples/multimodal_agent
+# 富 UI 目标需使用对应 CMake 开关构建
+./build/agent_framework/tui_agent_demo
+./build/agent_framework/web_ui_demo
+./build/agent_framework/imgui_agent_demo
 ```
 
 ## 下一步

@@ -1,5 +1,7 @@
 # WP2.0：GraphExecutor 统一执行与会话状态写回 — 实现计划
 
+> **历史计划**：本文保留设计过程；文内 checkbox 是当时的验收草案，不代表当前实现状态。当前事实、源码与 CTest 证据统一以 [phase-3-status.md](./phase-3-status.md) 为准。
+
 本文档将 [phase-2-plan.md](./phase-2-plan.md) **§4 WP2.0** 与交付项 **D1**（统一执行入口）、**D11**（多轮 `NextAgentState` / `history` 写回）落实为**无歧义、可按 PR 顺序落地**的任务、接口、算法与测试。范围**仅限**本 WP；不实现 WP2.1–2.6（A2A Server）、WP2.7（完整输入 DSL）、WP2.9（压缩策略深化）— 仅预留与本 WP 的衔接点。
 
 **文档版本**：0.1

@@ -291,6 +291,7 @@ RenderedPrompt PromptRenderer::render(const LLMInput& input, const std::string& 
 
     RenderedPrompt rendered;
     rendered.cancellation_requested = input.cancellation_requested;
+    rendered.model_config = input.model_config;
     rendered.rendered_text = tpl->render(vars);
 
     std::shared_ptr<HistoryFormatter> hf =

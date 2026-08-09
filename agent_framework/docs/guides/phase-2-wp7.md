@@ -1,5 +1,7 @@
 # WP2.7：输入质控（Tier A/B）、ExecutionContext 与 §5.1 用户 DSL — 实现计划
 
+> **历史计划**：本文保留设计过程；文内 checkbox 是当时的验收草案，不代表当前实现状态。当前事实、源码与 CTest 证据统一以 [phase-3-status.md](./phase-3-status.md) 为准。
+
 本文档将 [phase-2-plan.md](./phase-2-plan.md) **§4 WP2.7** 与交付项 **D8** 落实为可执行任务：**`ExecutionContext`** 在拼装 **`LLMInput` 前**固化；**`UserInputPreprocessor`** 产出 **`llm_user_text`、`injected_context[]`、`control_actions[]`**；**Tier A** 覆盖 **`@file` / `@url` / `/cmd`** 的语法、**fs 监禁**、**web 同类策略**、**长度与白名单**；**Tier B**（可选）子 LLM 消歧；与 **WP2.1c** 注入预算 **硬接线**。
 
 **WP2.7 交付**：公共 API + **单测** + **`docs/guides/user-input-dsl.md`**；**CLI** 入口与 **A2A 用户消息→LLM** 路径 **共用** `UserInputPreprocessor::process(...)`（**同一实现**，不同调用点）。

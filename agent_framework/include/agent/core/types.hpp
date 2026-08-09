@@ -151,6 +151,20 @@ struct ToolMeta {
 };
 
 /**
+ * @brief 模型配置。定义在 LLMInput 前以支持 request-scoped profile。
+ */
+struct ModelConfig {
+    std::string model_name;
+    double temperature = 0.7;
+    double top_p = 1.0;
+    int max_tokens = 4096;
+    bool stream = true;
+    int http_timeout_sec = 120;
+    int max_retries = 3;
+    std::map<std::string, json> extra_params;
+};
+
+/**
  * @brief LLM 输入结构
  */
 struct LLMInput {
@@ -170,6 +184,8 @@ struct LLMInput {
     std::optional<std::string> audio_data;  // 音频 base64 编码（可选）
     /** Request-scoped cooperative cancellation/deadline check. */
     std::function<bool()> cancellation_requested;
+    /** Optional immutable per-request model profile; avoids mutating a shared adapter. */
+    std::optional<ModelConfig> model_config;
 };
 
 /**
@@ -186,6 +202,7 @@ struct RenderedPrompt {
     /** WP2.1c：`AGENT_CONTEXT_BUDGET_STRICT=1` 且合并/注入后仍超限时为 true，调用方应跳过 LLM */
     bool context_budget_blocked = false;
     std::function<bool()> cancellation_requested;
+    std::optional<ModelConfig> model_config;
 };
 
 /**
@@ -233,20 +250,6 @@ inline llm_http_error::llm_http_error(int status_code, std::string provider,
       body_excerpt(std::move(body_excerpt)),
       provider(std::move(provider)),
       retry_after_sec(retry_after_sec) {}
-
-/**
- * @brief 模型配置
- */
-struct ModelConfig {
-    std::string model_name;        // 模型名称（如 "gpt-4o", "claude-3-opus"）
-    double temperature = 0.7;      // 温度参数
-    double top_p = 1.0;            // Top P 参数
-    int max_tokens = 4096;         // 最大 token 数
-    bool stream = true;            // 是否启用流式输出
-    int http_timeout_sec = 120;    // HTTP 连接/读超时（秒）
-    int max_retries = 3;           // 失败重试次数（不含首次）
-    std::map<std::string, json> extra_params;  // 额外参数
-};
 
 // ============================================================================
 // 多模态向量检索相关类型

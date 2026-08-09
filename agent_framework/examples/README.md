@@ -24,8 +24,6 @@ submodules recursively before enabling `AGENT_BUILD_TUI`.
 
 ## Focused examples
 
-- `simple_agent`: deterministic Taskflow/Workflow graph.
-- `multimodal_agent`: A2A text and structured-data message serialization.
 - `tool_integration`: ToolBus schema validation and asynchronous local invocation.
 - `workflow_custom`: custom source/node/sink workflow.
 - `agent_server_demo`: Live A2A server; use `tools/run_agent_server.sh` and `configs/server.env.example`.

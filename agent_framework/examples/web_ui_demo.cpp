@@ -248,6 +248,9 @@ int main(int argc, char** argv) {
 #endif
     }
     example::apply_skill_cli_options(skills_root_arg, skill_authoring_root_arg, no_skills);
+    const bool import_cursor_mcp =
+        !(no_cursor_mcp || env_truthy("AGENT_TEST_SKIP_CURSOR_MCP") ||
+          env_truthy("AGENT_CLI_SKIP_CURSOR_MCP"));
 
     example::LiveRuntime runtime;
     try {
@@ -259,8 +262,7 @@ int main(int argc, char** argv) {
         options.max_iterations = max_iterations;
         options.use_cursor_skill_roots = true;
         options.enable_skills = !no_skills;
-        options.import_cursor_mcp = !(no_cursor_mcp || env_truthy("AGENT_TEST_SKIP_CURSOR_MCP") ||
-                                      env_truthy("AGENT_CLI_SKIP_CURSOR_MCP"));
+        options.import_cursor_mcp = import_cursor_mcp;
         options.verbose = verbose || env_truthy("AGENT_TEST_AGENT_LOOP_DEBUG");
         runtime = example::build_live_runtime(options);
     } catch (const std::exception& e) {
@@ -328,11 +330,14 @@ int main(int argc, char** argv) {
 
     const char* provider_env = std::getenv("AGENT_LLM_PROVIDER");
     auto emit_bootstrap = [&]() {
+        const std::string connection = !import_cursor_mcp ? "Core tools ready" :
+            runtime.bootstrap.diagnostics.empty()
+                ? (runtime.bootstrap.mcp_services > 0 ? "MCP connected" : "Core tools ready")
+                : "MCP partial";
         ui.dispatch_message("runtime", json{{"session", "orbital-analysis"},
                                             {"provider", provider_env && *provider_env ? provider_env : "OpenAI"},
                                             {"model", cfg.model_config.model_name.empty() ? "provider default" : cfg.model_config.model_name},
-                                            {"connection", skip_cursor_mcp ? "Core tools ready" :
-                                             mcp_boot.diagnostics.empty() ? "MCP connected" : "MCP partial"}});
+                                            {"connection", connection}});
         const auto skills = example::skill_ui_status(deps.skills);
         ui.dispatch_message("skills_status", json{{"enabled", skills.enabled},
                                                    {"count", skills.count},
@@ -341,9 +346,9 @@ int main(int argc, char** argv) {
                                                    {"errors", skills.errors},
                                                    {"root", skills.root},
                                                    {"active", skills.active}});
-        for (const auto& diagnostic : mcp_boot.diagnostics)
+        for (const auto& diagnostic : runtime.bootstrap.diagnostics)
             ui.dispatch_message("mcp_status", json{{"level", "error"}, {"message", "MCP unavailable: " + diagnostic}});
-        for (const auto& service : mcp_boot.skipped_mcp_services)
+        for (const auto& service : runtime.bootstrap.skipped_mcp_services)
             ui.dispatch_message("mcp_status", json{{"level", "info"}, {"message", "MCP skipped by policy: " + service}});
         if (!demo_state) return;
         ui.dispatch_message("demo_user", json{{"content", "分析 sin(x) 在 [0, 2π] 的极值，并给出可复核结果。"}});

@@ -1,5 +1,7 @@
 # WP2.agent2agent — A2A orchestration library + CLI demo
 
+> **历史计划**：本文保留设计过程；文内 checkbox 是当时的验收草案，不代表当前实现状态。当前事实、源码与 CTest 证据统一以 [phase-3-status.md](./phase-3-status.md) 为准。
+
 **ID**: WP2.agent2agent (orchestration only; reuses JSON-RPC / Card / `AgentClient` / SSE).  
 **Version**: 0.1 · **Date**: 2026-04-05  
 

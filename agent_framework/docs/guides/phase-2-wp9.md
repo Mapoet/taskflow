@@ -1,5 +1,7 @@
 # WP2.9：工作记忆与压缩钩子 — 实现计划
 
+> **历史计划**：本文保留设计过程；文内 checkbox 是当时的验收草案，不代表当前实现状态。当前事实、源码与 CTest 证据统一以 [phase-3-status.md](./phase-3-status.md) 为准。
+
 本文档将 [phase-2-plan.md](./phase-2-plan.md) **§4 WP2.9** 与交付项 **D10** 落实为可执行任务：**偏早压缩**（阈值可配，默认与 [agents/memory.md](../agents/memory.md) §5.1 **约 50%** 建议一致）；**槽位预算可导出**；**压缩失败回退** 到 **WP2.1c** 式安全截断；**手动**（§5.1 **`/memory compact`**、**`/memory clear`**，经 [phase-2-wp7.md](./phase-2-wp7.md) **`ControlAction`**) 与 **自动触发** **共用同一策略入口** `run_memory_compaction(...)`。
 
 **WP2.9 交付**：**`WorkingMemoryMetrics`**（或等价）**可序列化导出**；**`MemoryCompaction`** 模块（计量 + 策略 + 回退）；**`AgentThreadState` 扩展字段**；**AgentLoop / `StateMerge` 后** 与 **`control_actions`** 分发点 **接线**；**单测**；**`docs/guides/working-memory-compact.md`**。

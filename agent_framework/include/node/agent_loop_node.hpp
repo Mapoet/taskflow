@@ -15,6 +15,7 @@
 #include <agent/skills/skill_runtime.hpp>
 #include <agent/memory/memory.hpp>
 #include <agent/vectorstore/vectorstore.hpp>
+#include <agent/encoder/encoder.hpp>
 #include <functional>
 #include <string>
 #include <memory>
@@ -72,10 +73,12 @@ public:
         ToolExecutionObserver tool_execution_observer = {},
         SkillEventSink skill_event_sink = {},
         std::function<void(std::string_view)> thinking_stream_callback = nullptr,
-        std::shared_ptr<LLMClient> memory_compaction_llm = nullptr
+        std::shared_ptr<LLMClient> memory_compaction_llm = nullptr,
+        std::shared_ptr<EncoderManager> encoder_manager = nullptr
     );
 
 private:
+#if 0 // Removed WP3.2 legacy graph builder; retained temporarily for source-history review only.
     /**
      * @brief 构建循环体（每次迭代执行的子图）
      * @param builder 子图构建器
@@ -95,6 +98,7 @@ private:
         std::shared_ptr<VectorStore> vector_store,
         const std::unordered_map<std::string, std::any>& inputs
     );
+#endif
     
     /**
      * @brief 循环条件判断函数

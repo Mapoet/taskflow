@@ -96,7 +96,7 @@ void test_f1_summarize_fallback_truncate() {
     }
 
     MemoryCompactOptions opt;
-    opt.llm_client = llm.get();
+    opt.sub_llm_client = llm.get();
     const MemoryCompactResult r =
         run_memory_compaction(st, MemoryCompactTrigger::manual_compact, opt);
     assert(r.did_mutate);

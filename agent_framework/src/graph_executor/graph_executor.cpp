@@ -244,6 +244,8 @@ bool merge_react_session_state(
         session.iteration = std::max(session.iteration, next->iteration);
         session.last_memory_assembly_report = next->last_memory_assembly_report;
         session.memory_assembly_reports = next->memory_assembly_reports;
+        session.last_memory_compaction_report = next->last_memory_compaction_report;
+        session.memory_compaction_reports = next->memory_compaction_reports;
         session.last_memory_auto_compact_iteration = next->last_memory_auto_compact_iteration;
         session.last_memory_compaction_ts = next->last_memory_compaction_ts;
         session.last_error.clear();
@@ -281,6 +283,8 @@ bool merge_react_session_state(
     session.execution_context = next->execution_context;
     session.last_memory_assembly_report = next->last_memory_assembly_report;
     session.memory_assembly_reports = next->memory_assembly_reports;
+    session.last_memory_compaction_report = next->last_memory_compaction_report;
+    session.memory_compaction_reports = next->memory_compaction_reports;
     session.last_memory_auto_compact_iteration = next->last_memory_auto_compact_iteration;
     session.last_memory_compaction_ts = next->last_memory_compaction_ts;
     session.last_error = next->last_error;
@@ -603,13 +607,12 @@ ExecutionResult GraphExecutor::execute_sync(tf::Executor& executor, ExecutionReq
     auto committed_session = request.session;
     auto working_session = std::make_shared<internal::AgentThreadState>(*committed_session);
     working_session->memory_assembly_reports.clear();
+    working_session->memory_compaction_reports.clear();
     request.session = working_session;
     request.context.session_id = session_id;
     request.session->execution_context = request.context;
     request.options.react.graph_options.task_control = request.control;
     auto prior_tool_observer = request.options.react.graph_options.tool_execution_observer;
-    const std::size_t history_size_before = request.session->history.size();
-    const auto compact_ts_before = request.session->last_memory_compaction_ts;
 
     const std::string run_id = request.context.task_id.value_or(session_id) + ":" +
                                std::to_string(expected_revision + 1);
@@ -732,12 +735,11 @@ ExecutionResult GraphExecutor::execute_sync(tf::Executor& executor, ExecutionReq
         }
     }
     request.session->memory_assembly_reports.clear();
-    if (request.session->last_memory_compaction_ts != compact_ts_before) {
-        emit(ExecutionEventType::MemoryCompacted,
-             {{"history_size_before", history_size_before},
-              {"history_size_after", request.session->history.size()},
-              {"strategy", "configured"}});
+    for(const auto& compaction_report : request.session->memory_compaction_reports) {
+        if(compaction_report.is_object() && !compaction_report.empty())
+            emit(ExecutionEventType::MemoryCompacted, compaction_report);
     }
+    request.session->memory_compaction_reports.clear();
     if (request.control) {
         request.control->check_deadline_now();
     }

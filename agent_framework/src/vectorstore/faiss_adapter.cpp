@@ -7,15 +7,14 @@
 #include <agent/skills/skill_supply_chain.hpp>
 
 #include <algorithm>
-#include <chrono>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
-#include <iomanip>
 #include <sstream>
 #include <stdexcept>
 #if !defined(_WIN32)
 #include <fcntl.h>
+#include <sys/file.h>
 #include <unistd.h>
 #endif
 
@@ -28,6 +27,7 @@
 namespace agent_framework {
 
 namespace {
+#ifdef AGENT_HAVE_FAISS
 bool metadata_matches(const Document& document, const MetadataFilter& filter) {
     for(const auto& [key, expected] : filter) {
         const auto found = document.metadata.extra_metadata.find(key);
@@ -35,6 +35,31 @@ bool metadata_matches(const Document& document, const MetadataFilter& filter) {
     }
     return true;
 }
+
+class FaissRegistryLock {
+public:
+    explicit FaissRegistryLock(const std::filesystem::path& path) {
+#if !defined(_WIN32)
+        fd_ = ::open(path.c_str(), O_CREAT | O_RDWR | O_CLOEXEC, 0600);
+        if(fd_ < 0 || ::flock(fd_, LOCK_EX) != 0) {
+            if(fd_ >= 0) ::close(fd_);
+            throw std::runtime_error("cannot lock Faiss index registry");
+        }
+#else
+        (void)path;
+#endif
+    }
+    ~FaissRegistryLock() {
+#if !defined(_WIN32)
+        if(fd_ >= 0) { (void)::flock(fd_, LOCK_UN); ::close(fd_); }
+#endif
+    }
+    FaissRegistryLock(const FaissRegistryLock&) = delete;
+    FaissRegistryLock& operator=(const FaissRegistryLock&) = delete;
+private:
+    int fd_ = -1;
+};
+#endif
 
 void validate_faiss_embedding(const Embedding& embedding, int dimension) {
     if(dimension <= 0 || static_cast<int>(embedding.size()) != dimension) {
@@ -339,10 +364,28 @@ bool FaissBackend::save_index(const std::string& path) {
     try {
         const fs::path root(path), generations=root/"generations";
         fs::create_directories(generations);
-        const auto revision=std::chrono::duration_cast<std::chrono::nanoseconds>(
-            std::chrono::system_clock::now().time_since_epoch()).count();
+        FaissRegistryLock registry_lock(root/"lock");
+        std::uint64_t revision = 1;
+        for(const auto& entry : fs::directory_iterator(generations)) {
+            if(!entry.is_directory()) continue;
+            const auto candidate = entry.path().filename().string();
+            if(candidate.empty() || candidate.find_first_not_of("0123456789") != std::string::npos)
+                continue;
+            try {
+                revision = std::max(revision,
+                                    static_cast<std::uint64_t>(std::stoull(candidate)) + 1);
+            }
+            catch(...) {}
+        }
         const std::string name=std::to_string(revision);
-        const fs::path temporary=generations/(".tmp-"+name), generation=generations/name;
+#if defined(_WIN32)
+        const int process_id = 0;
+#else
+        const int process_id = ::getpid();
+#endif
+        const fs::path temporary=generations/(".tmp-"+std::to_string(process_id)+"-"+name), generation=generations/name;
+        std::error_code cleanup_error;
+        fs::remove_all(temporary, cleanup_error);
         fs::create_directories(temporary);
         const fs::path index_path=temporary/"index.faiss", records_path=temporary/"records.jsonl";
         faiss::write_index(static_cast<faiss::Index*>(index_), index_path.c_str());
@@ -360,10 +403,25 @@ bool FaissBackend::save_index(const std::string& path) {
         std::ofstream manifest_out(manifest_path,std::ios::binary); manifest_out<<manifest.dump(2)<<'\n'; manifest_out.close();
         if(!durable_file(index_path)||!durable_file(records_path)||!durable_file(manifest_path)||!durable_dir(temporary)) return false;
         fs::rename(temporary,generation); durable_dir(generations);
-        const fs::path current_tmp=root/"CURRENT.tmp", current=root/"CURRENT";
+        const fs::path current_tmp=root/("CURRENT.tmp-"+std::to_string(process_id)), current=root/"CURRENT";
         std::ofstream pointer(current_tmp,std::ios::binary); pointer<<name<<'\n'; pointer.close();
         if(!durable_file(current_tmp)) return false;
-        fs::rename(current_tmp,current); return durable_dir(root);
+        fs::rename(current_tmp,current);
+        if(!durable_dir(root)) return false;
+        std::vector<std::string> committed_generations;
+        for(const auto& entry : fs::directory_iterator(generations)) {
+            const auto candidate = entry.path().filename().string();
+            if(entry.is_directory() && !candidate.empty() &&
+               candidate.find_first_not_of("0123456789") == std::string::npos)
+                committed_generations.push_back(candidate);
+            else if(entry.is_directory() && candidate.rfind(".tmp-", 0) == 0)
+                fs::remove_all(entry.path(), cleanup_error);
+        }
+        std::sort(committed_generations.begin(), committed_generations.end(),
+                  [](const auto& lhs, const auto& rhs) { return std::stoull(lhs) > std::stoull(rhs); });
+        for(std::size_t index=3; index<committed_generations.size(); ++index)
+            fs::remove_all(generations/committed_generations[index], cleanup_error);
+        return durable_dir(generations);
     } catch(const std::exception&) { return false; }
 #else
     (void)path; return false;
@@ -398,7 +456,9 @@ bool FaissBackend::load_index(const std::string& path) {
                 const fs::path generation = generations / generation_name;
                 json manifest; std::ifstream manifest_in(generation / "manifest.json");
                 manifest_in >> manifest;
-                if(manifest.value("schema_version",0)!=1 || manifest.value("dimension",0)!=dimension_ ||
+                if(manifest.value("schema_version",0)!=1 ||
+                   manifest.value("revision",std::uint64_t{0}) != std::stoull(generation_name) ||
+                   manifest.value("dimension",0)!=dimension_ ||
                    manifest.value("metric","")!="cosine" || manifest.value("index_type","")!=index_type_ ||
                    manifest.value("encoder_id","")!=encoder_id_ ||
                    manifest.value("encoder_revision","")!=encoder_revision_) continue;

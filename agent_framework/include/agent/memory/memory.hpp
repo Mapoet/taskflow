@@ -14,8 +14,16 @@
 #include <memory>
 #include <ctime>
 #include <mutex>
+#include <functional>
+#include <string_view>
 
 namespace agent_framework {
+
+struct MemoryScope {
+    std::string tenant_id{"default"};
+    std::string agent_id{"default"};
+    std::string session_id{"default"};
+};
 
 // ============================================================================
 // 记忆存储后端接口
@@ -101,9 +109,11 @@ public:
 class FileMemoryBackend : public MemoryBackend {
 public:
     using MemoryBackend::store_message;
+    using FaultInjector = std::function<void(std::string_view)>;
     explicit FileMemoryBackend(const std::string& data_dir,
                                std::string tenant_id = "default",
-                               std::string agent_id = "default");
+                               std::string agent_id = "default",
+                               FaultInjector fault_injector = {});
 
     void store_event(const Event& event) override;
     std::vector<Event> query_events(
@@ -129,6 +139,7 @@ private:
     std::string data_dir_;
     std::string tenant_id_;
     std::string agent_id_;
+    FaultInjector fault_injector_;
     std::mutex file_mutex_;
 
 };
@@ -139,7 +150,9 @@ private:
 class SQLiteMemoryBackend : public MemoryBackend {
 public:
     using MemoryBackend::store_message;
-    explicit SQLiteMemoryBackend(const std::string& db_path);
+    explicit SQLiteMemoryBackend(const std::string& db_path,
+                                 std::string tenant_id = "default",
+                                 std::string agent_id = "default");
     ~SQLiteMemoryBackend();
 
     void store_event(const Event& event) override;
@@ -164,6 +177,8 @@ public:
 
 private:
     std::string db_path_;
+    std::string tenant_id_;
+    std::string agent_id_;
     void* db_;  // sqlite3* 指针（前向声明避免暴露 SQLite 头文件）
     std::mutex db_mutex_;
 

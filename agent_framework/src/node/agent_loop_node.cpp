@@ -26,6 +26,7 @@
 #include <unordered_map>
 #include <chrono>
 #include <cctype>
+#include <cmath>
 #include <cstdlib>
 #include <ctime>
 #include <iostream>
@@ -140,6 +141,39 @@ std::vector<CallSpec> bounded_tool_calls(std::vector<CallSpec> calls, int max_ca
     return calls;
 }
 
+MemoryCompactionProfile compaction_profile_from_config(const AgentConfig& config) {
+    MemoryCompactionProfile profile;
+    const auto string_value = [&](const char* key, std::string& target) {
+        const auto found = config.extra_config.find(key);
+        if(found != config.extra_config.end() && found->second.is_string())
+            target = found->second.get<std::string>();
+    };
+    const auto size_value = [&](const char* key, std::size_t& target) {
+        const auto found = config.extra_config.find(key);
+        if(found != config.extra_config.end() && found->second.is_number_unsigned())
+            target = found->second.get<std::size_t>();
+    };
+    string_value("MEMORY_COMPACTION_PROVIDER", profile.provider);
+    string_value("MEMORY_COMPACTION_MODEL", profile.model);
+    size_value("MEMORY_COMPACTION_MAX_INPUT_BYTES", profile.max_input_bytes);
+    size_value("MEMORY_COMPACTION_MAX_OUTPUT_BYTES", profile.max_output_bytes);
+    size_value("MEMORY_COMPACTION_MAX_INPUT_TOKENS", profile.max_input_tokens);
+    size_value("MEMORY_COMPACTION_MAX_OUTPUT_TOKENS", profile.max_output_tokens);
+    if(const auto found = config.extra_config.find("MEMORY_COMPACTION_TIMEOUT_MS");
+       found != config.extra_config.end() && found->second.is_number_integer())
+        profile.timeout_ms = found->second.get<int>();
+    if(const auto found = config.extra_config.find("MEMORY_COMPACTION_MAX_RETRIES");
+       found != config.extra_config.end() && found->second.is_number_integer())
+        profile.max_retries = found->second.get<int>();
+    if(const auto found = config.extra_config.find("MEMORY_COMPACTION_TEMPERATURE");
+       found != config.extra_config.end() && found->second.is_number())
+        profile.temperature = found->second.get<double>();
+    if(const auto found = config.extra_config.find("MEMORY_COMPACTION_TOP_P");
+       found != config.extra_config.end() && found->second.is_number())
+        profile.top_p = found->second.get<double>();
+    return profile;
+}
+
 } // namespace
 
 std::pair<std::shared_ptr<workflow::LoopNode>, tf::Task>
@@ -159,10 +193,12 @@ AgentLoopNode::create(
     ToolExecutionObserver tool_execution_observer,
     SkillEventSink skill_event_sink,
     std::function<void(std::string_view)> thinking_stream_callback,
-    std::shared_ptr<LLMClient> memory_compaction_llm
+    std::shared_ptr<LLMClient> memory_compaction_llm,
+    std::shared_ptr<EncoderManager> encoder_manager
 ) {
     (void)memory_store;
-    (void)vector_store;
+    if(static_cast<bool>(vector_store) != static_cast<bool>(encoder_manager))
+        throw std::invalid_argument("AgentLoop RAG requires both VectorStore and EncoderManager");
     struct Shared {
         std::shared_ptr<internal::AgentThreadState> state;
         LLMOutput last_llm;
@@ -171,7 +207,7 @@ AgentLoopNode::create(
     };
 
     auto body_func = [agent_config, llm_client, toolbus, stream_callback, thinking_stream_callback,
-                      skills, task_control, memory_compaction_llm,
+                      skills, task_control, memory_compaction_llm, vector_store, encoder_manager,
                       tool_execution_observer, skill_event_sink](
                          const workflow::ValueMap& inps,
                          const workflow::IterationContext&)
@@ -416,6 +452,7 @@ AgentLoopNode::create(
             MemoryCompactOptions mcopt;
             mcopt.agent_config = &agent_config;
             mcopt.sub_llm_client = memory_compaction_llm.get();
+            mcopt.profile = compaction_profile_from_config(agent_config);
             if(task_control) mcopt.cancellation_requested = [task_control] {
                 return task_control->is_cancel_requested() || task_control->is_deadline_exceeded();
             };
@@ -458,6 +495,29 @@ AgentLoopNode::create(
                 {MemorySlotKind::Retrieval, "input-policy-injected-context", 600, 0,
                  wp27_context_suffix, json{{"origin", "input_policy"}}});
         }
+        if(vector_store && encoder_manager && !user_query.empty()) {
+            int top_k = 5;
+            std::string modality;
+            MetadataFilter filter;
+            if(const auto found = agent_config.extra_config.find("RAG_TOP_K");
+               found != agent_config.extra_config.end() && found->second.is_number_integer())
+                top_k = found->second.get<int>();
+            if(const auto found = agent_config.extra_config.find("RAG_MODALITY");
+               found != agent_config.extra_config.end() && found->second.is_string())
+                modality = found->second.get<std::string>();
+            if(const auto found = agent_config.extra_config.find("RAG_METADATA_FILTER");
+               found != agent_config.extra_config.end() && found->second.is_object())
+                for(const auto& [key, value] : found->second.items()) filter.emplace(key, value);
+            const auto retrieval = retrieve_knowledge_base(
+                user_query, vector_store, encoder_manager, top_k, modality, filter);
+            for(const auto& result : retrieval.results) {
+                assembly_input.retrieval.push_back(
+                    {MemorySlotKind::Retrieval, "retrieval:" + result.doc_id, 600, 0,
+                     "[source:" + result.doc_id + "] " + result.content,
+                     json{{"citation_id", result.doc_id}, {"score", result.score},
+                          {"metadata", result.metadata}}});
+            }
+        }
         if(shared->state->skill_prompt_cache && !shared->state->skill_prompt_cache->empty()) {
             assembly_input.skill.push_back(
                 {MemorySlotKind::Skill, "active-skill", 700, 0,
@@ -496,6 +556,22 @@ AgentLoopNode::create(
         assembly_policy.slot_quota_bytes[MemorySlotKind::Tool] = limits.max_tool_result_json_bytes;
         assembly_policy.minimum_retained_bytes[MemorySlotKind::System] = 1;
         assembly_policy.minimum_retained_bytes[MemorySlotKind::Task] = 1;
+        if(const auto found = agent_config.extra_config.find("MEMORY_ASSEMBLY_HARD_TOKENS");
+           found != agent_config.extra_config.end() && found->second.is_number_unsigned()) {
+            assembly_policy.hard_limit_tokens = found->second.get<std::size_t>();
+            assembly_policy.soft_limit_tokens = assembly_policy.hard_limit_tokens
+                ? assembly_policy.hard_limit_tokens - assembly_policy.hard_limit_tokens / 10 : 0;
+        }
+        if(const auto found = agent_config.extra_config.find("MEMORY_ASSEMBLY_CHARS_PER_TOKEN");
+           found != agent_config.extra_config.end() && found->second.is_number()) {
+            const double chars_per_token = found->second.get<double>();
+            if(chars_per_token > 0.0) {
+                assembly_policy.token_estimator = [chars_per_token](std::string_view text) {
+                    return static_cast<std::size_t>(
+                        std::ceil(static_cast<double>(text.size()) / chars_per_token));
+                };
+            }
+        }
         const auto assembled = assemble_memory(assembly_input, assembly_policy);
         shared->state->last_memory_assembly_report = assembled.report.to_json();
         shared->state->memory_assembly_reports.push_back(
@@ -506,8 +582,11 @@ AgentLoopNode::create(
         for(const auto& slot : assembled.slots) kept.emplace(slot.source_id, slot.text);
         llm_in.system_prompt = kept.contains("system-prompt") ? kept.at("system-prompt") : "";
         llm_in.user_prompt = kept.contains("current-user-task") ? kept.at("current-user-task") : "";
-        if(kept.contains("input-policy-injected-context"))
-            llm_in.context = kept.at("input-policy-injected-context");
+        for(const auto& slot : assembled.slots) {
+            if(slot.kind != MemorySlotKind::Retrieval) continue;
+            if(!llm_in.context.empty()) llm_in.context += "\n\n";
+            llm_in.context += slot.text;
+        }
         for(std::size_t index = 0; index < shared->state->history.size(); ++index) {
             const auto key = "history-" + std::to_string(index);
             const auto found = kept.find(key);
@@ -916,6 +995,7 @@ AgentLoopNode::create(
             MemoryCompactOptions mcopt;
             mcopt.agent_config = &agent_config;
             mcopt.sub_llm_client = memory_compaction_llm.get();
+            mcopt.profile = compaction_profile_from_config(agent_config);
             if(task_control) mcopt.cancellation_requested = [task_control] {
                 return task_control->is_cancel_requested() || task_control->is_deadline_exceeded();
             };
@@ -960,206 +1040,6 @@ AgentLoopNode::create(
         std::move(exit_func), output_keys, std::move(loop_options));
 }
 
-void AgentLoopNode::build_loop_body(
-    workflow::GraphBuilder& builder,
-    const AgentConfig& agent_config,
-    std::shared_ptr<LLMClient> llm_client,
-    std::shared_ptr<ToolBus> toolbus,
-    std::shared_ptr<MemoryStore> memory_store,
-    std::shared_ptr<VectorStore> vector_store,
-    const std::unordered_map<std::string, std::any>& inputs
-) {
-    // This legacy helper cannot enforce the unified MemoryAssembly boundary.
-    // Keep it fail-closed until the obsolete private API is removed entirely.
-    throw std::logic_error(
-        "AgentLoopNode::build_loop_body is retired; use AgentLoopNode::create");
-    (void)memory_store;
-    (void)vector_store;
-    // expose loop inputs as a source node
-    auto [loop_in, loop_task] = builder.create_any_source("LoopInput", inputs);
-    (void)loop_task;
-
-    // LLM node: render + invoke_with_rendered_prompt
-    const std::string model_name = agent_config.model_config.model_name;
-    const std::string provider = "";  // default provider
-    auto [llm_node, llm_task] = LLMNode::create(
-        builder,
-        "LLM",
-        llm_client,
-        std::make_shared<PromptRenderer>(),
-        model_name,
-        provider,
-        {{"LoopInput", std::string(internal::kSystemPrompt)},
-         {"LoopInput", std::string(internal::kUserQuery)},
-         {"LoopInput", std::string(internal::kAgentState)}},
-        nullptr);
-    (void)llm_task;
-
-    // ToolAggregator: WP2.1b orchestration (same as loop body minus repeat guard)
-    const ContextBudgetLimits tool_agg_budget = ContextBudgetLimits::load(&agent_config);
-    auto tool_agg = [toolbus, agent_config, tool_agg_budget](
-                        const std::unordered_map<std::string, std::any>& inps)
-        -> std::unordered_map<std::string, std::any> {
-        const LLMOutput llm_out = std::any_cast<LLMOutput>(inps.at(std::string(internal::kLlmOutput)));
-        std::vector<Message> tool_msgs;
-        bool had_error = false;
-
-        auto state = std::any_cast<std::shared_ptr<internal::AgentThreadState>>(
-            inps.at(std::string(internal::kAgentState)));
-        std::vector<CallSpec> calls = bounded_tool_calls(
-            llm_out.tool_calls, agent_config.max_tool_calls_per_iteration,
-            state ? state->iteration : 0);
-
-        if (!toolbus || calls.empty()) {
-            return {
-                {std::string(internal::kToolMessages), std::any{tool_msgs}},
-                {std::string(internal::kToolHadError), std::any{had_error}}
-            };
-        }
-
-        const ToolOrchestrationOptions orch_opts = resolve_tool_orchestration_options(agent_config);
-        auto classify_side = [toolbus](std::string_view nm) -> ToolSideEffect {
-            return toolbus->get_tool_meta(std::string(nm)).side_effect;
-        };
-        std::vector<json> results(calls.size());
-        std::vector<CallSpec> pending_calls;
-        std::vector<std::size_t> pending_indexes;
-        for (std::size_t i = 0; i < calls.size(); ++i) {
-            bool restored = false;
-            if (state && calls[i].tool_call_id) {
-                for (auto it = state->history.rbegin(); it != state->history.rend(); ++it) {
-                    if (it->role == "tool" && it->tool_call_id == calls[i].tool_call_id &&
-                        it->tool_result) {
-                        results[i] = *it->tool_result;
-                        restored = true;
-                        break;
-                    }
-                }
-            }
-            if (!restored) {
-                pending_indexes.push_back(i);
-                pending_calls.push_back(calls[i]);
-            }
-        }
-        if (!pending_calls.empty()) {
-            auto executed = execute_tool_calls_sequenced(
-                toolbus, pending_calls, orch_opts, classify_side);
-            for (std::size_t i = 0; i < executed.size(); ++i) {
-                results[pending_indexes[i]] = std::move(executed[i]);
-            }
-        }
-        for (std::size_t idx = 0; idx < calls.size(); ++idx) {
-            json result = results[idx];
-            apply_per_tool_result_budget(result, tool_agg_budget, AfTruncationKind::tool_result);
-            Message m;
-            m.role = "tool";
-            m.content = "";
-            m.tool_call_id = calls[idx].tool_call_id;
-            m.tool_name = calls[idx].name;
-            m.tool_result = std::move(result);
-            m.timestamp = std::time(nullptr);
-            if (result.is_object() && result.contains("code") && result["code"].is_string()) {
-                had_error = true;
-            }
-            tool_msgs.push_back(std::move(m));
-        }
-
-        return {
-            {std::string(internal::kToolMessages), std::any{tool_msgs}},
-            {std::string(internal::kToolHadError), std::any{had_error}}
-        };
-    };
-
-    auto [tool_node, tool_task] = builder.create_any_node(
-        "ToolAggregator",
-        {{"LLM", std::string(internal::kLlmOutput)},
-         {"LoopInput", std::string(internal::kAgentState)}},
-        tool_agg,
-        {std::string(internal::kToolMessages), std::string(internal::kToolHadError)});
-    (void)tool_task;
-
-    // StateMerge: update history + iteration
-    auto state_merge = [agent_config, llm_client](
-                          const std::unordered_map<std::string, std::any>& inps)
-        -> std::unordered_map<std::string, std::any> {
-        auto st = std::any_cast<std::shared_ptr<internal::AgentThreadState>>(
-            inps.at(std::string(internal::kAgentState)));
-        const LLMOutput llm_out = std::any_cast<LLMOutput>(inps.at(std::string(internal::kLlmOutput)));
-        const std::vector<Message> tool_msgs =
-            std::any_cast<std::vector<Message>>(inps.at(std::string(internal::kToolMessages)));
-
-        auto next = std::make_shared<internal::AgentThreadState>();
-        if (st) {
-            *next = *st;
-        }
-        const std::vector<CallSpec> calls = bounded_tool_calls(
-            llm_out.tool_calls, agent_config.max_tool_calls_per_iteration, next->iteration);
-        std::unordered_set<std::string> completed_ids;
-        for (const auto& tool_message : tool_msgs) {
-            if (tool_message.tool_call_id) completed_ids.insert(*tool_message.tool_call_id);
-        }
-        std::vector<CallSpec> completed_calls;
-        for (const auto& call : calls) {
-            if (call.tool_call_id && completed_ids.contains(*call.tool_call_id)) {
-                completed_calls.push_back(call);
-            }
-        }
-        // append assistant message
-        Message a;
-        a.role = "assistant";
-        a.timestamp = std::time(nullptr);
-        if (!completed_calls.empty()) {
-            json j;
-            j["tool_calls"] = json::array();
-            for (const auto& c : completed_calls) {
-                json one;
-                one["type"] = "function";
-                one["function"] = json{{"name", c.name}, {"arguments", c.arguments.dump()}};
-                if (c.tool_call_id) {
-                    one["id"] = *c.tool_call_id;
-                }
-                j["tool_calls"].push_back(std::move(one));
-            }
-            a.content = j.dump();
-        } else if (!llm_out.final_answer.empty()) {
-            a.content = llm_out.final_answer;
-        } else {
-            a.content = llm_out.reasoning;
-        }
-        if (calls.empty() || !completed_calls.empty()) {
-            next->history.push_back(std::move(a));
-        }
-        for (const auto& tm : tool_msgs) {
-            next->history.push_back(tm);
-        }
-        next->iteration += 1;
-
-        MemoryCompactOptions mcopt;
-        mcopt.agent_config = &agent_config;
-        maybe_auto_compact_memory(*next, mcopt);
-
-        const bool is_final = calls.empty() && (llm_out.is_final || !llm_out.final_answer.empty());
-        const std::string final_answer = llm_out.final_answer;
-
-        return {
-            {std::string(internal::kNextAgentState), std::any{next}},
-            {std::string(internal::kIsFinal), std::any{is_final}},
-            {std::string(internal::kFinalAnswer), std::any{final_answer}},
-            {std::string(internal::kLlmOutput), std::any{llm_out}}
-        };
-    };
-
-    builder.create_any_node(
-        "StateMerge",
-        {{"LoopInput", std::string(internal::kAgentState)},
-         {"LLM", std::string(internal::kLlmOutput)},
-         {"ToolAggregator", std::string(internal::kToolMessages)}},
-        state_merge,
-        {std::string(internal::kNextAgentState),
-         std::string(internal::kIsFinal),
-         std::string(internal::kFinalAnswer),
-         std::string(internal::kLlmOutput)});
-}
 
 int AgentLoopNode::check_loop_condition(
     const std::unordered_map<std::string, std::any>& outputs,

@@ -1,5 +1,7 @@
 # WP2.2：AgentServer 真实服务（httplib 路由 + 线程模型 + executor 投递）— 实现计划
 
+> **历史计划**：本文保留设计过程；文内 checkbox 是当时的验收草案，不代表当前实现状态。当前事实、源码与 CTest 证据统一以 [phase-3-status.md](./phase-3-status.md) 为准。
+
 本文档将 [phase-2-plan.md](./phase-2-plan.md) **§4 WP2.2** 与交付项 **D3** 落实为可执行任务：**真实 `listen`**、**路由表** 与 **`a2a-spec-tracker.md` / WP2.1 Facade 对齐**、**长任务不阻塞 httplib 工作线程**、**状态/Artifact 经 SSE 推送**。
 
 **WP2.2 交付**：`AgentServer::start/stop` 基于 **`httplib::Server`** 可运行；**Well-Known Agent Card**、**JSON-RPC（规范路径）** 与 **可选 Legacy REST** 的 **明确开关**；**任务执行**在 **独立线程 / Taskflow `Executor` / 内部队列+worker** 上运行；**SSE** 使用 **`Response::set_chunked_content_provider`**（或等价 API）长连接写出 **WP2.1 `sse_framing` 帧**；`validate_authentication` **完整传入 headers**（具体 Bearer/API Key 规则属 **WP2.5**）。

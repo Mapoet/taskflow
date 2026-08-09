@@ -21,6 +21,27 @@ std::map<workflow::AnySource*, KnowledgeBaseBinding> bindings;
 namespace agent_framework {
 namespace node {
 
+KnowledgeBaseRetrieval retrieve_knowledge_base(
+    const std::string& query_text,
+    const std::shared_ptr<VectorStore>& vector_store,
+    const std::shared_ptr<EncoderManager>& encoder_manager,
+    int top_k,
+    const std::string& modality,
+    const MetadataFilter& metadata_filter) {
+    if(!vector_store || !encoder_manager)
+        throw std::invalid_argument("knowledge base requires VectorStore and EncoderManager");
+    if(top_k <= 0) throw std::invalid_argument("knowledge base top_k must be positive");
+    KnowledgeBaseRetrieval retrieval;
+    if(query_text.empty()) return retrieval;
+    auto encoder = encoder_manager->get_encoder("text");
+    if(!encoder) throw std::runtime_error("knowledge base text encoder is not registered");
+    retrieval.results = vector_store->search(
+        encoder->encode(query_text), top_k, modality, metadata_filter);
+    retrieval.context = KnowledgeBaseSourceNode::generate_context_summary(retrieval.results);
+    retrieval.citations = KnowledgeBaseSourceNode::extract_citations(retrieval.results);
+    return retrieval;
+}
+
 std::pair<std::shared_ptr<workflow::AnySource>, tf::Task>
 KnowledgeBaseSourceNode::create(
     workflow::GraphBuilder& builder,
@@ -77,40 +98,12 @@ std::unordered_map<std::string, std::any> KnowledgeBaseSourceNode::perform_retri
     int top_k,
     const std::string& modality
 ) {
-    // 1. 编码查询文本
-    if(!vector_store || !encoder_manager || top_k <= 0 || query_text.empty()) {
-        return {{"context", std::any{std::string("")}},
-                {"results", std::any{std::vector<RetrievalResult>{}}},
-                {"citations", std::any{std::vector<Citation>{}}}};
-    }
-    auto encoder = encoder_manager->get_encoder("text");
-    if (!encoder) {
-        return {
-            {"context", std::any{std::string("")}},
-            {"results", std::any{std::vector<RetrievalResult>{}}},
-            {"citations", std::any{std::vector<Citation>{}}}
-        };
-    }
-    
-    Embedding query_embedding = encoder->encode(query_text);
-    
-    // 2. 向量检索
-    std::vector<RetrievalResult> results = vector_store->search(
-        query_embedding,
-        top_k,
-        modality
-    );
-    
-    // 3. 生成上下文摘要
-    std::string context = generate_context_summary(results);
-    
-    // 4. 提取引用信息
-    std::vector<Citation> citations = extract_citations(results);
-    
+    const auto retrieval = retrieve_knowledge_base(
+        query_text, vector_store, encoder_manager, top_k, modality);
     return {
-        {"context", std::any{context}},
-        {"results", std::any{results}},
-        {"citations", std::any{citations}}
+        {"context", std::any{retrieval.context}},
+        {"results", std::any{retrieval.results}},
+        {"citations", std::any{retrieval.citations}}
     };
 }
 

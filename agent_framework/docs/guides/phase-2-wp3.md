@@ -1,5 +1,7 @@
 # WP2.3：任务状态机、取消与超时（内部 `AgentTask` ↔ A2A）— 实现计划
 
+> **历史计划**：本文保留设计过程；文内 checkbox 是当时的验收草案，不代表当前实现状态。当前事实、源码与 CTest 证据统一以 [phase-3-status.md](./phase-3-status.md) 为准。
+
 本文档将 [phase-2-plan.md](./phase-2-plan.md) **§4 WP2.3** 与交付项 **D2** 中「**任务状态 / 取消 / 超时** 与 A2A 映射」落实为可执行任务。
 
 **WP2.3 交付**：**合法状态迁移**表与运行时校验；**协作式取消**（`cancel` API → 标志位 → 图内可观测点退出）；** wall-clock 超时**（可配置）→ **`FAILED`** 与可序列化原因；**`AgentTaskStatus` ↔ 规范 wire 字符串** 映射写入 **`a2a-spec-tracker.md`** 并由 **`wire_mapping` / `to_json`** 使用；**SSE** 在迁移时推送（与 [phase-2-wp2.md](./phase-2-wp2.md) `push_task_status_update` 衔接）。

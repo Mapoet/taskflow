@@ -1,5 +1,7 @@
 # WP2.6：A2A 一致性 / 契约测试与 Fixture 版本化 — 实现计划
 
+> **历史计划**：本文保留设计过程；文内 checkbox 是当时的验收草案，不代表当前实现状态。当前事实、源码与 CTest 证据统一以 [phase-3-status.md](./phase-3-status.md) 为准。
+
 本文档将 [phase-2-plan.md](./phase-2-plan.md) **§4 WP2.6** 与交付项 **D6** 落实为可执行任务：**官方或社区示例 JSON**、**录制/手写 fixture** **入仓**；**JSON-RPC** 与 **SSE** 的 **快照 / 结构化断言**；**与 `a2a-spec-tracker.md` 修订号绑定**；**CI 可重复、默认无网**；支撑 **M3**「契约门禁」。
 
 **WP2.6 交付**：目录化 **`tests/fixtures/a2a/<bundle_id>/`**（或 `agent_framework/tests/fixtures/...` — **与 CMake 引用路径一致即可**）；**清单文件** `manifest.json`（或 `README.md` 表格）列出每个 fixture 的 **来源 URL / commit**、**适用规范片段**、**期望断言类型**；**CTest** 目标 **`a2a_contract_json`**、**`a2a_contract_sse`**（名称可调整）；可选 **`a2a_contract_loopback`**（`AgentClient` + 本地 `httplib::Server` **回放** fixture）。

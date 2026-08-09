@@ -619,7 +619,9 @@ void dispatch_pending_control_actions(std::vector<ControlAction>& actions,
 
     MemoryCompactOptions mcopt;
     mcopt.agent_config = agent_config;
-    mcopt.llm_client = llm_client;
+    // Manual compaction never borrows the main LLM. Without an explicitly
+    // isolated sub-client the structured strategy follows deterministic fallback.
+    (void)llm_client;
     for (const auto& a : actions) {
         if (a.command == "memory.compact") {
             if (agent_state) {

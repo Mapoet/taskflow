@@ -1,5 +1,7 @@
 # WP2.U：富界面（ImGui / TUI / Web）— 实现计划
 
+> **历史计划**：本文保留设计过程；文内 checkbox 是当时的验收草案，不代表当前实现状态。当前事实、源码与 CTest 证据统一以 [phase-3-status.md](./phase-3-status.md) 为准。
+
 本文档将 [phase-2-plan.md](./phase-2-plan.md) **§4（可选）WP2.U**、**§1.3** 与 [plan-detailed.md](./plan-detailed.md) **§5.4、§7** 落实为可执行任务：在 **不阻塞 D1–D11** 前提下，**任选一条** **垂直切片**（**M8**）落地；**所有** 富界面 **仅** 通过 **`UIHandler` / `UIManager`** 与 **图工厂**（如 **`build_cli_agent_graph`**）对齐，**复用** [phase-1-wp6.md](./phase-1-wp6.md) **§4.3** 流式/终稿 **去重** 约定。
 
 **WP2.U 交付（M8）**：**Track I、T、W 中完成其一** 即 **通过** M8；**推荐** 以 **Track I（ImGui）** 为 **默认** 展示路径。**共享基线**（**若** 任何 Track 合入）：**`UIManager::dispatch_message` 非空实现** + **`UIHandler` 可选 `handle_aux_event` 默认空**（§5）；**文档** **`docs/guides/rich-ui.md`**。

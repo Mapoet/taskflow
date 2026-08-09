@@ -5,6 +5,7 @@
 #include <agent/toolbus/toolbus.hpp>
 
 #include <future>
+#include <cstdlib>
 #include <stdexcept>
 #include <vector>
 
@@ -47,6 +48,17 @@ public:
 }
 
 int main() {
+#if defined(_WIN32)
+    (void)_putenv_s("AGENT_MEMORY_SOFT_LIMIT_BYTES", "1");
+    (void)_putenv_s("AGENT_MEMORY_COMPACT_TRIGGER_RATIO", "0");
+    (void)_putenv_s("AGENT_MEMORY_COMPACT_HEAD_KEEP", "1");
+    (void)_putenv_s("AGENT_MEMORY_COMPACT_TAIL_KEEP", "1");
+#else
+    (void)::setenv("AGENT_MEMORY_SOFT_LIMIT_BYTES", "1", 1);
+    (void)::setenv("AGENT_MEMORY_COMPACT_TRIGGER_RATIO", "0", 1);
+    (void)::setenv("AGENT_MEMORY_COMPACT_HEAD_KEEP", "1", 1);
+    (void)::setenv("AGENT_MEMORY_COMPACT_TAIL_KEEP", "1", 1);
+#endif
     auto llm = std::make_shared<LLMClient>();
     llm->set_prompt_renderer(std::make_shared<PromptRenderer>());
     llm->register_adapter("test", std::make_shared<FinalAdapter>());
@@ -87,9 +99,20 @@ int main() {
     const auto result = graph_executor.execute_sync(executor, std::move(request));
     require(result.success, "execution failed");
     std::size_t assembled = 0;
+    std::size_t compacted = 0;
     bool evicted = false;
     for(const auto& event : events) {
         if(event.type == ExecutionEventType::MemoryAssembled) ++assembled;
+        if(event.type == ExecutionEventType::MemoryCompacted) {
+            ++compacted;
+            require(event.payload.value("schema_version", 0) == 1,
+                    "MemoryCompacted schema version missing");
+            require(event.payload.value("source_digest", "").size() == 64,
+                    "MemoryCompacted source digest missing");
+            require(event.payload.contains("bytes_before") &&
+                    event.payload.contains("bytes_after") && event.payload.contains("strategy"),
+                    "MemoryCompacted exact report fields missing");
+        }
         evicted = evicted || event.type == ExecutionEventType::MemoryEvicted;
         const auto payload = event.payload.dump();
         require(payload.find("SECRET_TOOL_CONTEXT") == std::string::npos,
@@ -98,5 +121,6 @@ int main() {
                 "raw memory source id leaked into event");
     }
     require(assembled == 2, "MemoryAssembled was not emitted once per iteration");
+    require(compacted >= 1, "MemoryCompacted exact report was not emitted");
     require(evicted, "MemoryEvicted was not emitted");
 }

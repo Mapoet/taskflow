@@ -1,5 +1,7 @@
 # WP2.1b：工具编排（只读并行 + 写串行 + 并发上限）— 实现计划
 
+> **历史计划**：本文保留设计过程；文内 checkbox 是当时的验收草案，不代表当前实现状态。当前事实、源码与 CTest 证据统一以 [phase-3-status.md](./phase-3-status.md) 为准。
+
 本文档将 [phase-2-plan.md](./phase-2-plan.md) **§4 WP2.1b** 与交付项 **D7** 中属于「**编排与并发**」的部分（不含结果截断、不含调用前 hook）落实为可执行任务。
 
 **WP2.1b 交付**：可配置的 **读工具并行**（带 **全局并发上限**）、**写工具与未知类工具串行**、与现有 **`ToolBus::call_tool` + `AGENT_TOOL_ALLOWLIST`** 路径兼容；**`AgentLoop` / `ToolAggregator` 与可选 `ToolCallNode`** 共用同一编排实现；**文档化** 内建/MCP 工具的读/写分类表。

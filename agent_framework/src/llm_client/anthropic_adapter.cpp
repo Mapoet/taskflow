@@ -101,6 +101,8 @@ RenderedPrompt rendered_from_llm_input(const LLMInput& in) {
         tools.push_back(json{{"type", "function"}, {"function", std::move(fn)}});
     }
     rp.tools_json = std::move(tools);
+    rp.cancellation_requested = in.cancellation_requested;
+    rp.model_config = in.model_config;
     return rp;
 }
 
@@ -157,12 +159,14 @@ std::vector<ToolMeta> AnthropicAdapter::get_available_tools() const {
     return {};
 }
 
-json AnthropicAdapter::build_anthropic_request(const RenderedPrompt& rendered) {
+json AnthropicAdapter::build_anthropic_request(const RenderedPrompt& rendered,
+                                               const ModelConfig& config) {
     json req;
-    req["model"] = config_.model_name;
-    const int max_tok = std::max(config_.max_tokens, k_anthropic_min_max_tokens);
+    req["model"] = config.model_name;
+    const int max_tok = std::max(config.max_tokens, k_anthropic_min_max_tokens);
     req["max_tokens"] = max_tok;
-    req["temperature"] = config_.temperature;
+    req["temperature"] = config.temperature;
+    req["top_p"] = config.top_p;
 
     std::vector<std::string> system_parts;
     for (const auto& m : rendered.messages) {
@@ -260,7 +264,7 @@ json AnthropicAdapter::build_anthropic_request(const RenderedPrompt& rendered) {
     if (!tools_anth.empty()) {
         req["tools"] = std::move(tools_anth);
     }
-    req["stream"] = config_.stream;
+    req["stream"] = config.stream;
     return req;
 }
 
@@ -280,19 +284,21 @@ std::future<LLMOutput> AnthropicAdapter::invoke_with_rendered_channels(
     const RenderedPrompt& rendered,
     std::function<void(std::string_view)> answer_callback,
     std::function<void(std::string_view)> thinking_callback) {
-    return std::async(std::launch::async, [this, rendered, cb = std::move(answer_callback),
+    const ModelConfig request_config = rendered.model_config.value_or(config_);
+    return std::async(std::launch::async, [this, rendered, request_config,
+                                          cb = std::move(answer_callback),
                                           thinking_cb = std::move(thinking_callback)]() mutable {
         return invoke_with_retries(
-            [this, &rendered, &cb, &thinking_cb]() {
-                http_transport_->set_http_timeout_sec(config_.http_timeout_sec);
+            [this, &rendered, &request_config, &cb, &thinking_cb]() {
+                http_transport_->set_http_timeout_sec(request_config.http_timeout_sec);
                 const std::string url = anthropic_base_ + "/v1/messages";
-                json body = build_anthropic_request(rendered);
+                json body = build_anthropic_request(rendered, request_config);
                 std::map<std::string, std::string> hdrs = {
                     {"x-api-key", api_key_},
                     {"anthropic-version", k_anthropic_api_version},
                     {"Content-Type", "application/json"}};
 
-                if (!config_.stream) {
+                if (!request_config.stream) {
                     json resp = http_transport_->post_llm(url, body, hdrs, "anthropic");
                     return parse_anthropic_non_stream(resp);
                 }
@@ -345,7 +351,7 @@ std::future<LLMOutput> AnthropicAdapter::invoke_with_rendered_channels(
                             }
                         }
                     },
-                    config_.http_timeout_sec, "anthropic", rendered.cancellation_requested);
+                    request_config.http_timeout_sec, "anthropic", rendered.cancellation_requested);
 
                 LLMOutput out;
                 out.final_answer = text_acc;
@@ -370,7 +376,7 @@ std::future<LLMOutput> AnthropicAdapter::invoke_with_rendered_channels(
                 out.is_final = out.tool_calls.empty();
                 return out;
             },
-            config_);
+            request_config);
     });
 }
 

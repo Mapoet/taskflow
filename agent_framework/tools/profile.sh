@@ -4,7 +4,7 @@
 set -e
 
 BUILD_DIR="build"
-PROGRAM="${1:-examples/simple_agent}"
+PROGRAM="${1:-agent_framework/cli_agent_demo}"
 
 if [ ! -f "${BUILD_DIR}/${PROGRAM}" ]; then
     echo "Program ${PROGRAM} not found. Building first..."
@@ -23,4 +23,3 @@ if [ -f "tfprof.json" ]; then
 else
     echo "Warning: Profiling data not generated"
 fi
-

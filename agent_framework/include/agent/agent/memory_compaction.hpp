@@ -47,15 +47,20 @@ struct MemoryCompactResult {
     std::string source_digest;
     int schema_version = 1;
     bool cancelled = false;
+    json to_json() const;
 };
 
 struct MemoryCompactionProfile {
     std::string provider;
+    std::string model;
     int timeout_ms = 0;
     std::size_t max_input_bytes = 0;
     std::size_t max_output_bytes = 0;
+    std::size_t max_input_tokens = 0;
+    std::size_t max_output_tokens = 0;
     int max_retries = 0;
     double temperature = 0.0;
+    double top_p = 1.0;
 };
 
 struct MemoryCompactionInput {
@@ -95,8 +100,7 @@ std::shared_ptr<MemoryCompactorRegistry> default_memory_compactor_registry();
 
 struct MemoryCompactOptions {
     const AgentConfig* agent_config = nullptr;
-    /** Deprecated compatibility path for direct callers; AgentLoop uses sub_llm_client. */
-    LLMClient* llm_client = nullptr;
+    /** Must be an isolated client; the main agent client is never an implicit fallback. */
     LLMClient* sub_llm_client = nullptr;
     std::shared_ptr<MemoryCompactorRegistry> registry;
     MemoryCompactionProfile profile;

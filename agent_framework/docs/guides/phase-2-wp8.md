@@ -1,5 +1,7 @@
 # WP2.8：Verifier（第二套 LLM 子图）— 实现计划
 
+> **历史计划**：本文保留设计过程；文内 checkbox 是当时的验收草案，不代表当前实现状态。当前事实、源码与 CTest 证据统一以 [phase-3-status.md](./phase-3-status.md) 为准。
+
 本文档将 [phase-2-plan.md](./phase-2-plan.md) **§4 WP2.8** 与交付项 **D9** 落实为可执行任务：主 Agent 图产出 **草案输出** 后进入 **Verifier 子图**（**框架内第二套 `LLMClient`**，不绑定外部商业二审 API，与 [plan-detailed.v2.md](./plan-detailed.v2.md) §6.2 一致）；**结构化**结论 **`ok` / `issues` / `suggested_action`**；Verifier **默认无写工具**；**事件进 SSE + 日志**；**fail** 路径与主循环 **Retry/Escalate** 衔接（v2 mermaid：`OUT → VRF →|fail| FIX → MAIN`）。
 
 **WP2.8 交付**：**`VerifierResult`**（或等价名）类型 + **JSON 解析/校验** + **图接线**（CLI **与** A2A **同一模板**）；**单测**（mock LLM、闸逻辑、重试次数）；**`docs/guides/verifier.md`**（env、schema、SSE 字段）。

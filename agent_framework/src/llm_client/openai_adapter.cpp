@@ -64,6 +64,8 @@ RenderedPrompt rendered_from_llm_input(const LLMInput& in) {
         tools.push_back(json{{"type", "function"}, {"function", std::move(fn)}});
     }
     rp.tools_json = std::move(tools);
+    rp.cancellation_requested = in.cancellation_requested;
+    rp.model_config = in.model_config;
     return rp;
 }
 
@@ -187,9 +189,10 @@ std::vector<ToolMeta> OpenAIAdapter::get_available_tools() const {
     return {};
 }
 
-json OpenAIAdapter::build_openai_request(const RenderedPrompt& rendered) {
+json OpenAIAdapter::build_openai_request(const RenderedPrompt& rendered,
+                                         const ModelConfig& config) {
     json req;
-    req["model"] = config_.model_name;
+    req["model"] = config.model_name;
     json msgs = json::array();
     for (const auto& m : sanitize_openai_message_protocol(rendered.messages)) {
         msgs.push_back(m);
@@ -205,10 +208,11 @@ json OpenAIAdapter::build_openai_request(const RenderedPrompt& rendered) {
         }
     }
     req["tool_choice"] = "auto";
-    req["temperature"] = config_.temperature;
-    req["max_tokens"] = config_.max_tokens;
-    req["stream"] = config_.stream;
-    for (const auto& kv : config_.extra_params) {
+    req["temperature"] = config.temperature;
+    req["top_p"] = config.top_p;
+    req["max_tokens"] = config.max_tokens;
+    req["stream"] = config.stream;
+    for (const auto& kv : config.extra_params) {
         req[kv.first] = kv.second;
     }
     return req;
@@ -232,22 +236,23 @@ std::future<LLMOutput> OpenAIAdapter::invoke_with_rendered_channels(
     std::function<void(std::string_view)> thinking_callback) {
     const char* dbg_env = std::getenv("AGENT_TEST_AGENT_LOOP_DEBUG");
     const bool dbg = dbg_env && std::string(dbg_env) != "0";
+    const ModelConfig request_config = rendered.model_config.value_or(config_);
     return std::async(std::launch::async,
-                      [this, rendered, cb = std::move(answer_callback),
+                      [this, rendered, request_config, cb = std::move(answer_callback),
                        thinking_cb = std::move(thinking_callback), dbg]() mutable {
         return invoke_with_retries(
-            [this, &rendered, &cb, &thinking_cb, dbg]() {
-                http_transport_->set_http_timeout_sec(config_.http_timeout_sec);
+            [this, &rendered, &request_config, &cb, &thinking_cb, dbg]() {
+                http_transport_->set_http_timeout_sec(request_config.http_timeout_sec);
                 const std::string url = base_url_ + "/chat/completions";
-                json body = build_openai_request(rendered);
+                json body = build_openai_request(rendered, request_config);
                 std::map<std::string, std::string> hdrs = {{"Authorization", "Bearer " + api_key_},
                                                            {"Content-Type", "application/json"}};
 
-                if (!config_.stream) {
+                if (!request_config.stream) {
                     if (dbg) {
                         std::cout << "[OpenAIAdapter] POST " << url
-                                  << " model=" << config_.model_name
-                                  << " stream=false timeout_sec=" << config_.http_timeout_sec
+                                  << " model=" << request_config.model_name
+                                  << " stream=false timeout_sec=" << request_config.http_timeout_sec
                                   << " payload_chars=" << body.dump().size() << "\n";
                         std::cout.flush();
                     }
@@ -261,8 +266,8 @@ std::future<LLMOutput> OpenAIAdapter::invoke_with_rendered_channels(
 
                 if (dbg) {
                     std::cout << "[OpenAIAdapter] SSE POST " << url
-                              << " model=" << config_.model_name
-                              << " stream=true timeout_sec=" << config_.http_timeout_sec
+                              << " model=" << request_config.model_name
+                              << " stream=true timeout_sec=" << request_config.http_timeout_sec
                               << " payload_chars=" << body.dump().size() << "\n";
                     std::cout.flush();
                 }
@@ -315,7 +320,7 @@ std::future<LLMOutput> OpenAIAdapter::invoke_with_rendered_channels(
                             }
                         }
                     },
-                    config_.http_timeout_sec, "openai", rendered.cancellation_requested);
+                    request_config.http_timeout_sec, "openai", rendered.cancellation_requested);
 
                 LLMOutput out;
                 out.final_answer = full_text;
@@ -340,7 +345,7 @@ std::future<LLMOutput> OpenAIAdapter::invoke_with_rendered_channels(
                 out.is_final = out.tool_calls.empty();
                 return out;
             },
-            config_);
+            request_config);
     });
 }
 

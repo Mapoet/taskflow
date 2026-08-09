@@ -1,5 +1,7 @@
 # WP2.1d：工具调用前 Hook（allow / deny / 改参）与 `AGENT_TOOL_ALLOWLIST` 组合策略 — 实现计划
 
+> **历史计划**：本文保留设计过程；文内 checkbox 是当时的验收草案，不代表当前实现状态。当前事实、源码与 CTest 证据统一以 [phase-3-status.md](./phase-3-status.md) 为准。
+
 本文档将 [phase-2-plan.md](./phase-2-plan.md) **§4 WP2.1d** 与交付项 **D7** 中「**调用前 hook** + **与 allowlist 文档化 + 单测**」落实为可执行任务。
 
 **WP2.1d 交付**：在 **`ToolBus::call_tool` 单一路径**上插入 **可链式**、**同步** 的 **before-call hook**；支持 **放行**、**拒绝**（返回结构化错误 JSON future）、**改参**（替换 `arguments` 后 **重新** 走 schema 校验）；与现有 **`AGENT_TOOL_ALLOWLIST`** 的 **先后顺序与语义** 文档化并单测覆盖。

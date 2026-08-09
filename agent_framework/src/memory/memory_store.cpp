@@ -11,6 +11,7 @@
 #include <cctype>
 #include <cerrno>
 #include <filesystem>
+#include <functional>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
@@ -33,7 +34,7 @@ namespace agent_framework
     {
         namespace fs = std::filesystem;
 
-        constexpr int kMemorySchemaVersion = 2;
+        constexpr int kMemorySchemaVersion = 3;
 
         bool valid_scope_id(const std::string &value)
         {
@@ -305,11 +306,87 @@ namespace agent_framework
             std::vector<json> summaries;
         };
 
+        void append_audit(const fs::path &session, const json &record);
+
         std::string generation_name(std::uint64_t revision)
         {
             std::ostringstream value;
             value << std::setw(20) << std::setfill('0') << revision;
             return value.str();
+        }
+
+        json generation_index(const SessionGeneration &data)
+        {
+            return {{"schema_version", kMemorySchemaVersion}, {"revision", data.revision},
+                    {"counts", {{"events", data.events.size()},
+                                {"messages", data.messages.size()},
+                                {"summaries", data.summaries.size()}}}};
+        }
+
+        void ensure_index_locked(const fs::path &session, const SessionGeneration &data)
+        {
+            if(!data.revision) return;
+            const auto indexes = session / "indexes";
+            secure_directory(indexes);
+            const auto target = indexes / (generation_name(data.revision) + ".json");
+            bool valid = false;
+            try {
+                json existing;
+                std::ifstream input(target, std::ios::binary);
+                input >> existing;
+                valid = existing == generation_index(data);
+            } catch(...) {}
+            if(valid) return;
+#if defined(_WIN32)
+            const auto process_id = 0;
+#else
+            const auto process_id = ::getpid();
+#endif
+            const auto temporary = indexes /
+                (".tmp-" + std::to_string(process_id) + "-" + generation_name(data.revision));
+            {
+                std::ofstream output(temporary, std::ios::binary | std::ios::trunc);
+                output << generation_index(data).dump(2) << '\n';
+                output.flush();
+                if(!output) throw std::runtime_error("cannot write memory derived index");
+            }
+            secure_file(temporary);
+            if(!durable_file(temporary)) throw std::runtime_error("memory index fsync failed");
+            std::error_code ignored;
+            fs::remove(target, ignored);
+            fs::rename(temporary, target);
+            if(!durable_directory(indexes)) throw std::runtime_error("memory index publish failed");
+        }
+
+        void repair_current_locked(const fs::path &session, const SessionGeneration &data)
+        {
+            if(!data.revision) return;
+            const auto expected = generation_name(data.revision);
+            std::string selected;
+            { std::ifstream input(session / "CURRENT"); std::getline(input, selected); }
+            if(selected == expected) return;
+#if defined(_WIN32)
+            const auto process_id = 0;
+#else
+            const auto process_id = ::getpid();
+#endif
+            const auto temporary = session / ("CURRENT.repair-" + std::to_string(process_id));
+            {
+                std::ofstream output(temporary, std::ios::binary | std::ios::trunc);
+                output << expected << '\n';
+                output.flush();
+                if(!output) throw std::runtime_error("cannot repair memory CURRENT");
+            }
+            secure_file(temporary);
+            if(!durable_file(temporary)) throw std::runtime_error("memory CURRENT repair fsync failed");
+#if defined(_WIN32)
+            std::error_code ignored;
+            fs::remove(session / "CURRENT", ignored);
+#endif
+            fs::rename(temporary, session / "CURRENT");
+            append_audit(session, {{"type", "current_repaired"},
+                                   {"generation_digest", skill_sha256_bytes(expected).value_or("unavailable")}});
+            if(!durable_directory(session)) throw std::runtime_error("memory CURRENT repair publish failed");
         }
 
         std::optional<SessionGeneration> read_generation(const fs::path &directory)
@@ -319,7 +396,8 @@ namespace agent_framework
                 json manifest;
                 std::ifstream manifest_input(directory / "manifest.json", std::ios::binary);
                 manifest_input >> manifest;
-                if (!manifest.is_object() || manifest.value("schema_version", 0) != kMemorySchemaVersion)
+                const auto schema_version = manifest.value("schema_version", 0);
+                if (!manifest.is_object() || (schema_version != 2 && schema_version != kMemorySchemaVersion))
                     return std::nullopt;
                 SessionGeneration data;
                 data.revision = manifest.value("revision", std::uint64_t{0});
@@ -386,7 +464,59 @@ namespace agent_framework
             return {};
         }
 
-        void commit_session(const fs::path &session, SessionGeneration data)
+        void append_audit(const fs::path &session, const json &record)
+        {
+            const auto path = session / "audit.jsonl";
+            std::ofstream output(path, std::ios::binary | std::ios::app);
+            if (!output)
+                throw std::runtime_error("cannot write memory audit");
+            output << redact_json(record).dump() << '\n';
+            output.flush();
+            if (!output)
+                throw std::runtime_error("cannot flush memory audit");
+            output.close();
+            secure_file(path);
+            if (!durable_file(path))
+                throw std::runtime_error("memory audit fsync failed");
+        }
+
+        void quarantine_current_locked(const fs::path &session)
+        {
+            std::string pointed_generation;
+            { std::ifstream pointer(session / "CURRENT"); std::getline(pointer, pointed_generation); }
+            if(!valid_scope_id(pointed_generation))
+                return;
+            const auto pointed_path = session / "generations" / pointed_generation;
+            if(!fs::exists(pointed_path) || read_generation(pointed_path))
+                return;
+            const auto quarantine = session / "quarantine";
+            secure_directory(quarantine);
+            auto target = quarantine / pointed_generation;
+            if(fs::exists(target)) target += ".duplicate";
+            fs::rename(pointed_path, target);
+            append_audit(session, {{"type", "generation_quarantined"},
+                                   {"generation_digest", skill_sha256_bytes(pointed_generation).value_or("unavailable")}});
+            (void)durable_directory(quarantine);
+            std::clog << "[memory] quarantined invalid generation digest="
+                      << skill_sha256_bytes(pointed_generation).value_or("unavailable") << '\n';
+        }
+
+        SessionGeneration load_session_recovering(const fs::path &session)
+        {
+            ensure_no_symlink(session);
+            secure_directory(session);
+            ProcessFileLock lock(session / "lock");
+            secure_file(session / "lock");
+            quarantine_current_locked(session);
+            auto data = load_session(session);
+            repair_current_locked(session, data);
+            ensure_index_locked(session, data);
+            return data;
+        }
+
+        bool commit_session(const fs::path &session,
+                            const std::function<bool(SessionGeneration &)> &mutate,
+                            const std::function<void(std::string_view)> &fault_injector)
         {
             ensure_no_symlink(session);
             secure_directory(session);
@@ -395,31 +525,15 @@ namespace agent_framework
     ProcessFileLock lock(lock_path);
     secure_file(lock_path);
 
-    // Quarantine a committed generation whose manifest/content no longer validates.
-    // This happens under the process lock so another writer cannot race the move.
-    std::string pointed_generation;
-    { std::ifstream pointer(session / "CURRENT"); std::getline(pointer, pointed_generation); }
-    if(valid_scope_id(pointed_generation)) {
-        const auto pointed_path = session / "generations" / pointed_generation;
-        if(fs::exists(pointed_path) && !read_generation(pointed_path)) {
-            const auto quarantine = session / "quarantine";
-            secure_directory(quarantine);
-            auto target = quarantine / pointed_generation;
-            if(fs::exists(target)) target += ".duplicate";
-            fs::rename(pointed_path, target);
-            (void)durable_directory(quarantine);
-            std::clog << "[memory] quarantined invalid generation digest="
-                      << skill_sha256_bytes(pointed_generation).value_or("unavailable") << '\n';
-        }
-    }
-
-    // Reload after taking the cross-process lock so concurrent commits compose.
-            const auto current = load_session(session);
-            if (data.revision != current.revision + 1)
-                throw std::runtime_error("memory revision conflict");
+            quarantine_current_locked(session);
+            auto data = load_session(session);
+            if (!mutate(data))
+                return false;
+            if (fault_injector)
+                fault_injector("after_reload");
             const auto generations = session / "generations";
             secure_directory(generations);
-            std::uint64_t largest_published_revision = current.revision;
+            std::uint64_t largest_published_revision = data.revision;
             const auto inspect_revisions = [&](const fs::path &directory)
             {
                 std::error_code error;
@@ -460,6 +574,8 @@ namespace agent_framework
             write_jsonl(temporary / "events.jsonl", data.events);
             write_jsonl(temporary / "messages.jsonl", data.messages);
             write_jsonl(temporary / "summaries.jsonl", data.summaries);
+            if (fault_injector)
+                fault_injector("after_records");
             const auto event_digest = file_digest(temporary / "events.jsonl");
             const auto message_digest = file_digest(temporary / "messages.jsonl");
             const auto summary_digest = file_digest(temporary / "summaries.jsonl");
@@ -475,6 +591,8 @@ namespace agent_framework
                     throw std::runtime_error("cannot write memory manifest");
             }
             secure_file(temporary / "manifest.json");
+            if (fault_injector)
+                fault_injector("after_manifest");
             for (const auto &file : {"events.jsonl", "messages.jsonl", "summaries.jsonl", "manifest.json"})
                 if (!durable_file(temporary / file))
                     throw std::runtime_error("memory fsync failed");
@@ -483,6 +601,11 @@ namespace agent_framework
             fs::rename(temporary, committed);
             if (!durable_directory(generations))
                 throw std::runtime_error("memory generation publish failed");
+            if (fault_injector)
+                fault_injector("after_generation_publish");
+            ensure_index_locked(session, data);
+            if (fault_injector)
+                fault_injector("after_index_publish");
 
             const auto current_tmp = session /
                                      ("CURRENT.tmp-" + std::to_string(process_id));
@@ -496,6 +619,8 @@ namespace agent_framework
             secure_file(current_tmp);
             if (!durable_file(current_tmp))
                 throw std::runtime_error("memory CURRENT fsync failed");
+            if (fault_injector)
+                fault_injector("before_current_publish");
             fs::rename(current_tmp, session / "CURRENT");
             if (!durable_directory(session))
                 throw std::runtime_error("memory commit fsync failed");
@@ -508,10 +633,30 @@ namespace agent_framework
             for (const auto &entry : fs::directory_iterator(generations))
             {
                 const auto entry_name = entry.path().filename().string();
-                if (entry.is_directory() && (entry_name.starts_with(".tmp-") || !keep.contains(entry_name)))
+                if (entry.is_directory() && (entry_name.starts_with(".tmp-") || !keep.contains(entry_name))) {
+                    append_audit(session, {{"type", "generation_gc"},
+                                           {"generation_digest", skill_sha256_bytes(entry_name).value_or("unavailable")}});
                     fs::remove_all(entry.path(), cleanup_error);
+                }
+            }
+            const auto indexes = session / "indexes";
+            if(fs::exists(indexes)) for(const auto &entry : fs::directory_iterator(indexes)) {
+                auto index_generation = entry.path().stem().string();
+                const auto entry_name = entry.path().filename().string();
+                if(entry_name.starts_with(".tmp-") || !keep.contains(index_generation))
+                    fs::remove(entry.path(), cleanup_error);
+            }
+            const auto blobs = session / "blobs";
+            secure_directory(blobs);
+            for(const auto &entry : fs::directory_iterator(blobs)) {
+                append_audit(session, {{"type", "unreferenced_blob_gc"},
+                                       {"blob_digest", skill_sha256_bytes(entry.path().filename().string()).value_or("unavailable")}});
+                fs::remove_all(entry.path(), cleanup_error);
             }
             (void)durable_directory(generations);
+            (void)durable_directory(indexes);
+            (void)durable_directory(blobs);
+            return true;
         }
 
         fs::path scoped_root(const std::string &root, const std::string &tenant,
@@ -535,8 +680,9 @@ namespace agent_framework
     } // namespace
 
     FileMemoryBackend::FileMemoryBackend(const std::string &data_dir, std::string tenant_id,
-                                         std::string agent_id)
-        : data_dir_(data_dir), tenant_id_(std::move(tenant_id)), agent_id_(std::move(agent_id))
+                                         std::string agent_id, FaultInjector fault_injector)
+        : data_dir_(data_dir), tenant_id_(std::move(tenant_id)), agent_id_(std::move(agent_id)),
+          fault_injector_(std::move(fault_injector))
     {
         if (data_dir_.empty())
             throw std::invalid_argument("memory data directory must not be empty");
@@ -553,10 +699,10 @@ namespace agent_framework
         const auto session = event.data.value("session_id", "default");
         std::lock_guard<std::mutex> guard(file_mutex_);
         const auto root = session_root(data_dir_, tenant_id_, agent_id_, session);
-        auto data = load_session(root);
-        data.events.push_back(event_json(event));
-        ++data.revision;
-        commit_session(root, std::move(data));
+        commit_session(root, [&](SessionGeneration &data) {
+            data.events.push_back(event_json(event));
+            return true;
+        }, fault_injector_);
     }
 
     std::vector<Event> FileMemoryBackend::query_events(const std::string &session,
@@ -565,7 +711,7 @@ namespace agent_framework
     {
         std::lock_guard<std::mutex> guard(file_mutex_);
         std::vector<Event> result;
-        for (const auto &value : load_session(session_root(data_dir_, tenant_id_, agent_id_, session)).events)
+        for (const auto &value : load_session_recovering(session_root(data_dir_, tenant_id_, agent_id_, session)).events)
         {
             const auto event = parse_event(value);
             if ((node.empty() || event.node_name == node) && (begin == 0 || event.timestamp >= begin) &&
@@ -580,10 +726,10 @@ namespace agent_framework
         require_scope_id(session, "session id");
         std::lock_guard<std::mutex> guard(file_mutex_);
         const auto root = session_root(data_dir_, tenant_id_, agent_id_, session);
-        auto data = load_session(root);
-        data.messages.push_back(message_json(message));
-        ++data.revision;
-        commit_session(root, std::move(data));
+        commit_session(root, [&](SessionGeneration &data) {
+            data.messages.push_back(message_json(message));
+            return true;
+        }, fault_injector_);
     }
 
     std::vector<Message> FileMemoryBackend::get_conversation_history(const std::string &session,
@@ -591,7 +737,7 @@ namespace agent_framework
     {
         std::lock_guard<std::mutex> guard(file_mutex_);
         std::vector<Message> result;
-        for (const auto &value : load_session(session_root(data_dir_, tenant_id_, agent_id_, session)).messages)
+        for (const auto &value : load_session_recovering(session_root(data_dir_, tenant_id_, agent_id_, session)).messages)
             result.push_back(parse_message(value));
         if (maximum > 0 && result.size() > static_cast<std::size_t>(maximum))
             result.erase(result.begin(), result.end() - maximum);
@@ -603,10 +749,10 @@ namespace agent_framework
         require_scope_id(summary.session_id, "session id");
         std::lock_guard<std::mutex> guard(file_mutex_);
         const auto root = session_root(data_dir_, tenant_id_, agent_id_, summary.session_id);
-        auto data = load_session(root);
-        data.summaries.push_back(summary_json(summary));
-        ++data.revision;
-        commit_session(root, std::move(data));
+        commit_session(root, [&](SessionGeneration &data) {
+            data.summaries.push_back(summary_json(summary));
+            return true;
+        }, fault_injector_);
     }
 
     std::vector<MemorySummary> FileMemoryBackend::query_memory_summaries(const std::string &query,
@@ -619,7 +765,7 @@ namespace agent_framework
         {
             if (!entry.is_directory() || !valid_scope_id(entry.path().filename().string()))
                 continue;
-            for (const auto &value : load_session(entry.path()).summaries)
+            for (const auto &value : load_session_recovering(entry.path()).summaries)
             {
                 auto summary = parse_summary(value);
                 if (query.empty() || summary.summary.find(query) != std::string::npos)
@@ -641,17 +787,14 @@ namespace agent_framework
         {
             if (!entry.is_directory() || !valid_scope_id(entry.path().filename().string()))
                 continue;
-            auto data = load_session(entry.path());
-            const auto old_size = data.summaries.size();
-            data.summaries.erase(std::remove_if(data.summaries.begin(), data.summaries.end(),
-                                                [expiry](const json &value)
-                                                { return value.value("updated_at", std::time_t{}) < expiry; }),
-                                 data.summaries.end());
-            if (data.summaries.size() != old_size)
-            {
-                ++data.revision;
-                commit_session(entry.path(), std::move(data));
-            }
+            commit_session(entry.path(), [expiry](SessionGeneration &data) {
+                const auto old_size = data.summaries.size();
+                data.summaries.erase(std::remove_if(data.summaries.begin(), data.summaries.end(),
+                                                    [expiry](const json &value)
+                                                    { return value.value("updated_at", std::time_t{}) < expiry; }),
+                                     data.summaries.end());
+                return data.summaries.size() != old_size;
+            }, fault_injector_);
         }
     }
 
@@ -713,8 +856,16 @@ namespace agent_framework
                          summaries_.end());
     }
 
-    SQLiteMemoryBackend::SQLiteMemoryBackend(const std::string &path) : db_path_(path), db_(nullptr)
+    SQLiteMemoryBackend::SQLiteMemoryBackend(const std::string &path, std::string tenant_id,
+                                             std::string agent_id)
+        : db_path_(path), tenant_id_(std::move(tenant_id)), agent_id_(std::move(agent_id)), db_(nullptr)
     {
+        if (path.empty())
+            throw std::invalid_argument("memory sqlite path must not be empty");
+        require_scope_id(tenant_id_, "tenant id");
+        require_scope_id(agent_id_, "agent id");
+        if (path != ":memory:")
+            ensure_no_symlink(fs::path(path));
         sqlite3 *database = nullptr;
         if (sqlite3_open(path.c_str(), &database) != SQLITE_OK)
         {
@@ -724,6 +875,8 @@ namespace agent_framework
             throw std::runtime_error("cannot open memory sqlite: " + error);
         }
         db_ = database;
+        if (path != ":memory:")
+            secure_file(fs::path(path));
         init_database();
     }
     SQLiteMemoryBackend::~SQLiteMemoryBackend()
@@ -743,26 +896,90 @@ namespace agent_framework
     }
     void SQLiteMemoryBackend::init_database()
     {
-        execute_sql("PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000; "
-                    "CREATE TABLE IF NOT EXISTS memory_events(session TEXT,node TEXT,ts INTEGER,payload TEXT);"
-                    "CREATE INDEX IF NOT EXISTS memory_events_lookup ON memory_events(session,node,ts);"
-                    "CREATE TABLE IF NOT EXISTS memory_messages(session TEXT,ts INTEGER,payload TEXT);"
-                    "CREATE INDEX IF NOT EXISTS memory_messages_lookup ON memory_messages(session,ts);"
-                    "CREATE TABLE IF NOT EXISTS memory_summaries(session TEXT,summary TEXT,payload TEXT,updated INTEGER);"
-                    "PRAGMA user_version=2;");
+        auto *database = static_cast<sqlite3 *>(db_);
+        execute_sql("PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;");
+        const auto scalar_int = [&](const char *sql) {
+            sqlite3_stmt *statement = nullptr;
+            sqlite_require(sqlite3_prepare_v2(database, sql, -1, &statement, nullptr), database,
+                           "prepare sqlite migration query");
+            const int rc = sqlite3_step(statement);
+            sqlite_require(rc, database, "run sqlite migration query");
+            const int value = rc == SQLITE_ROW ? sqlite3_column_int(statement, 0) : 0;
+            sqlite3_finalize(statement);
+            return value;
+        };
+        int version = scalar_int("PRAGMA user_version");
+        if (version > kMemorySchemaVersion)
+            throw std::runtime_error("memory sqlite schema is newer than this runtime");
+        const bool has_tables = scalar_int(
+            "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='memory_events'") != 0;
+        try
+        {
+            execute_sql("BEGIN IMMEDIATE;");
+            if (!has_tables)
+            {
+                execute_sql(
+                    "CREATE TABLE memory_events(tenant TEXT NOT NULL,agent TEXT NOT NULL,session TEXT NOT NULL,node TEXT,ts INTEGER,payload TEXT);"
+                    "CREATE TABLE memory_messages(tenant TEXT NOT NULL,agent TEXT NOT NULL,session TEXT NOT NULL,ts INTEGER,payload TEXT);"
+                    "CREATE TABLE memory_summaries(tenant TEXT NOT NULL,agent TEXT NOT NULL,session TEXT NOT NULL,summary TEXT,payload TEXT,updated INTEGER);");
+            }
+            else if (version < kMemorySchemaVersion)
+            {
+                const auto has_column = [&](const char *table, const char *column) {
+                    sqlite3_stmt *statement = nullptr;
+                    const auto sql = std::string("PRAGMA table_info(") + table + ")";
+                    sqlite_require(sqlite3_prepare_v2(database, sql.c_str(), -1, &statement, nullptr),
+                                   database, "prepare sqlite column migration");
+                    bool found = false;
+                    while (sqlite3_step(statement) == SQLITE_ROW)
+                    {
+                        const auto *name = reinterpret_cast<const char *>(sqlite3_column_text(statement, 1));
+                        if (name && column == std::string(name))
+                            found = true;
+                    }
+                    sqlite3_finalize(statement);
+                    return found;
+                };
+                for (const auto *table : {"memory_events", "memory_messages", "memory_summaries"})
+                {
+                    if (!has_column(table, "tenant"))
+                        execute_sql(std::string("ALTER TABLE ") + table +
+                                    " ADD COLUMN tenant TEXT NOT NULL DEFAULT 'default';");
+                    if (!has_column(table, "agent"))
+                        execute_sql(std::string("ALTER TABLE ") + table +
+                                    " ADD COLUMN agent TEXT NOT NULL DEFAULT 'default';");
+                }
+            }
+            execute_sql(
+                "DROP INDEX IF EXISTS memory_events_lookup;"
+                "DROP INDEX IF EXISTS memory_messages_lookup;"
+                "DROP INDEX IF EXISTS memory_summaries_lookup;"
+                "CREATE INDEX memory_events_lookup ON memory_events(tenant,agent,session,node,ts);"
+                "CREATE INDEX memory_messages_lookup ON memory_messages(tenant,agent,session,ts);"
+                "CREATE INDEX memory_summaries_lookup ON memory_summaries(tenant,agent,updated);"
+                "PRAGMA user_version=3; COMMIT;");
+        }
+        catch (...)
+        {
+            try { execute_sql("ROLLBACK;"); } catch (...) {}
+            throw;
+        }
     }
     void SQLiteMemoryBackend::store_event(const Event &event)
     {
         std::lock_guard<std::mutex> guard(db_mutex_);
         auto *database = static_cast<sqlite3 *>(db_);
         sqlite3_stmt *statement = nullptr;
-        sqlite_require(sqlite3_prepare_v2(database, "INSERT INTO memory_events VALUES(?,?,?,?)", -1, &statement, nullptr), database, "prepare event");
+        sqlite_require(sqlite3_prepare_v2(database, "INSERT INTO memory_events(tenant,agent,session,node,ts,payload) VALUES(?,?,?,?,?,?)", -1, &statement, nullptr), database, "prepare event");
         const auto payload = event_json(event).dump();
         const auto session = event.data.value("session_id", "default");
-        sqlite3_bind_text(statement, 1, session.c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_text(statement, 2, event.node_name.c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_int64(statement, 3, event.timestamp);
-        sqlite3_bind_text(statement, 4, payload.c_str(), -1, SQLITE_TRANSIENT);
+        require_scope_id(session, "session id");
+        sqlite3_bind_text(statement, 1, tenant_id_.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(statement, 2, agent_id_.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(statement, 3, session.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(statement, 4, event.node_name.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_int64(statement, 5, event.timestamp);
+        sqlite3_bind_text(statement, 6, payload.c_str(), -1, SQLITE_TRANSIENT);
         const int rc = sqlite3_step(statement);
         sqlite3_finalize(statement);
         sqlite_require(rc, database, "store event");
@@ -772,7 +989,8 @@ namespace agent_framework
     {
         std::lock_guard<std::mutex> guard(db_mutex_);
         auto *database = static_cast<sqlite3 *>(db_);
-        std::string sql = "SELECT payload FROM memory_events WHERE session=?";
+        require_scope_id(session, "session id");
+        std::string sql = "SELECT payload FROM memory_events WHERE tenant=? AND agent=? AND session=?";
         if (!node.empty())
             sql += " AND node=?";
         if (begin)
@@ -783,6 +1001,8 @@ namespace agent_framework
         sqlite3_stmt *statement = nullptr;
         sqlite_require(sqlite3_prepare_v2(database, sql.c_str(), -1, &statement, nullptr), database, "prepare query events");
         int index = 1;
+        sqlite3_bind_text(statement, index++, tenant_id_.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(statement, index++, agent_id_.c_str(), -1, SQLITE_TRANSIENT);
         sqlite3_bind_text(statement, index++, session.c_str(), -1, SQLITE_TRANSIENT);
         if (!node.empty())
             sqlite3_bind_text(statement, index++, node.c_str(), -1, SQLITE_TRANSIENT);
@@ -802,11 +1022,13 @@ namespace agent_framework
         std::lock_guard<std::mutex> guard(db_mutex_);
         auto *database = static_cast<sqlite3 *>(db_);
         sqlite3_stmt *statement = nullptr;
-        sqlite_require(sqlite3_prepare_v2(database, "INSERT INTO memory_messages VALUES(?,?,?)", -1, &statement, nullptr), database, "prepare message");
+        sqlite_require(sqlite3_prepare_v2(database, "INSERT INTO memory_messages(tenant,agent,session,ts,payload) VALUES(?,?,?,?,?)", -1, &statement, nullptr), database, "prepare message");
         const auto payload = message_json(message).dump();
-        sqlite3_bind_text(statement, 1, session.c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_int64(statement, 2, message.timestamp);
-        sqlite3_bind_text(statement, 3, payload.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(statement, 1, tenant_id_.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(statement, 2, agent_id_.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(statement, 3, session.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_int64(statement, 4, message.timestamp);
+        sqlite3_bind_text(statement, 5, payload.c_str(), -1, SQLITE_TRANSIENT);
         const int rc = sqlite3_step(statement);
         sqlite3_finalize(statement);
         sqlite_require(rc, database, "store message");
@@ -816,9 +1038,12 @@ namespace agent_framework
         std::lock_guard<std::mutex> guard(db_mutex_);
         auto *database = static_cast<sqlite3 *>(db_);
         sqlite3_stmt *statement = nullptr;
-        sqlite_require(sqlite3_prepare_v2(database, "SELECT payload FROM memory_messages WHERE session=? ORDER BY ts DESC LIMIT ?", -1, &statement, nullptr), database, "prepare history");
-        sqlite3_bind_text(statement, 1, session.c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_int(statement, 2, maximum > 0 ? maximum : -1);
+        require_scope_id(session, "session id");
+        sqlite_require(sqlite3_prepare_v2(database, "SELECT payload FROM memory_messages WHERE tenant=? AND agent=? AND session=? ORDER BY ts DESC LIMIT ?", -1, &statement, nullptr), database, "prepare history");
+        sqlite3_bind_text(statement, 1, tenant_id_.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(statement, 2, agent_id_.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(statement, 3, session.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_int(statement, 4, maximum > 0 ? maximum : -1);
         std::vector<Message> result;
         while (sqlite3_step(statement) == SQLITE_ROW)
             result.push_back(parse_message(json::parse(reinterpret_cast<const char *>(sqlite3_column_text(statement, 0)))));
@@ -832,13 +1057,15 @@ namespace agent_framework
         std::lock_guard<std::mutex> guard(db_mutex_);
         auto *database = static_cast<sqlite3 *>(db_);
         sqlite3_stmt *statement = nullptr;
-        sqlite_require(sqlite3_prepare_v2(database, "INSERT INTO memory_summaries VALUES(?,?,?,?)", -1, &statement, nullptr), database, "prepare summary");
+        sqlite_require(sqlite3_prepare_v2(database, "INSERT INTO memory_summaries(tenant,agent,session,summary,payload,updated) VALUES(?,?,?,?,?,?)", -1, &statement, nullptr), database, "prepare summary");
         const auto payload = summary_json(summary).dump();
-        sqlite3_bind_text(statement, 1, summary.session_id.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(statement, 1, tenant_id_.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(statement, 2, agent_id_.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(statement, 3, summary.session_id.c_str(), -1, SQLITE_TRANSIENT);
         const auto redacted = redact_text(summary.summary);
-        sqlite3_bind_text(statement, 2, redacted.c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_text(statement, 3, payload.c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_int64(statement, 4, summary.updated_at);
+        sqlite3_bind_text(statement, 4, redacted.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(statement, 5, payload.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_int64(statement, 6, summary.updated_at);
         const int rc = sqlite3_step(statement);
         sqlite3_finalize(statement);
         sqlite_require(rc, database, "store summary");
@@ -848,10 +1075,12 @@ namespace agent_framework
         std::lock_guard<std::mutex> guard(db_mutex_);
         auto *database = static_cast<sqlite3 *>(db_);
         sqlite3_stmt *statement = nullptr;
-        sqlite_require(sqlite3_prepare_v2(database, "SELECT payload FROM memory_summaries WHERE summary LIKE ? ORDER BY updated DESC LIMIT ?", -1, &statement, nullptr), database, "prepare summary query");
+        sqlite_require(sqlite3_prepare_v2(database, "SELECT payload FROM memory_summaries WHERE tenant=? AND agent=? AND summary LIKE ? ORDER BY updated DESC LIMIT ?", -1, &statement, nullptr), database, "prepare summary query");
         const auto like = "%" + query + "%";
-        sqlite3_bind_text(statement, 1, like.c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_int(statement, 2, top > 0 ? top : -1);
+        sqlite3_bind_text(statement, 1, tenant_id_.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(statement, 2, agent_id_.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(statement, 3, like.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_int(statement, 4, top > 0 ? top : -1);
         std::vector<MemorySummary> result;
         while (sqlite3_step(statement) == SQLITE_ROW)
             result.push_back(parse_summary(json::parse(reinterpret_cast<const char *>(sqlite3_column_text(statement, 0)))));
@@ -863,8 +1092,10 @@ namespace agent_framework
         std::lock_guard<std::mutex> guard(db_mutex_);
         auto *database = static_cast<sqlite3 *>(db_);
         sqlite3_stmt *statement = nullptr;
-        sqlite_require(sqlite3_prepare_v2(database, "DELETE FROM memory_summaries WHERE updated<?", -1, &statement, nullptr), database, "prepare cleanup");
-        sqlite3_bind_int64(statement, 1, expiry);
+        sqlite_require(sqlite3_prepare_v2(database, "DELETE FROM memory_summaries WHERE tenant=? AND agent=? AND updated<?", -1, &statement, nullptr), database, "prepare cleanup");
+        sqlite3_bind_text(statement, 1, tenant_id_.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(statement, 2, agent_id_.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_int64(statement, 3, expiry);
         const int rc = sqlite3_step(statement);
         sqlite3_finalize(statement);
         sqlite_require(rc, database, "cleanup summaries");

@@ -1,13 +1,14 @@
 #include <agent/encoder/encoder.hpp>
 #include <agent/llm_client/llm_client.hpp>
-#include <agent/memory/memory_assembly.hpp>
 #include <agent/prompt_renderer/prompt_renderer.hpp>
+#include <agent/graph_executor/graph_executor.hpp>
+#include <agent/internal/agent_thread_state.hpp>
+#include <agent/toolbus/toolbus.hpp>
 #include <agent/vectorstore/vectorstore.hpp>
-#include <node/knowledge_base_node.hpp>
-#include <workflow/nodeflow.hpp>
 
 #include <future>
 #include <stdexcept>
+#include <taskflow/taskflow.hpp>
 
 using namespace agent_framework;
 
@@ -22,6 +23,7 @@ Document make_document(std::string id, std::string content) {
     document.metadata.doc_id = document.doc_id;
     document.metadata.modality = "text";
     document.metadata.content = std::move(content);
+    document.metadata.extra_metadata["tenant"] = "science";
     return document;
 }
 
@@ -66,36 +68,38 @@ int main() {
     store->insert(make_document("weather-radar", "unrelated radar reflectivity"),
                   encoder->encode("weather radar reflectivity"));
 
-    workflow::GraphBuilder builder;
-    auto [source, task] = agent_framework::node::KnowledgeBaseSourceNode::create(
-        builder, "rag", store, encoders);
-    (void)task;
-    agent_framework::node::KnowledgeBaseSourceNode::set_query(source, query, 1, "text");
-    const auto results = std::any_cast<std::vector<RetrievalResult>>(source->values.at("results"));
-    const auto citations = std::any_cast<std::vector<Citation>>(source->values.at("citations"));
-    const auto context = std::any_cast<std::string>(source->values.at("context"));
-    require(results.size() == 1 && results.front().doc_id == "gnss-ro", "retrieval selected wrong document");
-    require(citations.size() == 1 && citations.front().doc_id == "gnss-ro", "citation mapping mismatch");
-    require(context.find("[source:gnss-ro]") != std::string::npos, "stable source id missing from context");
-
-    MemoryAssemblyInput assembly_input;
-    assembly_input.retrieval.push_back(
-        {MemorySlotKind::Retrieval, "gnss-ro", 50, 0, context,
-         json{{"citation_id", "gnss-ro"}}});
-    MemoryAssemblyPolicy policy;
-    policy.hard_limit_bytes = 2048;
-    const auto assembled = assemble_memory(assembly_input, policy);
-
     auto client = std::make_shared<LLMClient>();
     client->set_prompt_renderer(std::make_shared<PromptRenderer>());
     client->register_adapter("probe", std::make_shared<CitationProbeAdapter>());
     client->set_default_adapter("probe");
-    LLMInput input;
-    input.system_prompt = "Answer only from retrieved evidence and preserve source IDs.";
-    input.user_prompt = query;
-    input.context = assembled.text;
-    const auto output = client->invoke(input).get();
-    require(output.is_final, "mock LLM output was not final");
-    require(output.final_answer.find("[source:gnss-ro]") != std::string::npos, "final answer lost citation");
-    require(output.final_answer.find("ocean-colour") == std::string::npos, "final answer cited unretrieved source");
+    ExecutionRequest request;
+    request.config.system_prompt = "Answer only from retrieved evidence and preserve source IDs.";
+    request.config.max_iterations = 1;
+    request.config.extra_config["RAG_TOP_K"] = 1;
+    request.config.extra_config["RAG_MODALITY"] = "text";
+    request.config.extra_config["RAG_METADATA_FILTER"] = json{{"tenant", "science"}};
+    request.deps = {client, std::make_shared<ToolBus>(), nullptr, nullptr, store, encoders};
+    request.session = std::make_shared<internal::AgentThreadState>();
+    request.session->initial_user_prompt = query;
+    request.context.session_id = "rag-production-e2e";
+    request.options.persist_session = false;
+    request.options.input_already_processed = true;
+    std::string final_answer;
+    request.options.react.sink.on_final_json = [&](const json& value) {
+        final_answer = value.value("final_answer", "");
+    };
+    std::size_t assembled_events = 0;
+    request.event_sink = [&](const ExecutionEvent& event) {
+        if(event.type == ExecutionEventType::MemoryAssembled) ++assembled_events;
+    };
+    tf::Executor executor(2);
+    GraphExecutor graph_executor;
+    const auto output = graph_executor.execute_sync(executor, std::move(request));
+    if(!output.success) throw std::runtime_error(
+        "GraphExecutor RAG path failed: " + output.error.value_or("unknown"));
+    require(assembled_events == 1, "RAG prompt did not pass through MemoryAssembly");
+    require(final_answer.find("[source:gnss-ro]") != std::string::npos,
+            "final answer lost citation");
+    require(final_answer.find("ocean-colour") == std::string::npos,
+            "final answer cited unretrieved source");
 }

@@ -179,6 +179,29 @@ jobs:
         count=$(ctest --test-dir build -N -L phase3-offline | awk '/Test +#[0-9]+:/ {n++} END {print n+0}')
         test "$count" -ge 10
         ctest --test-dir build -L phase3-offline --output-on-failure
+
+  phase3-faiss-release:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+      with:
+        submodules: recursive
+        persist-credentials: false
+    - name: Install Faiss CPU dependencies
+      run: sudo apt-get update && sudo apt-get install -y libopenblas-dev liblapack-dev
+    - name: Configure Release Faiss contract
+      run: >-
+        cmake -S . -B build-phase3-faiss
+        -DCMAKE_BUILD_TYPE=Release
+        -DCMAKE_CXX_STANDARD=20
+        -DAGENT_BUILD_FAISS=ON
+    - name: Build Release Faiss contract
+      run: cmake --build build-phase3-faiss --parallel 2 --target test_vectorstore_faiss_contract
+    - name: Phase 3 Faiss gate
+      run: |
+        count=$(ctest --test-dir build-phase3-faiss -N -L phase3-faiss | awk '/Test +#[0-9]+:/ {n++} END {print n+0}')
+        test "$count" -eq 1
+        ctest --test-dir build-phase3-faiss -L phase3-faiss --output-on-failure
   
   leak-test-cpp20:
     runs-on: ubuntu-latest

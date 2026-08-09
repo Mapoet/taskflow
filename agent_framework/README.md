@@ -60,11 +60,11 @@ make -j$(nproc)
 ### 运行示例
 
 ```bash
-# 运行简单 Agent 示例
-./build/examples/simple_agent
+# 运行 Live CLI Agent
+./build/agent_framework/cli_agent_demo -p "hello"
 
-# 运行多模态 Agent 示例
-./build/examples/multimodal_agent
+# 运行 Live A2A Server（不提供 mock 模式）
+./build/agent_framework/agent_server_demo --help
 ```
 
 ### 启动 Scientific Console
@@ -121,10 +121,11 @@ taskflow/                       # 项目根目录
 │   │   └── ui/                 # UI 适配模块
 │   │
 │   ├── examples/               # 示例程序
-│   │   ├── simple_agent.cpp
-│   │   ├── multimodal_agent.cpp
-│   │   ├── tool_integration.cpp
-│   │   └── workflow_custom.cpp
+│   │   ├── cli_agent_demo.cpp
+│   │   ├── agent_server_demo.cpp
+│   │   ├── tui_agent_demo.cpp
+│   │   ├── web_ui_demo.cpp
+│   │   └── imgui_agent_demo.cpp
 │   │
 │   ├── tests/                  # 单元测试
 │   ├── tools/                  # 工具脚本
@@ -184,61 +185,16 @@ git submodule status
 
 ## 使用示例
 
-### 简单 Agent 示例
+### LiveRuntime Agent 示例
 
-```cpp
-#include <agent/core/types.hpp>
-#include <workflow/nodeflow.hpp>
-#include <taskflow/taskflow.hpp>
-#include <iostream>
-
-namespace wf = workflow;
-
-int main() {
-    tf::Executor executor(std::thread::hardware_concurrency());
-    wf::GraphBuilder builder("simple_agent");
-
-    // 创建系统提示词源节点
-    auto [sys_node, _] = builder.create_typed_source(
-        "SystemPrompt",
-        std::make_tuple(std::string("你是一个有用的助手。")),
-        {"prompt"}
-    );
-
-    // 创建用户输入源节点
-    auto [user_node, _] = builder.create_any_source(
-        "UserInput",
-        std::unordered_map<std::string, std::any>{
-            {"query", std::any{std::string("你好")}}
-        }
-    );
-
-    // 创建 LLM 节点
-    auto [llm_node, _] = builder.create_any_node(
-        "LLM",
-        {{"SystemPrompt", "prompt"}, {"UserInput", "query"}},
-        [](const auto& inputs) {
-            // LLM 调用逻辑
-            // ...
-        },
-        {"final_answer"}
-    );
-
-    // 创建输出 Sink
-    builder.create_any_sink(
-        "Output",
-        {{"LLM", "final_answer"}},
-        [](const auto& outputs) {
-            std::string answer = std::any_cast<std::string>(outputs.at("final_answer"));
-            std::cout << answer << std::endl;
-        }
-    );
-
-    // 执行工作流
-    builder.run(executor);
-    return 0;
-}
+```bash
+export AGENT_LLM_PROVIDER=openai
+export OPENAI_API_KEY=...
+./build/agent_framework/cli_agent_demo -p "summarize the current workspace"
 ```
+
+五个交互入口统一通过 `examples/common/agent_example_bootstrap.hpp` 构造
+`LiveRuntime`；`agent_server_demo` 是纯 Live 服务，不注册 mock 启动参数。
 
 ## 模块说明
 
