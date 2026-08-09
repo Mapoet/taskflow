@@ -104,6 +104,16 @@
 - **安全、兼容、迁移和回滚影响**：base/dynamic View 作为 typed contract 固定进 SQLite checkpoint；旧 v1 conversation/summary 仅通过 fixed-scope dual-read provider 投影为 Observed/Candidate，不回写或获得 instruction authority。GraphExecutor template 显式注册，可回滚到原静态 Memory View。跨 scope promotion 在具备批准的 copy/migration 语义前 fail closed。
 - **验收标准变化及批准**：未降低 F3M exit gate。离线核心必须证明未批准权威晋升和跨租户泄漏为 0；真实 profiles/provider calibration、可执行 hybrid index、跨 Store 原子提交、ApprovalStore 直连、Live/HA/Inspector 仍 pending，故 `R4V2-03` 保持 partial。
 
+### D4-012 — F4V 使用 LLM Professional Judgment Plane 与确定性 Oracle/Arbiter Plane 分层
+
+- **日期 / 状态 / 决策者**：2026-08-10 / approved-for-offline-core / Codex（依据用户批准实施 F4V）
+- **关联 requirement / plan revision**：`R4V2-04` / `phase4-v2-plan-r1`
+- **事实与证据**：legacy Assurance Harness 只有只读 verifier registry、EvidenceLedger 和确定性 Arbiter，未形成 Verification Planner、专业角色、角色独立、跨 verifier 解析及 durable report。LLM 适合解释代码、架构、领域、安全与完备性，但不能可靠判定构建/测试/指标/外部副作用事实，也不能审批自己的执行结果。
+- **备选方案**：让一个通用 Judge 直接返回 PASS/FAIL；或让各 verifier 自行执行工具并把输出视为最终事实。前者无法证明专业覆盖与独立性，后者混淆事实获取、语义判断和最终裁决，允许自证及多数投票覆盖强反例。
+- **决定与理由**：Verification Planner 与 Code/Architecture/Domain/Security/Completeness/Resolver 是独立 RoleRuntime stage；deterministic/real-system observation 通过 digest-bound Manifest oracle 进入 EvidenceLedger；tenant/task、只读 capability intersection、criterion/evidence closure、planner/executor/verifier independence、oracle strength、equal-strength conflict 和最终 Arbiter 保持确定性。LLM finding 为 calibrated/advisory evidence，不能覆盖更强反例或降低 AcceptanceContract。
+- **安全、兼容、迁移和回滚影响**：legacy `AssuranceHarness` 与 `VerifierRegistry` 保留；新 workflow/GraphExecutor template 需要显式注册。Assurance SQLite schema v1 使用 WAL/FULL/private permission，并在一个事务内提交 terminal checkpoint 与 AcceptanceReport；RoleRuntime InvocationManifest 仍在独立 Store，通过 invocation/digest 绑定。真实命令或外部系统采集必须后续经 Sandbox/ToolBus adapter，当前 Manifest adapter 不执行副作用。
+- **验收标准变化及批准**：未降低 F4V exit gate。强 oracle FAIL→Accepted 必须为 0；测试通过但 mandatory artifact 缺失、规划者/执行者自验收、未知 evidence、未授权能力和未解决同强度冲突均不得 Accepted。真实专业 adapter、生产 calibration/benchmark、跨 Store 原子绑定、F5R remediation、默认强制与 Live/UI 仍 pending，故 `R4V2-04` 保持 partial。
+
 ## 新决策模板
 
 ### D4-NNN — 标题

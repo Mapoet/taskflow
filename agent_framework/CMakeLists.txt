@@ -254,6 +254,18 @@ endif()
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/assurance/harness.cpp)
     list(APPEND AGENT_SOURCES src/assurance/harness.cpp)
 endif()
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/assurance/professional_types.cpp)
+    list(APPEND AGENT_SOURCES src/assurance/professional_types.cpp)
+endif()
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/assurance/professional_workflow.cpp)
+    list(APPEND AGENT_SOURCES src/assurance/professional_workflow.cpp)
+endif()
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/assurance/sqlite_assurance_store.cpp)
+    list(APPEND AGENT_SOURCES src/assurance/sqlite_assurance_store.cpp)
+endif()
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/assurance/assurance_graph_template.cpp)
+    list(APPEND AGENT_SOURCES src/assurance/assurance_graph_template.cpp)
+endif()
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/run/types.cpp)
     list(APPEND AGENT_SOURCES src/run/types.cpp)
 endif()
@@ -1332,6 +1344,43 @@ if(BUILD_TESTING)
         add_test(NAME phase4_assurance COMMAND test_phase4_assurance)
         set_tests_properties(phase4_assurance PROPERTIES
             LABELS "phase4-assurance;phase4-offline;offline")
+    endif()
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_phase4_assurance_workflow_contracts.cpp)
+        add_executable(test_phase4_assurance_workflow_contracts
+            tests/test_phase4_assurance_workflow_contracts.cpp)
+        target_link_libraries(test_phase4_assurance_workflow_contracts PRIVATE agent_framework)
+        add_test(NAME phase4_assurance_workflow_contracts
+                 COMMAND test_phase4_assurance_workflow_contracts)
+        set_tests_properties(phase4_assurance_workflow_contracts PROPERTIES
+            LABELS "phase4-assurance-v2;phase4-contract;phase4-durable;phase4-offline;offline"
+            RUN_SERIAL TRUE)
+    endif()
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_phase4_assurance_workflow.cpp)
+        add_executable(test_phase4_assurance_workflow
+            tests/test_phase4_assurance_workflow.cpp)
+        target_link_libraries(test_phase4_assurance_workflow PRIVATE agent_framework)
+        add_test(NAME phase4_assurance_workflow COMMAND test_phase4_assurance_workflow)
+        set_tests_properties(phase4_assurance_workflow PROPERTIES
+            LABELS "phase4-assurance-v2;phase4-assurance;phase4-offline;offline")
+    endif()
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_phase4_assurance_workflow_negative.cpp)
+        add_executable(test_phase4_assurance_workflow_negative
+            tests/test_phase4_assurance_workflow_negative.cpp)
+        target_link_libraries(test_phase4_assurance_workflow_negative PRIVATE agent_framework)
+        add_test(NAME phase4_assurance_workflow_negative
+                 COMMAND test_phase4_assurance_workflow_negative)
+        set_tests_properties(phase4_assurance_workflow_negative PROPERTIES
+            LABELS "phase4-assurance-v2;phase4-policy;phase4-offline;offline")
+    endif()
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_phase4_assurance_workflow_integration.cpp)
+        add_executable(test_phase4_assurance_workflow_integration
+            tests/test_phase4_assurance_workflow_integration.cpp)
+        target_link_libraries(test_phase4_assurance_workflow_integration PRIVATE agent_framework)
+        add_test(NAME phase4_assurance_workflow_integration
+                 COMMAND test_phase4_assurance_workflow_integration)
+        set_tests_properties(phase4_assurance_workflow_integration PROPERTIES
+            LABELS "phase4-assurance-v2;phase4-llm-runtime;phase4-integration;phase4-durable;phase4-offline;offline"
+            RUN_SERIAL TRUE)
     endif()
     if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_phase4_runtime_observability.cpp)
         add_executable(test_phase4_runtime_observability tests/test_phase4_runtime_observability.cpp)

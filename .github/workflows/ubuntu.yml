@@ -173,7 +173,7 @@ jobs:
     - name: Phase 4 offline gate
       run: |
         count=$(ctest --test-dir build -N -L phase4-offline | awk '/Test +#[0-9]+:/ {n++} END {print n+0}')
-        test "$count" -ge 24
+        test "$count" -ge 28
         ctest --test-dir build -L phase4-offline --output-on-failure
 
   release-test-cpp20:
@@ -194,7 +194,7 @@ jobs:
     - name: Phase 4 offline Release gate
       run: |
         count=$(ctest --test-dir build -N -L phase4-offline | awk '/Test +#[0-9]+:/ {n++} END {print n+0}')
-        test "$count" -ge 24
+        test "$count" -ge 28
         ctest --test-dir build -L phase4-offline --output-on-failure
 
   phase3-faiss-release:
