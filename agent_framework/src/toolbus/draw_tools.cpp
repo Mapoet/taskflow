@@ -13,6 +13,7 @@
 #include <agent/toolbus/draw_tools.hpp>
 #include <agent/toolbus/fs_sandbox.hpp>
 #include <agent/core/types.hpp>
+#include <agent/internal/platform_io.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -776,7 +777,8 @@ json invoke_draw_export(const json& j, const DrawConfig& cfg) {
     if (!fs::exists(parent, ec)) {
         return make_draw_error("parent_missing", "parent directory does not exist");
     }
-    const std::string tmp = path->string() + ".tmp." + std::to_string(static_cast<long long>(::getpid()));
+    const std::string tmp =
+        path->string() + ".tmp." + std::to_string(internal::current_process_id());
     {
         std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
         if (!out) {

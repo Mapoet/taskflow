@@ -1,0 +1,17 @@
+{
+  "schema_version": 99,
+  "identity": {
+    "tenant_id": "tenant-a",
+    "organization_id": "",
+    "principal_id": "",
+    "project_id": "",
+    "task_id": "task-a",
+    "run_id": "",
+    "plan_id": "",
+    "memory_id": ""
+  },
+  "kind": "agent.task_intake/v1",
+  "payload": {},
+  "extensions": {},
+  "canonical_digest": "sha256:invalid"
+}

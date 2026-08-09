@@ -1,6 +1,6 @@
 # Phase 4 实施状态与证据矩阵
 
-**状态**：实施前基线  
+**状态**：P4-F0R–P4-F8 首轮垂直实现检查点（未完成项保持开放）
 **最后核对日期**：2026-08-09  
 **上游章程**：[phase-4.md](./phase-4.md)  
 **总体计划**：[phase-4-plan.md](./phase-4-plan.md)
@@ -18,24 +18,24 @@
 
 ## 2. 当前总体判断
 
-Phase 4 当前总体满足度约为 **25–30%**。Phase 3 已提供可靠的单机 Agent Runtime 基座，但 Phase 4 的认知规划、多层记忆与动态 View、全运行持久化、durable approval、五层验收、标准遥测、评测集和分布式控制面尚未形成。
+Phase 4 当前总体满足度约为 **45–50%**。首轮实现已形成共享契约、SQLite Run/Memory、动态 View、认知规划、独立五层验收、Sandbox/Telemetry/Eval/Live/Queue 核心语义的离线垂直骨架；但真实 investigator/provider、统一进程/容器 sandbox、OTLP/SLO、scheduled live、远程持久化与 HA 尚未达到工作包 DoD，因此所有 WP 仍保持 `[~]`。
 
 | 工作包 | 状态 | 满足度 | 已有基础 | 未关闭的核心 DoD |
 |---|---:|---:|---|---|
-| WP4.0 Task Cognition | `[~]` | 25% | 输入预处理、RAG、ToolBus、ChildTask、Subflow、A2A | 无 TaskIntake/Evidence/Understanding/Plan DAG/critic/revision |
-| WP4.1 Assurance Harness | `[~]` | 20% | Verifier、CTest、Audit、artifact、UI 验证惯例 | 无 AcceptanceContract、五层 verifier、独立 arbiter、证据充分性 |
-| WP4.2 Durable Run | `[~]` | 35% | SessionStore、checkpoint、Effect WAL、memory generation、child resume | 无统一 RunStore、graph cursor、timer/retry/interrupt、replay/time-travel |
-| WP4.3 HITL/Policy | `[~]` | 20% | cancel/deadline、Skill Policy、Tool hook、ManualReview | 无 durable approval、reviewer/decision、参数编辑、恢复和 UI queue |
-| WP4.4 Sandbox Runtime | `[~]` | 45% | FS jail、bwrap/unshare、networkless Skill、RLIMIT、renderer worker | 无统一 provider、session workspace、container/remote、credential broker |
-| WP4.5 OTel/SLO | `[~]` | 35% | AuditEvent、trace ID、JSONL/stderr、latency、ExecutionEvent | 无标准 span/OTLP/metrics/cost/critical path/SLO |
-| WP4.6 Evaluation | `[~]` | 15% | CTest、fixture、Phase labels、Verifier tests | 无任务集、trajectory、质量指标、模型矩阵、judge calibration |
-| WP4.7 Live Certification | `[~]` | 15% | 两个 opt-in A2A live test | 可 skip-as-pass；无 scheduled matrix 和环境 manifest |
-| WP4.8 Distributed Control | `[~]` | 10% | 进程内 FIFO/worker、SQLite、A2A ChildTask | 无 durable queue、ownership lease、heartbeat、HA、远程存储 |
-| WP4.9 Multi-layer Memory | `[~]` | 25% | MemoryStore/Assembly/Compaction、RAG、Skill、Session checkpoint | 无多层 namespace、authority/lifecycle、动态 View、scope-first retrieval、晋升/遗忘治理 |
+| WP4.0 Task Cognition | `[~]` | 60% | TaskIntake/Evidence/Understanding/Plan schema、Investigator Registry、DAG critic、SQLite Evidence/Plan CAS Store、memory-aware workflow | 真实 ToolBus/外部 investigator、durable replan、GraphExecutor/UI 未接入 |
+| WP4.1 Assurance Harness | `[~]` | 55% | AcceptanceContract、只读 verifier registry、EvidenceLedger、oracle-strength arbiter、五层 fail-closed | artifact/domain/security/metric 真实适配器、impact graph、report store、remediation 闭环未完成 |
+| WP4.2 Durable Run | `[~]` | 65% | SQLite RunStore、状态机、CAS checkpoint、event、interrupt/resume token、graph revision、durable timer/restart | graph cursor/effect/memory 原子提交、deterministic replay/time-travel 和执行器集成未完成 |
+| WP4.3 HITL/Policy | `[~]` | 55% | Approval schema、deterministic PDP、SQLite ApprovalStore、pending/CAS/TOCTOU/SoD/expiry/revocation、durable interruption/resume | delegation/双人多签、edit→新 request、escalation、三端 UI 未完成 |
+| WP4.4 Sandbox Runtime | `[~]` | 50% | Sandbox schema、provider/registry、policy validator、workspace snapshot/quota；既有 bwrap 原型可复用 | 统一 Process/Container/Remote provider、credential broker、network enforcement、逃逸 E2E 未完成 |
+| WP4.5 OTel/SLO | `[~]` | 45% | correlation schema、Span/Metric runtime、sink、attribute privacy/cardinality gate | OTLP batch exporter、跨进程传播、audit bridge、SLO registry/dashboard 未完成 |
+| WP4.6 Evaluation | `[~]` | 45% | dataset/trajectory schema、immutable registry、ground-truth 隔离、deterministic runner、paired regression gate | 领域数据集、完整指标、judge calibration、resume/flaky/cost/nightly report 未完成 |
+| WP4.7 Live Certification | `[~]` | 25% | EnvironmentManifest digest、ExecutionAttestation、required skip-as-fail、expiry/revision invalidation | 真实 LLM/IdP/MCP/A2A/sandbox matrix 和 scheduled workflow 尚无 executed evidence |
+| WP4.8 Distributed Control | `[~]` | 25% | queue/lease/fencing/idempotency/retry/dead-letter 的确定性内存参考实现 | 名称所指生产能力仍缺远程 durable queue、worker registry、scheduler、PostgreSQL/object store、HA/chaos |
+| WP4.9 Multi-layer Memory | `[~]` | 65% | SQLite v2 store、六层 namespace、authority/lifecycle/ACL、Provider/View、8 profiles、AGENTS resolver、promotion/forget | hybrid index/adapters、conflict clarification、Run 原子 pin、v1 dual-read、Inspector/UI/截图未完成 |
 
 WP4.9 使用尾部编号只是为了不重排已经冻结的 116 个任务 ID；它是 P0，并应在认知规划和五层验收垂直闭环之前达到可用状态。
 
-## 3. WP4.0 当前证据
+## 3. WP4.0 实施前基线证据（保留用于差异追溯）
 
 **可复用**：
 
@@ -47,7 +47,7 @@ WP4.9 使用尾部编号只是为了不重排已经冻结的 116 个任务 ID；
 
 **判定**：这些能力支持调查和执行，但没有任务理解及计划领域模型；ReAct 中临时选择工具不能替代版本化专业计划。
 
-## 4. WP4.1 当前证据
+## 4. WP4.1 实施前基线证据（保留用于差异追溯）
 
 **可复用**：
 
@@ -58,7 +58,7 @@ WP4.9 使用尾部编号只是为了不重排已经冻结的 116 个任务 ID；
 
 **关键限制**：现有 Verifier prompt 明确禁止调用工具或外部 API，只能检查用户任务与 draft answer；它只能成为 Assurance Harness 的一个语义 verifier，不能作为最终验收器。
 
-## 5. WP4.2 当前证据
+## 5. WP4.2 实施前基线证据（保留用于差异追溯）
 
 **可复用**：
 
@@ -69,7 +69,7 @@ WP4.9 使用尾部编号只是为了不重排已经冻结的 116 个任务 ID；
 
 **关键限制**：没有统一 RunState/RunStore；GraphExecutor 未持久化 node cursor、pending work、timer、interrupt、plan/acceptance revision 和 deterministic replay 元数据。
 
-## 6. WP4.3 当前证据
+## 6. WP4.3 实施前基线证据（保留用于差异追溯）
 
 **可复用**：
 
@@ -80,7 +80,7 @@ WP4.9 使用尾部编号只是为了不重排已经冻结的 116 个任务 ID；
 
 **关键限制**：没有 ApprovalRequest/Decision schema、durable interruption、reviewer identity、expiry、delegation、参数编辑、双人复核和三端 UI pending queue。
 
-## 7. WP4.4 当前证据
+## 7. WP4.4 实施前基线证据（保留用于差异追溯）
 
 **可复用**：
 
@@ -90,7 +90,7 @@ WP4.9 使用尾部编号只是为了不重排已经冻结的 116 个任务 ID；
 
 **关键限制**：隔离逻辑分散在 Skill、FS 和 renderer；没有统一 SandboxProvider、workspace snapshot/diff、生命周期、container/remote provider、credential broker 和审计 manifest。
 
-## 8. WP4.5 当前证据
+## 8. WP4.5 实施前基线证据（保留用于差异追溯）
 
 **可复用**：
 
@@ -100,21 +100,21 @@ WP4.9 使用尾部编号只是为了不重排已经冻结的 116 个任务 ID；
 
 **关键限制**：没有 span parentage、OTLP exporter、标准 GenAI semantic convention、histogram、token/cost/cache/queue 指标、sampling、critical path、dashboard 和 SLO。
 
-## 9. WP4.6 当前证据
+## 9. WP4.6 实施前基线证据（保留用于差异追溯）
 
 **可复用**：默认构建中存在 3000 余个 CTest，其中 Agent Framework 已有 unit、contract、loopback、fault/recovery、UI 和 Phase 标签。
 
 **关键限制**：没有独立 eval runner、dataset schema、trajectory recorder、模型/Prompt 版本矩阵、RAG/规划/验收质量指标、统计比较、flaky detection 或 judge calibration。
 
-## 10. WP4.7 当前证据
+## 10. WP4.7 实施前基线证据（保留用于差异追溯）
 
 `a2a_live_smoke` 和 `a2a_live_multi_agent` 提供 live 入口，但环境变量未设置时返回 0；普通绿色 CTest 不能证明实际执行。当前无强制 `executed=true` 证据、scheduled workflow、真实 IdP/MCP/LLM/renderer/sandbox 组合矩阵和环境 manifest。
 
-## 11. WP4.8 当前证据
+## 11. WP4.8 实施前基线证据（保留用于差异追溯）
 
 AgentServer 使用有界进程内 FIFO、worker threads、内存 active task map 和可选 SQLite SessionStore。A2A/ChildTask 支持远程执行，但没有 durable dispatch、任务所有权 lease、worker heartbeat、leader election、远程 artifact/evidence store、HA 和 rolling migration。
 
-## 12. WP4.9 当前证据
+## 12. WP4.9 实施前基线证据（保留用于差异追溯）
 
 **可复用**：
 
@@ -148,3 +148,20 @@ AgentServer 使用有界进程内 FIFO、worker threads、内存 active task map
 4. 所有 schema 变化必须记录 decision、migration、rollback 和 fixture revision。
 5. 每次实施后更新 source/test/evidence、最后验证日期和 plan revision。
 6. 外部依赖不可用不等于通过；应记录 `[!]` 或 `inconclusive`。
+
+## 15. 2026-08-09 首轮纵向实现增量证据
+
+第 3–12 节刻意保留为实施前基线，不能再被解读为当前源码不存在相应类型。当前新增能力及证据如下：
+
+| 能力域 | 当前实现 | 确定性证据 | 仍不可声称的能力 |
+|---|---|---|---|
+| 统一契约 | `contracts/contract` 及 planning/assurance/run/approval/memory/sandbox/telemetry/eval 类型 | `phase4_contracts` | 已发布 schema 的长期兼容性和线上迁移 |
+| Durable Run/HITL | SQLite RunStore、CAS 状态机、event、interruption/token、timer；PDP | `phase4_durable_run`、`phase4_policy` | GraphExecutor 原子 replay、完整 ApprovalStore/UI |
+| 多层记忆 | SQLite v2、六层 scope、Provider、8 种 View、AGENTS resolver、治理/forget | `phase4_memory`、`phase4_memory_profiles` | hybrid index、v1 dual-read、冲突 HITL、Inspector/UI |
+| 认知规划 | SQLite Evidence/Plan store、Investigator Registry、workflow、DAG validator | `phase4_cognition`、`phase4_planning_store` | 真实 ToolBus/外部 investigator、执行器接入 |
+| 五层验收 | 只读 verifier registry、EvidenceLedger、强 oracle 优先 arbiter、隔离 Verification View | `phase4_assurance` | 真实 verifier adapters、report store、remediation 闭环 |
+| Runtime/OTel | Sandbox spec/provider contract、workspace manifest；Span/Metric runtime 与隐私门 | `phase4_runtime_observability` | concrete provider、OTLP/SLO、跨进程传播 |
+| Eval/Live/Distributed | immutable dataset、统计比较；certification contract；租约/fencing/DLQ 内存参考实现 | `phase4_eval`、`phase4_live_distributed` | executed live matrix、远程持久队列、HA |
+| 跨模块绑定 | Memory snapshot/view→Plan digest→Run checkpoint→五层 AcceptanceReport→restart terminal | `phase4_vertical` | 真实执行器副作用与远程依赖的端到端认证 |
+
+当前 `ctest -L phase4-offline` 为 **13/13 PASS**；Phase 3 `ctest -L phase3-offline` 为 **14/14 PASS**。首轮纵向证据见[首轮报告](./phase-4/acceptance-P4-F0R-F8-vertical-20260809.md)，P4-F2D 持久化增量见[增量报告](./phase-4/acceptance-P4-F2D-durable-stores-20260809.md)。

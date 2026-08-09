@@ -1,4 +1,5 @@
 #include <agent/toolbus/tool_effect_journal.hpp>
+#include <agent/internal/platform_io.hpp>
 #include <agent/observability/audit.hpp>
 
 #include <fstream>
@@ -213,7 +214,7 @@ void ToolEffectJournal::append_locked(ToolEffectRecord& record) {
         if (count < 0) { if (errno == EINTR) continue; ok = false; break; }
         offset += static_cast<std::size_t>(count);
     }
-    if (ok) ok = ::fdatasync(fd) == 0;
+    if (ok) ok = internal::sync_file(fd) == 0;
     (void)::flock(fd, LOCK_UN);
     (void)::close(fd);
     if (!ok) throw std::runtime_error("cannot durably append tool effect WAL");

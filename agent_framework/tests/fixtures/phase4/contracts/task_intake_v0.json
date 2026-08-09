@@ -1,0 +1,23 @@
+{
+  "schema_version": 0,
+  "identity": {
+    "tenant_id": "tenant-a",
+    "organization_id": "org-a",
+    "principal_id": "user-a",
+    "project_id": "project-a",
+    "task_id": "task-a",
+    "run_id": "",
+    "plan_id": "",
+    "memory_id": ""
+  },
+  "kind": "agent.task_intake/v1",
+  "payload": {
+    "goal": "legacy goal",
+    "requested_deliverables": [],
+    "explicit_constraints": [],
+    "granted_authorities": [],
+    "success_signals": [],
+    "fact_gaps": []
+  },
+  "extensions": {}
+}

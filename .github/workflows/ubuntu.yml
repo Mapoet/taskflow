@@ -19,6 +19,12 @@ jobs:
     - uses: actions/checkout@v3
       with:
         persist-credentials: false
+    - name: Install sandbox runtime
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y bubblewrap
+        test -x /usr/bin/unshare
+        test -x /usr/bin/bwrap
     - name: Configure Stage 10 Skill and public API gates
       run: >-
         cmake -S . -B build-stage10-ci
@@ -63,7 +69,8 @@ jobs:
           test_skill_remote_registry \
           test_skill_cli_supply_chain \
           test_skill_platform_stress \
-          test_skill_registry_scale
+          test_skill_registry_scale \
+          test_resource_runtime
     - name: Run offline Stage 10 quality gates
       run: >-
         ctest --test-dir build-stage10-ci
@@ -161,8 +168,13 @@ jobs:
     - name: Phase 3 offline gate
       run: |
         count=$(ctest --test-dir build -N -L phase3-offline | awk '/Test +#[0-9]+:/ {n++} END {print n+0}')
-        test "$count" -ge 10
+        test "$count" -ge 13
         ctest --test-dir build -L phase3-offline --output-on-failure
+    - name: Phase 4 offline gate
+      run: |
+        count=$(ctest --test-dir build -N -L phase4-offline | awk '/Test +#[0-9]+:/ {n++} END {print n+0}')
+        test "$count" -ge 13
+        ctest --test-dir build -L phase4-offline --output-on-failure
 
   release-test-cpp20:
     runs-on: ubuntu-latest
@@ -179,6 +191,11 @@ jobs:
         count=$(ctest --test-dir build -N -L phase3-offline | awk '/Test +#[0-9]+:/ {n++} END {print n+0}')
         test "$count" -ge 10
         ctest --test-dir build -L phase3-offline --output-on-failure
+    - name: Phase 4 offline Release gate
+      run: |
+        count=$(ctest --test-dir build -N -L phase4-offline | awk '/Test +#[0-9]+:/ {n++} END {print n+0}')
+        test "$count" -ge 10
+        ctest --test-dir build -L phase4-offline --output-on-failure
 
   phase3-faiss-release:
     runs-on: ubuntu-latest
@@ -235,7 +252,7 @@ jobs:
     - name: Install GLFW/X11 build deps
       run: |
         sudo apt-get update
-        sudo apt-get install -y libgl1-mesa-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev
+        sudo apt-get install -y libgl1-mesa-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libwayland-bin libwayland-dev wayland-protocols libxkbcommon-dev
     - name: configure
       run: cmake -S . -B build-wpu -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_STANDARD=20 -DAGENT_BUILD_IMGUI=ON
     - name: build imgui_agent_demo

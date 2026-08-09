@@ -10,24 +10,43 @@ jobs:
   
   debug-test-cpp20:
     runs-on: windows-latest
+    env:
+      VCPKG_DISABLE_METRICS: 1
     steps:
     - uses: actions/checkout@v3
+    - name: Install SQLite3
+      run: vcpkg install sqlite3:x64-windows
     - name: cmake
-      run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_STANDARD=20
+      run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_STANDARD=20 "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows
     - name: build
       run: cmake --build build --parallel 10
     - name: test
       run: cd build ; ctest --exclude-regex "test-unicode" --output-on-failure
+    - name: Phase 4 offline gate
+      shell: pwsh
+      run: |
+        $count = (ctest --test-dir build -N -L phase4-offline | Select-String 'Test +#[0-9]+:').Count
+        if ($count -lt 13) { throw "Expected at least 13 Phase 4 offline tests, found $count" }
+        ctest --test-dir build -L phase4-offline --output-on-failure
   
   release-test-cpp20:
     runs-on: windows-latest
+    env:
+      VCPKG_DISABLE_METRICS: 1
     steps:
     - uses: actions/checkout@v3
+    - name: Install SQLite3
+      run: vcpkg install sqlite3:x64-windows
     - name: cmake
-      run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_STANDARD=20
+      run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_STANDARD=20 "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows
     - name: build
       run: cmake --build build --parallel 10
     - name: test
       run: cd build ; ctest --exclude-regex "test-unicode" --output-on-failure
+    - name: Phase 4 offline Release gate
+      shell: pwsh
+      run: |
+        $count = (ctest --test-dir build -N -L phase4-offline | Select-String 'Test +#[0-9]+:').Count
+        if ($count -lt 13) { throw "Expected at least 13 Phase 4 offline tests, found $count" }
+        ctest --test-dir build -L phase4-offline --output-on-failure
   
-

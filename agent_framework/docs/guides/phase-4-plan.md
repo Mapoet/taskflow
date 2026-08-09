@@ -1,6 +1,6 @@
 # Phase 4 总体实施计划
 
-**状态**：规划基线 v2  
+**状态**：执行检查点 v3（P4-F0R–P4-F8 首轮纵向实现已验证，工作包 DoD 未全部关闭）
 **日期**：2026-08-09  
 **章程**：[phase-4.md](./phase-4.md)  
 **事实状态**：[phase-4-status.md](./phase-4-status.md)  
@@ -185,3 +185,20 @@ flowchart TD
 - 完成实现：状态只能变为 `implemented`，不能直接 `accepted`；
 - 五层验收完成：arbiter 才能将任务标为 `accepted`；
 - 状态文档只接受 AcceptanceReport 支持的 `[x]`。
+
+## 12. 2026-08-09 执行检查点与后续批次
+
+P4-F0R–P4-F8 已完成首轮“契约/参考实现”纵向批次，并通过 `phase4-offline` 11 项测试。该检查点证明共享 schema、SQLite Run/Memory、动态 Memory View、计划绑定、五层裁决、sandbox/telemetry/eval/live-certification/queue 核心语义可以在同一构建中协同工作；它不等于各工作包 DoD 已完成，也不提供真实 Live 或 HA 证据。
+
+下一批按以下生产化顺序连续实施；每个子批通过其离线门禁后进入下一项，真实外部依赖不可用时保持 `partial/inconclusive`，不得以 skip 代替执行：
+
+1. **P4-F2D**（进行中）：SQLite Evidence/Plan/Approval 已实现并验证；继续补 AcceptanceReport store、Run/Plan/Memory/Effect 原子绑定与恢复；
+2. **P4-F3I**：ToolBus、仓库调查、外部知识 investigator 适配器，GraphExecutor cognition/replan 接入；
+3. **P4-F4A**：artifact/code/runtime/security/domain/metric verifier，impact graph 与 remediation→replan；
+4. **P4-F5P**：统一 Process provider、credential broker、网络策略，OTLP exporter、trace propagation、Audit bridge 与 SLO；
+5. **P4-F6E**：固定领域数据集、完整规划/记忆/验收指标、统计门禁、flaky/resume/nightly report；
+6. **P4-F7L**：真实 LLM/IdP/MCP/A2A/sandbox/renderer scheduled matrix，签名 EnvironmentManifest 与 no-skip certification；
+7. **P4-F8D**：远程 durable queue、worker registry/scheduler、PostgreSQL/object store、HA/chaos；
+8. **P4-FUI**：CLI/Web/TUI 计划、记忆、审批、验收视图与真实运行截图。UI 批次必须在实际运行环境完成截图验收。
+
+当前实现、证据和残余风险以[状态矩阵](./phase-4-status.md)、[追溯矩阵](./phase-4/traceability-matrix.md)及[本批验收报告](./phase-4/acceptance-P4-F0R-F8-vertical-20260809.md)为准。

@@ -6,6 +6,7 @@
 #include <agent/toolbus/fs_sandbox.hpp>
 #include <agent/toolbus/fs_tools.hpp>
 #include <agent/context_budget/context_budget.hpp>
+#include <agent/internal/platform_io.hpp>
 
 #include <algorithm>
 #include <cstdlib>
@@ -250,7 +251,7 @@ struct FsToolsState {
             return fs_tool_error("parent_missing", "parent directory does not exist");
         }
         const std::string tmp =
-            path->string() + ".tmp." + std::to_string(static_cast<long long>(::getpid()));
+            path->string() + ".tmp." + std::to_string(internal::current_process_id());
         {
             std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
             if (!out) {
@@ -680,7 +681,7 @@ struct FsToolsState {
             return fs_tool_error("result_too_large", "result exceeds AGENT_FS_MAX_WRITE_BYTES");
         }
         const std::string tmp =
-            path->string() + ".tmp." + std::to_string(static_cast<long long>(::getpid()));
+            path->string() + ".tmp." + std::to_string(internal::current_process_id());
         {
             std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
             if (!out) {

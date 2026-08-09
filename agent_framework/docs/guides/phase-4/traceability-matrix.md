@@ -6,20 +6,20 @@
 
 | Requirement | Plan tasks | Status | Source/API | Tests | Runtime evidence | Acceptance |
 |---|---|---|---|---|---|---|
-| R4.0 证据驱动任务理解 | 4.0.1–4.0.9 | planned | 待实现 `planning/*` | `phase4-planning` | EvidenceBundle/Understanding digest | WP4.0 DoD |
-| R4.0 可执行计划与重规划 | 4.0.10–4.0.16 | planned | 待实现 PlanStore/Workflow | DAG/CAS/replan/E2E | plan revision/diff/UI screenshot | WP4.0 DoD |
-| R4.1 五层独立验收 | 4.1.1–4.1.16 | planned | 待实现 `assurance/*` | `phase4-assurance` | Findings/AcceptanceReport | WP4.1 DoD |
-| R4.2 全运行持久化 | 4.2.1–4.2.12 | planned | 待实现 `run/*` | kill/restart/replay | Run checkpoint/recovery trace | WP4.2 DoD |
-| R4.3 Durable HITL | 4.3.1–4.3.12 | planned | 待实现 approval/policy | `phase4-policy` | request/decision/audit/UI | WP4.3 DoD |
-| R4.4 统一 Sandbox | 4.4.1–4.4.12 | planned | 待抽取 `sandbox/*` | escape/resource/E2E | SandboxManifest/workspace diff | WP4.4 DoD |
-| R4.5 标准观测与 SLO | 4.5.1–4.5.12 | planned | 待实现 telemetry | OTLP loopback/context | trace/dashboard/SLO report | WP4.5 DoD |
-| R4.6 系统评测 | 4.6.1–4.6.13 | planned | 待实现 `eval/*` | small/nightly datasets | comparison report | WP4.6 DoD |
-| R4.7 Live 认证 | 4.7.1–4.7.11 | planned | CI/runner 待实现 | scheduled live matrix | executed attestation/cert | WP4.7 DoD |
-| R4.8 分布式控制面 | 4.8.1–4.8.12 | planned | remote stores/queue 待实现 | chaos/load/HA | lease/failover report | WP4.8 DoD |
-| R4.9 五层 scope 与 Provider | 4.9.1–4.9.10 | planned | 待实现 `memory_v2/*` provider/schema | namespace/ACL/provider/adapter | MemoryRecord/provider generation | WP4.9 DoD |
-| R4.9 Scope-first 检索与动态 View | 4.9.11–4.9.16 | planned | 待实现 index/view/resolver/assembly v2 | retrieval/conflict/view/recovery | ViewManifest/snapshot/view digest | WP4.9 DoD |
-| R4.9 Consolidation 与治理 | 4.9.17–4.9.19 | planned | 待实现 promotion/governance/inspector | promotion/forget/RBAC/UI | candidate/decision/audit/screenshots | WP4.9 DoD |
-| R4.9 迁移与垂直认证 | 4.9.20 | planned | v1 adapter/dual-read 待实现 | `phase4-memory` E2E/eval | cross-scope/restart/report | WP4.9 DoD |
+| R4.0 证据驱动任务理解 | 4.0.1–4.0.9 | implemented | `planning/types,evidence_store,sqlite_planning_store,cognition_workflow` | `phase4_cognition`、`phase4_planning_store` | durable EvidenceBundle/Understanding/View digest | real adapters pending |
+| R4.0 可执行计划与重规划 | 4.0.10–4.0.16 | partial | `planning/plan_store,sqlite_planning_store,plan_validator` | DAG/CAS/cycle/restart/parent-digest negative | durable plan revision digest | executor replan/UI pending |
+| R4.1 五层独立验收 | 4.1.1–4.1.16 | implemented | `assurance/evidence,verifier,registry,arbiter,harness` | `phase4_assurance` | Findings/AcceptanceReport | real verifier adapters/store pending |
+| R4.2 全运行持久化 | 4.2.1–4.2.12 | implemented | `run/state_machine,store` + SQLite | `phase4_durable_run` | restart/CAS/timer/token | executor replay pending |
+| R4.3 Durable HITL | 4.3.1–4.3.12 | partial | `approval/types,policy,store`; Run interruption | `phase4_policy`、`phase4_approval_store`、durable run | PDP/request/decision/token/restart | delegation/multisig/edit-flow/UI pending |
+| R4.4 统一 Sandbox | 4.4.1–4.4.12 | partial | `sandbox/types,provider,workspace` | `phase4_runtime_observability` | deterministic workspace/spec | concrete providers pending |
+| R4.5 标准观测与 SLO | 4.5.1–4.5.12 | partial | `telemetry/types,runtime` | `phase4_runtime_observability` | span/metric/privacy gate | OTLP/SLO pending |
+| R4.6 系统评测 | 4.6.1–4.6.13 | partial | `eval/types,runner` | `phase4_eval` | deterministic run/comparison | datasets/judge/nightly pending |
+| R4.7 Live 认证 | 4.7.1–4.7.11 | partial | `live/certification` | `phase4_live_distributed` | skip-as-fail/expiry | executed live matrix pending |
+| R4.8 分布式控制面 | 4.8.1–4.8.12 | partial | `distributed/durable_queue` reference semantics | fencing/reclaim/DLQ | lease tokens | remote durability/HA pending |
+| R4.9 五层 scope 与 Provider | 4.9.1–4.9.10 | implemented | `memory_v2/types,store,provider,project_instruction_provider` | `phase4_memory*` | ACL/provider generation | upstream adapters pending |
+| R4.9 Scope-first 检索与动态 View | 4.9.11–4.9.16 | implemented | `memory_v2/view_engine,view_profiles` | isolation/budget/restart/digest | ViewManifest/snapshot | hybrid retrieval/atomic Run pin pending |
+| R4.9 Consolidation 与治理 | 4.9.17–4.9.19 | partial | `memory_v2/governance` | promotion/forget/sink | decision/tombstone | consolidator/Inspector/UI pending |
+| R4.9 迁移与垂直认证 | 4.9.20 | partial | v2 isolated path；Memory→Plan→Run→Acceptance 纵向绑定 | `phase4_vertical` + Phase 3/4 offline regression | 27 tests PASS；restart terminal binding | dual-read/real executor/live E2E pending |
 
 ## 2. 行更新规则
 
