@@ -230,6 +230,15 @@ endif()
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/planning/cognition_workflow.cpp)
     list(APPEND AGENT_SOURCES src/planning/cognition_workflow.cpp)
 endif()
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/planning/cognition_pipeline.cpp)
+    list(APPEND AGENT_SOURCES src/planning/cognition_pipeline.cpp)
+endif()
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/planning/sqlite_cognition_store.cpp)
+    list(APPEND AGENT_SOURCES src/planning/sqlite_cognition_store.cpp)
+endif()
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/planning/cognition_graph_template.cpp)
+    list(APPEND AGENT_SOURCES src/planning/cognition_graph_template.cpp)
+endif()
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/assurance/types.cpp)
     list(APPEND AGENT_SOURCES src/assurance/types.cpp)
 endif()
@@ -310,6 +319,29 @@ if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/live/certification.cpp)
 endif()
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/distributed/durable_queue.cpp)
     list(APPEND AGENT_SOURCES src/distributed/durable_queue.cpp)
+endif()
+
+# Phase 4 v2 role-based LLM workflow runtime
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/llm_runtime/types.cpp)
+    list(APPEND AGENT_SOURCES src/llm_runtime/types.cpp)
+endif()
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/llm_runtime/store.cpp)
+    list(APPEND AGENT_SOURCES src/llm_runtime/store.cpp)
+endif()
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/llm_runtime/sqlite_store.cpp)
+    list(APPEND AGENT_SOURCES src/llm_runtime/sqlite_store.cpp)
+endif()
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/llm_runtime/registry.cpp)
+    list(APPEND AGENT_SOURCES src/llm_runtime/registry.cpp)
+endif()
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/llm_runtime/router.cpp)
+    list(APPEND AGENT_SOURCES src/llm_runtime/router.cpp)
+endif()
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/llm_runtime/structured_output.cpp)
+    list(APPEND AGENT_SOURCES src/llm_runtime/structured_output.cpp)
+endif()
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/llm_runtime/runtime.cpp)
+    list(APPEND AGENT_SOURCES src/llm_runtime/runtime.cpp)
 endif()
 
 # LLM Client 模块
@@ -1205,6 +1237,34 @@ if(BUILD_TESTING)
         set_tests_properties(phase4_cognition PROPERTIES
             LABELS "phase4-cognition;phase4-planning;phase4-offline;offline")
     endif()
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_phase4_cognition_pipeline_contracts.cpp)
+        add_executable(test_phase4_cognition_pipeline_contracts
+            tests/test_phase4_cognition_pipeline_contracts.cpp)
+        target_link_libraries(test_phase4_cognition_pipeline_contracts PRIVATE agent_framework)
+        add_test(NAME phase4_cognition_pipeline_contracts
+                 COMMAND test_phase4_cognition_pipeline_contracts)
+        set_tests_properties(phase4_cognition_pipeline_contracts PROPERTIES
+            LABELS "phase4-cognition-v2;phase4-contract;phase4-durable;phase4-offline;offline"
+            RUN_SERIAL TRUE)
+    endif()
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_phase4_cognition_pipeline.cpp)
+        add_executable(test_phase4_cognition_pipeline
+            tests/test_phase4_cognition_pipeline.cpp)
+        target_link_libraries(test_phase4_cognition_pipeline PRIVATE agent_framework)
+        add_test(NAME phase4_cognition_pipeline COMMAND test_phase4_cognition_pipeline)
+        set_tests_properties(phase4_cognition_pipeline PROPERTIES
+            LABELS "phase4-cognition-v2;phase4-planning;phase4-policy;phase4-offline;offline")
+    endif()
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_phase4_cognition_pipeline_integration.cpp)
+        add_executable(test_phase4_cognition_pipeline_integration
+            tests/test_phase4_cognition_pipeline_integration.cpp)
+        target_link_libraries(test_phase4_cognition_pipeline_integration PRIVATE agent_framework)
+        add_test(NAME phase4_cognition_pipeline_integration
+                 COMMAND test_phase4_cognition_pipeline_integration)
+        set_tests_properties(phase4_cognition_pipeline_integration PROPERTIES
+            LABELS "phase4-cognition-v2;phase4-llm-runtime;phase4-integration;phase4-durable;phase4-offline;offline"
+            RUN_SERIAL TRUE)
+    endif()
     if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_phase4_planning_store.cpp)
         add_executable(test_phase4_planning_store tests/test_phase4_planning_store.cpp)
         target_link_libraries(test_phase4_planning_store PRIVATE agent_framework)
@@ -1226,6 +1286,39 @@ if(BUILD_TESTING)
         add_test(NAME phase4_runtime_observability COMMAND test_phase4_runtime_observability)
         set_tests_properties(phase4_runtime_observability PROPERTIES
             LABELS "phase4-runtime;phase4-sandbox;phase4-observability;phase4-telemetry;phase4-offline;offline")
+    endif()
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_phase4_llm_runtime_contracts.cpp)
+        add_executable(test_phase4_llm_runtime_contracts
+            tests/test_phase4_llm_runtime_contracts.cpp)
+        target_link_libraries(test_phase4_llm_runtime_contracts PRIVATE agent_framework)
+        add_test(NAME phase4_llm_runtime_contracts COMMAND test_phase4_llm_runtime_contracts)
+        set_tests_properties(phase4_llm_runtime_contracts PROPERTIES
+            LABELS "phase4-llm-runtime;phase4-contract;phase4-offline;offline")
+    endif()
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_phase4_llm_runtime_routing.cpp)
+        add_executable(test_phase4_llm_runtime_routing
+            tests/test_phase4_llm_runtime_routing.cpp)
+        target_link_libraries(test_phase4_llm_runtime_routing PRIVATE agent_framework)
+        add_test(NAME phase4_llm_runtime_routing COMMAND test_phase4_llm_runtime_routing)
+        set_tests_properties(phase4_llm_runtime_routing PROPERTIES
+            LABELS "phase4-llm-runtime;phase4-policy;phase4-offline;offline")
+    endif()
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_phase4_llm_runtime_store.cpp)
+        add_executable(test_phase4_llm_runtime_store
+            tests/test_phase4_llm_runtime_store.cpp)
+        target_link_libraries(test_phase4_llm_runtime_store PRIVATE agent_framework)
+        add_test(NAME phase4_llm_runtime_store COMMAND test_phase4_llm_runtime_store)
+        set_tests_properties(phase4_llm_runtime_store PROPERTIES
+            LABELS "phase4-llm-runtime;phase4-durable;phase4-offline;offline"
+            RUN_SERIAL TRUE)
+    endif()
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_phase4_llm_runtime_integration.cpp)
+        add_executable(test_phase4_llm_runtime_integration
+            tests/test_phase4_llm_runtime_integration.cpp)
+        target_link_libraries(test_phase4_llm_runtime_integration PRIVATE agent_framework)
+        add_test(NAME phase4_llm_runtime_integration COMMAND test_phase4_llm_runtime_integration)
+        set_tests_properties(phase4_llm_runtime_integration PROPERTIES
+            LABELS "phase4-llm-runtime;phase4-integration;phase4-telemetry;phase4-offline;offline")
     endif()
     if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_phase4_eval.cpp)
         add_executable(test_phase4_eval tests/test_phase4_eval.cpp)

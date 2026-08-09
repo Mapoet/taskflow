@@ -17,6 +17,7 @@
 #include <optional>
 #include <map>
 #include <chrono>
+#include <cstdint>
 #include <memory>
 #include <ctime>
 #include <functional>
@@ -216,6 +217,20 @@ struct CallSpec {
 };
 
 /**
+ * @brief Provider-reported usage for one request.
+ *
+ * Missing values remain unset: callers must not interpret an unavailable provider metric as zero.
+ */
+struct LLMUsage {
+    std::optional<std::uint64_t> input_tokens;
+    std::optional<std::uint64_t> output_tokens;
+    std::optional<std::uint64_t> cached_input_tokens;
+    std::optional<double> cost_usd;
+    std::string source;
+    std::string unknown_reason;
+};
+
+/**
  * @brief LLM 输出结构
  */
 struct LLMOutput {
@@ -225,6 +240,7 @@ struct LLMOutput {
     std::string final_answer;          // 最终回答（仅当 is_final 为真时有效）
     std::optional<std::string> audio_out;  // 语音输出（可选，如 GPT-4o Realtime API）
     std::optional<std::string> image_out;  // 图像输出（可选，如 GPT-4o Realtime API）
+    std::optional<LLMUsage> usage;      // provider-reported token/cost usage; absent means unknown
 };
 
 /**

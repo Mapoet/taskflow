@@ -27,6 +27,8 @@ class TaskControl;
 
 struct SkillServices;
 
+namespace llm_runtime { class RoleRuntime; }
+
 namespace node {
 
 /**
@@ -74,7 +76,8 @@ public:
         SkillEventSink skill_event_sink = {},
         std::function<void(std::string_view)> thinking_stream_callback = nullptr,
         std::shared_ptr<LLMClient> memory_compaction_llm = nullptr,
-        std::shared_ptr<EncoderManager> encoder_manager = nullptr
+        std::shared_ptr<EncoderManager> encoder_manager = nullptr,
+        std::shared_ptr<llm_runtime::RoleRuntime> llm_role_runtime = nullptr
     );
 
 private:

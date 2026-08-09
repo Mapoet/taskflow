@@ -21,23 +21,23 @@
 
 按 Phase 4 v1 原始目标，当前总体满足度约为 **45–50%**。首轮实现已形成共享契约、SQLite Run/Memory、动态 View、认知规划、独立五层验收、Sandbox/Telemetry/Eval/Live/Queue 核心语义的离线垂直骨架；但真实 investigator/provider、统一进程/容器 sandbox、OTLP/SLO、scheduled live、远程持久化与 HA 尚未达到工作包 DoD，因此所有 WP 仍保持 `[~]`。
 
-[Phase 4 v2](./phase-4-plan-v2.md) 把“规划、验证和记忆均由专门 LLM 工作流驱动”提升为 mandatory target。按扩展后的目标重新计量，当前总体满足度约为 **35–40%**。完成度下降只表示目标边界扩大，不表示已有实现退化。
+[Phase 4 v2](./phase-4-plan-v2.md) 把“规划、验证和记忆均由专门 LLM 工作流驱动”提升为 mandatory target。完成 P4-V2-F1L 与 F2C 离线核心后，按扩展目标重新计量，当前总体满足度约为 **45–50%**。该数值仍不包含真实 provider/role 矩阵和生产闭环。
 
 | 评估口径 | 满足度 | 已证明 | 尚未证明 |
 |---|---:|---|---|
 | v1 原始目标 | 45–50% | 确定性契约、Store、View、Harness 和离线纵向绑定 | 生产适配器、真实 Live、远程 durable/HA |
-| v2 扩展目标 | 35–40% | v1 基础可作为确定性控制面复用 | 统一 Role Runtime、多阶段 LLM cognition/memory/assurance、Judge 校准和角色 Live matrix |
+| v2 扩展目标 | 45–50% | v1 控制面；统一 Role Runtime；多阶段 cognition/planning、独立 Critic、durable revision/recovery 和 GraphExecutor 模板的离线闭环 | LLM memory/assurance、Judge 校准、全路径强制接入、真实 investigator 和角色 Live matrix |
 
 ### 2.1 v2 横向能力状态
 
 | 能力域 | 状态 | v2 满足度 | 当前事实 | 未关闭的 mandatory DoD |
 |---|---:|---:|---|---|
-| Role-based LLM Runtime | `[~]` | 15–20% | 有 `LLMClient`、provider adapter、`ModelConfig` 和通用 AgentLoop | `LLMRoleProfile`、路由/回退、Prompt revision、独立性组、InvocationManifest、校准和 durable recovery |
-| LLM Cognition/Planning | `[~]` | 35–40% | 有 Investigator、Evidence/Plan Store、DAG validator 和单次 `draft()` 插槽 | intake/strategy/tool loop/synthesis/boundary/planner/critic/revision 多阶段工作流及真实适配 |
+| Role-based LLM Runtime | `[~]` | 70–75% | 已有版本化 Profile/Prompt/Route/Manifest/Reasoning/Calibration 契约、确定性 Router、schema gate、SQLite CAS/recovery、usage/latency、Telemetry/Audit bridge、fake fallback/repair 和可选 AgentLoop adapter | 独立 `StructuredOutputPolicy` 契约、project/org overlay/default revision 管理、GraphExecutor 全路径强制接入、timeout/live provider/calibration matrix |
+| LLM Cognition/Planning | `[~]` | 75–80% | RoleRuntime stages、strict checkpoint、intake/strategy/只读 tool loop/synthesis/boundary/planner/独立 critic/revision/HITL、SQLite recovery 和 GraphExecutor template 已形成离线闭环 | 真实 investigator/provider/calibration matrix、adaptive stop、跨 Store 原子提交、ApprovalStore 直连、默认不可绕过门禁和 live/SLO |
 | LLM Professional Assurance | `[~]` | 35–40% | 有 Verifier Registry、EvidenceLedger、五层 Harness 和确定性 Arbiter | 专业 LLM verifier、只读调查、角色隔离、交叉证据解析、remediation/replan |
 | LLM Multi-layer Memory | `[~]` | 45–50% | scope/store/provider/view/governance 完整度较高；legacy compaction 可用 LLM | extraction、normalization、entity/claim linking、consolidation、conflict、query/rerank 工作流 |
 | LLM Eval/Judge | `[~]` | 30–35% | 有 Dataset Registry、EvalRunner 和 paired gate | blind/multi-judge、agreement、false accept/reject、角色/Prompt/模型升级门禁 |
-| LLM Observability | `[~]` | 30–35% | 有 task/plan/evidence/memory 等 correlation identity | 实际 provider/model/prompt/profile/view/fallback/token/cost/calibration manifest |
+| LLM Observability | `[~]` | 50–55% | Role Runtime 已记录 provider/model/profile/prompt/view/route/fallback/token/cost/latency/calibration manifest 并桥接 span/audit | OTLP/SLO、真实 provider usage 一致性、跨进程 correlation 和 live evidence |
 
 v2 采用“**LLM Cognitive Plane + Deterministic Control Plane**”：LLM 深度参与分析、调查、综合、规划、记忆加工和专业解释；ACL、authority、policy、CAS、artifact/test/metric oracle 与最终 Arbiter 保持确定性。系统持久化结构化事实、证据、假设、备选方案、风险和决策理由，不持久化模型私有 chain-of-thought。
 
@@ -181,10 +181,11 @@ AgentServer 使用有界进程内 FIFO、worker threads、内存 active task map
 | 统一契约 | `contracts/contract` 及 planning/assurance/run/approval/memory/sandbox/telemetry/eval 类型 | `phase4_contracts` | 已发布 schema 的长期兼容性和线上迁移 |
 | Durable Run/HITL | SQLite RunStore、CAS 状态机、event、interruption/token、timer；PDP | `phase4_durable_run`、`phase4_policy` | GraphExecutor 原子 replay、完整 ApprovalStore/UI |
 | 多层记忆 | SQLite v2、六层 scope、Provider、8 种 View、AGENTS resolver、治理/forget | `phase4_memory`、`phase4_memory_profiles` | hybrid index、v1 dual-read、冲突 HITL、Inspector/UI |
-| 认知规划 | SQLite Evidence/Plan store、Investigator Registry、workflow、DAG validator | `phase4_cognition`、`phase4_planning_store` | 真实 ToolBus/外部 investigator、执行器接入 |
+| 认知规划 | SQLite Evidence/Plan/Cognition checkpoint、RoleRuntime stage adapter、Intake→Strategy→Investigation→Synthesis→Boundary→Planner→Critic/Revision、GraphExecutor template | `phase4_cognition`、`phase4_planning_store`、3 个 `phase4_cognition_pipeline*` | 真实 ToolBus/外部 investigator/provider matrix、跨 Store 原子提交和默认强制接入 |
 | 五层验收 | 只读 verifier registry、EvidenceLedger、强 oracle 优先 arbiter、隔离 Verification View | `phase4_assurance` | 真实 verifier adapters、report store、remediation 闭环 |
 | Runtime/OTel | Sandbox spec/provider contract、workspace manifest；Span/Metric runtime 与隐私门 | `phase4_runtime_observability` | concrete provider、OTLP/SLO、跨进程传播 |
 | Eval/Live/Distributed | immutable dataset、统计比较；certification contract；租约/fencing/DLQ 内存参考实现 | `phase4_eval`、`phase4_live_distributed` | executed live matrix、远程持久队列、HA |
 | 跨模块绑定 | Memory snapshot/view→Plan digest→Run checkpoint→五层 AcceptanceReport→restart terminal | `phase4_vertical` | 真实执行器副作用与远程依赖的端到端认证 |
+| Role-based LLM Runtime | immutable role/profile/prompt/calibration、provider pool、schema gate、能力/Memory View/独立性约束、InvocationManifest SQLite CAS/recovery、AgentLoop 可选接入 | `phase4_llm_runtime_contracts`、`phase4_llm_runtime_routing`、`phase4_llm_runtime_store`、`phase4_llm_runtime_integration` | 尚未证明所有 Cognition/Memory/Assurance/Judge 路径不可绕过；无真实 provider/calibration/live matrix |
 
-当前 `ctest -L phase4-offline` 为 **13/13 PASS**；Phase 3 `ctest -L phase3-offline` 为 **14/14 PASS**。首轮纵向证据见[首轮报告](./phase-4/acceptance-P4-F0R-F8-vertical-20260809.md)，P4-F2D 持久化增量见[增量报告](./phase-4/acceptance-P4-F2D-durable-stores-20260809.md)。
+当前 `ctest -L phase4-offline` 为 **20/20 PASS**；Phase 3 `ctest -L phase3-offline` 为 **14/14 PASS**。首轮纵向证据见[首轮报告](./phase-4/acceptance-P4-F0R-F8-vertical-20260809.md)，P4-F2D 持久化增量见[增量报告](./phase-4/acceptance-P4-F2D-durable-stores-20260809.md)，F1L 证据边界见[Role Runtime 验收报告](./phase-4/acceptance-P4-V2-F1L-20260809.md)，F2C 证据边界见[多阶段认知规划验收报告](./phase-4/acceptance-P4-V2-F2C-20260809.md)。

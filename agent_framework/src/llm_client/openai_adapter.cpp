@@ -69,8 +69,34 @@ RenderedPrompt rendered_from_llm_input(const LLMInput& in) {
     return rp;
 }
 
+std::optional<LLMUsage> parse_openai_usage(const json& body) {
+    if(!body.is_object() || !body.contains("usage") || !body.at("usage").is_object())
+        return std::nullopt;
+    const auto& usage = body.at("usage");
+    LLMUsage result;
+    if(usage.contains("prompt_tokens") && usage.at("prompt_tokens").is_number_unsigned())
+        result.input_tokens = usage.at("prompt_tokens").get<std::uint64_t>();
+    else if(usage.contains("prompt_tokens") && usage.at("prompt_tokens").is_number_integer())
+        result.input_tokens = static_cast<std::uint64_t>(std::max<std::int64_t>(0, usage.at("prompt_tokens").get<std::int64_t>()));
+    if(usage.contains("completion_tokens") && usage.at("completion_tokens").is_number_unsigned())
+        result.output_tokens = usage.at("completion_tokens").get<std::uint64_t>();
+    else if(usage.contains("completion_tokens") && usage.at("completion_tokens").is_number_integer())
+        result.output_tokens = static_cast<std::uint64_t>(std::max<std::int64_t>(0, usage.at("completion_tokens").get<std::int64_t>()));
+    if(usage.contains("prompt_tokens_details") && usage.at("prompt_tokens_details").is_object()) {
+        const auto& details = usage.at("prompt_tokens_details");
+        if(details.contains("cached_tokens") && details.at("cached_tokens").is_number_integer())
+            result.cached_input_tokens = static_cast<std::uint64_t>(std::max<std::int64_t>(0, details.at("cached_tokens").get<std::int64_t>()));
+    }
+    if(usage.contains("cost") && usage.at("cost").is_number()) result.cost_usd = usage.at("cost").get<double>();
+    result.source = "provider:openai";
+    if(!result.input_tokens && !result.output_tokens && !result.cost_usd)
+        result.unknown_reason = "provider usage object contained no supported fields";
+    return result;
+}
+
 LLMOutput parse_openai_non_stream(const json& body) {
     LLMOutput out;
+    out.usage = parse_openai_usage(body);
     if (!body.contains("choices") || !body["choices"].is_array() || body["choices"].empty()) {
         out.is_final = true;
         return out;
@@ -212,8 +238,11 @@ json OpenAIAdapter::build_openai_request(const RenderedPrompt& rendered,
     req["top_p"] = config.top_p;
     req["max_tokens"] = config.max_tokens;
     req["stream"] = config.stream;
+    static const std::unordered_set<std::string> protected_fields = {
+        "model", "messages", "tools", "tool_choice", "temperature", "top_p",
+        "max_tokens", "stream"};
     for (const auto& kv : config.extra_params) {
-        req[kv.first] = kv.second;
+        if(protected_fields.count(kv.first) == 0U) req[kv.first] = kv.second;
     }
     return req;
 }
@@ -263,6 +292,7 @@ std::future<LLMOutput> OpenAIAdapter::invoke_with_rendered_channels(
                 body["stream"] = true;
                 std::string full_text;
                 std::map<int, StreamToolSlot> tool_acc;
+                std::optional<LLMUsage> stream_usage;
 
                 if (dbg) {
                     std::cout << "[OpenAIAdapter] SSE POST " << url
@@ -274,6 +304,7 @@ std::future<LLMOutput> OpenAIAdapter::invoke_with_rendered_channels(
                 http_transport_->post_sse_cancellable(
                     url, body, hdrs,
                     [&](const std::string&, const json& ev) {
+                        if(const auto usage = parse_openai_usage(ev)) stream_usage = usage;
                         if (!ev.contains("choices") || !ev["choices"].is_array()) {
                             return;
                         }
@@ -343,6 +374,7 @@ std::future<LLMOutput> OpenAIAdapter::invoke_with_rendered_channels(
                     out.tool_calls.push_back(std::move(cs));
                 }
                 out.is_final = out.tool_calls.empty();
+                out.usage = std::move(stream_usage);
                 return out;
             },
             request_config);

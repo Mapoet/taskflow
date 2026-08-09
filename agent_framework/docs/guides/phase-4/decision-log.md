@@ -74,6 +74,26 @@
 - **安全、兼容、迁移和回滚影响**：新路径使用 feature flag、immutable profile/prompt/schema/calibration revision 和 shadow evaluation；legacy draft/verifier/compaction 先保留 adapter，可回滚到上一批准 revision。
 - **验收标准变化**：原 Phase 4 45–50% 作为 v1 基线保留；按 v2 扩展目标重新计量为 35–40%。任何生产 LLM 调用必须记录实际路由、Prompt、Memory View、能力、token/cost、fallback 和 calibration manifest。
 
+### D4-009 — F1L 采用独立 Invocation Store，并暂将 Structured Output Policy 固结于 Prompt revision
+
+- **日期 / 状态 / 决策者**：2026-08-09 / approved-for-offline-core / Codex（依据用户批准实施 F1L）
+- **关联 requirement / plan revision**：`R4V2-01` / `phase4-v2-plan-r1`
+- **事实与证据**：现有 Run/Event 契约已发布且服务于跨模块状态机；LLM 调用具有高频 attempt、provider usage、fallback 和不确定恢复语义。直接扩展 Run v1 会扩大迁移和回归面。首版 Prompt revision 已原子包含 input/output schema、repair budget、redaction 和 compatibility class。
+- **备选方案**：立即修改 Run schema 并把每次 LLM attempt 写成 RunEvent；或在首版同时建立独立 `StructuredOutputPolicy` registry。前者引入跨 Store 原子协调，后者在尚无跨 Prompt 复用证据时增加一次可失配 pin。
+- **决定与理由**：使用 tenant-scoped SQLite `llm_invocations` 保存不可变 profile/prompt/calibration 与 CAS manifest，通过 trace/task/run/plan identity、manifest digest 和 Telemetry/Audit 与 Run 关联；首个离线核心把 Structured Output Policy 固结在 immutable Prompt revision 内，保持 schema 与修复预算原子一致。
+- **安全、兼容、迁移和回滚影响**：SQLite schema version=1、WAL/FULL synchronous、私有文件权限；旧 AgentLoop 路径仍可用，显式注入 RoleRuntime 才启用新路径。回滚通过重新 pin 已批准 profile/prompt revision，不修改历史文档。
+- **验收标准变化及批准**：该决策不删除 F1L 的七契约目标；独立 `StructuredOutputPolicy`、project/org overlay 和所有工作流强制接入继续列为 residual gap，因此 `R4V2-01` 只能为 partial。
+
+### D4-010 — F2C 使用 LLM Cognitive Plane 与确定性 Planning Control Plane 分层
+
+- **日期 / 状态 / 决策者**：2026-08-09 / approved-for-offline-core / Codex（依据用户批准实施 F2C）
+- **关联 requirement / plan revision**：`R4V2-02` / `phase4-v2-plan-r1`
+- **事实与证据**：LLM 适合分析 goal、gap、claim、boundary、plan 和 counterexample，但不能可靠执行 tenant isolation、能力授权、预算、evidence 引用完整性、DAG、CAS、HITL 和恢复语义。现有 Evidence/Plan/RoleRuntime 可以作为确定性边界复用。
+- **备选方案**：由一个 ReAct agent 自由完成调查和计划，或把所有 stage 输出直接视为权威计划。前者无法稳定恢复和审计，后者允许模型伪造 evidence、扩大权限或自我验收。
+- **决定与理由**：Intake、Strategy、Synthesis、Boundary、Planner、Critic、Reviser 是独立 RoleRuntime 语义 stage；investigator dispatch、只读/capability/budget、claim-evidence 引用、PlanValidator、Critic independence、revision CAS、HITL validator 和 terminal state 由确定性 pipeline 执行。stage artifact 和 attempt 写入 tenant-scoped Cognition checkpoint；不保存私有 chain-of-thought。
+- **安全、兼容、迁移和回滚影响**：旧 `CognitionWorkflow::draft()` 保留；新 GraphExecutor template 需要显式注册。SQLite schema v1 使用 WAL/FULL/private permission。跨 Store 非原子窗口通过 stage attempt 和幂等只读调查恢复，但不宣称 provider exactly-once。
+- **验收标准变化及批准**：未降低 F2C exit gate。离线核心通过仍不足以关闭真实 profiles/prompts/investigator/provider/calibration、ApprovalStore 直连、跨 Store 原子提交、默认强制接入和 live/SLO，因此 `R4V2-02` 保持 partial。
+
 ## 新决策模板
 
 ### D4-NNN — 标题

@@ -18,6 +18,7 @@
 #include <agent/agent/user_input_preprocessor.hpp>
 #include <agent/agent/memory_compaction.hpp>
 #include <agent/a2a/outbound_task_supervisor.hpp>
+#include <agent/llm_runtime/runtime.hpp>
 
 #include <algorithm>
 #include <any>
@@ -195,7 +196,8 @@ AgentLoopNode::create(
     SkillEventSink skill_event_sink,
     std::function<void(std::string_view)> thinking_stream_callback,
     std::shared_ptr<LLMClient> memory_compaction_llm,
-    std::shared_ptr<EncoderManager> encoder_manager
+    std::shared_ptr<EncoderManager> encoder_manager,
+    std::shared_ptr<llm_runtime::RoleRuntime> llm_role_runtime
 ) {
     (void)memory_store;
     if(static_cast<bool>(vector_store) != static_cast<bool>(encoder_manager))
@@ -209,7 +211,7 @@ AgentLoopNode::create(
 
     auto body_func = [agent_config, llm_client, toolbus, stream_callback, thinking_stream_callback,
                       skills, task_control, memory_compaction_llm, vector_store, encoder_manager,
-                      tool_execution_observer, skill_event_sink](
+                      tool_execution_observer, skill_event_sink, llm_role_runtime](
                          const workflow::ValueMap& inps,
                          const workflow::IterationContext&)
         -> std::unordered_map<std::string, std::any> {
@@ -659,8 +661,59 @@ AgentLoopNode::create(
                 }
                 if (thinking_stream_callback) thinking_stream_callback(chunk);
             };
-            llm_out = llm_client->invoke_channels(llm_in, "", std::move(cancellable_stream),
-                                                  std::move(cancellable_thinking)).get();
+            if(llm_role_runtime) {
+                llm_runtime::RoleInvocationRequest role_request;
+                if(!shared->state || !shared->state->execution_context)
+                    throw std::runtime_error("LLM Role Runtime requires an ExecutionContext");
+                const auto& execution = *shared->state->execution_context;
+                role_request.metadata.identity.tenant_id = execution.tenant_id;
+                role_request.metadata.identity.task_id = execution.task_id.value_or("");
+                role_request.trace_id = execution.trace_id;
+                const auto profile_id = agent_config.extra_config.find("LLM_ROLE_PROFILE_ID");
+                const auto profile_revision = agent_config.extra_config.find("LLM_ROLE_PROFILE_REVISION");
+                if(profile_id == agent_config.extra_config.end() || !profile_id->second.is_string() ||
+                   profile_revision == agent_config.extra_config.end() || !profile_revision->second.is_string())
+                    throw std::runtime_error("LLM Role Runtime requires pinned profile id and revision");
+                role_request.profile_id = profile_id->second.get<std::string>();
+                role_request.profile_revision = profile_revision->second.get<std::string>();
+                role_request.policy_revision = execution.input_policy_version;
+                role_request.prompt_variables = llm_in.extra_variables;
+                role_request.prompt_variables["caller_system_prompt"] = llm_in.system_prompt;
+                role_request.prompt_variables["caller_user_prompt"] = llm_in.user_prompt;
+                role_request.input = llm_in;
+                const auto assign_string_config = [&](const char* key, std::string& target) {
+                    const auto found = agent_config.extra_config.find(key);
+                    if(found != agent_config.extra_config.end() && found->second.is_string())
+                        target = found->second.get<std::string>();
+                };
+                assign_string_config("LLM_MEMORY_SNAPSHOT_ID", role_request.memory_view.snapshot_id);
+                assign_string_config("LLM_MEMORY_VIEW_PROFILE", role_request.memory_view.profile);
+                assign_string_config("LLM_MEMORY_VIEW_DIGEST", role_request.memory_view.view_digest);
+                assign_string_config("LLM_REQUIRED_REGION", role_request.required_region);
+                if(const auto found = agent_config.extra_config.find("LLM_GRANTED_CAPABILITIES");
+                   found != agent_config.extra_config.end() && found->second.is_array()) {
+                    for(const auto& capability : found->second) {
+                        if(capability.is_string())
+                            role_request.granted_capabilities.push_back(capability.get<std::string>());
+                    }
+                }
+                for(const auto& tool : llm_in.tools) {
+                    role_request.granted_capabilities.push_back(tool.name);
+                    role_request.granted_capabilities.push_back("tool:" + tool.name);
+                }
+                role_request.estimated_input_tokens = static_cast<std::uint64_t>(
+                    (llm_in.system_prompt.size() + llm_in.user_prompt.size() + llm_in.context.size()) / 4U);
+                auto role_result = llm_role_runtime->invoke(
+                    std::move(role_request), std::move(cancellable_stream),
+                    std::move(cancellable_thinking));
+                if(!role_result.ok)
+                    throw std::runtime_error("LLM Role Runtime: " + role_result.error_code +
+                                             ": " + role_result.error_message);
+                llm_out = std::move(role_result.output);
+            } else {
+                llm_out = llm_client->invoke_channels(llm_in, "", std::move(cancellable_stream),
+                                                      std::move(cancellable_thinking)).get();
+            }
         } catch (const std::exception& e) {
             if (dbg) {
                 std::cout << "[AgentLoop] LLM call threw exception: " << e.what() << "\n";

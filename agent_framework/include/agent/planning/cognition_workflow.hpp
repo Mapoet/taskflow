@@ -20,6 +20,9 @@ struct InvestigationRequest {
     memory_v2::MemoryView view;
     std::string deadline;
     std::uint64_t remaining_tool_calls{0};
+    std::string question;
+    std::uint64_t round{0};
+    std::vector<std::string> prior_evidence_ids;
 };
 
 class Investigator {
@@ -27,6 +30,8 @@ public:
     virtual ~Investigator() = default;
     virtual std::string id() const = 0;
     virtual bool external() const noexcept = 0;
+    virtual bool read_only() const noexcept { return true; }
+    virtual std::vector<std::string> required_capabilities() const { return {}; }
     virtual std::vector<EvidenceRecord> investigate(const InvestigationRequest& request,
                                                      std::string* error) = 0;
 };

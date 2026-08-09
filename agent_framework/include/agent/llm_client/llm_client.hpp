@@ -371,6 +371,9 @@ public:
      */
     std::vector<std::string> list_providers() const;
 
+    /** @brief Check whether a provider adapter is currently registered. */
+    bool has_provider(const std::string& provider) const;
+
     /**
      * @brief 获取模型名称（用于提示词渲染器选择格式化策略）
      * @param provider 提供商名称（空字符串表示使用默认）

@@ -47,7 +47,11 @@ CognitionResult CognitionWorkflow::run(
         if(cancelled()) { result.error = "cognition cancelled"; return result; }
         if(remaining == 0) { result.error = "investigation budget exhausted"; return result; }
         std::string error;
-        InvestigationRequest request{intake, investigation_view, options.deadline, remaining};
+        InvestigationRequest request;
+        request.intake = intake;
+        request.view = investigation_view;
+        request.deadline = options.deadline;
+        request.remaining_tool_calls = remaining;
         auto records = investigator->investigate(request, &error);
         if(!error.empty()) { result.error = investigator->id() + ":" + error; return result; }
         --remaining;

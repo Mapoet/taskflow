@@ -86,7 +86,8 @@ RenderedPrompt LLMClient::render_prompt(const LLMInput& input, const std::string
     if (!renderer) {
         throw std::invalid_argument("LLMClient: prompt_renderer not set");
     }
-    const std::string model_name = get_model_name(provider);
+    const std::string model_name = input.model_config && !input.model_config->model_name.empty()
+        ? input.model_config->model_name : get_model_name(provider);
     return renderer->render(input, model_name);
 }
 
@@ -182,6 +183,11 @@ std::vector<std::string> LLMClient::list_providers() const {
         names.push_back(kv.first);
     }
     return names;
+}
+
+bool LLMClient::has_provider(const std::string& provider) const {
+    std::lock_guard<std::mutex> lock(adapters_mutex_);
+    return adapters_.find(provider) != adapters_.end();
 }
 
 std::string LLMClient::get_model_name(const std::string& provider) const {
