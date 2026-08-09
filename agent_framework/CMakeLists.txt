@@ -293,6 +293,21 @@ endif()
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/memory_v2/governance.cpp)
     list(APPEND AGENT_SOURCES src/memory_v2/governance.cpp)
 endif()
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/memory_v2/workflows/memory_workflow.cpp)
+    list(APPEND AGENT_SOURCES src/memory_v2/workflows/memory_workflow.cpp)
+endif()
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/memory_v2/workflows/memory_pipeline.cpp)
+    list(APPEND AGENT_SOURCES src/memory_v2/workflows/memory_pipeline.cpp)
+endif()
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/memory_v2/workflows/sqlite_memory_workflow_store.cpp)
+    list(APPEND AGENT_SOURCES src/memory_v2/workflows/sqlite_memory_workflow_store.cpp)
+endif()
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/memory_v2/workflows/memory_graph_template.cpp)
+    list(APPEND AGENT_SOURCES src/memory_v2/workflows/memory_graph_template.cpp)
+endif()
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/memory_v2/workflows/legacy_memory_provider.cpp)
+    list(APPEND AGENT_SOURCES src/memory_v2/workflows/legacy_memory_provider.cpp)
+endif()
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/sandbox/types.cpp)
     list(APPEND AGENT_SOURCES src/sandbox/types.cpp)
 endif()
@@ -1229,6 +1244,44 @@ if(BUILD_TESTING)
         add_test(NAME phase4_memory_profiles COMMAND test_phase4_memory_profiles)
         set_tests_properties(phase4_memory_profiles PROPERTIES
             LABELS "phase4-memory;phase4-offline;offline" RUN_SERIAL TRUE)
+    endif()
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_phase4_memory_workflow_contracts.cpp)
+        add_executable(test_phase4_memory_workflow_contracts
+            tests/test_phase4_memory_workflow_contracts.cpp)
+        target_link_libraries(test_phase4_memory_workflow_contracts PRIVATE agent_framework)
+        add_test(NAME phase4_memory_workflow_contracts
+                 COMMAND test_phase4_memory_workflow_contracts)
+        set_tests_properties(phase4_memory_workflow_contracts PROPERTIES
+            LABELS "phase4-memory-v2;phase4-contract;phase4-durable;phase4-offline;offline"
+            RUN_SERIAL TRUE)
+    endif()
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_phase4_memory_workflow.cpp)
+        add_executable(test_phase4_memory_workflow tests/test_phase4_memory_workflow.cpp)
+        target_link_libraries(test_phase4_memory_workflow PRIVATE agent_framework)
+        add_test(NAME phase4_memory_workflow COMMAND test_phase4_memory_workflow)
+        set_tests_properties(phase4_memory_workflow PROPERTIES
+            LABELS "phase4-memory-v2;phase4-memory;phase4-policy;phase4-offline;offline"
+            RUN_SERIAL TRUE)
+    endif()
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_phase4_memory_workflow_negative.cpp)
+        add_executable(test_phase4_memory_workflow_negative
+            tests/test_phase4_memory_workflow_negative.cpp)
+        target_link_libraries(test_phase4_memory_workflow_negative PRIVATE agent_framework)
+        add_test(NAME phase4_memory_workflow_negative
+                 COMMAND test_phase4_memory_workflow_negative)
+        set_tests_properties(phase4_memory_workflow_negative PROPERTIES
+            LABELS "phase4-memory-v2;phase4-policy;phase4-offline;offline"
+            RUN_SERIAL TRUE)
+    endif()
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_phase4_memory_workflow_integration.cpp)
+        add_executable(test_phase4_memory_workflow_integration
+            tests/test_phase4_memory_workflow_integration.cpp)
+        target_link_libraries(test_phase4_memory_workflow_integration PRIVATE agent_framework)
+        add_test(NAME phase4_memory_workflow_integration
+                 COMMAND test_phase4_memory_workflow_integration)
+        set_tests_properties(phase4_memory_workflow_integration PROPERTIES
+            LABELS "phase4-memory-v2;phase4-llm-runtime;phase4-integration;phase4-durable;phase4-offline;offline"
+            RUN_SERIAL TRUE)
     endif()
     if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_phase4_cognition.cpp)
         add_executable(test_phase4_cognition tests/test_phase4_cognition.cpp)

@@ -94,6 +94,16 @@
 - **安全、兼容、迁移和回滚影响**：旧 `CognitionWorkflow::draft()` 保留；新 GraphExecutor template 需要显式注册。SQLite schema v1 使用 WAL/FULL/private permission。跨 Store 非原子窗口通过 stage attempt 和幂等只读调查恢复，但不宣称 provider exactly-once。
 - **验收标准变化及批准**：未降低 F2C exit gate。离线核心通过仍不足以关闭真实 profiles/prompts/investigator/provider/calibration、ApprovalStore 直连、跨 Store 原子提交、默认强制接入和 live/SLO，因此 `R4V2-02` 保持 partial。
 
+### D4-011 — F3M 使用 LLM Memory Semantic Plane 与确定性 Memory Governance Plane 分层
+
+- **日期 / 状态 / 决策者**：2026-08-10 / approved-for-offline-core / Codex（依据用户批准实施 F3M）
+- **关联 requirement / plan revision**：`R4V2-03` / `phase4-v2-plan-r1`
+- **事实与证据**：现有 Memory v2 已有 scope/store/provider/view/governance，但只有静态选择和确定性写入；legacy LLM compaction 不能表达 provenance、entity/claim、conflict、task state、query/rerank 或 promotion/forget recommendation。LLM 适合语义加工，但不能可靠实施 tenant/ACL、authority、CAS、retention、legal hold、HITL 和恢复。
+- **备选方案**：让一个自由 ReAct memory agent直接检索并写入权威 Store；或让各调用点零散执行 extraction/summary。前者允许 prompt injection、跨 scope 泄漏和自我晋升，后者无法统一版本、恢复、审计和质量校准。
+- **决定与理由**：Extraction、Normalization、Consolidation、Conflict、Task State、Query Planning、Reranking、Dynamic View 和 Governance Recommendation 是独立 RoleRuntime stage；scope-first/provider 二次过滤、provenance/evidence 闭包、candidate-only write、record-ID closure、View Router/budget、CAS 和 promotion/forget executor 保持确定性。LLM 永远只产生 Candidate/Recommendation，不获得 authority mutation 权限。
+- **安全、兼容、迁移和回滚影响**：base/dynamic View 作为 typed contract 固定进 SQLite checkpoint；旧 v1 conversation/summary 仅通过 fixed-scope dual-read provider 投影为 Observed/Candidate，不回写或获得 instruction authority。GraphExecutor template 显式注册，可回滚到原静态 Memory View。跨 scope promotion 在具备批准的 copy/migration 语义前 fail closed。
+- **验收标准变化及批准**：未降低 F3M exit gate。离线核心必须证明未批准权威晋升和跨租户泄漏为 0；真实 profiles/provider calibration、可执行 hybrid index、跨 Store 原子提交、ApprovalStore 直连、Live/HA/Inspector 仍 pending，故 `R4V2-03` 保持 partial。
+
 ## 新决策模板
 
 ### D4-NNN — 标题

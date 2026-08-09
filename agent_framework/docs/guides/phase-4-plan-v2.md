@@ -45,7 +45,7 @@ Durable Evidence Plane
 | 口径 | 当前满足度 | 含义 |
 |---|---:|---|
 | Phase 4 v1 原始目标 | 45–50% | 已形成共享契约和离线纵向骨架，生产适配器、真实 Live 与 HA 尚未关闭 |
-| Phase 4 v2 扩展目标 | 45–50% | 保留 v1 已实现能力；F1L 与 F2C 离线核心已实现，角色化 LLM memory/assurance/eval 与 live/强制接入仍是 mandatory DoD |
+| Phase 4 v2 扩展目标 | 50–55% | 保留 v1 已实现能力；F1L、F2C 与 F3M 离线核心已实现，角色化 LLM assurance/eval、生产 hybrid retrieval 与 live/强制接入仍是 mandatory DoD |
 
 ### 2.2 v2 能力成熟度
 
@@ -54,11 +54,11 @@ Durable Evidence Plane
 | 角色化 LLM Runtime | Profile/Prompt/Route/Manifest/Reasoning/Calibration contracts、Router/schema gate、SQLite recovery、usage/latency、AgentLoop adapter | 独立 StructuredOutputPolicy、overlay/default revision、GraphExecutor 强制接入、timeout/live provider/calibration matrix | 70–75% |
 | 认知与规划 | RoleRuntime adapter、strict stage/checkpoint、Intake/Strategy/只读调查/Synthesis/Boundary/Planner/独立 Critic/Revision/HITL、SQLite recovery、GraphExecutor template | 真实 investigator/provider calibration matrix、adaptive stop、跨 Store 原子提交、ApprovalStore 直连、默认强制门禁和 live/SLO | 75–80% |
 | 专业验收 | Verifier Registry、EvidenceLedger、五层 Harness、确定性 Arbiter | LLM 专业 verifier、只读调查工具、交叉质询、校准、remediation 闭环 | 35–40% |
-| 多层记忆 | SQLite v2、六层 scope、Provider/View、ACL/authority/freshness/governance | LLM extraction、normalization、entity/claim linking、consolidation、conflict explanation、query/rerank | 45–50% |
+| 多层记忆 | SQLite v2、六层 scope、Provider/View、ACL/authority/freshness/governance；九阶段 RoleRuntime workflow、candidate-only write、conflict/task state、query/rerank、dynamic View、promotion/forget recommendation、v1 dual-read/restart | 真实 profiles/provider calibration、可执行 hybrid index、跨 Store 原子提交、ApprovalStore 直连、cross-scope migration、默认强制接入、Live/HA/Inspector | 75–80% |
 | Eval/Judge | Dataset Registry、EvalRunner、paired regression gate | blind judge、多 Judge 一致性、误接受/误拒绝、角色和 Prompt 升级门禁 | 30–35% |
 | LLM 可观测性 | task/plan/evidence/memory 等 correlation identity | 实际 provider/model/prompt/profile/fallback/token/cost/calibration manifest | 30–35% |
 
-当前可复用离线证据为 `phase4-offline` **20/20 PASS**、`phase3-offline` **14/14 PASS**，其中 `phase4-cognition-v2` **3/3 PASS**。它证明确定性骨架、F1L 和 F2C 离线核心没有回归，不证明真实 investigator/provider matrix、专业任务质量或 live SLO 已经实现。
+当前可复用离线证据为 `phase4-offline` **24/24 PASS**、`phase3-offline` **14/14 PASS**，其中 `phase4-cognition-v2` **3/3 PASS**、`phase4-memory-v2` **4/4 PASS**。它证明确定性骨架、F1L/F2C/F3M 离线核心没有回归，不证明真实 investigator/provider matrix、长期记忆质量、生产 hybrid retrieval 或 live SLO 已经实现。
 
 ## 3. v2 需求编号
 
@@ -371,6 +371,6 @@ F0 → F1L → F2C → F3M → F4V → F5R → F6E → F7L → F8U
 
 ## 11. 当前下一步
 
-`P4-V2-F1L` 与 `P4-V2-F2C` 离线核心已经形成 RoleRuntime、Intake→Strategy→Investigation→Synthesis→Boundary→Planner→Critic/Revision、strict checkpoint、SQLite recovery、HITL validator 和 GraphExecutor template。`R4V2-01/02` 仍为 partial：真实 profiles/prompts/provider/investigator/calibration matrix、跨 Store 原子提交、ApprovalStore 直连、默认不可绕过门禁、强 cancellation 和 live/SLO 尚未关闭。
+`P4-V2-F1L`、`P4-V2-F2C` 与 `P4-V2-F3M` 离线核心已经形成统一 RoleRuntime、任务认知规划、scope-first 多层记忆语义加工、strict checkpoint、SQLite recovery、HITL validator/executor、v1 dual-read 和 GraphExecutor templates。`R4V2-01/02/03` 仍为 partial：真实 profiles/prompts/provider/calibration matrix、生产 hybrid retrieval、跨 Store 原子提交、ApprovalStore 直连、默认不可绕过门禁、强 cancellation、Live/HA/Inspector 尚未关闭。
 
-下一获批实施批次应为 **P4-V2-F3M LLM 驱动多层记忆**，并复用 F1L RoleRuntime 与 F2C 的 stage/checkpoint/recovery 语义；LLM 只能处理 scope-first/ACL 后的 Memory View，只能产生 candidate/recommendation，禁止绕过 authority、promotion、forget 和 tenant isolation 控制面。
+下一获批实施批次应为 **P4-V2-F4V 多角色专业验证与五层验收**，复用 F1L RoleRuntime、F2C plan/evidence/acceptance contracts 和 F3M Verification View；LLM verifier 只形成带证据的专业 finding，强 oracle 与确定性 Arbiter 仍拥有最终否决权。

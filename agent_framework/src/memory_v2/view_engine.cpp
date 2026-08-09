@@ -52,6 +52,15 @@ MemoryView MemoryViewEngine::build(const MemoryViewSpec& spec, std::string_view 
         generation = mix_generation(generation, batch.provider_id);
         generation = mix_generation(generation, std::to_string(batch.generation));
         for(auto& record : batch.records) {
+            // Provider adapters are not trusted to implement tenant/scope/ACL filtering.
+            // Enforce the same visibility predicate again before ranking or materialization.
+            if(record.record_id.empty() ||
+               record.metadata.identity.tenant_id != record.scope.tenant_id ||
+               !memory_visible_to(record, query)) {
+                out.fail_closed = true;
+                out.error = "provider_scope_violation:" + batch.provider_id;
+                return out;
+            }
             auto found = unique.find(record.record_id);
             if(found == unique.end() || found->second.revision < record.revision)
                 unique[record.record_id] = std::move(record);

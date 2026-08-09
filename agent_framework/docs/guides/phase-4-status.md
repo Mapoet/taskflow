@@ -1,7 +1,7 @@
 # Phase 4 实施状态与证据矩阵
 
 **状态**：Phase 4 v2 技术状态重估基线（未完成项保持开放）  
-**最后核对日期**：2026-08-09  
+**最后核对日期**：2026-08-10
 **上游章程**：[phase-4.md](./phase-4.md)  
 **当前总体计划**：[phase-4-plan-v2.md](./phase-4-plan-v2.md)  
 **v1 历史计划**：[phase-4-plan.md](./phase-4-plan.md)
@@ -21,12 +21,12 @@
 
 按 Phase 4 v1 原始目标，当前总体满足度约为 **45–50%**。首轮实现已形成共享契约、SQLite Run/Memory、动态 View、认知规划、独立五层验收、Sandbox/Telemetry/Eval/Live/Queue 核心语义的离线垂直骨架；但真实 investigator/provider、统一进程/容器 sandbox、OTLP/SLO、scheduled live、远程持久化与 HA 尚未达到工作包 DoD，因此所有 WP 仍保持 `[~]`。
 
-[Phase 4 v2](./phase-4-plan-v2.md) 把“规划、验证和记忆均由专门 LLM 工作流驱动”提升为 mandatory target。完成 P4-V2-F1L 与 F2C 离线核心后，按扩展目标重新计量，当前总体满足度约为 **45–50%**。该数值仍不包含真实 provider/role 矩阵和生产闭环。
+[Phase 4 v2](./phase-4-plan-v2.md) 把“规划、验证和记忆均由专门 LLM 工作流驱动”提升为 mandatory target。完成 P4-V2-F1L、F2C 与 F3M 离线核心后，按扩展目标重新计量，当前总体满足度约为 **50–55%**。该数值仍不包含真实 provider/role 矩阵和生产闭环。
 
 | 评估口径 | 满足度 | 已证明 | 尚未证明 |
 |---|---:|---|---|
 | v1 原始目标 | 45–50% | 确定性契约、Store、View、Harness 和离线纵向绑定 | 生产适配器、真实 Live、远程 durable/HA |
-| v2 扩展目标 | 45–50% | v1 控制面；统一 Role Runtime；多阶段 cognition/planning、独立 Critic、durable revision/recovery 和 GraphExecutor 模板的离线闭环 | LLM memory/assurance、Judge 校准、全路径强制接入、真实 investigator 和角色 Live matrix |
+| v2 扩展目标 | 50–55% | v1 控制面；统一 Role Runtime；多阶段 cognition/planning；scope-first 的 LLM memory extraction/normalization/consolidation/conflict/query/rerank/view/governance recommendation；durable recovery 和 GraphExecutor 模板 | LLM professional assurance/Judge、生产 hybrid retrieval、全路径强制接入、真实角色校准与 Live matrix |
 
 ### 2.1 v2 横向能力状态
 
@@ -35,7 +35,7 @@
 | Role-based LLM Runtime | `[~]` | 70–75% | 已有版本化 Profile/Prompt/Route/Manifest/Reasoning/Calibration 契约、确定性 Router、schema gate、SQLite CAS/recovery、usage/latency、Telemetry/Audit bridge、fake fallback/repair 和可选 AgentLoop adapter | 独立 `StructuredOutputPolicy` 契约、project/org overlay/default revision 管理、GraphExecutor 全路径强制接入、timeout/live provider/calibration matrix |
 | LLM Cognition/Planning | `[~]` | 75–80% | RoleRuntime stages、strict checkpoint、intake/strategy/只读 tool loop/synthesis/boundary/planner/独立 critic/revision/HITL、SQLite recovery 和 GraphExecutor template 已形成离线闭环 | 真实 investigator/provider/calibration matrix、adaptive stop、跨 Store 原子提交、ApprovalStore 直连、默认不可绕过门禁和 live/SLO |
 | LLM Professional Assurance | `[~]` | 35–40% | 有 Verifier Registry、EvidenceLedger、五层 Harness 和确定性 Arbiter | 专业 LLM verifier、只读调查、角色隔离、交叉证据解析、remediation/replan |
-| LLM Multi-layer Memory | `[~]` | 45–50% | scope/store/provider/view/governance 完整度较高；legacy compaction 可用 LLM | extraction、normalization、entity/claim linking、consolidation、conflict、query/rerank 工作流 |
+| LLM Multi-layer Memory | `[~]` | 75–80% | 九阶段 RoleRuntime memory workflow、strict/SQLite checkpoint、scope-first/provider 二次隔离、candidate-only write、entity/claim linking、consolidation/conflict、task state、query/rerank、dynamic View、HITL promotion/forget、v1 dual-read 和 GraphExecutor 离线闭环 | 真实 profile/provider calibration、可执行 hybrid index、跨 Store 原子提交、ApprovalStore 直连、cross-scope migration、默认强制接入、Live/HA/Inspector |
 | LLM Eval/Judge | `[~]` | 30–35% | 有 Dataset Registry、EvalRunner 和 paired gate | blind/multi-judge、agreement、false accept/reject、角色/Prompt/模型升级门禁 |
 | LLM Observability | `[~]` | 50–55% | Role Runtime 已记录 provider/model/profile/prompt/view/route/fallback/token/cost/latency/calibration manifest 并桥接 span/audit | OTLP/SLO、真实 provider usage 一致性、跨进程 correlation 和 live evidence |
 
@@ -54,7 +54,7 @@ v2 采用“**LLM Cognitive Plane + Deterministic Control Plane**”：LLM 深�
 | WP4.6 Evaluation | `[~]` | 45% | dataset/trajectory schema、immutable registry、ground-truth 隔离、deterministic runner、paired regression gate | 领域数据集、完整指标、judge calibration、resume/flaky/cost/nightly report 未完成 |
 | WP4.7 Live Certification | `[~]` | 25% | EnvironmentManifest digest、ExecutionAttestation、required skip-as-fail、expiry/revision invalidation | 真实 LLM/IdP/MCP/A2A/sandbox matrix 和 scheduled workflow 尚无 executed evidence |
 | WP4.8 Distributed Control | `[~]` | 25% | queue/lease/fencing/idempotency/retry/dead-letter 的确定性内存参考实现 | 名称所指生产能力仍缺远程 durable queue、worker registry、scheduler、PostgreSQL/object store、HA/chaos |
-| WP4.9 Multi-layer Memory | `[~]` | 65% | SQLite v2 store、六层 namespace、authority/lifecycle/ACL、Provider/View、8 profiles、AGENTS resolver、promotion/forget | hybrid index/adapters、conflict clarification、Run 原子 pin、v1 dual-read、Inspector/UI/截图未完成 |
+| WP4.9 Multi-layer Memory | `[~]` | 75% | SQLite v2 store、六层 namespace、authority/lifecycle/ACL、Provider/View、8 profiles、AGENTS resolver、九阶段 LLM workflow、promotion/forget、v1 dual-read 和 restart | hybrid index/adapters、独立 conflict store、Run/Invocation/Approval 原子 pin、cross-scope migration、Inspector/UI/截图未完成 |
 
 WP4.9 使用尾部编号只是为了不重排已经冻结的 116 个任务 ID；它是 P0，并应在认知规划和五层验收垂直闭环之前达到可用状态。
 
@@ -188,4 +188,4 @@ AgentServer 使用有界进程内 FIFO、worker threads、内存 active task map
 | 跨模块绑定 | Memory snapshot/view→Plan digest→Run checkpoint→五层 AcceptanceReport→restart terminal | `phase4_vertical` | 真实执行器副作用与远程依赖的端到端认证 |
 | Role-based LLM Runtime | immutable role/profile/prompt/calibration、provider pool、schema gate、能力/Memory View/独立性约束、InvocationManifest SQLite CAS/recovery、AgentLoop 可选接入 | `phase4_llm_runtime_contracts`、`phase4_llm_runtime_routing`、`phase4_llm_runtime_store`、`phase4_llm_runtime_integration` | 尚未证明所有 Cognition/Memory/Assurance/Judge 路径不可绕过；无真实 provider/calibration/live matrix |
 
-当前 `ctest -L phase4-offline` 为 **20/20 PASS**；Phase 3 `ctest -L phase3-offline` 为 **14/14 PASS**。首轮纵向证据见[首轮报告](./phase-4/acceptance-P4-F0R-F8-vertical-20260809.md)，P4-F2D 持久化增量见[增量报告](./phase-4/acceptance-P4-F2D-durable-stores-20260809.md)，F1L 证据边界见[Role Runtime 验收报告](./phase-4/acceptance-P4-V2-F1L-20260809.md)，F2C 证据边界见[多阶段认知规划验收报告](./phase-4/acceptance-P4-V2-F2C-20260809.md)。
+当前 `ctest -L phase4-offline` 为 **24/24 PASS**；Phase 3 `ctest -L phase3-offline` 为 **14/14 PASS**。首轮纵向证据见[首轮报告](./phase-4/acceptance-P4-F0R-F8-vertical-20260809.md)，P4-F2D 持久化增量见[增量报告](./phase-4/acceptance-P4-F2D-durable-stores-20260809.md)，F1L 证据边界见[Role Runtime 验收报告](./phase-4/acceptance-P4-V2-F1L-20260809.md)，F2C 证据边界见[多阶段认知规划验收报告](./phase-4/acceptance-P4-V2-F2C-20260809.md)，F3M 证据边界见[LLM 多层记忆验收报告](./phase-4/acceptance-P4-V2-F3M-20260810.md)。
