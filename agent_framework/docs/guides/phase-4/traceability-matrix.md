@@ -2,6 +2,8 @@
 
 **用途**：防止需求、实现和验收脱节。状态只允许：`planned`、`in_progress`、`implemented`、`verified`、`accepted`、`partial`、`blocked`。
 
+**当前计划版本**：[`phase4-v2-plan-r1`](../phase-4-plan-v2.md)；原 R4.0–R4.9 行继续保留，v2 扩展要求使用 `R4V2-*`，不得覆盖已有实现证据。
+
 ## 1. 主矩阵
 
 | Requirement | Plan tasks | Status | Source/API | Tests | Runtime evidence | Acceptance |
@@ -21,7 +23,21 @@
 | R4.9 Consolidation 与治理 | 4.9.17–4.9.19 | partial | `memory_v2/governance` | promotion/forget/sink | decision/tombstone | consolidator/Inspector/UI pending |
 | R4.9 迁移与垂直认证 | 4.9.20 | partial | v2 isolated path；Memory→Plan→Run→Acceptance 纵向绑定 | `phase4_vertical` + Phase 3/4 offline regression | 27 tests PASS；restart terminal binding | dual-read/real executor/live E2E pending |
 
-## 2. 行更新规则
+## 2. Phase 4 v2 扩展矩阵
+
+| Requirement | Plan tasks | Status | Current source/API | Current tests/evidence | Mandatory gap / acceptance |
+|---|---|---|---|---|---|
+| `R4V2-00` 双基线与治理 | `P4-V2-F0.1–F0.5` | implemented | `phase-4-plan-v2.md`、status、decision、ledger | 文档 ID/链接/口径检查 | 文档基线验收后保持；代码完成度不得由本行推断 |
+| `R4V2-01` Role-based LLM Runtime | `P4-V2-F1L.1–F1L.12` | planned | 可复用 `llm_client/llm_client`、provider adapters、`core/types::ModelConfig` | legacy provider/AgentLoop tests；无 v2 role tests | contracts、registry/router、prompt/schema、independence、manifest、telemetry、recovery 和真实 route evidence |
+| `R4V2-02` 多阶段认知规划 | `P4-V2-F2C.1–F2C.10` | partial | `planning/cognition_workflow,evidence_store,plan_store,plan_validator` | `phase4_cognition`、`phase4_planning_store` | 当前仅单次抽象 draft；需真实 LLM adapter、strategy/tool loop/synthesis/critic/replan/recovery |
+| `R4V2-03` LLM 多层记忆 | `P4-V2-F3M.1–F3M.9` | partial | `memory_v2/*`；legacy `memory_compaction` | `phase4_memory`、`phase4_memory_profiles` | extraction/normalization/linking/consolidation/conflict/query/rerank；越权晋升和泄漏必须为 0 |
+| `R4V2-04` 多角色专业验收 | `P4-V2-F4V.1–F4V.10` | partial | `assurance/evidence,verifier,registry,arbiter,harness` | `phase4_assurance` | 真实专业 LLM verifiers、只读工具、角色独立、cross-verifier resolution、durable report |
+| `R4V2-05` 修复与选择性复验 | `P4-V2-F5R.1–F5R.7` | planned | plan revisions、Finding/Acceptance contracts 可复用 | 无完整闭环证据 | impact graph、bounded remediation/replan、anti-downgrade、selective rerun、fault/restart E2E |
+| `R4V2-06` Judge 与校准 | `P4-V2-F6E.1–F6E.9` | partial | `eval/types,runner` | `phase4_eval` | blind/multi-judge、agreement、false accept/reject、role metrics、upgrade/rollback/nightly gate |
+| `R4V2-07` LLM 角色 Live 认证 | `P4-V2-F7L.1–F7L.7` | planned | `live/certification` | `phase4_live_distributed` 只证明 contract | planning/memory/verifier/judge 真实矩阵、failure recovery、signed report、executed=true/no-skip |
+| `R4V2-08` 解释性 UI | `P4-V2-F8U.1–F8U.6` | planned | 现有 CLI/Web/TUI 可作为呈现端 | 无 v2 真实运行截图 | 统一事实源、plan/evidence/memory/invocation/assurance/HITL 视图和真实截图验收 |
+
+## 3. 行更新规则
 
 1. `implemented` 需要 source/API 和模块测试，但不代表任务完成。
 2. `verified` 需要所有适用层的 evidence；缺少真实依赖只能 partial/blocked。
@@ -31,7 +47,7 @@
 6. 任何 mandatory criterion 的删除或降级必须关联 HITL decision。
 7. 涉及 Memory 的 requirement 必须同时填写 source authority、scope、provider/index generation、ViewManifest 和 promotion/forget decision；只有 Prompt 或向量命中不能作为完成证据。
 
-## 3. 单任务扩展模板
+## 4. 单任务扩展模板
 
 | Requirement | Plan node/revision | Commit/files | Test layers | Evidence IDs | Findings | Decision |
 |---|---|---|---|---|---|---|

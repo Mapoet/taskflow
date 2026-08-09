@@ -18,6 +18,7 @@ executing/verifying → replanning → approved
 | `P4-DOC-MEMORY-20260809` | `P4-F0 / plan-v2` | accepted | 2026-08-09 | Codex / user approval | 新增 WP4.9；融合章程、状态、总体计划、WP4.0–4.8 和治理档案 | PASS：17 文档、136 个唯一 ID、0 重复、0 失效本地链接；WP4.9 SHA-256 `0defa55f8559a7f6bfb5a5066e74fabe06ccc18b02c05b2c1d7553c299e6c206` | 用户于 2026-08-09 批准落盘；内容与结构验收 PASS |
 | `P4-F0R-F8-VERTICAL-20260809` | `P4-F0R–P4-F8 / plan-v3` | partial | 2026-08-09 | Codex / user continuous approval | 可移植性修复；共享契约；SQLite Run/Memory；Cognition/Assurance；Sandbox/Telemetry/Eval/Live/Queue 参考语义；跨模块纵向测试 | PASS：`phase4-offline` 11/11、`phase3-offline` 14/14；见验收报告 | 首轮离线纵向闭环 accepted；各 WP 生产 DoD、真实 Live、远程 durability/HA 保持 partial |
 | `P4-F2D-DURABLE-STORES-20260809` | `P4-F2D / plan-v3.1` | partial | 2026-08-09 | Codex / user continuous approval | 新增 SQLite Evidence/Plan Store 与 ApprovalStore；跨实例 CAS、父 digest、scope isolation、pending/TOCTOU/SoD/expiry/revocation | PASS：`phase4-offline` 13/13、`phase3-offline` 14/14；见增量报告 | 已实现的 durable store 子集 accepted；AcceptanceReport store 与跨 store 原子协调 pending |
+| `P4-DOC-V2-BASELINE-20260809` | `P4-V2-F0 / phase4-v2-plan-r1` | implemented | 2026-08-09 | Codex / user explicit approval | 保留 v1，新增 v2 正式计划；按扩展目标重估 status；更新 traceability、decision、ledger 和导航 | PASS：75 个唯一 v2 计划节点、41 个本地链接且 0 失效；plan SHA-256 `4d8b2db253fef9b09feb53bec30380c851fd5247a6176526724c85295043fd3d` | 文档结构与引用校验 PASS，内容等待用户验收；`R4V2-01`–`R4V2-08` 代码实施仍为 planned/partial |
 
 ## 3. 执行记录模板
 

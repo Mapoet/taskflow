@@ -1,10 +1,14 @@
 # Phase 4 分工作包规划索引
 
 **状态事实**：[phase-4-status.md](../phase-4-status.md)  
-**总体计划**：[phase-4-plan.md](../phase-4-plan.md)  
+**当前总体计划**：[phase-4-plan-v2.md](../phase-4-plan-v2.md)  
+**v1 历史计划**：[phase-4-plan.md](../phase-4-plan.md)  
+**v2 原始需求记录**：[phase-4-v2.md](../phase-4-v2.md)  
 **阶段章程**：[phase-4.md](../phase-4.md)
 
-本目录现定义 WP4.0–WP4.9 共 **136 个稳定任务 ID**。WP4.9 虽使用尾部编号以避免重排既有任务，但属于 P0，逻辑上在 Durable/HITL 基础之后、认知规划和五层验收垂直闭环之前实施。
+本目录现保留 WP4.0–WP4.9 共 **136 个 v1 稳定任务 ID**；v2 计划另定义 **75 个** `P4-V2-*` 可落地计划节点，不重排旧 ID。WP4.9 虽使用尾部编号以避免重排既有任务，但属于 P0，逻辑上在 Durable/HITL 基础之后、认知规划和五层验收垂直闭环之前实施。
+
+v2 将 Role-based LLM Workflow Runtime 设为新的横向 P0 能力，并以“LLM Cognitive Plane + Deterministic Control Plane”为统一边界。当前完成事实只以状态矩阵和 AcceptanceReport 为准。
 
 ## 工作包
 

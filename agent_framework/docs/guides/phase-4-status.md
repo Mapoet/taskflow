@@ -1,9 +1,10 @@
 # Phase 4 实施状态与证据矩阵
 
-**状态**：P4-F0R–P4-F8 首轮垂直实现检查点（未完成项保持开放）
+**状态**：Phase 4 v2 技术状态重估基线（未完成项保持开放）  
 **最后核对日期**：2026-08-09  
 **上游章程**：[phase-4.md](./phase-4.md)  
-**总体计划**：[phase-4-plan.md](./phase-4-plan.md)
+**当前总体计划**：[phase-4-plan-v2.md](./phase-4-plan-v2.md)  
+**v1 历史计划**：[phase-4-plan.md](./phase-4-plan.md)
 
 ## 1. 状态语义
 
@@ -16,9 +17,31 @@
 
 “满足度”是按接口、组件、集成、真实运行证据、生产门禁五级评估的工程成熟度，不是代码覆盖率。任何 `[x]` 必须同时在[追溯矩阵](./phase-4/traceability-matrix.md)和[执行台账](./phase-4/execution-ledger.md)中有证据。
 
-## 2. 当前总体判断
+## 2. 当前总体判断与双基线
 
-Phase 4 当前总体满足度约为 **45–50%**。首轮实现已形成共享契约、SQLite Run/Memory、动态 View、认知规划、独立五层验收、Sandbox/Telemetry/Eval/Live/Queue 核心语义的离线垂直骨架；但真实 investigator/provider、统一进程/容器 sandbox、OTLP/SLO、scheduled live、远程持久化与 HA 尚未达到工作包 DoD，因此所有 WP 仍保持 `[~]`。
+按 Phase 4 v1 原始目标，当前总体满足度约为 **45–50%**。首轮实现已形成共享契约、SQLite Run/Memory、动态 View、认知规划、独立五层验收、Sandbox/Telemetry/Eval/Live/Queue 核心语义的离线垂直骨架；但真实 investigator/provider、统一进程/容器 sandbox、OTLP/SLO、scheduled live、远程持久化与 HA 尚未达到工作包 DoD，因此所有 WP 仍保持 `[~]`。
+
+[Phase 4 v2](./phase-4-plan-v2.md) 把“规划、验证和记忆均由专门 LLM 工作流驱动”提升为 mandatory target。按扩展后的目标重新计量，当前总体满足度约为 **35–40%**。完成度下降只表示目标边界扩大，不表示已有实现退化。
+
+| 评估口径 | 满足度 | 已证明 | 尚未证明 |
+|---|---:|---|---|
+| v1 原始目标 | 45–50% | 确定性契约、Store、View、Harness 和离线纵向绑定 | 生产适配器、真实 Live、远程 durable/HA |
+| v2 扩展目标 | 35–40% | v1 基础可作为确定性控制面复用 | 统一 Role Runtime、多阶段 LLM cognition/memory/assurance、Judge 校准和角色 Live matrix |
+
+### 2.1 v2 横向能力状态
+
+| 能力域 | 状态 | v2 满足度 | 当前事实 | 未关闭的 mandatory DoD |
+|---|---:|---:|---|---|
+| Role-based LLM Runtime | `[~]` | 15–20% | 有 `LLMClient`、provider adapter、`ModelConfig` 和通用 AgentLoop | `LLMRoleProfile`、路由/回退、Prompt revision、独立性组、InvocationManifest、校准和 durable recovery |
+| LLM Cognition/Planning | `[~]` | 35–40% | 有 Investigator、Evidence/Plan Store、DAG validator 和单次 `draft()` 插槽 | intake/strategy/tool loop/synthesis/boundary/planner/critic/revision 多阶段工作流及真实适配 |
+| LLM Professional Assurance | `[~]` | 35–40% | 有 Verifier Registry、EvidenceLedger、五层 Harness 和确定性 Arbiter | 专业 LLM verifier、只读调查、角色隔离、交叉证据解析、remediation/replan |
+| LLM Multi-layer Memory | `[~]` | 45–50% | scope/store/provider/view/governance 完整度较高；legacy compaction 可用 LLM | extraction、normalization、entity/claim linking、consolidation、conflict、query/rerank 工作流 |
+| LLM Eval/Judge | `[~]` | 30–35% | 有 Dataset Registry、EvalRunner 和 paired gate | blind/multi-judge、agreement、false accept/reject、角色/Prompt/模型升级门禁 |
+| LLM Observability | `[~]` | 30–35% | 有 task/plan/evidence/memory 等 correlation identity | 实际 provider/model/prompt/profile/view/fallback/token/cost/calibration manifest |
+
+v2 采用“**LLM Cognitive Plane + Deterministic Control Plane**”：LLM 深度参与分析、调查、综合、规划、记忆加工和专业解释；ACL、authority、policy、CAS、artifact/test/metric oracle 与最终 Arbiter 保持确定性。系统持久化结构化事实、证据、假设、备选方案、风险和决策理由，不持久化模型私有 chain-of-thought。
+
+### 2.2 v1 工作包状态
 
 | 工作包 | 状态 | 满足度 | 已有基础 | 未关闭的核心 DoD |
 |---|---:|---:|---|---|

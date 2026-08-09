@@ -60,6 +60,20 @@
 - **安全依据**：外部或可编辑内容默认是数据而非高权限指令；consolidator 不能授予自身更高 authority，也不能审批自己的晋升。
 - **验收**：未批准 Authoritative promotion 为 0，所有晋升、纠错、撤销和 forget 均有 provenance、decision 和传播证据。
 
+### D4-008 — Phase 4 v2 采用 LLM 认知面与确定性控制面
+
+- **日期**：2026-08-09
+- **状态**：approved
+- **决策者**：用户
+- **关联 requirement / plan revision**：`R4V2-00`–`R4V2-08` / `phase4-v2-plan-r1`
+- **事实与证据**：当前 Planning 只有单次抽象 `CognitionModel::draft()`；Assurance 有插件 Harness 但尚无专业 LLM verifier；Phase 4 Memory View 和 Governance 主要是确定性逻辑，LLM 主要用于 legacy compaction。已有确定性骨架必须复用，但不能声称已经形成 LLM 驱动规划—记忆—验证系统。
+- **备选方案**：分别在 Planning、Memory、Assurance 中直接增加零散模型调用；该方案会复制配置、路由、审计、恢复和权限逻辑，无法证明角色独立性。
+- **决定与理由**：先实施横向 `P4-V2-F1L Role-based LLM Workflow Runtime`，再接入多阶段 Cognition、Memory Workflow、专业 Assurance 和 Judge。LLM 负责分析、调查、综合、规划、语义加工、批评和专业解释；Schema、ACL、Authority、Policy、CAS、Approval、强 Oracle 和最终 Arbiter 保持确定性。
+- **独立性**：Planner/Executor 不得成为自己的唯一 Verifier；关键任务至少两个独立 verifier。相同模型只更换 Prompt 不自动满足 independence policy。
+- **推理记录**：不持久化隐藏 chain-of-thought，只记录 claims、evidence、assumptions、unknowns、alternatives、decision rationale、risks、counterexamples 和 confidence。
+- **安全、兼容、迁移和回滚影响**：新路径使用 feature flag、immutable profile/prompt/schema/calibration revision 和 shadow evaluation；legacy draft/verifier/compaction 先保留 adapter，可回滚到上一批准 revision。
+- **验收标准变化**：原 Phase 4 45–50% 作为 v1 基线保留；按 v2 扩展目标重新计量为 35–40%。任何生产 LLM 调用必须记录实际路由、Prompt、Memory View、能力、token/cost、fallback 和 calibration manifest。
+
 ## 新决策模板
 
 ### D4-NNN — 标题

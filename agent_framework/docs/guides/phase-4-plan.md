@@ -1,10 +1,13 @@
-# Phase 4 总体实施计划
+# Phase 4 总体实施计划（v1 历史基线）
 
-**状态**：执行检查点 v3（P4-F0R–P4-F8 首轮纵向实现已验证，工作包 DoD 未全部关闭）
+**状态**：历史计划；后续实施已由 [Phase 4 v2 计划](./phase-4-plan-v2.md)扩展和接续  
 **日期**：2026-08-09  
 **章程**：[phase-4.md](./phase-4.md)  
 **事实状态**：[phase-4-status.md](./phase-4-status.md)  
-**分项详案**：[phase-4/README.md](./phase-4/README.md)
+**分项详案**：[phase-4/README.md](./phase-4/README.md)  
+**继任计划**：[phase-4-plan-v2.md](./phase-4-plan-v2.md)
+
+> 本文件保留 Phase 4 原始目标、稳定任务 ID 和 2026-08-09 执行检查点。v2 新增“角色化 LLM Runtime，以及 LLM 驱动的规划、记忆、专业验证和 Judge 校准”，不改写本文件的历史计划语义。
 
 ## 1. 总目标
 
@@ -188,9 +191,9 @@ flowchart TD
 
 ## 12. 2026-08-09 执行检查点与后续批次
 
-P4-F0R–P4-F8 已完成首轮“契约/参考实现”纵向批次，并通过 `phase4-offline` 11 项测试。该检查点证明共享 schema、SQLite Run/Memory、动态 Memory View、计划绑定、五层裁决、sandbox/telemetry/eval/live-certification/queue 核心语义可以在同一构建中协同工作；它不等于各工作包 DoD 已完成，也不提供真实 Live 或 HA 证据。
+P4-F0R–P4-F8 已完成首轮“契约/参考实现”纵向批次；在后续 P4-F2D 增量后，当前累计通过 `phase4-offline` **13/13** 项测试。该检查点证明共享 schema、SQLite Run/Memory、动态 Memory View、计划绑定、五层裁决、sandbox/telemetry/eval/live-certification/queue 核心语义可以在同一构建中协同工作；它不等于各工作包 DoD 已完成，也不提供真实 Live 或 HA 证据。
 
-下一批按以下生产化顺序连续实施；每个子批通过其离线门禁后进入下一项，真实外部依赖不可用时保持 `partial/inconclusive`，不得以 skip 代替执行：
+以下是 v1 检查点形成时的生产化顺序。自 `phase4-v2-plan-r1` 起，它们按[继任计划](./phase-4-plan-v2.md#6-依赖与连续实施顺序)被保留、吸收或扩展；后续执行以 v2 顺序和门禁为准：
 
 1. **P4-F2D**（进行中）：SQLite Evidence/Plan/Approval 已实现并验证；继续补 AcceptanceReport store、Run/Plan/Memory/Effect 原子绑定与恢复；
 2. **P4-F3I**：ToolBus、仓库调查、外部知识 investigator 适配器，GraphExecutor cognition/replan 接入；
