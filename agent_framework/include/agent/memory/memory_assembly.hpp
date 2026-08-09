@@ -4,7 +4,10 @@
 #include <agent/context_budget/context_budget.hpp>
 
 #include <cstddef>
+#include <functional>
+#include <map>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace agent_framework {
@@ -20,28 +23,53 @@ struct MemorySlot {
     json provenance = json::object();
 };
 
+/** The only typed boundary for prompt context assembly. */
+struct MemoryAssemblyInput {
+    std::vector<MemorySlot> system;
+    std::vector<MemorySlot> task;
+    std::vector<MemorySlot> working;
+    std::vector<MemorySlot> retrieval;
+    std::vector<MemorySlot> tool;
+    std::vector<MemorySlot> skill;
+
+    std::vector<MemorySlot> flatten() const;
+};
+
 struct MemoryAssemblyPolicy {
     std::size_t soft_limit_bytes = 0; // 0 means no soft cap
     std::size_t hard_limit_bytes = 0; // 0 means no hard cap
     std::size_t default_slot_quota_bytes = 0;
+    std::map<MemorySlotKind, std::size_t> slot_quota_bytes;
+    std::map<MemorySlotKind, std::size_t> minimum_retained_bytes;
     bool retain_system_and_task = true;
+    bool retain_citations = true;
+    std::string revision = "memory-assembly-v1";
+    std::function<std::size_t(std::string_view)> token_estimator;
 };
 
 struct MemoryAssemblyReport {
     std::size_t input_bytes = 0;
     std::size_t output_bytes = 0;
+    std::size_t input_tokens = 0;
+    std::size_t output_tokens = 0;
+    std::size_t input_slots = 0;
+    std::size_t output_slots = 0;
     std::size_t evicted_slots = 0;
+    std::string policy_revision;
     std::vector<json> decisions; // ids, sizes and reasons only; never slot text
     json to_json() const;
 };
 
 struct MemoryAssemblyResult {
     std::string text;
+    std::vector<MemorySlot> slots;
     MemoryAssemblyReport report;
 };
 
 /** Deterministically applies quotas and priority eviction without exposing source text in reports. */
 MemoryAssemblyResult assemble_memory(std::vector<MemorySlot> slots, const MemoryAssemblyPolicy& policy);
+MemoryAssemblyResult assemble_memory(const MemoryAssemblyInput& input,
+                                     const MemoryAssemblyPolicy& policy);
 const char* memory_slot_kind_name(MemorySlotKind kind);
 
 } // namespace agent_framework

@@ -262,7 +262,8 @@ int main(int argc, char** argv) {
                      "(see docs/guides/getting_started.md)\n";
         return 1;
     }
-    AgentWorkflowDeps deps{runtime.llm, runtime.toolbus, runtime.skills};
+    AgentWorkflowDeps deps{runtime.llm, runtime.toolbus, runtime.skills,
+                           runtime.memory_compaction_llm};
     AgentConfig cfg = runtime.config;
 
     tf::Executor executor;

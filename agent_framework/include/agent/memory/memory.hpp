@@ -54,7 +54,11 @@ public:
      * @brief 存储消息
      * @param message 消息
      */
-    virtual void store_message(const Message& message) = 0;
+    virtual void store_message(const std::string& session_id,
+                               const Message& message) = 0;
+    void store_message(const Message& message) {
+        store_message("default", message);
+    }
 
     /**
      * @brief 查询对话历史
@@ -96,7 +100,10 @@ public:
  */
 class FileMemoryBackend : public MemoryBackend {
 public:
-    explicit FileMemoryBackend(const std::string& data_dir);
+    using MemoryBackend::store_message;
+    explicit FileMemoryBackend(const std::string& data_dir,
+                               std::string tenant_id = "default",
+                               std::string agent_id = "default");
 
     void store_event(const Event& event) override;
     std::vector<Event> query_events(
@@ -105,7 +112,8 @@ public:
         std::time_t start_time = 0,
         std::time_t end_time = 0
     ) override;
-    void store_message(const Message& message) override;
+    void store_message(const std::string& session_id,
+                       const Message& message) override;
     std::vector<Message> get_conversation_history(
         const std::string& session_id,
         int max_messages = 10
@@ -119,21 +127,10 @@ public:
 
 private:
     std::string data_dir_;
+    std::string tenant_id_;
+    std::string agent_id_;
     std::mutex file_mutex_;
 
-    /**
-     * @brief 获取事件日志文件路径
-     * @param session_id 会话 ID
-     * @return 文件路径
-     */
-    std::string get_event_log_path(const std::string& session_id) const;
-
-    /**
-     * @brief 追加事件到文件
-     * @param event 事件
-     * @param path 文件路径
-     */
-    void append_event_to_file(const Event& event, const std::string& path);
 };
 
 /**
@@ -141,6 +138,7 @@ private:
  */
 class SQLiteMemoryBackend : public MemoryBackend {
 public:
+    using MemoryBackend::store_message;
     explicit SQLiteMemoryBackend(const std::string& db_path);
     ~SQLiteMemoryBackend();
 
@@ -151,7 +149,8 @@ public:
         std::time_t start_time = 0,
         std::time_t end_time = 0
     ) override;
-    void store_message(const Message& message) override;
+    void store_message(const std::string& session_id,
+                       const Message& message) override;
     std::vector<Message> get_conversation_history(
         const std::string& session_id,
         int max_messages = 10
@@ -186,6 +185,7 @@ private:
  */
 class InMemoryBackend : public MemoryBackend {
 public:
+    using MemoryBackend::store_message;
     InMemoryBackend();
 
     void store_event(const Event& event) override;
@@ -195,7 +195,8 @@ public:
         std::time_t start_time = 0,
         std::time_t end_time = 0
     ) override;
-    void store_message(const Message& message) override;
+    void store_message(const std::string& session_id,
+                       const Message& message) override;
     std::vector<Message> get_conversation_history(
         const std::string& session_id,
         int max_messages = 10
@@ -230,6 +231,8 @@ public:
      * @param event 事件
      */
     void store_event(const Event& event);
+
+    void store_message(const std::string& session_id, const Message& message);
 
     /**
      * @brief 查询对话历史

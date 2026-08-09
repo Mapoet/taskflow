@@ -158,7 +158,8 @@ AgentLoopNode::create(
     std::shared_ptr<TaskControl> task_control,
     ToolExecutionObserver tool_execution_observer,
     SkillEventSink skill_event_sink,
-    std::function<void(std::string_view)> thinking_stream_callback
+    std::function<void(std::string_view)> thinking_stream_callback,
+    std::shared_ptr<LLMClient> memory_compaction_llm
 ) {
     (void)memory_store;
     (void)vector_store;
@@ -170,7 +171,7 @@ AgentLoopNode::create(
     };
 
     auto body_func = [agent_config, llm_client, toolbus, stream_callback, thinking_stream_callback,
-                      skills, task_control,
+                      skills, task_control, memory_compaction_llm,
                       tool_execution_observer, skill_event_sink](
                          const workflow::ValueMap& inps,
                          const workflow::IterationContext&)
@@ -414,7 +415,10 @@ AgentLoopNode::create(
             shared->state->iteration += 1;
             MemoryCompactOptions mcopt;
             mcopt.agent_config = &agent_config;
-            mcopt.llm_client = llm_client.get();
+            mcopt.sub_llm_client = memory_compaction_llm.get();
+            if(task_control) mcopt.cancellation_requested = [task_control] {
+                return task_control->is_cancel_requested() || task_control->is_deadline_exceeded();
+            };
             maybe_auto_compact_memory(*shared->state, mcopt);
             return emit();
         }
@@ -427,30 +431,111 @@ AgentLoopNode::create(
                        task_control->is_deadline_exceeded();
             };
         }
-        llm_in.system_prompt =
+        const auto raw_system =
             std::any_cast<std::string>(inps.at(std::string(internal::kSystemPrompt)));
-        llm_in.user_prompt = user_query;
-        llm_in.history = shared->state->history;
-        if (it == 0 && !wp27_context_suffix.empty()) {
-            const auto limits = ContextBudgetLimits::load(&agent_config);
-            MemoryAssemblyPolicy assembly_policy;
-            assembly_policy.hard_limit_bytes = limits.max_injection_bytes;
-            assembly_policy.default_slot_quota_bytes = limits.max_injection_bytes;
-            auto assembled = assemble_memory(
-                {{MemorySlotKind::Task, "input-policy-injected-context", 100, 0,
-                  std::move(wp27_context_suffix), json{{"origin", "input_policy"}}}},
-                assembly_policy);
-            llm_in.context = std::move(assembled.text);
-            llm_in.extra_variables["memory_assembly_report"] = assembled.report.to_json().dump();
+        MemoryAssemblyInput assembly_input;
+        assembly_input.system.push_back(
+            {MemorySlotKind::System, "system-prompt", 1000, 0, raw_system,
+             json{{"origin", "agent_config"}}});
+        assembly_input.task.push_back(
+            {MemorySlotKind::Task, "current-user-task", 900, 0, user_query,
+             json{{"origin", "user"}}});
+        for(std::size_t index = 0; index < shared->state->history.size(); ++index) {
+            const auto& message = shared->state->history[index];
+            std::string text = message.content;
+            const bool tool = message.role == "tool";
+            if(tool && message.tool_result) {
+                if(!text.empty()) text += "\n";
+                text += message.tool_result->dump();
+            }
+            auto& target = tool ? assembly_input.tool : assembly_input.working;
+            target.push_back({tool ? MemorySlotKind::Tool : MemorySlotKind::Working,
+                              "history-" + std::to_string(index), tool ? 300 : 500, 0,
+                              std::move(text), json{{"history_index", index}}});
+        }
+        if(it == 0 && !wp27_context_suffix.empty()) {
+            assembly_input.retrieval.push_back(
+                {MemorySlotKind::Retrieval, "input-policy-injected-context", 600, 0,
+                 wp27_context_suffix, json{{"origin", "input_policy"}}});
+        }
+        if(shared->state->skill_prompt_cache && !shared->state->skill_prompt_cache->empty()) {
+            assembly_input.skill.push_back(
+                {MemorySlotKind::Skill, "active-skill", 700, 0,
+                 *shared->state->skill_prompt_cache,
+                 json{{"skill_id", shared->state->active_skill_id.value_or("unknown")}}});
+        }
+        if (shared->state->outbound_supervisor) {
+            std::size_t max_events = 8;
+            std::size_t max_bytes = 4096;
+            if (const char* value = std::getenv("AGENT_A2A_SUBTASK_CONTEXT_MAX_EVENTS")) {
+                try {
+                    const int parsed = std::stoi(value);
+                    if(parsed >= 0) max_events = static_cast<std::size_t>(parsed);
+                } catch (...) {}
+            }
+            if (const char* value = std::getenv("AGENT_A2A_SUBTASK_CONTEXT_BYTES")) {
+                try {
+                    const int parsed = std::stoi(value);
+                    if(parsed >= 0) max_bytes = static_cast<std::size_t>(parsed);
+                } catch (...) {}
+            }
+            assembly_input.working.push_back(
+                {MemorySlotKind::Working, "orchestrator-subtask-digest", 650, 0,
+                 shared->state->outbound_supervisor->format_digest_for_llm(
+                     max_events, max_bytes),
+                 json{{"origin", "outbound_supervisor"}}});
+        }
+        const auto limits = ContextBudgetLimits::load(&agent_config);
+        MemoryAssemblyPolicy assembly_policy;
+        assembly_policy.hard_limit_bytes = limits.max_combined_prompt_attach_bytes;
+        assembly_policy.soft_limit_bytes = limits.max_combined_prompt_attach_bytes
+            ? limits.max_combined_prompt_attach_bytes - limits.max_combined_prompt_attach_bytes / 10
+            : 0;
+        assembly_policy.slot_quota_bytes[MemorySlotKind::Retrieval] = limits.max_injection_bytes;
+        assembly_policy.slot_quota_bytes[MemorySlotKind::Skill] = limits.max_injection_bytes;
+        assembly_policy.slot_quota_bytes[MemorySlotKind::Tool] = limits.max_tool_result_json_bytes;
+        assembly_policy.minimum_retained_bytes[MemorySlotKind::System] = 1;
+        assembly_policy.minimum_retained_bytes[MemorySlotKind::Task] = 1;
+        const auto assembled = assemble_memory(assembly_input, assembly_policy);
+        shared->state->last_memory_assembly_report = assembled.report.to_json();
+        shared->state->memory_assembly_reports.push_back(
+            shared->state->last_memory_assembly_report);
+        llm_in.extra_variables["memory_assembly_report"] =
+            shared->state->last_memory_assembly_report.dump();
+        std::map<std::string, std::string> kept;
+        for(const auto& slot : assembled.slots) kept.emplace(slot.source_id, slot.text);
+        llm_in.system_prompt = kept.contains("system-prompt") ? kept.at("system-prompt") : "";
+        llm_in.user_prompt = kept.contains("current-user-task") ? kept.at("current-user-task") : "";
+        if(kept.contains("input-policy-injected-context"))
+            llm_in.context = kept.at("input-policy-injected-context");
+        for(std::size_t index = 0; index < shared->state->history.size(); ++index) {
+            const auto key = "history-" + std::to_string(index);
+            const auto found = kept.find(key);
+            if(found == kept.end()) continue;
+            auto message = shared->state->history[index];
+            std::string original = message.content;
+            if(message.role == "tool" && message.tool_result) {
+                if(!original.empty()) original += "\n";
+                original += message.tool_result->dump();
+            }
+            if(found->second != original) {
+                message.content = found->second;
+                message.tool_result.reset();
+            }
+            llm_in.history.push_back(std::move(message));
         }
         std::string policy_ver = "wp27-v1";
         if (shared->state && shared->state->execution_context) {
             policy_ver = shared->state->execution_context->input_policy_version;
         }
         llm_in.extra_variables["input_policy_version"] = policy_ver;
-        if (shared->state->skill_prompt_cache && !shared->state->skill_prompt_cache->empty()) {
-            llm_in.skill_block = shared->state->skill_prompt_cache;
+        if (kept.contains("active-skill")) {
+            llm_in.skill_block = kept.at("active-skill");
             llm_in.active_skill_id = shared->state->active_skill_id;
+        }
+        if (kept.contains("orchestrator-subtask-digest")) {
+            llm_in.orchestrator_subtask_digest =
+                kept.at("orchestrator-subtask-digest");
         }
         if (toolbus) {
             if (active_skill_policy) {
@@ -462,35 +547,6 @@ AgentLoopNode::create(
                 llm_in.tools = toolbus->export_as_llm_tools();
             }
         }
-        if (shared->state && shared->state->outbound_supervisor) {
-            std::size_t max_ev = 8;
-            std::size_t max_b = 4096;
-            if (const char* e = std::getenv("AGENT_A2A_SUBTASK_CONTEXT_MAX_EVENTS")) {
-                if (e[0] != '\0') {
-                    try {
-                        const int v = std::stoi(std::string(e));
-                        if (v >= 0) {
-                            max_ev = static_cast<std::size_t>(v);
-                        }
-                    } catch (...) {
-                    }
-                }
-            }
-            if (const char* e = std::getenv("AGENT_A2A_SUBTASK_CONTEXT_BYTES")) {
-                if (e[0] != '\0') {
-                    try {
-                        const int v = std::stoi(std::string(e));
-                        if (v >= 0) {
-                            max_b = static_cast<std::size_t>(v);
-                        }
-                    } catch (...) {
-                    }
-                }
-            }
-            llm_in.orchestrator_subtask_digest =
-                shared->state->outbound_supervisor->format_digest_for_llm(max_ev, max_b);
-        }
-
         // invoke (LLMClient will render using its configured PromptRenderer)
         if (dbg) {
             std::cout << "[AgentLoop] calling LLM...\n";
@@ -859,7 +915,10 @@ AgentLoopNode::create(
         if (shared->state) {
             MemoryCompactOptions mcopt;
             mcopt.agent_config = &agent_config;
-            mcopt.llm_client = llm_client.get();
+            mcopt.sub_llm_client = memory_compaction_llm.get();
+            if(task_control) mcopt.cancellation_requested = [task_control] {
+                return task_control->is_cancel_requested() || task_control->is_deadline_exceeded();
+            };
             maybe_auto_compact_memory(*shared->state, mcopt);
         }
 
@@ -910,6 +969,10 @@ void AgentLoopNode::build_loop_body(
     std::shared_ptr<VectorStore> vector_store,
     const std::unordered_map<std::string, std::any>& inputs
 ) {
+    // This legacy helper cannot enforce the unified MemoryAssembly boundary.
+    // Keep it fail-closed until the obsolete private API is removed entirely.
+    throw std::logic_error(
+        "AgentLoopNode::build_loop_body is retired; use AgentLoopNode::create");
     (void)memory_store;
     (void)vector_store;
     // expose loop inputs as a source node
@@ -1073,7 +1136,6 @@ void AgentLoopNode::build_loop_body(
 
         MemoryCompactOptions mcopt;
         mcopt.agent_config = &agent_config;
-        mcopt.llm_client = llm_client.get();
         maybe_auto_compact_memory(*next, mcopt);
 
         const bool is_final = calls.empty() && (llm_out.is_final || !llm_out.final_answer.empty());

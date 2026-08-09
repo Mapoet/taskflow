@@ -121,12 +121,18 @@ std::optional<std::string> base64_decode(const std::string& value, std::string* 
 } // namespace
 
 std::string skill_trust_role_name(SkillTrustRole role) {
-    return role == SkillTrustRole::Package ? "package" : "registry";
+    switch(role) {
+        case SkillTrustRole::Package: return "package";
+        case SkillTrustRole::Registry: return "registry";
+        case SkillTrustRole::Capability: return "capability";
+    }
+    return "unknown";
 }
 
 std::optional<SkillTrustRole> skill_trust_role_from_name(const std::string& value) {
     if(value == "package") return SkillTrustRole::Package;
     if(value == "registry") return SkillTrustRole::Registry;
+    if(value == "capability") return SkillTrustRole::Capability;
     return std::nullopt;
 }
 
@@ -231,10 +237,12 @@ SkillSignatureResult verify_skill_signature(const SkillSignatureEnvelope& envelo
         result.error = parse_error;
         return result;
     }
-    const auto expected_kind = required_role == SkillTrustRole::Package ? "package" : "registry";
+    const auto expected_kind = required_role == SkillTrustRole::Package ? "package" :
+        (required_role == SkillTrustRole::Registry ? "registry" : "mcp-capability");
     if(envelope.subject_kind != expected_kind || trust.revoked_publishers.count(envelope.publisher) ||
        trust.revoked_keys.count(envelope.key_id) ||
-       (required_role == SkillTrustRole::Package && trust.revoked_packages.count(envelope.subject_digest))) {
+       (required_role == SkillTrustRole::Package && trust.revoked_packages.count(envelope.subject_digest)) ||
+       (required_role == SkillTrustRole::Capability && trust.revoked_capabilities.count(envelope.subject_digest))) {
         result.error = std::string(kSkillTrustDenied) + ": role mismatch or revoked identity";
         return result;
     }
@@ -324,7 +332,8 @@ std::optional<SkillSignatureEnvelope> SkillSignatureEnvelope::from_json(const js
        out.api_version != "agent.taskflow/skill-signature/v1" ||
        !required_string(value, "algorithm", out.algorithm, error) || out.algorithm != "Ed25519" ||
        !required_string(value, "subjectKind", out.subject_kind, error) ||
-       (out.subject_kind != "package" && out.subject_kind != "registry") ||
+       (out.subject_kind != "package" && out.subject_kind != "registry" &&
+        out.subject_kind != "mcp-capability") ||
        !required_digest(value, "subjectDigest", out.subject_digest, error) ||
        !required_digest(value, "keyId", out.key_id, error) ||
        !required_string(value, "publisher", out.publisher, error) ||
@@ -347,7 +356,8 @@ json SkillTrustStore::to_json() const {
     }
     return {{"apiVersion", api_version}, {"keys", serialized_keys},
             {"revokedPublishers", revoked_publishers}, {"revokedKeys", revoked_keys},
-            {"revokedPackages", revoked_packages}};
+            {"revokedPackages", revoked_packages},
+            {"revokedCapabilities", revoked_capabilities}};
 }
 
 std::optional<SkillTrustStore> SkillTrustStore::from_json(const json& value, std::string* error) {
@@ -380,6 +390,7 @@ std::optional<SkillTrustStore> SkillTrustStore::from_json(const json& value, std
         out.revoked_publishers = value.value("revokedPublishers", std::set<std::string>{});
         out.revoked_keys = value.value("revokedKeys", std::set<std::string>{});
         out.revoked_packages = value.value("revokedPackages", std::set<std::string>{});
+        out.revoked_capabilities = value.value("revokedCapabilities", std::set<std::string>{});
     } catch(const std::exception& ex) {
         fail(error, ex.what());
         return std::nullopt;

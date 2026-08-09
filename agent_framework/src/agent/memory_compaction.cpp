@@ -7,6 +7,7 @@
 #include <agent/internal/agent_thread_state.hpp>
 #include <agent/llm_client/llm_client.hpp>
 #include <agent/agent/memory_compaction.hpp>
+#include <agent/skills/skill_supply_chain.hpp>
 
 #include <agent/core/types.hpp>
 
@@ -19,6 +20,7 @@
 #include <iostream>
 #include <sstream>
 #include <string>
+#include <thread>
 
 namespace agent_framework {
 namespace {
@@ -179,6 +181,7 @@ bool do_truncate_middle(internal::AgentThreadState& st,
         out.bytes_before = bytes_before;
         out.bytes_after = bytes_before;
         out.did_mutate = false;
+        out.outcome = MemoryCompactionOutcome::NoOp;
         out.strategy_used = "truncate";
         out.log_reason = "empty_history";
         return false;
@@ -190,6 +193,7 @@ bool do_truncate_middle(internal::AgentThreadState& st,
         out.bytes_before = bytes_before;
         out.bytes_after = bytes_before;
         out.did_mutate = false;
+        out.outcome = MemoryCompactionOutcome::NoOp;
         out.strategy_used = "truncate";
         out.log_reason = "min_size";
         return false;
@@ -212,6 +216,7 @@ bool do_truncate_middle(internal::AgentThreadState& st,
         make_truncate_marker(why, dropped, b0, b1_intermediate);
     const std::size_t b1 = history_utf8_bytes_total(st);
     out.did_mutate = true;
+    out.outcome = MemoryCompactionOutcome::Mutated;
     out.strategy_used = "truncate";
     out.bytes_before = b0;
     out.bytes_after = b1;
@@ -241,57 +246,92 @@ std::string linearize_middle(const std::vector<Message>& hist,
     return oss.str();
 }
 
-bool try_summarize_middle(internal::AgentThreadState& st,
+enum class StructuredAttempt { Success, Failure, Cancelled };
+
+StructuredAttempt try_summarize_middle(internal::AgentThreadState& st,
                          MemoryCompactTrigger why,
                          std::size_t H_env,
                          std::size_t T_env,
-                         LLMClient& llm,
+                         const MemoryCompactionContext& context,
                          MemoryCompactResult& out,
                          std::size_t bytes_before) {
     const std::size_t n = st.history.size();
     std::size_t H = std::min(std::max(H_env, std::size_t{1}), n);
     std::size_t T = std::min(T_env, n);
     if (H + T >= n) {
-        return false;
+        return StructuredAttempt::Failure;
     }
     std::string middle =
         linearize_middle(st.history, H, n, T);
-    const std::size_t mid_cap = memory_summary_input_max_from_env();
+    const std::string digest = skill_sha256_bytes(middle).value_or("sha256-unavailable");
+    const std::size_t mid_cap = context.profile.max_input_bytes
+        ? context.profile.max_input_bytes : memory_summary_input_max_from_env();
     middle = utf8_safe_truncate(middle, mid_cap);
 
     LLMInput lin;
     lin.system_prompt =
         "You compress a middle segment of an agent conversation. Output exactly one JSON object "
-        "with key \"summary\" (string). No markdown fences.";
-    lin.user_prompt = middle;
+        "with schema_version=1, summary(string), facts(array), open_items(array), and "
+        "source_digest(string). Copy the supplied source_digest exactly. No markdown fences.";
+    lin.user_prompt = "source_digest=" + digest + "\n\n" + middle;
     lin.tools.clear();
     lin.history.clear();
+    lin.cancellation_requested = context.cancellation_requested;
 
-    const int tmo = memory_summary_timeout_ms_from_env();
-    std::future<LLMOutput> fut = llm.invoke(lin, "", nullptr);
-    std::future_status stw = fut.wait_for(std::chrono::milliseconds(tmo));
-    if (stw == std::future_status::timeout) {
-        return false;
-    }
-    // deferred：须 get() 才真正执行
     LLMOutput lo;
-    try {
-        lo = fut.get();
-    } catch (...) {
-        return false;
+    bool received = false;
+    const int attempts = std::max(1, context.profile.max_retries + 1);
+    for(int attempt = 0; attempt < attempts && !received; ++attempt) {
+        if(context.cancellation_requested && context.cancellation_requested()) {
+            out.cancelled = true;
+            out.outcome = MemoryCompactionOutcome::Cancelled;
+            out.log_reason = "structured_cancelled";
+            return StructuredAttempt::Cancelled;
+        }
+        try {
+            auto future = context.sub_llm->invoke(lin, context.profile.provider, nullptr);
+            const auto timeout = std::chrono::milliseconds(
+                context.profile.timeout_ms > 0 ? context.profile.timeout_ms
+                                               : memory_summary_timeout_ms_from_env());
+            const auto deadline = std::chrono::steady_clock::now() + timeout;
+            for(;;) {
+                if(context.cancellation_requested && context.cancellation_requested()) {
+                    out.cancelled = true;
+                    out.outcome = MemoryCompactionOutcome::Cancelled;
+                    out.log_reason = "structured_cancelled";
+                    return StructuredAttempt::Cancelled;
+                }
+                const auto status = future.wait_for(std::chrono::milliseconds(10));
+                if(status == std::future_status::ready || status == std::future_status::deferred) {
+                    lo = future.get();
+                    received = true;
+                    break;
+                }
+                if(std::chrono::steady_clock::now() >= deadline) break;
+            }
+        } catch (...) {
+            received = false;
+        }
     }
+    if(!received) return StructuredAttempt::Failure;
     std::string raw = lo.final_answer.empty() ? lo.reasoning : lo.final_answer;
     json j;
     try {
         j = json::parse(raw);
     } catch (...) {
-        return false;
+        return StructuredAttempt::Failure;
     }
-    if (!j.is_object() || !j.contains("summary") || !j["summary"].is_string()) {
-        return false;
+    if (!j.is_object() || j.value("schema_version", 0) != 1 ||
+        !j.contains("summary") || !j["summary"].is_string() ||
+        !j.contains("facts") || !j["facts"].is_array() ||
+        !j.contains("open_items") || !j["open_items"].is_array() ||
+        j.value("source_digest", "") != digest) {
+        return StructuredAttempt::Failure;
     }
-    std::string summary = j["summary"].get<std::string>();
-    summary = utf8_safe_truncate(summary, memory_summary_max_out_from_env());
+    const auto max_output = context.profile.max_output_bytes
+        ? context.profile.max_output_bytes : memory_summary_max_out_from_env();
+    const std::string summary = j.dump();
+    if(summary.size() > max_output) return StructuredAttempt::Failure;
 
     std::vector<Message> head(st.history.begin(), st.history.begin() + static_cast<std::ptrdiff_t>(H));
     std::vector<Message> tail(st.history.end() - static_cast<std::ptrdiff_t>(T), st.history.end());
@@ -307,22 +347,25 @@ bool try_summarize_middle(internal::AgentThreadState& st,
         st.history.push_back(std::move(m));
     }
     st.history[mid_idx].content =
-        std::string("[memory_compacted mode=summarize trigger=") + trigger_wp29_string(why) +
+        std::string("[memory_compacted mode=structured trigger=") + trigger_wp29_string(why) +
         " dropped_messages=" + std::to_string(dropped) + " bytes_before=" + std::to_string(b0) +
-        " policy=wp29-v1]\n" +
+        " schema_version=1 source_digest=" + digest + " policy=wp33-v1]\n" +
         summary;
-    if (st.history[mid_idx].content.size() > 512 + memory_summary_max_out_from_env()) {
+    if (st.history[mid_idx].content.size() > 512 + max_output) {
         st.history[mid_idx].content =
             utf8_safe_truncate(st.history[mid_idx].content,
-                              512 + memory_summary_max_out_from_env());
+                              512 + max_output);
     }
     const std::size_t b1 = history_utf8_bytes_total(st);
     out.did_mutate = true;
-    out.strategy_used = "summarize";
+    out.outcome = MemoryCompactionOutcome::Mutated;
+    out.strategy_used = "structured";
     out.bytes_before = b0;
     out.bytes_after = b1;
     out.log_reason = "summarize_ok";
-    return true;
+    out.source_digest = digest;
+    out.schema_version = 1;
+    return StructuredAttempt::Success;
 }
 
 bool try_extractive_middle(internal::AgentThreadState& st, MemoryCompactTrigger why,
@@ -341,7 +384,8 @@ bool try_extractive_middle(internal::AgentThreadState& st, MemoryCompactTrigger 
         utf8_safe_truncate(middle, memory_summary_max_out_from_env());
     st.history.push_back(std::move(summary));
     for (auto& m : tail) st.history.push_back(std::move(m));
-    out.did_mutate = true; out.strategy_used = "extractive"; out.bytes_before = bytes_before;
+    out.did_mutate = true; out.outcome = MemoryCompactionOutcome::Mutated;
+    out.strategy_used = "extractive"; out.bytes_before = bytes_before;
     out.bytes_after = history_utf8_bytes_total(st); out.log_reason = "extractive_ok";
     return true;
 }
@@ -389,7 +433,103 @@ void enforce_hard_limit_history(internal::AgentThreadState& st,
     }
 }
 
+std::string history_digest(const internal::AgentThreadState& state) {
+    std::ostringstream canonical;
+    for(const auto& message : state.history) {
+        canonical << message.role.size() << ':' << message.role << '|'
+                  << message.content.size() << ':' << message.content << '|';
+        if(message.tool_result) canonical << message.tool_result->dump();
+        canonical << '\n';
+    }
+    return skill_sha256_bytes(canonical.str()).value_or("sha256-unavailable");
+}
+
+class TruncateCompactor final : public MemoryCompactor {
+public:
+    MemoryCompactResult compact(const MemoryCompactionInput& input,
+                                const MemoryCompactionContext&) override {
+        MemoryCompactResult result;
+        result.source_digest = history_digest(input.state);
+        (void)do_truncate_middle(input.state, input.trigger, input.head_keep,
+                                 input.tail_keep, result, input.bytes_before);
+        return result;
+    }
+};
+
+class ExtractiveCompactor final : public MemoryCompactor {
+public:
+    MemoryCompactResult compact(const MemoryCompactionInput& input,
+                                const MemoryCompactionContext&) override {
+        MemoryCompactResult result;
+        result.source_digest = history_digest(input.state);
+        (void)try_extractive_middle(input.state, input.trigger, input.head_keep,
+                                    input.tail_keep, result, input.bytes_before);
+        return result;
+    }
+};
+
+class StructuredSummaryCompactor final : public MemoryCompactor {
+public:
+    MemoryCompactResult compact(const MemoryCompactionInput& input,
+                                const MemoryCompactionContext& context) override {
+        MemoryCompactResult result;
+        result.bytes_before = input.bytes_before;
+        result.bytes_after = input.bytes_before;
+        result.strategy_used = "structured";
+        result.source_digest = history_digest(input.state);
+        if(!context.sub_llm) {
+            result.outcome = MemoryCompactionOutcome::Failed;
+            result.log_reason = "structured_sub_llm_unavailable";
+            return result;
+        }
+        const auto outcome = try_summarize_middle(
+            input.state, input.trigger, input.head_keep, input.tail_keep,
+            context, result, input.bytes_before);
+        if(outcome == StructuredAttempt::Cancelled) {
+            result.cancelled = true;
+            result.outcome = MemoryCompactionOutcome::Cancelled;
+        } else if(outcome == StructuredAttempt::Failure) {
+            result.outcome = MemoryCompactionOutcome::Failed;
+            result.log_reason = "structured_failed";
+        }
+        return result;
+    }
+};
+
 } // namespace
+
+void MemoryCompactorRegistry::register_compactor(
+    std::string id, std::shared_ptr<MemoryCompactor> compactor) {
+    if(id.empty() || !compactor) throw std::invalid_argument("memory compactor id/implementation required");
+    std::lock_guard<std::mutex> lock(mutex_);
+    if(!compactors_.emplace(std::move(id), std::move(compactor)).second)
+        throw std::invalid_argument("memory compactor already registered");
+}
+
+std::shared_ptr<MemoryCompactor> MemoryCompactorRegistry::resolve(std::string_view id) const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    const auto found = compactors_.find(std::string(id));
+    return found == compactors_.end() ? nullptr : found->second;
+}
+
+std::vector<std::string> MemoryCompactorRegistry::ids() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    std::vector<std::string> result;
+    result.reserve(compactors_.size());
+    for(const auto& [id, _] : compactors_) result.push_back(id);
+    return result;
+}
+
+std::shared_ptr<MemoryCompactorRegistry> default_memory_compactor_registry() {
+    static auto registry = [] {
+        auto value = std::make_shared<MemoryCompactorRegistry>();
+        value->register_compactor("truncate", std::make_shared<TruncateCompactor>());
+        value->register_compactor("extractive", std::make_shared<ExtractiveCompactor>());
+        value->register_compactor("structured", std::make_shared<StructuredSummaryCompactor>());
+        return value;
+    }();
+    return registry;
+}
 
 void apply_memory_clear(internal::AgentThreadState& st) {
     st.history.clear();
@@ -426,27 +566,48 @@ MemoryCompactResult run_memory_compaction(internal::AgentThreadState& st,
     const std::size_t H_env = memory_head_keep_from_env();
     const std::size_t T_env = memory_tail_keep_from_env();
     const ContextBudgetLimits limits = ContextBudgetLimits::load(opt.agent_config);
-    const std::string compactor = memory_compactor_name();
-    const bool want_summarize = compactor == "structured" && opt.llm_client != nullptr;
-
-    res.strategy_used = "truncate";
-    if (compactor == "extractive") {
-        if (!try_extractive_middle(st, why, H_env, T_env, res, bytes_before))
-            (void)do_truncate_middle(st, why, H_env, T_env, res, bytes_before);
-    } else if (want_summarize) {
-        if (try_summarize_middle(st, why, H_env, T_env, *opt.llm_client, res, bytes_before)) {
-        } else {
-            MemoryCompactResult tr;
-            if (do_truncate_middle(st, why, H_env, T_env, tr, bytes_before)) {
-                res = tr;
-                res.strategy_used = "fallback_truncate";
-                res.log_reason = "summary_failed";
-            } else {
-                res = tr;
-            }
+    const std::string selected = opt.strategy_id.empty() ? memory_compactor_name()
+                                                          : opt.strategy_id;
+    const auto registry = opt.registry ? opt.registry : default_memory_compactor_registry();
+    auto compactor = registry->resolve(selected);
+    if(!compactor) throw std::invalid_argument("unknown memory compactor: " + selected);
+    MemoryCompactionProfile profile = opt.profile;
+    if(profile.timeout_ms <= 0) profile.timeout_ms = memory_summary_timeout_ms_from_env();
+    if(profile.max_input_bytes == 0) profile.max_input_bytes = memory_summary_input_max_from_env();
+    if(profile.max_output_bytes == 0) profile.max_output_bytes = memory_summary_max_out_from_env();
+    MemoryCompactionContext context{opt.agent_config,
+        opt.sub_llm_client ? opt.sub_llm_client : opt.llm_client,
+        profile, opt.cancellation_requested};
+    MemoryCompactionInput input{st, why, H_env, T_env, bytes_before};
+    res = compactor->compact(input, context);
+    if(res.outcome == MemoryCompactionOutcome::Cancelled || res.cancelled) {
+        res.outcome = MemoryCompactionOutcome::Cancelled;
+        res.cancelled = true;
+        res.bytes_after = history_utf8_bytes_total(st);
+        return res;
+    }
+    const auto builtins = default_memory_compactor_registry();
+    const auto fallback = [&](std::string_view id) {
+        auto resolved = registry->resolve(id);
+        return resolved ? resolved : builtins->resolve(id);
+    };
+    if(res.outcome == MemoryCompactionOutcome::Failed && selected == "structured") {
+        const auto extractive = fallback("extractive");
+        if(!extractive) throw std::logic_error("built-in extractive compactor unavailable");
+        res = extractive->compact(input, context);
+        if(res.outcome == MemoryCompactionOutcome::Mutated) {
+            res.strategy_used = "fallback_extractive";
+            res.log_reason = "structured_failed";
         }
-    } else {
-        (void)do_truncate_middle(st, why, H_env, T_env, res, bytes_before);
+    }
+    if(res.outcome == MemoryCompactionOutcome::Failed && selected != "truncate") {
+        const auto truncate = fallback("truncate");
+        if(!truncate) throw std::logic_error("built-in truncate compactor unavailable");
+        res = truncate->compact(input, context);
+        if(res.outcome == MemoryCompactionOutcome::Mutated) {
+            res.strategy_used = "fallback_truncate";
+            res.log_reason = selected + "_failed";
+        }
     }
 
     bool logged_fallback = false;
@@ -454,6 +615,7 @@ MemoryCompactResult run_memory_compaction(internal::AgentThreadState& st,
     enforce_hard_limit_history(st, hard, limits, logged_fallback);
     res.bytes_after = history_utf8_bytes_total(st);
     res.did_mutate = res.bytes_after != bytes_before;
+    if(res.did_mutate) res.outcome = MemoryCompactionOutcome::Mutated;
     if (logged_fallback) {
         std::clog << "[memory] fallback_1c bytes=" << res.bytes_after << "\n";
     }

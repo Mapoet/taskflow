@@ -74,6 +74,7 @@ struct LiveRuntimeOptions {
 
 struct LiveRuntime {
     std::shared_ptr<LLMClient> llm;
+    std::shared_ptr<LLMClient> memory_compaction_llm;
     std::shared_ptr<ToolBus> toolbus;
     std::shared_ptr<SkillServices> skills;
     AgentConfig config;
@@ -252,6 +253,24 @@ inline LiveRuntime build_live_runtime(const LiveRuntimeOptions& options) {
     LiveRuntime runtime;
     runtime.llm = std::make_shared<LLMClient>(LLMClient::from_env());
     runtime.llm->set_prompt_renderer(std::make_shared<PromptRenderer>());
+    if(const char* strategy = std::getenv("AGENT_MEMORY_COMPACTOR");
+       strategy && std::string(strategy) == "structured") {
+        runtime.memory_compaction_llm = std::make_shared<LLMClient>(LLMClient::from_env());
+        runtime.memory_compaction_llm->set_prompt_renderer(std::make_shared<PromptRenderer>());
+        const std::string provider = std::getenv("AGENT_LLM_PROVIDER")
+            ? std::getenv("AGENT_LLM_PROVIDER") : "openai";
+        ModelConfig summary_profile;
+        summary_profile.temperature = 0.0;
+        summary_profile.stream = false;
+        summary_profile.max_retries = 0;
+        if(const char* model = std::getenv("AGENT_MEMORY_SUMMARY_MODEL"))
+            summary_profile.model_name = model;
+        if(const char* timeout = std::getenv("AGENT_MEMORY_SUMMARY_TIMEOUT_MS")) {
+            const int parsed = std::atoi(timeout);
+            if(parsed > 0) summary_profile.http_timeout_sec = std::max(1, parsed / 1000);
+        }
+        runtime.memory_compaction_llm->configure(provider, summary_profile);
+    }
     runtime.toolbus = std::make_shared<ToolBus>();
     register_live_demo_tools(*runtime.toolbus);
 
@@ -295,7 +314,8 @@ inline LiveRuntime build_live_runtime(const LiveRuntimeOptions& options) {
 inline AgentExecutionProfile to_execution_profile(const LiveRuntime& runtime) {
     AgentExecutionProfile profile;
     profile.config = runtime.config;
-    profile.deps = {runtime.llm, runtime.toolbus, runtime.skills};
+    profile.deps = {runtime.llm, runtime.toolbus, runtime.skills,
+                    runtime.memory_compaction_llm};
     profile.input_policy = runtime.input_policy;
     return profile;
 }

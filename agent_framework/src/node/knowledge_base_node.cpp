@@ -121,7 +121,9 @@ std::string KnowledgeBaseSourceNode::generate_context_summary(
     
     for (size_t i = 0; i < results.size(); ++i) {
         const auto& result = results[i];
-        oss << "[" << (i + 1) << "] " << result.content;
+        // Stable source identifiers survive ranking changes and can be copied
+        // verbatim into prompts and final answers.
+        oss << "[source:" << result.doc_id << "] " << result.content;
         if (i < results.size() - 1) {
             oss << "\n\n";
         }

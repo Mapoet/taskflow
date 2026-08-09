@@ -242,6 +242,10 @@ bool merge_react_session_state(
             }
         }
         session.iteration = std::max(session.iteration, next->iteration);
+        session.last_memory_assembly_report = next->last_memory_assembly_report;
+        session.memory_assembly_reports = next->memory_assembly_reports;
+        session.last_memory_auto_compact_iteration = next->last_memory_auto_compact_iteration;
+        session.last_memory_compaction_ts = next->last_memory_compaction_ts;
         session.last_error.clear();
         session.initial_user_prompt.clear();
         return true;
@@ -275,6 +279,10 @@ bool merge_react_session_state(
     session.pending_control_actions = next->pending_control_actions;
     session.pending_input_violations = next->pending_input_violations;
     session.execution_context = next->execution_context;
+    session.last_memory_assembly_report = next->last_memory_assembly_report;
+    session.memory_assembly_reports = next->memory_assembly_reports;
+    session.last_memory_auto_compact_iteration = next->last_memory_auto_compact_iteration;
+    session.last_memory_compaction_ts = next->last_memory_compaction_ts;
     session.last_error = next->last_error;
     session.initial_user_prompt.clear();
     return true;
@@ -594,6 +602,7 @@ ExecutionResult GraphExecutor::execute_sync(tf::Executor& executor, ExecutionReq
     }
     auto committed_session = request.session;
     auto working_session = std::make_shared<internal::AgentThreadState>(*committed_session);
+    working_session->memory_assembly_reports.clear();
     request.session = working_session;
     request.context.session_id = session_id;
     request.session->execution_context = request.context;
@@ -708,6 +717,21 @@ ExecutionResult GraphExecutor::execute_sync(tf::Executor& executor, ExecutionReq
     result.outputs = wr.outputs;
     result.exit_code = wr.exit_code;
     result.error = wr.error_message;
+    for(const auto& assembly_report : request.session->memory_assembly_reports) {
+        if(!assembly_report.is_object() || assembly_report.empty()) continue;
+        emit(ExecutionEventType::MemoryAssembled, assembly_report);
+        const auto decisions = assembly_report.value("decisions", json::array());
+        if (decisions.is_array()) {
+            for (const auto& decision : decisions) {
+                const auto reason = decision.value("reason", "");
+                if (reason == "budget_evicted" || reason == "budget_truncated" ||
+                    reason == "slot_quota") {
+                    emit(ExecutionEventType::MemoryEvicted, decision);
+                }
+            }
+        }
+    }
+    request.session->memory_assembly_reports.clear();
     if (request.session->last_memory_compaction_ts != compact_ts_before) {
         emit(ExecutionEventType::MemoryCompacted,
              {{"history_size_before", history_size_before},

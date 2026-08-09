@@ -71,7 +71,8 @@ public:
         std::shared_ptr<TaskControl> task_control = nullptr,
         ToolExecutionObserver tool_execution_observer = {},
         SkillEventSink skill_event_sink = {},
-        std::function<void(std::string_view)> thinking_stream_callback = nullptr
+        std::function<void(std::string_view)> thinking_stream_callback = nullptr,
+        std::shared_ptr<LLMClient> memory_compaction_llm = nullptr
     );
 
 private:

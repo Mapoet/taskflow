@@ -1,10 +1,15 @@
 # `agent_server_demo` 深度升级计划（Live AgentServer）
 
+> **历史设计记录（已被当前实现取代）**：本文中的 mock/live 双模式、默认 mock、
+> `cli_a2a_orchestrator_demo` 与 `cli_agent_skills_demo` 方案不再代表当前产品行为。
+> 当前 `agent_server_demo` 仅支持 Live 模式，保留的 Agent Demo 统一使用 `LiveRuntime`
+> bootstrap。现状和验证证据见 [phase-3-status.md](./phase-3-status.md)。
+
 本文档将 `agent_server_demo` 从 **A2A Tier C/D 契约桩** 升级为与 **`tui_agent_demo` 同级的实时业务能力**，同时 **保留** CI / live multi-agent 所需的确定性 mock 角色。流式语义对齐 **A2A `StreamResponse` 标准字段**（非自定义 `token` 事件）。
 
 **文档版本**：1.0  
 **日期**：2026-08-09  
-**状态**：计划（未实施）  
+**状态**：历史计划（不作为当前实现规范）
 **关联**：[agent-server.md](./agent-server.md)、[a2a-orchestrator.md](./a2a-orchestrator.md)、[a2a-integration-tests.md](./a2a-integration-tests.md)、[a2a-spec-tracker.md](./a2a-spec-tracker.md)、[rich-ui.md](./rich-ui.md)、[verifier.md](./verifier.md)、[phase-2-update-plan.md](./phase-2-update-plan.md)、[`agent_example_bootstrap.hpp`](../../examples/common/agent_example_bootstrap.hpp)、[`tui_agent_demo.cpp`](../../examples/tui_agent_demo.cpp)
 
 ---

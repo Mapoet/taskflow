@@ -100,7 +100,7 @@ void test_f1_summarize_fallback_truncate() {
     const MemoryCompactResult r =
         run_memory_compaction(st, MemoryCompactTrigger::manual_compact, opt);
     assert(r.did_mutate);
-    assert(r.strategy_used == "fallback_truncate");
+    assert(r.strategy_used == "fallback_extractive");
     assert(st.history.size() == 10);
     assert(st.history[1].role == "system");
 }

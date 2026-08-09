@@ -259,7 +259,8 @@ int main(int argc, char** argv) {
     }
     const bool skip_cursor_mcp = !runtime.bootstrap.mcp_services;
     const auto& mcp_boot = runtime.bootstrap;
-    AgentWorkflowDeps deps{runtime.llm, runtime.toolbus, runtime.skills};
+    AgentWorkflowDeps deps{runtime.llm, runtime.toolbus, runtime.skills,
+                           runtime.memory_compaction_llm};
     AgentConfig cfg = runtime.config;
 
     std::clog << "[tui_agent_demo] starting fullscreen TUI (FTXUI 7.0.1 / UTF-8)...\n" << std::flush;

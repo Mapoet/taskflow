@@ -17,7 +17,7 @@ inline constexpr const char* kSkillSignatureInvalid = "skill_signature_invalid";
 inline constexpr const char* kSkillTrustDenied = "skill_trust_denied";
 inline constexpr const char* kSkillRegistryInvalid = "skill_registry_invalid";
 
-enum class SkillTrustRole { Package, Registry };
+enum class SkillTrustRole { Package, Registry, Capability };
 
 std::string skill_trust_role_name(SkillTrustRole role);
 std::optional<SkillTrustRole> skill_trust_role_from_name(const std::string& value);
@@ -77,6 +77,7 @@ struct SkillTrustStore {
     std::set<std::string> revoked_publishers;
     std::set<std::string> revoked_keys;
     std::set<std::string> revoked_packages;
+    std::set<std::string> revoked_capabilities;
 
     nlohmann::json to_json() const;
     static std::optional<SkillTrustStore> from_json(const nlohmann::json& value,

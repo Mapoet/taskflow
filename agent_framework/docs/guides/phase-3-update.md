@@ -1,6 +1,6 @@
 # Phase 3 更新实施计划：RAG、持久记忆、动态能力与生产收敛
 
-**状态**：执行计划（待实施）  
+**状态**：历史初版计划；当前修复基线为 [phase-3-update-05.md](./phase-3-update-05.md)，进度证据见 [phase-3-status.md](./phase-3-status.md)。
 **日期**：2026-08-09  
 **前置基线**：[phase-2-update.md](./phase-2-update.md)、[plan-detailed.v2.md](./plan-detailed.v2.md)、[agent-server.md](./agent-server.md)
 

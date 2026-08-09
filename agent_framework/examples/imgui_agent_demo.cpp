@@ -360,7 +360,8 @@ int main(int argc, char** argv) {
         std::cerr << "[imgui_agent_demo] LLM init: " << e.what() << "\n";
         return 1;
     }
-    AgentWorkflowDeps deps{runtime.llm, runtime.toolbus, runtime.skills};
+    AgentWorkflowDeps deps{runtime.llm, runtime.toolbus, runtime.skills,
+                           runtime.memory_compaction_llm};
     AgentConfig cfg = runtime.config;
 
     // Same rationale as web_ui_demo: avoid AgentLoop/OpenAIAdapter std::cout spam in GUI apps.

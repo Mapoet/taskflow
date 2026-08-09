@@ -17,6 +17,9 @@
 
 // 前向声明
 namespace agent_framework {
+
+/** Exact-match predicates over DocumentMetadata::extra_metadata. */
+using MetadataFilter = std::map<std::string, json>;
     class Encoder;
 }
 
@@ -59,7 +62,8 @@ public:
     virtual std::vector<RetrievalResult> search(
         const Embedding& query_vector,
         int top_k = 5,
-        const std::string& modality = ""
+        const std::string& modality = "",
+        const MetadataFilter& metadata_filter = {}
     ) = 0;
 
     /**
@@ -106,7 +110,8 @@ public:
     void insert_batch(const std::vector<Document>& docs,
                       const std::vector<Embedding>& embeddings) override;
     std::vector<RetrievalResult> search(const Embedding& query_vector, int top_k = 5,
-                                        const std::string& modality = "") override;
+                                        const std::string& modality = "",
+                                        const MetadataFilter& metadata_filter = {}) override;
     bool delete_document(const std::string& doc_id) override;
     bool update_document(const Document& doc, const Embedding& embedding) override;
     json get_statistics() const override;
@@ -130,7 +135,9 @@ public:
      * @param dimension 向量维度
      * @param index_type 索引类型（"IVF_PQ", "Flat", "HNSW" 等）
      */
-    explicit FaissBackend(int dimension, const std::string& index_type = "Flat");
+    explicit FaissBackend(int dimension, const std::string& index_type = "Flat",
+                          std::string encoder_id = "external",
+                          std::string encoder_revision = "unspecified");
     ~FaissBackend() override;
 
     void insert(const Document& doc, const Embedding& embedding) override;
@@ -139,7 +146,8 @@ public:
     std::vector<RetrievalResult> search(
         const Embedding& query_vector,
         int top_k = 5,
-        const std::string& modality = ""
+        const std::string& modality = "",
+        const MetadataFilter& metadata_filter = {}
     ) override;
     bool delete_document(const std::string& doc_id) override;
     bool update_document(const Document& doc, const Embedding& embedding) override;
@@ -150,6 +158,8 @@ public:
 private:
     int dimension_;
     std::string index_type_;
+    std::string encoder_id_;
+    std::string encoder_revision_;
     void* index_;  // faiss::Index* 指针（前向声明避免暴露 Faiss 头文件）
     std::map<std::string, Document> documents_;  // doc_id -> Document
     std::map<std::string, Embedding> embeddings_;
@@ -159,6 +169,7 @@ private:
      * @brief 创建 Faiss 索引
      */
     void create_index();
+    void rebuild_index();
 };
 
 /**
@@ -182,7 +193,8 @@ public:
     std::vector<RetrievalResult> search(
         const Embedding& query_vector,
         int top_k = 5,
-        const std::string& modality = ""
+        const std::string& modality = "",
+        const MetadataFilter& metadata_filter = {}
     ) override;
     bool delete_document(const std::string& doc_id) override;
     bool update_document(const Document& doc, const Embedding& embedding) override;
@@ -236,7 +248,8 @@ public:
     std::vector<RetrievalResult> search(
         const Embedding& query_vector,
         int top_k = 5,
-        const std::string& modality = ""
+        const std::string& modality = "",
+        const MetadataFilter& metadata_filter = {}
     );
 
     /**
@@ -251,6 +264,9 @@ public:
         const Embedding& query_vector,
         int top_k = 5
     );
+
+    bool delete_document(const std::string& doc_id);
+    bool update_document(const Document& doc, const Embedding& embedding);
 
     /** Persist the selected backend's index and document sidecar. */
     bool save_index(const std::string& path);

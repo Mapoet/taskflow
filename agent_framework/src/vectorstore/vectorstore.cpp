@@ -14,6 +14,14 @@
 namespace agent_framework {
 
 namespace {
+bool metadata_matches(const Document& document, const MetadataFilter& filter) {
+    for(const auto& [key, expected] : filter) {
+        const auto found = document.metadata.extra_metadata.find(key);
+        if(found == document.metadata.extra_metadata.end() || found->second != expected) return false;
+    }
+    return true;
+}
+
 float cosine_similarity(const Embedding& lhs, const Embedding& rhs) {
     if(lhs.size() != rhs.size() || lhs.empty()) throw std::invalid_argument("embedding dimension mismatch");
     double dot = 0.0, left_norm = 0.0, right_norm = 0.0;
@@ -47,6 +55,12 @@ void InMemoryVectorStoreBackend::validate_embedding(const Embedding& embedding) 
     if(embedding.empty()) throw std::invalid_argument("embedding must not be empty");
     if(dimension_ != 0 && static_cast<int>(embedding.size()) != dimension_)
         throw std::invalid_argument("embedding dimension mismatch");
+    double norm = 0.0;
+    for(float value : embedding) {
+        if(!std::isfinite(value)) throw std::invalid_argument("embedding must contain finite values");
+        norm += static_cast<double>(value) * value;
+    }
+    if(norm == 0.0) throw std::invalid_argument("embedding must not be a zero vector");
 }
 
 void InMemoryVectorStoreBackend::insert(const Document& doc, const Embedding& embedding) {
@@ -67,14 +81,16 @@ void InMemoryVectorStoreBackend::insert_batch(const std::vector<Document>& docs,
 }
 
 std::vector<RetrievalResult> InMemoryVectorStoreBackend::search(
-    const Embedding& query, int top_k, const std::string& modality) {
+    const Embedding& query, int top_k, const std::string& modality,
+    const MetadataFilter& metadata_filter) {
     if(top_k <= 0) return {};
     validate_embedding(query);
     std::vector<RetrievalResult> results;
     std::lock_guard<std::mutex> lock(mutex_);
     for(const auto& [id, doc] : documents_) {
         (void)id;
-        if(!modality.empty() && doc.metadata.modality != modality) continue;
+        if((!modality.empty() && doc.metadata.modality != modality) ||
+           !metadata_matches(doc, metadata_filter)) continue;
         results.push_back(to_result(doc, doc.embedding, cosine_similarity(query, doc.embedding)));
     }
     std::sort(results.begin(), results.end(), [](const auto& lhs, const auto& rhs) {
@@ -179,11 +195,20 @@ VectorStore::VectorStore(std::unique_ptr<VectorStoreBackend> backend) : backend_
 void VectorStore::insert(const Document& doc, const Embedding& embedding) {
     std::lock_guard<std::mutex> lock(backend_mutex_); backend_->insert(doc, embedding);
 }
-std::vector<RetrievalResult> VectorStore::search(const Embedding& query, int top_k, const std::string& modality) {
-    std::lock_guard<std::mutex> lock(backend_mutex_); return backend_->search(query, top_k, modality);
+std::vector<RetrievalResult> VectorStore::search(const Embedding& query, int top_k,
+                                                  const std::string& modality,
+                                                  const MetadataFilter& metadata_filter) {
+    std::lock_guard<std::mutex> lock(backend_mutex_);
+    return backend_->search(query, top_k, modality, metadata_filter);
 }
 std::vector<RetrievalResult> VectorStore::hybrid_search(const std::string&, const Embedding& query, int top_k) {
     return search(query, top_k);
+}
+bool VectorStore::delete_document(const std::string& doc_id) {
+    std::lock_guard<std::mutex> lock(backend_mutex_); return backend_->delete_document(doc_id);
+}
+bool VectorStore::update_document(const Document& doc, const Embedding& embedding) {
+    std::lock_guard<std::mutex> lock(backend_mutex_); return backend_->update_document(doc, embedding);
 }
 bool VectorStore::save_index(const std::string& path) {
     std::lock_guard<std::mutex> lock(backend_mutex_); return backend_->save_index(path);

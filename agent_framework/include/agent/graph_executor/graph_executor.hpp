@@ -47,6 +47,8 @@ struct AgentWorkflowDeps {
     std::shared_ptr<LLMClient> llm;
     std::shared_ptr<ToolBus> toolbus;
     std::shared_ptr<SkillServices> skills;
+    /** Isolated client for structured memory compaction; never receives ToolBus/Skills. */
+    std::shared_ptr<LLMClient> memory_compaction_llm;
 };
 
 /**
@@ -178,6 +180,8 @@ enum class ExecutionEventType {
     ChildTaskUpdated,
     VerifierStarted,
     VerifierCompleted,
+    MemoryAssembled,
+    MemoryEvicted,
     MemoryCompacted,
     ArtifactUpdated,
     CheckpointCommitted,

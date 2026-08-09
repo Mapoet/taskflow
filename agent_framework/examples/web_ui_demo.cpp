@@ -267,7 +267,8 @@ int main(int argc, char** argv) {
         std::cerr << "[web_ui_demo] LLM init: " << e.what() << "\n";
         return 1;
     }
-    AgentWorkflowDeps deps{runtime.llm, runtime.toolbus, runtime.skills};
+    AgentWorkflowDeps deps{runtime.llm, runtime.toolbus, runtime.skills,
+                           runtime.memory_compaction_llm};
     AgentConfig cfg = runtime.config;
 
     // AgentLoop / OpenAIAdapter treat AGENT_TEST_AGENT_LOOP_DEBUG as permission to print

@@ -158,6 +158,11 @@ jobs:
       run: cd build && AGENT_A2A_INTEGRATION_LOOPBACK=1 AGENT_CLIENT_USE_LEGACY_REST=0 AGENT_TOOL_ALLOWLIST= ctest -R a2a_loopback_integration --output-on-failure
     - name: Phase 2 vertical integration gates
       run: cd build && ctest -L 'phase2-(cli|a2a|quality|multi-agent|recovery)-e2e' --output-on-failure
+    - name: Phase 3 offline gate
+      run: |
+        count=$(ctest --test-dir build -N -L phase3-offline | awk '/Test +#[0-9]+:/ {n++} END {print n+0}')
+        test "$count" -ge 10
+        ctest --test-dir build -L phase3-offline --output-on-failure
 
   release-test-cpp20:
     runs-on: ubuntu-latest
@@ -169,6 +174,11 @@ jobs:
       run: cmake --build build --parallel 10
     - name: test
       run: cd build ; ctest --output-on-failure
+    - name: Phase 3 offline Release gate
+      run: |
+        count=$(ctest --test-dir build -N -L phase3-offline | awk '/Test +#[0-9]+:/ {n++} END {print n+0}')
+        test "$count" -ge 10
+        ctest --test-dir build -L phase3-offline --output-on-failure
   
   leak-test-cpp20:
     runs-on: ubuntu-latest
