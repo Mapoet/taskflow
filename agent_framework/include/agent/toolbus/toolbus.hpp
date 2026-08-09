@@ -295,6 +295,9 @@ public:
      */
     void register_mcp_service(const std::string& service_name,
                               std::shared_ptr<MCPClient> client);
+    /** Remove one MCP service and its namespaced proxy tools.  Existing calls
+     * retain their proxy/client references; new lookups are rejected. */
+    void unregister_mcp_service(const std::string& service_name) noexcept;
     bool has_mcp_service(std::string_view service_name) const;
     std::future<MCPResourceListResult> list_mcp_resources(
         const std::string& service_name, std::string cursor = {},

@@ -400,6 +400,18 @@ void ToolBus::register_mcp_service(const std::string& service_name, std::shared_
     mcp_clients_.emplace(service_name, std::move(client));
 }
 
+void ToolBus::unregister_mcp_service(const std::string& service_name) noexcept {
+    try {
+        std::lock_guard<std::mutex> lock(tools_mutex_);
+        mcp_clients_.erase(service_name);
+        const std::string prefix = service_name + "__";
+        for (auto it = tools_.begin(); it != tools_.end();) {
+            if (it->first.rfind(prefix, 0) == 0) it = tools_.erase(it);
+            else ++it;
+        }
+    } catch (...) {}
+}
+
 bool ToolBus::has_mcp_service(std::string_view service_name) const {
     std::lock_guard<std::mutex> lock(tools_mutex_);
     return mcp_clients_.count(std::string(service_name)) != 0U;

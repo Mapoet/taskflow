@@ -30,6 +30,8 @@ class LLMClient;
 class TaskControl;
 class ToolBus;
 class GraphExecutor;
+class ToolEffectJournal;
+class AuditSink;
 
 namespace internal {
 struct AgentThreadState;
@@ -236,6 +238,14 @@ struct ExecutionRequest {
     ExecutionContext context;
     std::shared_ptr<TaskControl> control;
     std::shared_ptr<SessionStore> session_store;
+    /**
+     * Optional WP3.7 tool-effect journal.  The executor records a Started
+     * entry before dispatch, marks it Completed after the tool returns, and
+     * only marks it Committed after the session checkpoint is durable.
+     */
+    std::shared_ptr<ToolEffectJournal> tool_effect_journal;
+    /** Optional redacting audit adapter; failures never affect execution. */
+    std::shared_ptr<AuditSink> audit_sink;
     ExecutionEventSink event_sink;
     InputPolicyConfig input_policy;
     ExecutionOptions options;

@@ -3,6 +3,7 @@
  * @brief Agent 客户端：A2A JSON-RPC（默认）与 Legacy REST（WP2.4）
  */
 #include <agent/agent_client/agent_client.hpp>
+#include <agent/agent_client/token_provider.hpp>
 #include <agent/a2a/client_config.hpp>
 #include <agent/a2a/jsonrpc_client.hpp>
 #include <agent/a2a/wire_card.hpp>
@@ -420,8 +421,13 @@ void AgentClient::set_authentication(const json& auth_config) {
 
 void AgentClient::refresh_authentication() {
     std::lock_guard<std::mutex> lock(auth_mutex_);
-    // OAuth 2.0 device grant (RFC 8628) is optional future work; see docs/guides/a2a-authentication.md.
-    (void)auth_config_;
+    if (token_provider_) (void)token_provider_->access_token();
+}
+
+void AgentClient::set_token_provider(std::shared_ptr<TokenProvider> provider) {
+    if (!provider) throw std::invalid_argument("token provider must not be null");
+    std::lock_guard<std::mutex> lock(auth_mutex_);
+    token_provider_ = std::move(provider);
 }
 
 std::map<std::string, std::string> AgentClient::build_auth_headers() const {
@@ -443,6 +449,7 @@ std::map<std::string, std::string> AgentClient::build_auth_headers() const {
             // Query appended in append_auth_query_to_get_url_unlocked for GET only.
         }
     }
+    if (token_provider_) headers["Authorization"] = "Bearer " + token_provider_->access_token();
 
     return headers;
 }

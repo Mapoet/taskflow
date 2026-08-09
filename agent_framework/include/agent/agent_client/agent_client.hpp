@@ -22,6 +22,7 @@
 #include <nlohmann/json.hpp>
 
 namespace agent_framework {
+class TokenProvider;
 
 using json = nlohmann::json;
 
@@ -202,6 +203,9 @@ public:
      */
     void refresh_authentication();
 
+    /** Attach an OAuth-capable provider; it owns refresh timing and credential storage. */
+    void set_token_provider(std::shared_ptr<TokenProvider> provider);
+
     /**
      * @brief 拼接两段 URL 路径（供 HTTPAgentTransport 等复用）
      */
@@ -212,6 +216,7 @@ private:
     const bool use_legacy_rest_;                                        // Legacy REST vs JSON-RPC（构造时固化）
     const std::string json_rpc_path_;                                   // JSON-RPC POST path（构造时固化）
     json auth_config_;                                                  // 认证配置
+    std::shared_ptr<TokenProvider> token_provider_;
     mutable std::mutex auth_mutex_;                                    // 认证互斥锁
 
     // HTTP 客户端（HttplibClient：REST 与 AgentServer 对齐）
