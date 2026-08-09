@@ -98,6 +98,28 @@ public:
     virtual bool load_index(const std::string& path) = 0;
 };
 
+/** Deterministic, dependency-free cosine-similarity backend for tests and local RAG. */
+class InMemoryVectorStoreBackend final : public VectorStoreBackend {
+public:
+    explicit InMemoryVectorStoreBackend(int dimension = 0);
+    void insert(const Document& doc, const Embedding& embedding) override;
+    void insert_batch(const std::vector<Document>& docs,
+                      const std::vector<Embedding>& embeddings) override;
+    std::vector<RetrievalResult> search(const Embedding& query_vector, int top_k = 5,
+                                        const std::string& modality = "") override;
+    bool delete_document(const std::string& doc_id) override;
+    bool update_document(const Document& doc, const Embedding& embedding) override;
+    json get_statistics() const override;
+    bool save_index(const std::string& path) override;
+    bool load_index(const std::string& path) override;
+
+private:
+    int dimension_ = 0;
+    std::map<std::string, Document> documents_;
+    mutable std::mutex mutex_;
+    void validate_embedding(const Embedding& embedding) const;
+};
+
 /**
  * @brief Faiss 后端实现
  */
@@ -108,7 +130,8 @@ public:
      * @param dimension 向量维度
      * @param index_type 索引类型（"IVF_PQ", "Flat", "HNSW" 等）
      */
-    explicit FaissBackend(int dimension, const std::string& index_type = "IVF_PQ");
+    explicit FaissBackend(int dimension, const std::string& index_type = "Flat");
+    ~FaissBackend() override;
 
     void insert(const Document& doc, const Embedding& embedding) override;
     void insert_batch(const std::vector<Document>& docs,
@@ -129,7 +152,8 @@ private:
     std::string index_type_;
     void* index_;  // faiss::Index* 指针（前向声明避免暴露 Faiss 头文件）
     std::map<std::string, Document> documents_;  // doc_id -> Document
-    std::mutex index_mutex_;
+    std::map<std::string, Embedding> embeddings_;
+    mutable std::mutex index_mutex_;
 
     /**
      * @brief 创建 Faiss 索引
@@ -228,6 +252,12 @@ public:
         int top_k = 5
     );
 
+    /** Persist the selected backend's index and document sidecar. */
+    bool save_index(const std::string& path);
+    /** Replace the selected backend's index from a persisted index. */
+    bool load_index(const std::string& path);
+    json get_statistics() const;
+
     /**
      * @brief 注册编码器
      * @param modality 模态类型（"text", "image", "audio", "video"）
@@ -252,8 +282,8 @@ public:
 private:
     std::unique_ptr<VectorStoreBackend> backend_;
     std::map<std::string, std::shared_ptr<Encoder>> encoders_;
-    std::mutex backend_mutex_;
-    std::mutex encoders_mutex_;
+    mutable std::mutex backend_mutex_;
+    mutable std::mutex encoders_mutex_;
 };
 
 } // namespace agent_framework

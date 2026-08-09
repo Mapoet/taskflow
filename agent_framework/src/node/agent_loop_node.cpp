@@ -11,6 +11,7 @@
 #include "agent/internal/loop_io_keys.hpp"
 #include <agent/skills/skill_services.hpp>
 #include <agent/context_budget/context_budget.hpp>
+#include <agent/memory/memory_assembly.hpp>
 #include <agent/agent/task_state_machine.hpp>
 #include <agent/toolbus/toolbus.hpp>
 #include <agent/agent/user_input_preprocessor.hpp>
@@ -431,7 +432,16 @@ AgentLoopNode::create(
         llm_in.user_prompt = user_query;
         llm_in.history = shared->state->history;
         if (it == 0 && !wp27_context_suffix.empty()) {
-            llm_in.context = std::move(wp27_context_suffix);
+            const auto limits = ContextBudgetLimits::load(&agent_config);
+            MemoryAssemblyPolicy assembly_policy;
+            assembly_policy.hard_limit_bytes = limits.max_injection_bytes;
+            assembly_policy.default_slot_quota_bytes = limits.max_injection_bytes;
+            auto assembled = assemble_memory(
+                {{MemorySlotKind::Task, "input-policy-injected-context", 100, 0,
+                  std::move(wp27_context_suffix), json{{"origin", "input_policy"}}}},
+                assembly_policy);
+            llm_in.context = std::move(assembled.text);
+            llm_in.extra_variables["memory_assembly_report"] = assembled.report.to_json().dump();
         }
         std::string policy_ver = "wp27-v1";
         if (shared->state && shared->state->execution_context) {

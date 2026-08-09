@@ -135,6 +135,12 @@ bool memory_compact_mode_summarize() {
     return s == "summarize";
 }
 
+std::string memory_compactor_name() {
+    const char* e = std::getenv("AGENT_MEMORY_COMPACTOR");
+    if (e && *e) return e;
+    return memory_compact_mode_summarize() ? "structured" : "truncate";
+}
+
 std::string trigger_wp29_string(MemoryCompactTrigger why) {
     switch (why) {
         case MemoryCompactTrigger::auto_threshold:
@@ -319,6 +325,27 @@ bool try_summarize_middle(internal::AgentThreadState& st,
     return true;
 }
 
+bool try_extractive_middle(internal::AgentThreadState& st, MemoryCompactTrigger why,
+                           std::size_t H_env, std::size_t T_env,
+                           MemoryCompactResult& out, std::size_t bytes_before) {
+    const std::size_t n = st.history.size();
+    const std::size_t H = std::min(std::max(H_env, std::size_t{1}), n);
+    const std::size_t T = std::min(T_env, n);
+    if (H + T >= n) return false;
+    const auto middle = linearize_middle(st.history, H, n, T);
+    std::vector<Message> head(st.history.begin(), st.history.begin() + static_cast<std::ptrdiff_t>(H));
+    std::vector<Message> tail(st.history.end() - static_cast<std::ptrdiff_t>(T), st.history.end());
+    st.history = std::move(head);
+    Message summary; summary.role = "system"; summary.timestamp = std::time(nullptr);
+    summary.content = "[memory_compacted mode=extractive trigger=" + trigger_wp29_string(why) + "]\n" +
+        utf8_safe_truncate(middle, memory_summary_max_out_from_env());
+    st.history.push_back(std::move(summary));
+    for (auto& m : tail) st.history.push_back(std::move(m));
+    out.did_mutate = true; out.strategy_used = "extractive"; out.bytes_before = bytes_before;
+    out.bytes_after = history_utf8_bytes_total(st); out.log_reason = "extractive_ok";
+    return true;
+}
+
 void enforce_hard_limit_history(internal::AgentThreadState& st,
                                std::size_t hard_bytes,
                                const ContextBudgetLimits& limits,
@@ -399,11 +426,14 @@ MemoryCompactResult run_memory_compaction(internal::AgentThreadState& st,
     const std::size_t H_env = memory_head_keep_from_env();
     const std::size_t T_env = memory_tail_keep_from_env();
     const ContextBudgetLimits limits = ContextBudgetLimits::load(opt.agent_config);
-    const bool want_summarize =
-        memory_compact_mode_summarize() && opt.llm_client != nullptr;
+    const std::string compactor = memory_compactor_name();
+    const bool want_summarize = compactor == "structured" && opt.llm_client != nullptr;
 
     res.strategy_used = "truncate";
-    if (want_summarize) {
+    if (compactor == "extractive") {
+        if (!try_extractive_middle(st, why, H_env, T_env, res, bytes_before))
+            (void)do_truncate_middle(st, why, H_env, T_env, res, bytes_before);
+    } else if (want_summarize) {
         if (try_summarize_middle(st, why, H_env, T_env, *opt.llm_client, res, bytes_before)) {
         } else {
             MemoryCompactResult tr;

@@ -107,11 +107,24 @@ void test_c3_manual_bypasses_auto_throttle() {
     assert(st.history.size() == 10);
 }
 
+void test_wp33_extractive_registry_strategy() {
+    set_env("AGENT_MEMORY_COMPACTOR", "extractive");
+    set_env("AGENT_MEMORY_COMPACT_HEAD_KEEP", "1");
+    set_env("AGENT_MEMORY_COMPACT_TAIL_KEEP", "1");
+    internal::AgentThreadState st = make_linear_history(8);
+    MemoryCompactOptions opt;
+    const auto result = run_memory_compaction(st, MemoryCompactTrigger::manual_compact, opt);
+    assert(result.did_mutate && result.strategy_used == "extractive");
+    assert(st.history[1].content.find("mode=extractive") != std::string::npos);
+    unset_env("AGENT_MEMORY_COMPACTOR");
+}
+
 } // namespace
 
 int main() {
     test_c1_truncate_shape();
     test_c2_noop_small_n();
     test_c3_manual_bypasses_auto_throttle();
+    test_wp33_extractive_registry_strategy();
     return 0;
 }

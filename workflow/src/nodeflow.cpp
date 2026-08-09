@@ -155,7 +155,11 @@ std::vector<std::string> AnySource::extract_keys(const std::unordered_map<std::s
 }
 
 std::function<void()> AnySource::functor(const char* node_name) const {
-  auto vals = values;
+  std::unordered_map<std::string, std::any> vals;
+  {
+    std::lock_guard<std::mutex> lock(values_mutex_);
+    vals = values;
+  }
   auto outputs = out;
   return [vals, outputs, node_name]() mutable {
     for (const auto& [key, val] : vals) {
@@ -163,6 +167,19 @@ std::function<void()> AnySource::functor(const char* node_name) const {
     }
     // std::cout << (node_name ? node_name : "AnySource") << " emitted\n";
   };
+}
+
+void AnySource::set_values(std::unordered_map<std::string, std::any> vals) {
+  std::lock_guard<std::mutex> lock(values_mutex_);
+  if(vals.size() != values.size()) {
+    throw std::invalid_argument("AnySource values must preserve its output keys");
+  }
+  for(const auto& [key, _] : values) {
+    if(!vals.contains(key)) {
+      throw std::invalid_argument("AnySource values must preserve its output keys");
+    }
+  }
+  values = std::move(vals);
 }
 
 std::shared_ptr<AnyValueSlot> AnySource::get_output_slot(const std::string& key) const {

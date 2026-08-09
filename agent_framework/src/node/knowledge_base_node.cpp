@@ -6,6 +6,17 @@
 #include "node/knowledge_base_node.hpp"
 #include <sstream>
 #include <algorithm>
+#include <mutex>
+
+namespace {
+struct KnowledgeBaseBinding {
+    std::weak_ptr<agent_framework::VectorStore> vector_store;
+    std::weak_ptr<agent_framework::EncoderManager> encoder_manager;
+};
+
+std::mutex bindings_mutex;
+std::map<workflow::AnySource*, KnowledgeBaseBinding> bindings;
+}
 
 namespace agent_framework {
 namespace node {
@@ -17,6 +28,9 @@ KnowledgeBaseSourceNode::create(
     std::shared_ptr<VectorStore> vector_store,
     std::shared_ptr<EncoderManager> encoder_manager
 ) {
+    if(!vector_store || !encoder_manager) {
+        throw std::invalid_argument("KnowledgeBaseSourceNode requires a VectorStore and EncoderManager");
+    }
     // 知识库 Source 节点的初始值（占位符，实际通过 set_query 设置）
     std::unordered_map<std::string, std::any> initial_values = {
         {"context", std::any{std::string("")}},
@@ -24,7 +38,12 @@ KnowledgeBaseSourceNode::create(
         {"citations", std::any{std::vector<Citation>{}}}
     };
     
-    return builder.create_any_source(name, initial_values);
+    auto created = builder.create_any_source(name, initial_values);
+    {
+        std::lock_guard<std::mutex> lock(bindings_mutex);
+        bindings[created.first.get()] = {vector_store, encoder_manager};
+    }
+    return created;
 }
 
 void KnowledgeBaseSourceNode::set_query(
@@ -33,9 +52,22 @@ void KnowledgeBaseSourceNode::set_query(
     int top_k,
     const std::string& modality
 ) {
-    // 注意：这里需要访问节点的内部状态来更新查询结果
-    // 实际实现可能需要通过节点的 API 来更新
-    // TODO: 实现查询更新逻辑
+    if(!node) throw std::invalid_argument("KnowledgeBaseSourceNode query target must not be null");
+    if(top_k <= 0) throw std::invalid_argument("KnowledgeBaseSourceNode top_k must be positive");
+    std::shared_ptr<VectorStore> vector_store;
+    std::shared_ptr<EncoderManager> encoder_manager;
+    {
+        std::lock_guard<std::mutex> lock(bindings_mutex);
+        const auto it = bindings.find(node.get());
+        if(it == bindings.end()) throw std::invalid_argument("source was not created by KnowledgeBaseSourceNode");
+        vector_store = it->second.vector_store.lock();
+        encoder_manager = it->second.encoder_manager.lock();
+    }
+    if(!vector_store || !encoder_manager) {
+        throw std::runtime_error("KnowledgeBaseSourceNode dependencies have expired");
+    }
+    node->set_values(perform_retrieval(query_text, std::move(vector_store),
+                                      std::move(encoder_manager), top_k, modality));
 }
 
 std::unordered_map<std::string, std::any> KnowledgeBaseSourceNode::perform_retrieval(
@@ -46,6 +78,11 @@ std::unordered_map<std::string, std::any> KnowledgeBaseSourceNode::perform_retri
     const std::string& modality
 ) {
     // 1. 编码查询文本
+    if(!vector_store || !encoder_manager || top_k <= 0 || query_text.empty()) {
+        return {{"context", std::any{std::string("")}},
+                {"results", std::any{std::vector<RetrievalResult>{}}},
+                {"citations", std::any{std::vector<Citation>{}}}};
+    }
     auto encoder = encoder_manager->get_encoder("text");
     if (!encoder) {
         return {
@@ -118,4 +155,3 @@ std::vector<Citation> KnowledgeBaseSourceNode::extract_citations(
 
 } // namespace node
 } // namespace agent_framework
-

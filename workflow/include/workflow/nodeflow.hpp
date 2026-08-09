@@ -381,8 +381,11 @@ struct AnySource : public INode {
   std::shared_future<std::any> get_output_future(const std::string& key) const override;
   std::vector<std::string> get_output_keys() const override;
   std::shared_ptr<AnyValueSlot> get_output_slot(const std::string& key) const override;
+  /** Replace all emitted values before a graph run. Keys must match this source's outputs. */
+  void set_values(std::unordered_map<std::string, std::any> vals);
 
  private:
+  mutable std::mutex values_mutex_;
   static std::vector<std::string> extract_keys(const std::unordered_map<std::string, std::any>& m);
 };
 

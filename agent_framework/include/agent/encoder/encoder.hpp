@@ -260,7 +260,7 @@ public:
 
 private:
     std::map<std::string, std::shared_ptr<Encoder>> encoders_;
-    std::mutex encoders_mutex_;
+    mutable std::mutex encoders_mutex_;
 
     /**
      * @brief 检测输入类型
