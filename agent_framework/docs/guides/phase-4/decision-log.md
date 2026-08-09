@@ -114,6 +114,16 @@
 - **安全、兼容、迁移和回滚影响**：legacy `AssuranceHarness` 与 `VerifierRegistry` 保留；新 workflow/GraphExecutor template 需要显式注册。Assurance SQLite schema v1 使用 WAL/FULL/private permission，并在一个事务内提交 terminal checkpoint 与 AcceptanceReport；RoleRuntime InvocationManifest 仍在独立 Store，通过 invocation/digest 绑定。真实命令或外部系统采集必须后续经 Sandbox/ToolBus adapter，当前 Manifest adapter 不执行副作用。
 - **验收标准变化及批准**：未降低 F4V exit gate。强 oracle FAIL→Accepted 必须为 0；测试通过但 mandatory artifact 缺失、规划者/执行者自验收、未知 evidence、未授权能力和未解决同强度冲突均不得 Accepted。真实专业 adapter、生产 calibration/benchmark、跨 Store 原子绑定、F5R remediation、默认强制与 Live/UI 仍 pending，故 `R4V2-04` 保持 partial。
 
+### D4-013 — F5R 使用 LLM 修复认知面与确定性影响/策略/提交面分层
+
+- **日期 / 状态 / 决策者**：2026-08-10 / approved-for-offline-core / Codex（依据用户批准实施 F5R）
+- **关联 requirement / plan revision**：`R4V2-05` / `phase4-v2-plan-r1`
+- **事实与证据**：F4V 已能输出 durable Finding/AcceptanceReport，但模型 finding 无权定位真实产物依赖、修改 PlanStore、降低 mandatory criterion 或判断旧证据仍有效。PlanStore 已有父摘要 CAS，PDP/Approval 已有策略和 decision 绑定，RoleRuntime/Memory Replan View 可复用。
+- **备选方案**：由同一个 verifier 直接改代码并宣布修复；或无影响分析地全量重跑。前者混淆判断、执行和自验收，后者成本不可控且不能证明证据污染边界。
+- **决定与理由**：Impact Analyst、Remediation Planner、Reverification Planner 通过 RoleRuntime 产生结构化候选；可信 `ImpactInventory`、Finding→requirement/criterion/node/artifact/evidence 映射、下游闭包、能力/回滚/风险、PlanValidator、token/cost/deadline、criterion anti-downgrade、digest/freshness reuse、PlanStore CAS 和 restart reconciliation 保持确定性。模型建议可以扩大到 inventory 内已知对象，但不能缩小强制影响闭包。
+- **安全、兼容、迁移和回滚影响**：新增 remediation typed contracts 和 tenant-scoped SQLite schema v1，继续复用 `internal/sqlite_utils`；旧 Plan/F4V 契约不变。Plan commit 后进程死亡通过“当前 plan digest 等于 proposed digest”幂等恢复；另一 writer 改变 plan 时进入 manual review。任何 criterion 字段变化或 governed action 必须绑定 approval request digest/decision；无决定时停在 `AwaitingApproval`。
+- **验收标准变化及批准**：未降低原 AcceptanceContract。污染或 stale evidence 不得复用，受影响 strong oracle 必须列入 forced rerun。当前交付只证明离线 remediation/replan/selective-reverification 控制面；不声称已经执行修复动作、产生新 artifact 或完成 F4V 二次裁决，故 `R4V2-05` 保持 partial。
+
 ## 新决策模板
 
 ### D4-NNN — 标题

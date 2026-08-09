@@ -19,14 +19,14 @@
 
 ## 2. 当前总体判断与双基线
 
-按 Phase 4 v1 原始目标，当前总体满足度约为 **48–53%**。实现已形成共享契约、SQLite Run/Memory/Assurance、动态 View、认知规划、多角色五层验收、Sandbox/Telemetry/Eval/Live/Queue 核心语义的离线垂直骨架；但真实 investigator/provider、统一进程/容器 sandbox、OTLP/SLO、scheduled live、远程持久化与 HA 尚未达到工作包 DoD，因此所有 WP 仍保持 `[~]`。
+按 Phase 4 v1 原始目标，当前总体满足度约为 **50–55%**。实现已形成共享契约、SQLite Run/Memory/Assurance/Remediation、动态 View、认知规划、多角色五层验收、有界 replan/选择性复验控制面、Sandbox/Telemetry/Eval/Live/Queue 核心语义的离线垂直骨架；但真实 investigator/provider、实际修复执行→新产物→复验、统一进程/容器 sandbox、OTLP/SLO、scheduled live、远程持久化与 HA 尚未达到工作包 DoD，因此所有 WP 仍保持 `[~]`。
 
-[Phase 4 v2](./phase-4-plan-v2.md) 把“规划、验证和记忆均由专门 LLM 工作流驱动”提升为 mandatory target。完成 P4-V2-F1L、F2C、F3M 与 F4V 离线核心后，按扩展目标重新计量，当前总体满足度约为 **55–60%**。该数值仍不包含真实 provider/role 矩阵和生产闭环。
+[Phase 4 v2](./phase-4-plan-v2.md) 把“规划、验证和记忆均由专门 LLM 工作流驱动”提升为 mandatory target。完成 P4-V2-F1L–F5R 离线核心后，按扩展目标重新计量，当前总体满足度约为 **60–65%**。该数值仍不包含真实 provider/role 矩阵、实际 remediation executor 和生产闭环。
 
 | 评估口径 | 满足度 | 已证明 | 尚未证明 |
 |---|---:|---|---|
-| v1 原始目标 | 48–53% | 确定性契约、Store、View、Harness、durable AcceptanceReport 和离线纵向绑定 | 生产适配器、真实 Live、远程 durable/HA |
-| v2 扩展目标 | 55–60% | v1 控制面；统一 Role Runtime；多阶段 cognition/planning；scope-first LLM memory workflow；多角色 professional assurance；durable recovery 和 GraphExecutor 模板 | remediation/replan、Judge、生产 hybrid retrieval、全路径强制接入、真实角色校准与 Live matrix |
+| v1 原始目标 | 50–55% | 确定性契约、Store、View、Harness、durable AcceptanceReport、impact/replan 控制面和离线纵向绑定 | 生产适配器、真实修复/复验闭环、真实 Live、远程 durable/HA |
+| v2 扩展目标 | 60–65% | v1 控制面；统一 Role Runtime；多阶段 cognition/planning；scope-first LLM memory workflow；多角色 professional assurance；LLM remediation/impact/selective reverify；durable recovery 和 GraphExecutor 模板 | remediation 实际执行、Judge、生产 hybrid retrieval、全路径强制接入、真实角色校准与 Live matrix |
 
 ### 2.1 v2 横向能力状态
 
@@ -34,8 +34,9 @@
 |---|---:|---:|---|---|
 | Role-based LLM Runtime | `[~]` | 70–75% | 已有版本化 Profile/Prompt/Route/Manifest/Reasoning/Calibration 契约、确定性 Router、schema gate、SQLite CAS/recovery、usage/latency、Telemetry/Audit bridge、fake fallback/repair 和可选 AgentLoop adapter | 独立 `StructuredOutputPolicy` 契约、project/org overlay/default revision 管理、GraphExecutor 全路径强制接入、timeout/live provider/calibration matrix |
 | LLM Cognition/Planning | `[~]` | 75–80% | RoleRuntime stages、strict checkpoint、intake/strategy/只读 tool loop/synthesis/boundary/planner/独立 critic/revision/HITL、SQLite recovery 和 GraphExecutor template 已形成离线闭环 | 真实 investigator/provider/calibration matrix、adaptive stop、跨 Store 原子提交、ApprovalStore 直连、默认不可绕过门禁和 live/SLO |
-| LLM Professional Assurance | `[~]` | 75–80% | Verification Planner；Manifest deterministic oracle；Code/Architecture/Domain/Security/Completeness 与 Resolver 七个 RoleRuntime 路由；只读 capability intersection；执行者/规划者隔离；evidence closure；强 oracle precedence；cross-verifier conflict；SQLite checkpoint/report 原子提交、restart 和 GraphExecutor | 真实 repo/build/runtime/domain/security/Sandbox adapters、双 verifier 策略配置、生产 calibration/quality benchmark、跨 Store 原子绑定、remediation/replan、默认强制接入与 Live/UI |
+| LLM Professional Assurance | `[~]` | 75–80% | Verification Planner；Manifest deterministic oracle；Code/Architecture/Domain/Security/Completeness 与 Resolver 七个 RoleRuntime 路由；只读 capability intersection；执行者/规划者隔离；evidence closure；强 oracle precedence；cross-verifier conflict；SQLite checkpoint/report 原子提交、restart 和 GraphExecutor | 真实 repo/build/runtime/domain/security/Sandbox adapters、双 verifier 策略配置、生产 calibration/quality benchmark、跨 Store 原子绑定、修复后自动复验、默认强制接入与 Live/UI |
 | LLM Multi-layer Memory | `[~]` | 75–80% | 九阶段 RoleRuntime memory workflow、strict/SQLite checkpoint、scope-first/provider 二次隔离、candidate-only write、entity/claim linking、consolidation/conflict、task state、query/rerank、dynamic View、HITL promotion/forget、v1 dual-read 和 GraphExecutor 离线闭环 | 真实 profile/provider calibration、可执行 hybrid index、跨 Store 原子提交、ApprovalStore 直连、cross-scope migration、默认强制接入、Live/HA/Inspector |
+| LLM Remediation/Replan | `[~]` | 70–75% | Impact Analyst/Remediation Planner/Reverification Planner 三个 RoleRuntime stage；typed inventory/impact；确定性下游失效闭包；授权/回滚/风险校验；Plan CAS；anti-downgrade HITL；token/cost/deadline；digest/freshness 复用；SQLite restart 与 GraphExecutor | remediation action 实际执行、产物新摘要回填、自动调用 F4V 复验、ApprovalStore 直连、跨 Store 原子协调、生产 calibration/live |
 | LLM Eval/Judge | `[~]` | 30–35% | 有 Dataset Registry、EvalRunner 和 paired gate | blind/multi-judge、agreement、false accept/reject、角色/Prompt/模型升级门禁 |
 | LLM Observability | `[~]` | 50–55% | Role Runtime 已记录 provider/model/profile/prompt/view/route/fallback/token/cost/latency/calibration manifest 并桥接 span/audit | OTLP/SLO、真实 provider usage 一致性、跨进程 correlation 和 live evidence |
 
@@ -45,8 +46,8 @@ v2 采用“**LLM Cognitive Plane + Deterministic Control Plane**”：LLM 深�
 
 | 工作包 | 状态 | 满足度 | 已有基础 | 未关闭的核心 DoD |
 |---|---:|---:|---|---|
-| WP4.0 Task Cognition | `[~]` | 60% | TaskIntake/Evidence/Understanding/Plan schema、Investigator Registry、DAG critic、SQLite Evidence/Plan CAS Store、memory-aware workflow | 真实 ToolBus/外部 investigator、durable replan、GraphExecutor/UI 未接入 |
-| WP4.1 Assurance Harness | `[~]` | 70% | AcceptanceContract、legacy verifier registry、Verification Planner、五专业角色与 Resolver、Manifest oracle、EvidenceLedger/resolution、oracle-strength arbiter、SQLite report/checkpoint、restart/GraphExecutor | artifact/runtime/domain/security/metric 真实执行适配器、impact graph、remediation/replan、生产校准与 UI 未完成 |
+| WP4.0 Task Cognition | `[~]` | 65% | TaskIntake/Evidence/Understanding/Plan schema、Investigator Registry、DAG critic、SQLite Evidence/Plan/Remediation CAS Store、memory-aware workflow、bounded replan | 真实 ToolBus/外部 investigator、remediation executor 自动回灌、默认强制接入/UI 未完成 |
+| WP4.1 Assurance Harness | `[~]` | 75% | AcceptanceContract、legacy verifier registry、Verification Planner、五专业角色与 Resolver、Manifest oracle、EvidenceLedger/resolution、oracle-strength arbiter、SQLite report/checkpoint、impact graph、remediation/selective reverify、restart/GraphExecutor | artifact/runtime/domain/security/metric 真实执行适配器、修复后自动复验、生产校准与 UI 未完成 |
 | WP4.2 Durable Run | `[~]` | 65% | SQLite RunStore、状态机、CAS checkpoint、event、interrupt/resume token、graph revision、durable timer/restart | graph cursor/effect/memory 原子提交、deterministic replay/time-travel 和执行器集成未完成 |
 | WP4.3 HITL/Policy | `[~]` | 55% | Approval schema、deterministic PDP、SQLite ApprovalStore、pending/CAS/TOCTOU/SoD/expiry/revocation、durable interruption/resume | delegation/双人多签、edit→新 request、escalation、三端 UI 未完成 |
 | WP4.4 Sandbox Runtime | `[~]` | 50% | Sandbox schema、provider/registry、policy validator、workspace snapshot/quota；既有 bwrap 原型可复用 | 统一 Process/Container/Remote provider、credential broker、network enforcement、逃逸 E2E 未完成 |
@@ -182,10 +183,11 @@ AgentServer 使用有界进程内 FIFO、worker threads、内存 active task map
 | Durable Run/HITL | SQLite RunStore、CAS 状态机、event、interruption/token、timer；PDP | `phase4_durable_run`、`phase4_policy` | GraphExecutor 原子 replay、完整 ApprovalStore/UI |
 | 多层记忆 | SQLite v2、六层 scope、Provider、8 种 View、AGENTS resolver、治理/forget | `phase4_memory`、`phase4_memory_profiles` | hybrid index、v1 dual-read、冲突 HITL、Inspector/UI |
 | 认知规划 | SQLite Evidence/Plan/Cognition checkpoint、RoleRuntime stage adapter、Intake→Strategy→Investigation→Synthesis→Boundary→Planner→Critic/Revision、GraphExecutor template | `phase4_cognition`、`phase4_planning_store`、3 个 `phase4_cognition_pipeline*` | 真实 ToolBus/外部 investigator/provider matrix、跨 Store 原子提交和默认强制接入 |
-| 五层验收 | 只读 legacy registry；Verification Planner；五专业角色与 Resolver RoleRuntime；Manifest oracle；evidence closure/conflict resolution；强 oracle arbiter；SQLite checkpoint/report；restart 与 GraphExecutor | `phase4_assurance`、4 个 `phase4_assurance_workflow*` | 真实 Sandbox/ToolBus oracle adapters、生产 calibration/benchmark、impact/remediation/replan 和默认强制接入 |
+| 五层验收 | 只读 legacy registry；Verification Planner；五专业角色与 Resolver RoleRuntime；Manifest oracle；evidence closure/conflict resolution；强 oracle arbiter；SQLite checkpoint/report；restart 与 GraphExecutor | `phase4_assurance`、4 个 `phase4_assurance_workflow*` | 真实 Sandbox/ToolBus oracle adapters、生产 calibration/benchmark、默认强制接入 |
+| 修复/重规划/复验 | `remediation` typed contracts、ImpactInventory/Graph、三角色 RoleRuntime、PlanStore CAS、PDP/HITL anti-downgrade、bounded budget、selective reverify、SQLite/GraphExecutor/restart | 4 个 `phase4_remediation_*` | 实际修复执行、新 artifact digest、自动 F4V 复验、ApprovalStore/跨 Store atomic、生产 calibration/live |
 | Runtime/OTel | Sandbox spec/provider contract、workspace manifest；Span/Metric runtime 与隐私门 | `phase4_runtime_observability` | concrete provider、OTLP/SLO、跨进程传播 |
 | Eval/Live/Distributed | immutable dataset、统计比较；certification contract；租约/fencing/DLQ 内存参考实现 | `phase4_eval`、`phase4_live_distributed` | executed live matrix、远程持久队列、HA |
 | 跨模块绑定 | Memory snapshot/view→Plan digest→Run checkpoint→五层 AcceptanceReport→restart terminal | `phase4_vertical` | 真实执行器副作用与远程依赖的端到端认证 |
 | Role-based LLM Runtime | immutable role/profile/prompt/calibration、provider pool、schema gate、能力/Memory View/独立性约束、InvocationManifest SQLite CAS/recovery、AgentLoop 可选接入 | `phase4_llm_runtime_contracts`、`phase4_llm_runtime_routing`、`phase4_llm_runtime_store`、`phase4_llm_runtime_integration` | 尚未证明所有 Cognition/Memory/Assurance/Judge 路径不可绕过；无真实 provider/calibration/live matrix |
 
-当前 `ctest -L phase4-offline` 为 **28/28 PASS**；Phase 3 `ctest -L phase3-offline` 为 **14/14 PASS**。首轮纵向证据见[首轮报告](./phase-4/acceptance-P4-F0R-F8-vertical-20260809.md)，P4-F2D 持久化增量见[增量报告](./phase-4/acceptance-P4-F2D-durable-stores-20260809.md)，F1L 证据边界见[Role Runtime 验收报告](./phase-4/acceptance-P4-V2-F1L-20260809.md)，F2C 证据边界见[多阶段认知规划验收报告](./phase-4/acceptance-P4-V2-F2C-20260809.md)，F3M 证据边界见[LLM 多层记忆验收报告](./phase-4/acceptance-P4-V2-F3M-20260810.md)，F4V 证据边界见[多角色专业验收报告](./phase-4/acceptance-P4-V2-F4V-20260810.md)。
+当前 `ctest -L phase4-offline` 为 **32/32 PASS**；Phase 3 `ctest -L phase3-offline` 为 **14/14 PASS**。首轮纵向证据见[首轮报告](./phase-4/acceptance-P4-F0R-F8-vertical-20260809.md)，P4-F2D 持久化增量见[增量报告](./phase-4/acceptance-P4-F2D-durable-stores-20260809.md)，F1L 证据边界见[Role Runtime 验收报告](./phase-4/acceptance-P4-V2-F1L-20260809.md)，F2C 证据边界见[多阶段认知规划验收报告](./phase-4/acceptance-P4-V2-F2C-20260809.md)，F3M 证据边界见[LLM 多层记忆验收报告](./phase-4/acceptance-P4-V2-F3M-20260810.md)，F4V 证据边界见[多角色专业验收报告](./phase-4/acceptance-P4-V2-F4V-20260810.md)，F5R 证据边界见[修复与选择性复验验收报告](./phase-4/acceptance-P4-V2-F5R-20260810.md)。

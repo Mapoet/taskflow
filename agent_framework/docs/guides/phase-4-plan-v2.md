@@ -1,8 +1,8 @@
 # Phase 4 v2：LLM 驱动规划、记忆与专业验收实施计划
 
-**状态**：规划基线已批准；F1L–F4V 离线核心已实施，requirements 仍保持 partial
+**状态**：规划基线已批准；F1L–F5R 离线核心已实施，requirements 仍保持 partial
 **计划版本**：`phase4-v2-plan-r1`  
-**日期**：2026-08-09  
+**最后更新**：2026-08-10
 **原始需求记录**：[phase-4-v2.md](./phase-4-v2.md)  
 **阶段章程**：[phase-4.md](./phase-4.md)  
 **事实状态**：[phase-4-status.md](./phase-4-status.md)  
@@ -44,8 +44,8 @@ Durable Evidence Plane
 
 | 口径 | 当前满足度 | 含义 |
 |---|---:|---|
-| Phase 4 v1 原始目标 | 48–53% | 已形成共享契约、durable Assurance 和离线纵向骨架，生产适配器、真实 Live 与 HA 尚未关闭 |
-| Phase 4 v2 扩展目标 | 55–60% | 保留 v1 已实现能力；F1L–F4V 离线核心已实现，remediation/replan、Judge、生产 hybrid retrieval 与 live/强制接入仍是 mandatory DoD |
+| Phase 4 v1 原始目标 | 50–55% | 已形成共享契约、durable Assurance、remediation/replan 控制面和离线纵向骨架，生产适配器、真实 Live 与 HA 尚未关闭 |
+| Phase 4 v2 扩展目标 | 60–65% | 保留 v1 已实现能力；F1L–F5R 离线核心已实现，修复动作实际执行→新产物→复验闭环、Judge、生产 hybrid retrieval 与 live/强制接入仍是 mandatory DoD |
 
 ### 2.2 v2 能力成熟度
 
@@ -53,12 +53,13 @@ Durable Evidence Plane
 |---|---|---|---:|
 | 角色化 LLM Runtime | Profile/Prompt/Route/Manifest/Reasoning/Calibration contracts、Router/schema gate、SQLite recovery、usage/latency、AgentLoop adapter | 独立 StructuredOutputPolicy、overlay/default revision、GraphExecutor 强制接入、timeout/live provider/calibration matrix | 70–75% |
 | 认知与规划 | RoleRuntime adapter、strict stage/checkpoint、Intake/Strategy/只读调查/Synthesis/Boundary/Planner/独立 Critic/Revision/HITL、SQLite recovery、GraphExecutor template | 真实 investigator/provider calibration matrix、adaptive stop、跨 Store 原子提交、ApprovalStore 直连、默认强制门禁和 live/SLO | 75–80% |
-| 专业验收 | Verification Planner、Manifest oracle、五专业 RoleRuntime verifier、Resolver、evidence closure/independence、SQLite checkpoint/report、强 oracle Arbiter、restart/GraphExecutor | 真实 Sandbox/ToolBus oracle adapters、双 verifier 策略、生产校准/benchmark、跨 Store atomic、remediation/replan、默认强制、Live/UI | 75–80% |
+| 专业验收 | Verification Planner、Manifest oracle、五专业 RoleRuntime verifier、Resolver、evidence closure/independence、SQLite checkpoint/report、强 oracle Arbiter、restart/GraphExecutor | 真实 Sandbox/ToolBus oracle adapters、双 verifier 策略、生产校准/benchmark、跨 Store atomic、修复后自动复验、默认强制、Live/UI | 75–80% |
 | 多层记忆 | SQLite v2、六层 scope、Provider/View、ACL/authority/freshness/governance；九阶段 RoleRuntime workflow、candidate-only write、conflict/task state、query/rerank、dynamic View、promotion/forget recommendation、v1 dual-read/restart | 真实 profiles/provider calibration、可执行 hybrid index、跨 Store 原子提交、ApprovalStore 直连、cross-scope migration、默认强制接入、Live/HA/Inspector | 75–80% |
+| 修复与选择性复验 | 三角色 RoleRuntime、typed ImpactInventory/Graph、确定性下游闭包、最小修复计划、PlanStore 父摘要 CAS、criterion anti-downgrade、token/cost/deadline budget、digest/freshness 复用门禁、SQLite restart、GraphExecutor | 实际修复执行器、产物新摘要回填、重新调用 F4V 的闭环、ApprovalStore 直连、跨 Store 原子协调、生产 calibration/live | 70–75% |
 | Eval/Judge | Dataset Registry、EvalRunner、paired regression gate | blind judge、多 Judge 一致性、误接受/误拒绝、角色和 Prompt 升级门禁 | 30–35% |
 | LLM 可观测性 | Role Runtime InvocationManifest 记录 provider/model/profile/prompt/view/route/fallback/token/cost/latency/calibration，并桥接 Telemetry/Audit | OTLP/SLO、真实 provider usage 一致性、跨进程 correlation 和 live evidence | 50–55% |
 
-当前可复用离线证据为 `phase4-offline` **28/28 PASS**、`phase3-offline` **14/14 PASS**，其中 `phase4-cognition-v2` **3/3 PASS**、`phase4-memory-v2` **4/4 PASS**、`phase4-assurance-v2` **4/4 PASS**。它证明确定性骨架及 F1L–F4V 离线核心没有回归，不证明真实 investigator/oracle/provider matrix、模型专业准确性、长期记忆质量、生产 hybrid retrieval 或 live SLO 已经实现。
+当前可复用离线证据为 `phase4-offline` **32/32 PASS**、`phase3-offline` **14/14 PASS**，其中 `phase4-cognition-v2` **3/3 PASS**、`phase4-memory-v2` **4/4 PASS**、`phase4-assurance-v2` **4/4 PASS**、`phase4-remediation-v2` **4/4 PASS**。它证明确定性骨架及 F1L–F5R 离线核心没有回归，不证明真实 investigator/oracle/provider matrix、模型专业准确性、实际修复执行→新产物→复验、长期记忆质量、生产 hybrid retrieval 或 live SLO 已经实现。
 
 ## 3. v2 需求编号
 
@@ -371,6 +372,6 @@ F0 → F1L → F2C → F3M → F4V → F5R → F6E → F7L → F8U
 
 ## 11. 当前下一步
 
-`P4-V2-F1L`、`P4-V2-F2C`、`P4-V2-F3M` 与 `P4-V2-F4V` 离线核心已经形成统一 RoleRuntime、任务认知规划、scope-first 多层记忆语义加工、九阶段专业验收、strict checkpoint、SQLite recovery、原子 AcceptanceReport、强 oracle 优先 evidence resolution 和 GraphExecutor templates。`R4V2-01/02/03/04` 仍为 partial：真实 profiles/prompts/provider/calibration matrix、生产 hybrid retrieval、真实 Sandbox/ToolBus oracle acquisition、跨 Store 原子提交、默认不可绕过门禁、强 cancellation、Live/HA/Inspector 尚未关闭。
+`P4-V2-F1L`–`P4-V2-F5R` 离线核心已经形成统一 RoleRuntime、任务认知规划、scope-first 多层记忆语义加工、专业验收、typed impact/replan/selective-reverification、strict checkpoint、SQLite recovery、AcceptanceReport、强 oracle 优先 evidence resolution、Plan CAS 和 GraphExecutor templates。`R4V2-01`–`R4V2-05` 仍为 partial：真实 profiles/prompts/provider/calibration matrix、生产 hybrid retrieval、真实 Sandbox/ToolBus oracle acquisition、实际修复执行→新产物→F4V 复验、跨 Store 原子提交、默认不可绕过门禁、强 cancellation、Live/HA/Inspector 尚未关闭。
 
-下一获批实施批次应为 **P4-V2-F5R 修复、重规划与选择性复验**：把 durable finding 精确映射到计划节点、产物和 criterion，实施有界 remediation/replan、anti-downgrade gate、impact graph 与受 digest/freshness 约束的 selective re-verification。F4V 的 LLM finding 仍无权直接修改任务产物或降低 mandatory criterion。
+下一实施批次为 **P4-V2-F6E Judge、评测与校准**：在 F1L–F5R 的 InvocationManifest、trajectory、Finding、ImpactGraph、RemediationPlan 和 ReverificationPlan 上建立 blind/multi-judge、角色级指标、误接受/误拒绝、统计门禁和版本回滚。F5R 的 LLM 输出仍只是受控候选；实际副作用必须由执行器/PDP 执行，mandatory criterion 变更必须绑定 HITL decision。

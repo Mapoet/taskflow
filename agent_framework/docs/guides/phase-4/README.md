@@ -30,6 +30,7 @@ v2 将 Role-based LLM Workflow Runtime 设为新的横向 P0 能力，并以“L
 - [需求—计划—证据追溯矩阵](./traceability-matrix.md)
 - [规划—执行台账](./execution-ledger.md)
 - [架构与验收决策日志](./decision-log.md)
+- [P4-V2-F5R 离线核心验收报告](./acceptance-P4-V2-F5R-20260810.md)
 
 ## 维护约束
 
