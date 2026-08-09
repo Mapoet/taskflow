@@ -47,6 +47,9 @@ public:
                    std::function<void(const AgentArtifact&)> on_artifact_update);
 
     void reconnect(const std::string& last_event_id);
+    /** Reconnect with freshly resolved authentication headers. */
+    void reconnect(const std::string& last_event_id,
+                   const std::map<std::string, std::string>& headers);
 
     void close();
 

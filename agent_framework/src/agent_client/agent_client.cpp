@@ -112,11 +112,12 @@ std::string AgentClient::join_url(const std::string& base, const std::string& pa
     return base + path;
 }
 
-AgentClient::AgentClient(const std::string& server_url, const AgentClientOptions& options)
+AgentClient::AgentClient(const std::string& server_url, const AgentClientOptions& options,
+                         std::unique_ptr<HTTPClient> http_client)
     : server_url_(server_url),
       use_legacy_rest_(options.use_legacy_rest.value_or(default_use_legacy_from_env())),
       json_rpc_path_(merge_json_rpc_path(options)),
-      http_client_(std::make_unique<HttplibClient>()) {
+      http_client_(http_client ? std::move(http_client) : std::make_unique<HttplibClient>()) {
     auth_config_ = json::object();
 }
 
@@ -140,8 +141,7 @@ std::future<AgentCard> AgentClient::discover_agent(const std::string& agent_endp
             std::lock_guard<std::mutex> lk(auth_mutex_);
             url = append_auth_query_to_get_url_unlocked(url);
         }
-        auto headers = build_auth_headers();
-        json body = http_client_->get(url, headers);
+        json body = with_auth_retry([&](auto headers) { return http_client_->get(url, headers); });
         throw_if_rest_error_body(body);
         if (!use_legacy_rest_) {
             return a2a::agent_card_from_a2a_wire(body);
@@ -169,9 +169,10 @@ std::future<AgentTask> AgentClient::send_task(
                 req_body["session_id"] = *session_id;
             }
             const std::string url = join_url(server_url_, agent_endpoint + "/tasks/send");
-            auto headers = build_auth_headers();
-            headers["Content-Type"] = "application/json";
-            json body = http_client_->post(url, req_body, headers);
+            json body = with_auth_retry([&](auto headers) {
+                headers["Content-Type"] = "application/json";
+                return http_client_->post(url, req_body, headers);
+            });
             throw_if_rest_error_body(body);
             return AgentTask::from_json(body.at("task"));
         }
@@ -185,10 +186,10 @@ std::future<AgentTask> AgentClient::send_task(
             {"metadata", meta}
         };
         const std::string rpc_url = join_url(server_url_, json_rpc_path_);
-        auto headers = build_auth_headers();
-        json result = a2a::a2a_jsonrpc_post(require_httplib(http_client_.get()), rpc_url,
-                                            a2a::kMethodSendMessage, params, headers,
-                                            jsonrpc_next_id_);
+        json result = with_auth_retry([&](auto headers) {
+            return a2a::a2a_jsonrpc_post(require_httplib(http_client_.get()), rpc_url,
+                                         a2a::kMethodSendMessage, params, headers, jsonrpc_next_id_);
+        });
         if (!result.contains("task")) {
             throw std::runtime_error("AgentClient: SendMessage result missing task");
         }
@@ -209,17 +210,17 @@ std::future<AgentTask> AgentClient::get_task(const std::string& agent_endpoint, 
                 std::lock_guard<std::mutex> lk(auth_mutex_);
                 url = append_auth_query_to_get_url_unlocked(url);
             }
-            auto headers = build_auth_headers();
-            json body = http_client_->get(url, headers);
+            json body = with_auth_retry([&](auto headers) { return http_client_->get(url, headers); });
             throw_if_rest_error_body(body);
             return AgentTask::from_json(body.at("task"));
         }
 
         json params = {{"id", task_id}};
         const std::string rpc_url = join_url(server_url_, json_rpc_path_);
-        auto headers = build_auth_headers();
-        json result = a2a::a2a_jsonrpc_post(require_httplib(http_client_.get()), rpc_url, a2a::kMethodGetTask,
-                                            params, headers, jsonrpc_next_id_);
+        json result = with_auth_retry([&](auto headers) {
+            return a2a::a2a_jsonrpc_post(require_httplib(http_client_.get()), rpc_url,
+                                         a2a::kMethodGetTask, params, headers, jsonrpc_next_id_);
+        });
         return a2a::task_from_a2a_wire(result);
     });
     std::future<AgentTask> fut = pt.get_future();
@@ -232,18 +233,20 @@ std::future<bool> AgentClient::cancel_task(const std::string& agent_endpoint, co
         if (use_legacy_rest_) {
             json req_body = {{"task_id", task_id}};
             const std::string url = join_url(server_url_, agent_endpoint + "/tasks/cancel");
-            auto headers = build_auth_headers();
-            headers["Content-Type"] = "application/json";
-            json body = http_client_->post(url, req_body, headers);
+            json body = with_auth_retry([&](auto headers) {
+                headers["Content-Type"] = "application/json";
+                return http_client_->post(url, req_body, headers);
+            });
             throw_if_rest_error_body(body);
             return body.value("success", false);
         }
 
         json params = {{"id", task_id}};
         const std::string rpc_url = join_url(server_url_, json_rpc_path_);
-        auto headers = build_auth_headers();
-        json result = a2a::a2a_jsonrpc_post(require_httplib(http_client_.get()), rpc_url,
-                                            a2a::kMethodCancelTask, params, headers, jsonrpc_next_id_);
+        json result = with_auth_retry([&](auto headers) {
+            return a2a::a2a_jsonrpc_post(require_httplib(http_client_.get()), rpc_url,
+                                         a2a::kMethodCancelTask, params, headers, jsonrpc_next_id_);
+        });
         (void)a2a::task_from_a2a_wire(result);
         return true;
     });
@@ -264,9 +267,10 @@ std::future<AgentTask> AgentClient::update_task(
             {"message", additional_message.to_json()}
         };
         const std::string url = join_url(server_url_, agent_endpoint + "/tasks/update");
-        auto headers = build_auth_headers();
-        headers["Content-Type"] = "application/json";
-        json body = http_client_->post(url, req_body, headers);
+        json body = with_auth_retry([&](auto headers) {
+            headers["Content-Type"] = "application/json";
+            return http_client_->post(url, req_body, headers);
+        });
         throw_if_rest_error_body(body);
         return AgentTask::from_json(body.at("task"));
     });
@@ -345,7 +349,9 @@ void AgentClient::resubscribe_task_updates(
 
     auto it = sse_connections_.find(sse_key);
     if (it != sse_connections_.end()) {
-        it->second->reconnect(last_event_id);
+        auto headers = build_auth_headers();
+        headers["Accept"] = "text/event-stream";
+        it->second->reconnect(last_event_id, headers);
     }
 }
 
@@ -359,9 +365,10 @@ void AgentClient::set_push_notification(
         {"webhook_url", webhook_url}
     };
     const std::string url = join_url(server_url_, agent_endpoint + "/tasks/pushNotification/set");
-    auto headers = build_auth_headers();
-    headers["Content-Type"] = "application/json";
-    json body = http_client_->post(url, req_body, headers);
+    json body = with_auth_retry([&](auto headers) {
+        headers["Content-Type"] = "application/json";
+        return http_client_->post(url, req_body, headers);
+    });
     throw_if_rest_error_body(body);
     (void)body;
 }
@@ -378,8 +385,7 @@ std::future<json> AgentClient::get_push_notification_config(
             std::lock_guard<std::mutex> lk(auth_mutex_);
             url = append_auth_query_to_get_url_unlocked(url);
         }
-        auto headers = build_auth_headers();
-        json body = http_client_->get(url, headers);
+        json body = with_auth_retry([&](auto headers) { return http_client_->get(url, headers); });
         throw_if_rest_error_body(body);
         return body;
     });
@@ -421,13 +427,24 @@ void AgentClient::set_authentication(const json& auth_config) {
 
 void AgentClient::refresh_authentication() {
     std::lock_guard<std::mutex> lock(auth_mutex_);
-    if (token_provider_) (void)token_provider_->access_token();
+    if (token_provider_) (void)token_provider_->force_refresh();
 }
 
 void AgentClient::set_token_provider(std::shared_ptr<TokenProvider> provider) {
     if (!provider) throw std::invalid_argument("token provider must not be null");
     std::lock_guard<std::mutex> lock(auth_mutex_);
     token_provider_ = std::move(provider);
+}
+
+bool AgentClient::force_refresh_if_available() {
+    std::shared_ptr<TokenProvider> provider;
+    {
+        std::lock_guard<std::mutex> lock(auth_mutex_);
+        provider = token_provider_;
+    }
+    if (!provider) return false;
+    (void)provider->force_refresh();
+    return true;
 }
 
 std::map<std::string, std::string> AgentClient::build_auth_headers() const {

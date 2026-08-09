@@ -15,6 +15,21 @@
 using namespace agent_framework;
 using namespace agent_framework::a2a;
 
+namespace {
+class FakeClaimsValidator final : public BearerClaimsValidator {
+public:
+    BearerValidationResult validate(std::string_view token) const override {
+        if (token != "signed-token") return {false, {}, "invalid_signature"};
+        BearerClaims claims;
+        claims.subject = "subject";
+        claims.issuer = "https://issuer.example";
+        claims.audiences = {"taskflow-agent"};
+        claims.scopes = {"tasks.read", "tasks.stream"};
+        return {true, std::move(claims), ""};
+    }
+};
+}
+
 static void fail(const char* m) {
     std::cerr << "test_auth_gate: " << m << "\n";
     std::exit(1);
@@ -107,6 +122,36 @@ static void test_load_config_match_card_bearer() {
 #endif
 }
 
+static void test_claims_and_route_policy() {
+    AuthGateConfig cfg;
+    cfg.mode = ServerAuthMode::Bearer;
+    cfg.effective.kind = AuthRequirementKind::HttpBearer;
+    cfg.bearer_claims_validator = std::make_shared<FakeClaimsValidator>();
+    cfg.route_policies[AuthRoute::JsonRpc] = {
+        false, "https://issuer.example", "taskflow-agent", {"tasks.read"}};
+    cfg.route_policies[AuthRoute::Sse] = {
+        false, "https://issuer.example", "taskflow-agent", {"tasks.stream"}};
+    cfg.route_policies[AuthRoute::WellKnown].allow_anonymous = true;
+
+    AuthContext ctx;
+    ctx.headers_lower["authorization"] = "Bearer signed-token";
+    AuthFailure failure;
+    assert(auth_gate_check_for_route(ctx, cfg, AuthRoute::JsonRpc, &failure));
+    assert(auth_gate_check_for_route(ctx, cfg, AuthRoute::Sse, &failure));
+    assert(auth_gate_check_for_route({}, cfg, AuthRoute::WellKnown, &failure));
+
+    cfg.route_policies[AuthRoute::JsonRpc].required_scopes.insert("tasks.write");
+    assert(!auth_gate_check_for_route(ctx, cfg, AuthRoute::JsonRpc, &failure));
+    assert(failure.http_status == 403);
+    assert(failure.log_safe_reason == "insufficient_scope");
+    assert(failure.www_authenticate.find("insufficient_scope") != std::string::npos);
+
+    ctx.headers_lower["authorization"] = "Bearer tampered-token";
+    assert(!auth_gate_check_for_route(ctx, cfg, AuthRoute::Sse, &failure));
+    assert(failure.log_safe_reason == "invalid_signature");
+    assert(failure.log_safe_reason.find("tampered-token") == std::string::npos);
+}
+
 int main() {
     test_constant_time_equal();
     test_parse_bearer_scheme();
@@ -115,6 +160,7 @@ int main() {
     test_gate_bearer_missing_www();
     test_gate_api_query();
     test_load_config_match_card_bearer();
+    test_claims_and_route_policy();
     std::cout << "test_auth_gate: ok\n";
     return 0;
 }

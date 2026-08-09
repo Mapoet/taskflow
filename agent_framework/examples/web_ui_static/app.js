@@ -12,6 +12,11 @@
   const tools = new Map();
   const markdown = window.markdownit({ html: false, linkify: true, typographer: false });
   const renderTimers = new WeakMap();
+  const MAX_MARKDOWN_BYTES = 256 * 1024;
+  const MAX_MERMAID_BYTES = 64 * 1024;
+  const MAX_MERMAID_NODES = 256;
+  const MAX_MATH_BYTES = 4096;
+  const RENDER_TIMEOUT_MS = 2000;
   let activeAssistant = null;
   let busy = false;
   let turnCount = 0;
@@ -78,8 +83,12 @@
         fragment.append(document.createTextNode(source.slice(cursor, match.index)));
         const span = document.createElement(match[2] == null ? "span" : "div");
         span.className = match[2] == null ? "math-inline" : "math-block";
+        const expression = match[2] == null ? match[3] : match[2];
         try {
-          window.katex.render(match[2] == null ? match[3] : match[2], span, {
+          if (expression.length > MAX_MATH_BYTES || /\\(?:write18|input|include|openout|read)\b/i.test(expression)) {
+            throw new Error("math safety limit");
+          }
+          window.katex.render(expression, span, {
             displayMode: match[2] != null, throwOnError: false, strict: "warn", trust: false
           });
         } catch (_) { span.textContent = match[0]; }
@@ -95,19 +104,36 @@
     if (!window.mermaid) return;
     const nodes = [];
     root.querySelectorAll("pre > code.language-mermaid").forEach((code) => {
+      const source = code.textContent || "";
+      const complexity = source.split(/\r?\n/).filter((line) => line.trim()).length +
+        (source.match(/-->/g) || []).length;
+      if (source.length > MAX_MERMAID_BYTES || complexity > MAX_MERMAID_NODES ||
+          /%%\{|\b(?:click|href|link)\s|<script|javascript:/i.test(source)) {
+        code.parentElement.classList.add("render-error");
+        return;
+      }
       const diagram = document.createElement("div");
       diagram.className = "mermaid";
-      diagram.textContent = code.textContent;
+      diagram.textContent = source;
       code.parentElement.replaceWith(diagram);
       nodes.push(diagram);
     });
     if (!nodes.length) return;
-    try { await window.mermaid.run({ nodes, suppressErrors: true }); }
+    let timer;
+    try {
+      await Promise.race([
+        window.mermaid.run({ nodes, suppressErrors: true }),
+        new Promise((_, reject) => { timer = window.setTimeout(() => reject(new Error("render timeout")), RENDER_TIMEOUT_MS); })
+      ]);
+    }
     catch (_) { nodes.forEach((node) => node.classList.add("render-error")); }
+    finally { if (timer) window.clearTimeout(timer); }
   }
 
   function renderMarkdown(target, source, finalRender) {
-    target.replaceChildren(safeFragment(markdown.render(text(source))));
+    const raw = text(source);
+    const bounded = raw.length <= MAX_MARKDOWN_BYTES ? raw : raw.slice(0, MAX_MARKDOWN_BYTES) + "\n\n[content truncated]";
+    target.replaceChildren(safeFragment(markdown.render(bounded)));
     renderMath(target);
     if (finalRender) void renderMermaid(target);
   }

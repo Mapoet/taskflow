@@ -4,6 +4,7 @@
  */
 
 #include <agent/toolbus/toolbus.hpp>
+#include <agent/toolbus/tool_effect_journal.hpp>
 
 #include <algorithm>
 #include <cctype>
@@ -15,10 +16,12 @@ namespace agent_framework {
 namespace {
 
 void notify_tool_observer(const ToolExecutionObserver& observer,
-                          ToolExecutionEvent event) noexcept {
+                          ToolExecutionEvent event) {
     if (!observer) return;
     try {
         observer(event);
+    } catch (const ToolEffectBlocked&) {
+        throw;
     } catch (...) {
         // Observability must not alter tool execution semantics.
     }

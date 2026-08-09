@@ -16,6 +16,7 @@
 #include <memory>
 #include <functional>
 #include <optional>
+#include <stdexcept>
 #include <string_view>
 #include <agent/core/types.hpp>
 #include <agent/agent_transport/sse_connection.hpp>
@@ -36,6 +37,16 @@ using json = nlohmann::json;
 struct AgentClientOptions {
     std::optional<bool> use_legacy_rest;
     std::optional<std::string> json_rpc_path;
+};
+
+/** HTTP status failure with a deliberately log-safe message (response bodies are excluded). */
+class HttpStatusError : public std::runtime_error {
+public:
+    HttpStatusError(int status, const std::string& operation)
+        : std::runtime_error("HTTP " + std::to_string(status) + " on " + operation), status_(status) {}
+    int status() const noexcept { return status_; }
+private:
+    int status_;
 };
 
 /**
@@ -76,7 +87,8 @@ public:
      * @param options 可选；未指定字段在构造时从环境变量读取一次后固化到本实例
      */
     explicit AgentClient(const std::string& server_url,
-                         const AgentClientOptions& options = AgentClientOptions{});
+                         const AgentClientOptions& options = AgentClientOptions{},
+                         std::unique_ptr<HTTPClient> http_client = nullptr);
 
     /**
      * @brief 析构函数
@@ -233,6 +245,21 @@ private:
      * @return Header 键值对
      */
     std::map<std::string, std::string> build_auth_headers() const;
+    bool force_refresh_if_available();
+
+    template <typename Operation>
+    decltype(auto) with_auth_retry(Operation&& operation) {
+        bool retried = false;
+        while (true) {
+            auto headers = build_auth_headers();
+            try {
+                return operation(std::move(headers));
+            } catch (const HttpStatusError& error) {
+                if (error.status() != 401 || retried || !force_refresh_if_available()) throw;
+                retried = true;
+            }
+        }
+    }
 
     /**
      * @brief 生成 SSE 连接键

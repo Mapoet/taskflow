@@ -125,6 +125,9 @@ bool UiPresentationModel::observe_artifact(const json& payload) {
     attachment.path = path;
     attachment.caption = payload.value("caption", std::string{});
     attachment.tool_call_id = payload.value("tool_call_id", std::string{});
+    attachment.sha256 = payload.value("sha256", std::string{});
+    attachment.citation_id = payload.value("citation_id", std::string{});
+    attachment.source_uri = payload.value("source_uri", std::string{});
     attachment.byte_size = payload.value("byte_size", std::size_t{0});
 
     std::lock_guard<std::mutex> lock(mutex_);

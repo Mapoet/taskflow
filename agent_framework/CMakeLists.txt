@@ -159,6 +159,8 @@ option(AGENT_BUILD_IMGUI
        OFF)
 option(AGENT_BUILD_TUI "Build tui_agent_demo (FTXUI)" OFF)
 option(AGENT_BUILD_WEB_UI "Build web_ui_demo (httplib + static assets + SSE)" OFF)
+option(AGENT_BUILD_RICH_RENDERERS
+       "Enable registration of isolated Mermaid/LaTeX renderer workers (plain fallback is always built)" OFF)
 
 # 包含目录
 include_directories(
@@ -463,6 +465,9 @@ endif()
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/ui/streaming_markdown.cpp)
     list(APPEND AGENT_SOURCES src/ui/streaming_markdown.cpp)
 endif()
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/ui/rich_renderer.cpp)
+    list(APPEND AGENT_SOURCES src/ui/rich_renderer.cpp)
+endif()
 
 # Node 模块
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/node/node_factory.cpp)
@@ -600,6 +605,8 @@ file(GLOB_RECURSE AGENT_HEADERS CONFIGURE_DEPENDS
 
 # 创建库
 add_library(agent_framework STATIC ${AGENT_SOURCES} ${AGENT_HEADERS})
+target_compile_definitions(agent_framework PUBLIC
+    AGENT_BUILD_RICH_RENDERERS=$<BOOL:${AGENT_BUILD_RICH_RENDERERS}>)
 if(CMAKE_BUILD_TYPE STREQUAL "Release")
     target_compile_options(agent_framework PRIVATE -O2 -DNDEBUG)
 else()
@@ -1092,6 +1099,18 @@ if(BUILD_TESTING)
         add_test(NAME token_provider_wp36 COMMAND test_token_provider_wp36)
         set_tests_properties(token_provider_wp36 PROPERTIES LABELS "phase3-oauth;phase3-offline;offline")
     endif()
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_oauth_sse_wp36.cpp)
+        add_executable(test_oauth_sse_wp36 tests/test_oauth_sse_wp36.cpp)
+        target_link_libraries(test_oauth_sse_wp36 PRIVATE agent_framework)
+        add_test(NAME oauth_sse_wp36 COMMAND test_oauth_sse_wp36)
+        set_tests_properties(oauth_sse_wp36 PROPERTIES LABELS "phase3-oauth;phase3-offline;offline")
+    endif()
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_oauth_retry_wp36.cpp)
+        add_executable(test_oauth_retry_wp36 tests/test_oauth_retry_wp36.cpp)
+        target_link_libraries(test_oauth_retry_wp36 PRIVATE agent_framework)
+        add_test(NAME oauth_retry_wp36 COMMAND test_oauth_retry_wp36)
+        set_tests_properties(oauth_retry_wp36 PROPERTIES LABELS "phase3-oauth;phase3-offline;offline")
+    endif()
     if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_tool_effect_journal_wp37.cpp)
         add_executable(test_tool_effect_journal_wp37 tests/test_tool_effect_journal_wp37.cpp)
         target_link_libraries(test_tool_effect_journal_wp37 PRIVATE agent_framework)
@@ -1103,6 +1122,13 @@ if(BUILD_TESTING)
         target_link_libraries(test_audit_wp38 PRIVATE agent_framework)
         add_test(NAME audit_wp38 COMMAND test_audit_wp38)
         set_tests_properties(audit_wp38 PROPERTIES LABELS "phase3-observability;phase3-offline;offline")
+    endif()
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_rich_renderer_wp39.cpp)
+        add_executable(test_rich_renderer_wp39 tests/test_rich_renderer_wp39.cpp)
+        target_link_libraries(test_rich_renderer_wp39 PRIVATE agent_framework)
+        add_test(NAME rich_renderer_wp39 COMMAND test_rich_renderer_wp39)
+        set_tests_properties(rich_renderer_wp39 PROPERTIES
+            LABELS "phase3-renderer;phase3-ui;phase3-offline;offline")
     endif()
     if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_mcp_lifecycle_wp35.cpp)
         add_executable(test_mcp_lifecycle_wp35 tests/test_mcp_lifecycle_wp35.cpp)

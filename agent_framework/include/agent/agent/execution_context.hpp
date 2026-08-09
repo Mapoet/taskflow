@@ -34,6 +34,10 @@ struct ExecutionContext {
     std::string input_policy_version = "wp27-v1";
     std::optional<std::string> session_id;
     std::optional<std::string> task_id;
+    /** End-to-end audit correlation identity. Empty lets the executor derive one. */
+    std::string trace_id;
+    /** Multi-tenant audit namespace; empty is valid for local single-tenant use. */
+    std::string tenant_id;
     /** Request-scoped upper bound. Empty vectors deny the corresponding Skill capability. */
     SkillPermissionGrant skill_grants;
     std::map<std::string, std::string> skill_environment;

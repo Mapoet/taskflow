@@ -59,6 +59,16 @@ void SSEConnection::subscribe(const std::map<std::string, std::string>& headers,
 }
 
 void SSEConnection::reconnect(const std::string& last_event_id) {
+    std::map<std::string, std::string> headers;
+    {
+        std::lock_guard<std::mutex> lock(connection_mutex_);
+        headers = request_headers_;
+    }
+    reconnect(last_event_id, headers);
+}
+
+void SSEConnection::reconnect(const std::string& last_event_id,
+                              const std::map<std::string, std::string>& headers) {
     std::thread prev;
     {
         std::lock_guard<std::mutex> lock(connection_mutex_);
@@ -66,6 +76,7 @@ void SSEConnection::reconnect(const std::string& last_event_id) {
             cancelled_.store(true, std::memory_order_release);
             prev = std::move(event_thread_);
         }
+        request_headers_ = headers;
         request_headers_["Last-Event-ID"] = last_event_id;
         cancelled_.store(false, std::memory_order_release);
         active_ = true;

@@ -6,6 +6,7 @@
 
 #include <httplib.hpp>
 
+#include <algorithm>
 #include <cctype>
 #include <cstdlib>
 #include <sstream>
@@ -128,6 +129,10 @@ bool load_auth_gate_config_from_env(const AgentCard& card, AuthGateConfig* cfg, 
         return false;
     }
     *cfg = AuthGateConfig{};
+    cfg->route_policies.emplace(AuthRoute::WellKnown, RouteAuthPolicy{});
+    cfg->route_policies.emplace(AuthRoute::JsonRpc, RouteAuthPolicy{});
+    cfg->route_policies.emplace(AuthRoute::Sse, RouteAuthPolicy{});
+    cfg->route_policies.emplace(AuthRoute::LegacyRest, RouteAuthPolicy{});
     const char* mode_e = std::getenv("AGENT_SERVER_AUTH_MODE");
     cfg->mode = parse_mode(mode_e);
 
@@ -230,6 +235,15 @@ bool load_auth_gate_config_from_env(const AgentCard& card, AuthGateConfig* cfg, 
 }
 
 bool auth_gate_check(const AuthContext& ctx, const AuthGateConfig& cfg, AuthFailure* fail_out) {
+    return auth_gate_check_for_route(ctx, cfg, AuthRoute::JsonRpc, fail_out);
+}
+
+bool auth_gate_check_for_route(const AuthContext& ctx, const AuthGateConfig& cfg,
+                               AuthRoute route, AuthFailure* fail_out) {
+    const auto policy_it = cfg.route_policies.find(route);
+    const RouteAuthPolicy policy = policy_it == cfg.route_policies.end()
+        ? RouteAuthPolicy{} : policy_it->second;
+    if (policy.allow_anonymous) return true;
     if (cfg.mode == ServerAuthMode::Off) {
         return true;
     }
@@ -271,13 +285,36 @@ bool auth_gate_check(const AuthContext& ctx, const AuthGateConfig& cfg, AuthFail
             }
             return false;
         }
-        bool ok = false;
-        for (const auto& t : cfg.bearer_tokens) {
-            if (constant_time_equal(token, t)) {
-                ok = true;
-                break;
+        if (cfg.bearer_claims_validator) {
+            const auto validation = cfg.bearer_claims_validator->validate(token);
+            if (!validation.valid) {
+                fail.www_authenticate = "Bearer error=\"invalid_token\"";
+                fail.log_safe_reason = validation.error_code.empty() ? "invalid_token" : validation.error_code;
+                if (fail_out) *fail_out = std::move(fail);
+                return false;
             }
+            const bool issuer_ok = policy.required_issuer.empty() ||
+                validation.claims.issuer == policy.required_issuer;
+            const bool audience_ok = policy.required_audience.empty() ||
+                validation.claims.audiences.contains(policy.required_audience);
+            const bool scopes_ok = std::all_of(policy.required_scopes.begin(), policy.required_scopes.end(),
+                [&](const std::string& scope) { return validation.claims.scopes.contains(scope); });
+            if (!issuer_ok || !audience_ok || !scopes_ok) {
+                fail.http_status = scopes_ok ? 401 : 403;
+                fail.www_authenticate = scopes_ok ? "Bearer error=\"invalid_token\""
+                                                  : "Bearer error=\"insufficient_scope\"";
+                fail.body_json = scopes_ok ? R"({"error":"Unauthorized"})"
+                                           : R"({"error":"Forbidden"})";
+                fail.log_safe_reason = !issuer_ok ? "issuer_mismatch" :
+                    !audience_ok ? "audience_mismatch" : "insufficient_scope";
+                if (fail_out) *fail_out = std::move(fail);
+                return false;
+            }
+            return true;
         }
+        bool ok = false;
+        for (const auto& t : cfg.bearer_tokens)
+            if (constant_time_equal(token, t)) { ok = true; break; }
         if (!ok) {
             fail.www_authenticate = "Bearer";
             fail.log_safe_reason = "bearer mismatch " + log_safe_token_hint(token);

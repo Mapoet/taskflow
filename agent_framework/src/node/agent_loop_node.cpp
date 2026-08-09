@@ -14,6 +14,7 @@
 #include <agent/memory/memory_assembly.hpp>
 #include <agent/agent/task_state_machine.hpp>
 #include <agent/toolbus/toolbus.hpp>
+#include <agent/toolbus/tool_effect_journal.hpp>
 #include <agent/agent/user_input_preprocessor.hpp>
 #include <agent/agent/memory_compaction.hpp>
 #include <agent/a2a/outbound_task_supervisor.hpp>
@@ -214,10 +215,12 @@ AgentLoopNode::create(
         -> std::unordered_map<std::string, std::any> {
         const char* dbg_env = std::getenv("AGENT_TEST_AGENT_LOOP_DEBUG");
         const bool dbg = dbg_env && std::string(dbg_env) != "0";
-        auto notify_tool = [&](ToolExecutionEvent event) noexcept {
+        auto notify_tool = [&](ToolExecutionEvent event) {
             if (!tool_execution_observer) return;
             try {
                 tool_execution_observer(event);
+            } catch (const ToolEffectBlocked&) {
+                throw;
             } catch (...) {
                 // Observability must not alter agent execution semantics.
             }

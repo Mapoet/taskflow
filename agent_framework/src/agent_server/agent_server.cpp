@@ -622,14 +622,22 @@ void AgentServer::set_authentication_validator(
     auth_validator_ = std::move(validator);
 }
 
+void AgentServer::set_bearer_claims_validator(
+    std::shared_ptr<const a2a::BearerClaimsValidator> validator,
+    std::map<a2a::AuthRoute, a2a::RouteAuthPolicy> route_policies) {
+    bearer_claims_validator_ = std::move(validator);
+    route_auth_policies_ = std::move(route_policies);
+}
+
 void AgentServer::set_input_preprocess_toolbus(std::shared_ptr<ToolBus> toolbus) {
     preprocess_toolbus_ = std::move(toolbus);
 }
 
-bool AgentServer::apply_auth_gate(const httplib::Request& req, httplib::Response& res) {
+bool AgentServer::apply_auth_gate(const httplib::Request& req, httplib::Response& res,
+                                  a2a::AuthRoute route) {
     const a2a::AuthContext ctx = a2a::auth_context_from_request(req);
     a2a::AuthFailure fail;
-    if (!a2a::auth_gate_check(ctx, auth_gate_config_, &fail)) {
+    if (!a2a::auth_gate_check_for_route(ctx, auth_gate_config_, route, &fail)) {
         res.status = fail.http_status;
         if (!fail.www_authenticate.empty()) {
             res.set_header("WWW-Authenticate", fail.www_authenticate);
@@ -789,11 +797,14 @@ void AgentServer::setup_routes() {
         if (!a2a::load_auth_gate_config_from_env(agent_card_, &auth_gate_config_, &auth_err)) {
             throw std::runtime_error(std::string("AgentServer auth: ") + auth_err);
         }
+        if (bearer_claims_validator_) auth_gate_config_.bearer_claims_validator = bearer_claims_validator_;
+        for (const auto& [route, policy] : route_auth_policies_)
+            auth_gate_config_.route_policies[route] = policy;
     }
 
     srv->Get("/.well-known/agent-card.json", [this](const httplib::Request& req, httplib::Response& res) {
         if (!card_discovery_is_public()) {
-            if (!apply_auth_gate(req, res)) {
+            if (!apply_auth_gate(req, res, a2a::AuthRoute::WellKnown)) {
                 return;
             }
         }
@@ -848,7 +859,7 @@ void AgentServer::handle_health(httplib::Response& res) {
 
 void AgentServer::handle_jsonrpc_post(const httplib::Request& req, httplib::Response& res) {
     res.status = 200;
-    if (!apply_auth_gate(req, res)) {
+    if (!apply_auth_gate(req, res, a2a::AuthRoute::JsonRpc)) {
         return;
     }
 
@@ -1166,7 +1177,7 @@ void AgentServer::handle_tasks_update(const httplib::Request& req, httplib::Resp
 }
 
 void AgentServer::handle_tasks_send_subscribe(const httplib::Request& req, httplib::Response& res) {
-    if (!apply_auth_gate(req, res)) {
+    if (!apply_auth_gate(req, res, a2a::AuthRoute::Sse)) {
         return;
     }
 

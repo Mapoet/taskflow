@@ -36,6 +36,9 @@ struct UiAttachment {
     std::string path;
     std::string caption;
     std::string tool_call_id;
+    std::string sha256;
+    std::string citation_id;
+    std::string source_uri;
     std::size_t byte_size = 0;
 };
 

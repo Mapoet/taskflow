@@ -202,6 +202,7 @@ json execute_and_parse_json(const httplib::Result& result, const char* method_la
     const int status = res.status;
 
     if (status < 200 || status >= 300) {
+        if (status == 401) throw HttpStatusError(status, method_label);
         if (return_jsonrpc_error_envelope_on_http_error && !res.body.empty()) {
             try {
                 json parsed = json::parse(res.body);

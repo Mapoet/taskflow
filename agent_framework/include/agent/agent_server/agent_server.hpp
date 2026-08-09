@@ -100,6 +100,10 @@ public:
      * @brief 设置附加认证验证器（在内置 AuthGate 通过后与关系 AND）
      */
     void set_authentication_validator(std::function<bool(const a2a::AuthContext& ctx)> validator);
+    /** Configure issuer-specific bearer verification and explicit per-route claims policy. */
+    void set_bearer_claims_validator(
+        std::shared_ptr<const a2a::BearerClaimsValidator> validator,
+        std::map<a2a::AuthRoute, a2a::RouteAuthPolicy> route_policies);
 
     /**
      * @brief WP2.7：@file/@url 物化所需 ToolBus；为 null 且用户输入触发注入时会产生 violation
@@ -138,6 +142,8 @@ private:
 
     std::function<bool(const a2a::AuthContext&)> auth_validator_;
     a2a::AuthGateConfig auth_gate_config_;
+    std::shared_ptr<const a2a::BearerClaimsValidator> bearer_claims_validator_;
+    std::map<a2a::AuthRoute, a2a::RouteAuthPolicy> route_auth_policies_;
     std::shared_ptr<ToolBus> preprocess_toolbus_;
     std::optional<AgentExecutionProfile> execution_profile_;
     std::shared_ptr<GraphExecutor> graph_executor_;
@@ -175,7 +181,8 @@ private:
     void handle_push_notification_set(const httplib::Request& req, httplib::Response& res);
     void handle_push_notification_get(const httplib::Request& req, httplib::Response& res);
 
-    bool apply_auth_gate(const httplib::Request& req, httplib::Response& res);
+    bool apply_auth_gate(const httplib::Request& req, httplib::Response& res,
+                         a2a::AuthRoute route = a2a::AuthRoute::LegacyRest);
 
     json jsonrpc_send_message(const json& params);
     json jsonrpc_get_task(const json& params);

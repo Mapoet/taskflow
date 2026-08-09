@@ -11,6 +11,8 @@
 #include <agent/a2a/auth_requirement.hpp>
 
 #include <map>
+#include <memory>
+#include <set>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -30,6 +32,36 @@ struct AuthContext {
     std::map<std::string, std::string> params_lower;
 };
 
+enum class AuthRoute { WellKnown, JsonRpc, Sse, LegacyRest };
+
+struct BearerClaims {
+    std::string subject;
+    std::string issuer;
+    std::set<std::string> audiences;
+    std::set<std::string> scopes;
+};
+
+struct BearerValidationResult {
+    bool valid{false};
+    BearerClaims claims;
+    /** Stable, non-secret reason such as invalid_signature or token_expired. */
+    std::string error_code;
+};
+
+/** Signature, expiry and token-format validation are delegated to an issuer-specific adapter. */
+class BearerClaimsValidator {
+public:
+    virtual ~BearerClaimsValidator() = default;
+    virtual BearerValidationResult validate(std::string_view bearer_token) const = 0;
+};
+
+struct RouteAuthPolicy {
+    bool allow_anonymous{false};
+    std::string required_issuer;
+    std::string required_audience;
+    std::set<std::string> required_scopes;
+};
+
 /** @brief Build AuthContext from httplib request (headers + query params). */
 AuthContext auth_context_from_request(const httplib::Request& req);
 
@@ -44,6 +76,8 @@ struct AuthGateConfig {
     /** Env defaults when mode is api_key_* (also used as fallback names for match_card). */
     std::string env_api_key_header_name{"X-API-Key"};
     std::string env_api_key_query_param{"api_key"};
+    std::shared_ptr<const BearerClaimsValidator> bearer_claims_validator;
+    std::map<AuthRoute, RouteAuthPolicy> route_policies;
 };
 
 struct AuthFailure {
@@ -65,6 +99,8 @@ bool load_auth_gate_config_from_env(const AgentCard& card, AuthGateConfig* cfg, 
 
 /** @brief Builtin gate: returns true if authorized. On false, fills failure. */
 bool auth_gate_check(const AuthContext& ctx, const AuthGateConfig& cfg, AuthFailure* fail_out);
+bool auth_gate_check_for_route(const AuthContext& ctx, const AuthGateConfig& cfg,
+                               AuthRoute route, AuthFailure* fail_out);
 
 /** @brief Constant-time equality for secret strings (same length only). */
 bool constant_time_equal(std::string_view a, std::string_view b);
