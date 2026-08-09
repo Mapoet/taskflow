@@ -15,7 +15,7 @@ executing/verifying → replanning → approved
 | Run | Plan task/revision | Status | Started/ended | Executor/reviewer | Changes | Evidence | Acceptance |
 |---|---|---|---|---|---|---|---|
 | `P4-DOC-BASELINE-20260809` | `P4-F0 / plan-v1` | implemented | 2026-08-09 | Codex / user approval | Phase 4 规划档案 | 本目录文档与链接检查 | 待文档验收 |
-| `P4-DOC-MEMORY-20260809` | `P4-F0 / plan-v2` | verified | 2026-08-09 | Codex / user approval | 新增 WP4.9；融合章程、状态、总体计划、WP4.0–4.8 和治理档案 | PASS：17 文档、136 个连续且唯一 ID、围栏、本地链接、索引/状态/追踪覆盖 | 待用户内容验收 |
+| `P4-DOC-MEMORY-20260809` | `P4-F0 / plan-v2` | accepted | 2026-08-09 | Codex / user approval | 新增 WP4.9；融合章程、状态、总体计划、WP4.0–4.8 和治理档案 | PASS：17 文档、136 个唯一 ID、0 重复、0 失效本地链接；WP4.9 SHA-256 `0defa55f8559a7f6bfb5a5066e74fabe06ccc18b02c05b2c1d7553c299e6c206` | 用户于 2026-08-09 批准落盘；内容与结构验收 PASS |
 
 ## 3. 执行记录模板
 
