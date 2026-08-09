@@ -2,6 +2,7 @@
 #define AGENT_UI_RICH_RENDERER_HPP
 
 #include <agent/core/types.hpp>
+#include <agent/observability/audit.hpp>
 
 #include <chrono>
 #include <filesystem>
@@ -122,7 +123,9 @@ private:
 class RendererRegistry {
 public:
     explicit RendererRegistry(std::shared_ptr<ArtifactStore> artifacts,
-                              std::set<std::string> allowlist = {"plain"});
+                              std::set<std::string> allowlist = {"plain"},
+                              std::shared_ptr<AuditSink> audit_sink = {},
+                              AuditLatencyPolicy latency_policy = AuditLatencyPolicy::from_environment());
     void register_renderer(std::shared_ptr<Renderer> renderer);
     void set_allowlist(std::set<std::string> allowlist);
     RenderResult render(const RenderRequest& request);
@@ -130,9 +133,13 @@ public:
 private:
     static std::optional<std::string> validate(const RenderRequest& request);
     RenderResult fallback(const RenderRequest& request, std::string diagnostic);
+    void audit(const RenderRequest& request, const RenderResult& result);
     std::shared_ptr<ArtifactStore> artifacts_;
     std::map<RenderKind, std::shared_ptr<Renderer>> renderers_;
     std::set<std::string> allowlist_;
+    std::shared_ptr<AuditSink> audit_sink_;
+    AuditLatencyPolicy latency_policy_;
+    std::uint64_t audit_sequence_{0};
     mutable std::mutex mutex_;
 };
 

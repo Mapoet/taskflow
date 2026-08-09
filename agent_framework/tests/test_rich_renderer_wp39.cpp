@@ -16,9 +16,11 @@ class FakeWorker final : public RendererWorker {
 public:
     RendererWorkerResult execute(RenderKind, const std::string&, const RenderLimits&) override {
         ++calls;
+        if (delay.count()) std::this_thread::sleep_for(delay);
         return response;
     }
     int calls{0};
+    std::chrono::milliseconds delay{0};
     RendererWorkerResult response{true, false, tiny_png(), "image/png", {}};
 };
 }
@@ -26,6 +28,7 @@ public:
 int main(int argc, char** argv) {
     // The same binary acts as the controlled worker for direct exec/no-shell verification.
     if (argc > 1) {
+        if (argc > 2 && std::string(argv[2]) == "exit-early") return 3;
         if (argc > 2 && std::string(argv[2]) == "sleep")
             std::this_thread::sleep_for(std::chrono::milliseconds(250));
         const auto bytes = tiny_png();
@@ -45,7 +48,9 @@ int main(int argc, char** argv) {
     assert(unavailable.diagnostic_code == "renderer_unavailable");
 
     auto fake = std::make_shared<FakeWorker>();
-    RendererRegistry registry(artifacts, {"plain", "mermaid-fake", "latex-fake"});
+    auto audit = std::make_shared<TestAuditSink>();
+    RendererRegistry registry(artifacts, {"plain", "mermaid-fake", "latex-fake"}, audit,
+                              AuditLatencyPolicy({{"renderer", 1}}));
     registry.register_renderer(std::make_shared<WorkerRenderer>(
         "mermaid-fake", RenderKind::Mermaid, fake));
     registry.register_renderer(std::make_shared<WorkerRenderer>(
@@ -57,6 +62,14 @@ int main(int argc, char** argv) {
     assert(rendered.artifact->citation_id == "citation-1");
     assert(artifacts->resolve(rendered.artifact->relative_path));
     assert(!artifacts->resolve("../outside.png"));
+    fake->delay = std::chrono::milliseconds(3);
+    const auto slow = registry.render(mermaid);
+    assert(slow.status == RenderStatus::Rendered && slow.latency_ms >= 1);
+    const auto audit_events = audit->events_for_trace("trace");
+    assert(audit_events.size() == 2);
+    assert(audit_events.back().event_kind == "renderer_slow");
+    assert(audit_events.back().payload.find("source") == audit_events.back().payload.end());
+    fake->delay = std::chrono::milliseconds(0);
 
     const int before_malicious = fake->calls;
     auto malicious = mermaid;
@@ -94,10 +107,25 @@ int main(int argc, char** argv) {
         "mermaid-timeout", RenderKind::Mermaid,
         std::make_shared<SubprocessRendererWorker>(self, std::vector<std::string>{"sleep"})));
     auto timeout_request = mermaid;
+    // Exceed the deliberately small socket buffer: the parent must multiplex
+    // input and output under the same deadline even when the worker never reads.
+    timeout_request.source.assign(32 * 1024, 'A');
     timeout_request.limits.timeout = std::chrono::milliseconds(20);
     const auto timed_out = timeout_registry.render(timeout_request);
     assert(timed_out.status == RenderStatus::Fallback);
     assert(timed_out.diagnostic_code == "renderer_timeout");
+
+    // A worker exiting without reading stdin must not SIGPIPE the host.
+    RendererRegistry early_exit_registry(artifacts, {"plain", "mermaid-exit-early"});
+    early_exit_registry.register_renderer(std::make_shared<WorkerRenderer>(
+        "mermaid-exit-early", RenderKind::Mermaid,
+        std::make_shared<SubprocessRendererWorker>(self,
+            std::vector<std::string>{"exit-early"})));
+    auto large_request = mermaid;
+    large_request.source.assign(32 * 1024, 'A');
+    const auto early_exit = early_exit_registry.render(large_request);
+    assert(early_exit.status == RenderStatus::Fallback);
+    assert(early_exit.diagnostic_code == "worker_failed");
 #endif
 
     UiPresentationModel model;

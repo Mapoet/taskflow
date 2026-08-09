@@ -110,6 +110,8 @@ flowchart LR
 
 ### WP3.6 — OAuth Device Flow 与认证刷新
 
+**实施状态（2026-08-09）**：`[x]`。已落地 RFC 8628 状态机、加密文件 credential store、并发 single-flight refresh、401 单次重试、SSE 重连换 token，以及按 route 配置的 issuer/audience/scope AuthGate。离线证据：`token_provider_wp36`、`oauth_retry_wp36`、`oauth_sse_wp36`、`auth_gate`。
+
 **目的**：在现有 Bearer/API key 之外提供可测试的外部身份集成。
 
 - 定义 `TokenProvider` 与 `CredentialStore` 接口；内存 fake、受保护本地文件实现，禁止把 refresh token 放在日志或 URL。
@@ -120,6 +122,8 @@ flowchart LR
 **验收**：过期 token 自动刷新一次；刷新失败不泄露 token；SSE 重连携带新 token；Bearer/API key 兼容不回归。
 
 ### WP3.7 — 工具副作用日志与 in-flight reconciliation
+
+**实施状态（2026-08-09）**：`[x]`。已落地 fsync JSONL WAL、严格状态迁移、重启恢复、replay/lookup/manual-review/fail-closed 策略，并接入 `GraphExecutor` 的调用前/完成后/session commit 边界。端到端证据：`tool_effect_journal_wp37` 与 `tool_effect_graph_wp37`；后者证明重复写不再 dispatch，缺少幂等键的写进入人工复核。
 
 **目的**：补齐“工具已经执行、进程在 session commit 前崩溃”的 exactly-once 边界。
 
@@ -132,6 +136,8 @@ flowchart LR
 
 ### WP3.8 — 统一可观测性、审计与性能告警
 
+**实施状态（2026-08-09）**：`[x]`。已落地 schema v2、stderr/JSONL/composite/test sinks、递归 redaction、trace 排序重放、payload digest、source/A2A sequence 字段和环境阈值。`GraphExecutor` 产生同 trace 的 tool/checkpoint/completion 事件；renderer 已接入 latency policy 并发出 `renderer_slow`。证据：`audit_wp38`、`tool_effect_graph_wp37`、`rich_renderer_wp39`。
+
 **目的**：把现有 ExecutionEvent 变成可检索的生产诊断面。
 
 - 定义 `AuditEvent` schema：ts、trace_id、tenant/session/task/attempt、component、capability revision、latency、outcome、error code、payload digest。
@@ -143,6 +149,8 @@ flowchart LR
 
 ### WP3.9 — 富 UI 可选渲染后端
 
+**实施状态（2026-08-09）**：`[x]`。已落地 plain/Mermaid/LaTex renderer abstraction、build flag/runtime allowlist、输入与复杂度限制、受控无 shell 子进程、CPU/内存/文件/输出/超时限制、content-addressed artifact store、统一 citation 字段和安全 fallback。默认 `AGENT_BUILD_RICH_RENDERERS=OFF`，因此离线构建无 Node/Kroki 依赖；Web 本地 Mermaid/KaTeX 成功态已用真实 demo 截图验证。
+
 **目的**：为 TUI/Web/ImGui 提供安全、缓存化的 Markdown 扩展视觉输出。
 
 - 新增 renderer abstraction：plain fallback、Mermaid、LaTex/math；后端由 build flag + runtime allowlist 选择。
@@ -151,6 +159,8 @@ flowchart LR
 - 实际 GUI/Web 验收必须采集真实运行截图并比较关键状态（加载、成功、失败、fallback）。
 
 **验收**：无渲染后端时纯文本不退化；恶意 Mermaid/LaTex 输入受限；三个 UI 至少一个真实运行链路通过截图验证。
+
+真实运行证据：[WP3.9 Web artifact 成功态](../assets/ui/phase3-wp39-web-artifact-success.png)。启动时显式设置 `AGENT_FS_ROOT`；截图中同时可见 Markdown 表格/代码、KaTeX、Mermaid、三个 Completed 工具事件和已加载的 PNG artifact。
 
 ## 4. 推荐 PR 顺序与依赖
 

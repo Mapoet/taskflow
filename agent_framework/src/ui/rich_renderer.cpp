@@ -16,6 +16,7 @@
 #include <poll.h>
 #include <signal.h>
 #include <sys/resource.h>
+#include <sys/socket.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -132,15 +133,28 @@ RendererWorkerResult SubprocessRendererWorker::execute(
     return {false, false, {}, {}, "subprocess_renderer_unsupported"};
 #else
     int input_pipe[2]{-1, -1}, output_pipe[2]{-1, -1};
-    if (::pipe(input_pipe) != 0 || ::pipe(output_pipe) != 0)
+    // A socket input channel allows MSG_NOSIGNAL: a worker that exits before
+    // reading its input must degrade this render, never terminate the host.
+    if (::socketpair(AF_UNIX, SOCK_STREAM, 0, input_pipe) != 0)
         return {false, false, {}, {}, "worker_pipe_failed"};
+    const int input_buffer_bytes = 16 * 1024;
+    (void)::setsockopt(input_pipe[1], SOL_SOCKET, SO_SNDBUF,
+                       &input_buffer_bytes, sizeof(input_buffer_bytes));
+    if (::pipe(output_pipe) != 0) {
+        ::close(input_pipe[0]); ::close(input_pipe[1]);
+        return {false, false, {}, {}, "worker_pipe_failed"};
+    }
     const pid_t child = ::fork();
-    if (child < 0) return {false, false, {}, {}, "worker_fork_failed"};
+    if (child < 0) {
+        ::close(input_pipe[0]); ::close(input_pipe[1]);
+        ::close(output_pipe[0]); ::close(output_pipe[1]);
+        return {false, false, {}, {}, "worker_fork_failed"};
+    }
     if (child == 0) {
         (void)::dup2(input_pipe[0], STDIN_FILENO);
         (void)::dup2(output_pipe[1], STDOUT_FILENO);
         const int null_fd = ::open("/dev/null", O_WRONLY);
-        if (null_fd >= 0) (void)::dup2(null_fd, STDERR_FILENO);
+        if (null_fd >= 0) { (void)::dup2(null_fd, STDERR_FILENO); ::close(null_fd); }
         ::close(input_pipe[0]); ::close(input_pipe[1]);
         ::close(output_pipe[0]); ::close(output_pipe[1]);
         struct rlimit memory{256U * 1024U * 1024U, 256U * 1024U * 1024U};
@@ -160,20 +174,28 @@ RendererWorkerResult SubprocessRendererWorker::execute(
         ::_exit(127);
     }
     ::close(input_pipe[0]); ::close(output_pipe[1]);
-    std::size_t offset = 0;
-    while (offset < source.size()) {
-        const auto count = ::write(input_pipe[1], source.data() + offset, source.size() - offset);
-        if (count < 0) { if (errno == EINTR) continue; break; }
-        offset += static_cast<std::size_t>(count);
-    }
-    ::close(input_pipe[1]);
+    (void)::fcntl(input_pipe[1], F_SETFL, O_NONBLOCK);
     (void)::fcntl(output_pipe[0], F_SETFL, O_NONBLOCK);
+    std::size_t offset = 0;
+    bool input_closed = false;
     const auto deadline = std::chrono::steady_clock::now() + limits.timeout;
     std::string bytes;
     int status = 0;
     bool exited = false, too_large = false;
     std::array<char, 8192> buffer{};
     while (std::chrono::steady_clock::now() < deadline) {
+        while (!input_closed && offset < source.size()) {
+            const auto count = ::send(input_pipe[1], source.data() + offset,
+                                      source.size() - offset, MSG_NOSIGNAL);
+            if (count > 0) offset += static_cast<std::size_t>(count);
+            else if (count < 0 && errno == EINTR) continue;
+            else if (count < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) break;
+            else { ::close(input_pipe[1]); input_closed = true; }
+        }
+        if (!input_closed && offset == source.size()) {
+            ::close(input_pipe[1]);
+            input_closed = true;
+        }
         for (;;) {
             const auto count = ::read(output_pipe[0], buffer.data(), buffer.size());
             if (count > 0) {
@@ -184,9 +206,12 @@ RendererWorkerResult SubprocessRendererWorker::execute(
         if (too_large) break;
         const auto waited = ::waitpid(child, &status, WNOHANG);
         if (waited == child) { exited = true; break; }
-        struct pollfd descriptor{output_pipe[0], POLLIN, 0};
-        (void)::poll(&descriptor, 1, 20);
+        std::array<struct pollfd, 2> descriptors{{
+            {output_pipe[0], POLLIN, 0},
+            {input_closed ? -1 : input_pipe[1], POLLOUT, 0}}};
+        (void)::poll(descriptors.data(), descriptors.size(), 20);
     }
+    if (!input_closed) ::close(input_pipe[1]);
     if (!exited) { (void)::kill(child, SIGKILL); (void)::waitpid(child, &status, 0); }
     for (;;) {
         const auto count = ::read(output_pipe[0], buffer.data(), buffer.size());
@@ -231,8 +256,11 @@ RenderResult WorkerRenderer::render(const RenderRequest& request, ArtifactStore&
 }
 
 RendererRegistry::RendererRegistry(std::shared_ptr<ArtifactStore> artifacts,
-                                   std::set<std::string> allowlist)
-    : artifacts_(std::move(artifacts)), allowlist_(std::move(allowlist)) {
+                                   std::set<std::string> allowlist,
+                                   std::shared_ptr<AuditSink> audit_sink,
+                                   AuditLatencyPolicy latency_policy)
+    : artifacts_(std::move(artifacts)), allowlist_(std::move(allowlist)),
+      audit_sink_(std::move(audit_sink)), latency_policy_(std::move(latency_policy)) {
     if (!artifacts_) throw std::invalid_argument("renderer registry requires artifact store");
     allowlist_.insert("plain");
     renderers_[RenderKind::Plain] = std::make_shared<PlainRenderer>();
@@ -288,15 +316,55 @@ RenderResult RendererRegistry::fallback(const RenderRequest& request, std::strin
     result.diagnostic_code = std::move(diagnostic);
     return result;
 }
+void RendererRegistry::audit(const RenderRequest& request, const RenderResult& result) {
+    if (!audit_sink_) return;
+    AuditEvent event;
+    event.timestamp = audit_timestamp_now();
+    event.trace_id = request.trace_id;
+    event.component = "renderer";
+    event.event_kind = latency_policy_.is_slow("renderer", result.latency_ms)
+        ? "renderer_slow" : "renderer_completed";
+    event.capability_id = "renderer:" + result.backend;
+    event.outcome = result.status == RenderStatus::Rendered || result.status == RenderStatus::Plain
+        ? "success" : "fallback";
+    event.error_code = result.diagnostic_code;
+    event.sequence = ++audit_sequence_;
+    event.latency_ms = result.latency_ms;
+    event.payload = {{"kind", render_kind_name(request.kind)},
+                     {"backend", result.backend},
+                     {"status", static_cast<int>(result.status)},
+                     {"source_bytes", request.source.size()}};
+    event.payload = redact_audit_payload(std::move(event.payload));
+    event.payload_digest = audit_payload_digest(event.payload);
+    audit_sink_->write(event);
+}
 RenderResult RendererRegistry::render(const RenderRequest& request) {
     std::lock_guard<std::mutex> lock(mutex_);
-    if (const auto error = validate(request)) return fallback(request, *error);
+    if (const auto error = validate(request)) {
+        auto result = fallback(request, *error);
+        audit(request, result);
+        return result;
+    }
     const auto it = renderers_.find(request.kind);
-    if (it == renderers_.end()) return fallback(request, "renderer_unavailable");
-    if (!allowlist_.contains(it->second->name())) return fallback(request, "renderer_disabled");
+    if (it == renderers_.end()) {
+        auto result = fallback(request, "renderer_unavailable");
+        audit(request, result);
+        return result;
+    }
+    if (!allowlist_.contains(it->second->name())) {
+        auto result = fallback(request, "renderer_disabled");
+        audit(request, result);
+        return result;
+    }
     auto result = it->second->render(request, *artifacts_);
-    if (result.status != RenderStatus::Rendered && result.status != RenderStatus::Plain)
-        return fallback(request, result.diagnostic_code.empty() ? "renderer_failed" : result.diagnostic_code);
+    if (result.status != RenderStatus::Rendered && result.status != RenderStatus::Plain) {
+        auto degraded = fallback(request,
+            result.diagnostic_code.empty() ? "renderer_failed" : result.diagnostic_code);
+        degraded.backend = result.backend;
+        degraded.latency_ms = result.latency_ms;
+        result = std::move(degraded);
+    }
+    audit(request, result);
     return result;
 }
 
