@@ -17,6 +17,8 @@
   const MAX_MERMAID_NODES = 256;
   const MAX_MATH_BYTES = 4096;
   const RENDER_TIMEOUT_MS = 2000;
+  const initialQuery = new URLSearchParams(window.location.search);
+  const screenshotMode = initialQuery.get("screenshot") === "1" || initialQuery.get("view") === "operations";
   let activeAssistant = null;
   let busy = false;
   let turnCount = 0;
@@ -233,6 +235,97 @@
     turn.artifacts.append(figure); scrollConversation();
   }
 
+  function statusLabel(value) { const v = text(value || "unknown"); return v.charAt(0).toUpperCase() + v.slice(1); }
+  function statusNode(value) {
+    const span = document.createElement("span"); span.className = "ops-state";
+    span.dataset.state = text(value || "unknown"); span.textContent = statusLabel(value); return span;
+  }
+  function cell(row, value) {
+    const td = document.createElement("td");
+    if (value instanceof Node) td.append(value); else td.textContent = text(value);
+    row.append(td); return td;
+  }
+  function renderOperations(snapshot) {
+    if (!snapshot || snapshot.schema_version !== "phase4.operations.v1") return;
+    $("ops-empty").hidden = true; $("ops-content").hidden = false;
+    $("operations-badge").textContent = statusLabel(snapshot.overall_status);
+    $("operations-badge").dataset.state = text(snapshot.overall_status);
+    $("ops-status").replaceChildren(statusNode(snapshot.overall_status));
+    $("ops-updated").textContent = text(snapshot.updated_at || "—");
+    $("ops-revision").textContent = "r" + Number(snapshot.plan_revision || 0);
+    $("ops-run").textContent = text(snapshot.run_id || "—");
+    $("ops-evidence-count").textContent = String((snapshot.evidence || []).length);
+    $("ops-risk").textContent = text(snapshot.residual_risk || "No residual risk recorded");
+    $("ops-live").textContent = text(snapshot.live_certification || "Unknown");
+    $("ops-blocker").textContent = text(snapshot.blocker || "No blocker");
+    $("ops-summary").textContent = text(snapshot.summary || "");
+
+    const stages = $("ops-stages"); stages.replaceChildren();
+    (snapshot.stages || []).forEach(function (stage, index) {
+      const card = document.createElement("article"); card.className = "stage-card"; card.dataset.state = text(stage.status);
+      const order = document.createElement("span"); order.className = "stage-order"; order.textContent = String(index + 1).padStart(2, "0");
+      const body = document.createElement("div"); const head = document.createElement("div"); head.className = "stage-head";
+      const title = document.createElement("b"); title.textContent = text(stage.label); head.append(title, statusNode(stage.status));
+      const meta = document.createElement("small"); meta.textContent = text(stage.role || "system") + " · revision " + Number(stage.revision || 0) + " · " + (stage.evidence_ids || []).length + " evidence";
+      const summary = document.createElement("p"); summary.textContent = text(stage.summary || "No displayable summary");
+      body.append(head, meta, summary); card.append(order, body); stages.append(card);
+    });
+
+    const memory = $("ops-memory"); memory.replaceChildren();
+    (snapshot.memory || []).forEach(function (item) {
+      const row = document.createElement("tr"); const source = document.createElement("div");
+      const scope = document.createElement("b"); scope.textContent = text(item.scope);
+      const small = document.createElement("small"); small.textContent = text(item.source); source.append(scope, small);
+      cell(row, source); cell(row, item.authority); cell(row, item.freshness);
+      const decision = document.createElement("div"); decision.append(statusNode(item.selected ? "passed" : "unknown"));
+      const reason = document.createElement("small"); reason.textContent = (item.selected ? "selected · " : "excluded · ") + text(item.selection_reason); decision.append(reason); cell(row, decision); memory.append(row);
+    });
+
+    const assurance = $("ops-assurance"); assurance.replaceChildren();
+    (snapshot.assurance || []).forEach(function (layer) {
+      const row = document.createElement("div"); row.className = "assurance-row"; const name = document.createElement("div");
+      const b = document.createElement("b"); b.textContent = text(layer.label); const small = document.createElement("small");
+      small.textContent = text(layer.oracle || "no oracle") + " · " + text(layer.verifier || "no verifier");
+      name.append(b, small); row.append(name, statusNode(layer.status)); assurance.append(row);
+    });
+
+    const invocations = $("ops-invocations"); invocations.replaceChildren();
+    (snapshot.invocations || []).forEach(function (item) {
+      const row = document.createElement("tr"); const who = document.createElement("div");
+      const b = document.createElement("b"); b.textContent = text(item.role); const small = document.createElement("small"); small.textContent = text(item.provider) + " / " + text(item.model); who.append(b, small);
+      cell(row, who); cell(row, text(item.prompt_version) + "\n" + text(item.view_id));
+      cell(row, Number(item.input_tokens || 0).toLocaleString() + " / " + Number(item.output_tokens || 0).toLocaleString());
+      cell(row, "$" + Number(item.cost_usd || 0).toFixed(4)); cell(row, Number(item.latency_ms || 0).toLocaleString() + " ms"); cell(row, statusNode(item.status)); invocations.append(row);
+    });
+
+    const hitl = $("ops-hitl"); hitl.replaceChildren();
+    (snapshot.hitl || []).forEach(function (request) {
+      const card = document.createElement("article"); card.className = "hitl-card"; const body = document.createElement("div");
+      const head = document.createElement("div"); head.className = "hitl-head"; const title = document.createElement("b"); title.textContent = text(request.kind).replaceAll("_", " "); head.append(title, statusNode(request.status));
+      const summary = document.createElement("p"); summary.textContent = text(request.summary); const meta = document.createElement("small"); meta.textContent = "Requested by " + text(request.requested_by || "system") + " · due " + text(request.deadline || "not set"); body.append(head, summary, meta);
+      const actions = document.createElement("div"); actions.className = "hitl-actions";
+      (request.allowed_actions || []).forEach(function (action) { const button = document.createElement("button"); button.type = "button"; button.textContent = text(action).replaceAll("_", " "); button.addEventListener("click", function () { submitHitl(request.id, action, button); }); actions.append(button); });
+      card.append(body, actions); hitl.append(card);
+    });
+  }
+
+  async function submitHitl(requestId, action, button) {
+    button.disabled = true; $("hitl-feedback").textContent = "Submitting accountable decision…";
+    try {
+      const response = await fetch("/ui/operations/hitl", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ request_id: requestId, action }) });
+      if (!response.ok) throw new Error(await response.text());
+      $("hitl-feedback").textContent = "Decision recorded and snapshot refreshed";
+    } catch (error) { $("hitl-feedback").textContent = "Decision not applied: " + text(error.message || error); }
+    finally { button.disabled = false; }
+  }
+
+  function setWorkspace(view) {
+    const ops = view === "operations"; $("conversation-view").hidden = ops; $("operations-view").hidden = !ops; composer.hidden = ops;
+    $("clear-button").hidden = ops;
+    $("conversation-tab").classList.toggle("selected", !ops); $("operations-tab").classList.toggle("selected", ops);
+    $("conversation-tab").setAttribute("aria-selected", String(!ops)); $("operations-tab").setAttribute("aria-selected", String(ops));
+  }
+
   function handleAux(o) {
     const type = text(o.type); const payload = o.payload || {};
     if (type === "runtime") {
@@ -251,7 +344,8 @@
       $("skills-active").textContent = text(payload.active || "-");
       $("skills-root").textContent = enabled ? text(payload.root || "Unknown root") : "Skills disabled";
       $("skills-health").dataset.state = enabled && Number(payload.errors || 0) ? "error" : enabled ? "ready" : "off";
-    } else if (type === "user_turn" || type === "demo_user") {
+    } else if (type === "phase4_operations") renderOperations(payload);
+    else if (type === "user_turn" || type === "demo_user") {
       addTurn("user", payload.content || payload.prompt || "", false); setBusy(true);
     } else if (type === "tool_started" || type === "tool_completed") updateTool(type, payload);
     else if (type === "artifact") addArtifact(payload);
@@ -263,10 +357,7 @@
     }
   }
 
-  const es = new EventSource("/ui/sse?session=default");
-  es.onopen = function () { setConnection("Connected", "connected"); setStatus("Event stream connected"); };
-  es.onerror = function () { setConnection("Reconnecting", "error"); setStatus("Event stream interrupted; reconnecting…"); };
-  es.onmessage = function (ev) {
+  function handleServerEvent(ev) {
     let o; try { o = JSON.parse(ev.data); } catch (_) { return; }
     if (o.kind === "token" && typeof o.content === "string") {
       const turn = ensureAssistant(); turn.rawAnswer += o.content; scheduleRender(turn, false);
@@ -283,7 +374,16 @@
       else addTurn("system", message, false);
       finishAssistant(); setBusy(false); setRunState("failed"); setStatus("Run failed");
     } else if (o.kind === "aux") handleAux(o);
-  };
+  }
+  if (!screenshotMode) {
+    const es = new EventSource("/ui/sse?session=default");
+    es.onopen = function () { setConnection("Connected", "connected"); setStatus("Event stream connected"); };
+    es.onerror = function () { setConnection("Reconnecting", "error"); setStatus("Event stream interrupted; reconnecting…"); };
+    es.onmessage = handleServerEvent;
+  } else {
+    fetch("/ui/operations/snapshot").then(function (response) { return response.json(); })
+      .then(function (snapshot) { renderOperations(snapshot); setConnection("Snapshot", "connected"); setStatus("Deterministic screenshot state loaded"); });
+  }
 
   async function submitPrompt(prompt) {
     addTurn("user", prompt, false); activeAssistant = null; setBusy(true); setStatus("Submitting task…");
@@ -302,6 +402,8 @@
     finally { stopBtn.disabled = false; }
   });
   $("clear-button").addEventListener("click", function () { conversation.replaceChildren(); tools.clear(); activityList.replaceChildren(); activeAssistant = null; turnCount = 0; updateCounts(); });
+  $("conversation-tab").addEventListener("click", function () { setWorkspace("conversation"); });
+  $("operations-tab").addEventListener("click", function () { setWorkspace("operations"); });
   $("rail-toggle").addEventListener("click", function () { $("left-rail").classList.toggle("open"); });
   $("activity-close").addEventListener("click", function () { $("activity-panel").classList.remove("open"); });
   $("command-button").addEventListener("click", function () { $("command-dialog").showModal(); $("command-input").focus(); });
@@ -309,5 +411,8 @@
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") { event.preventDefault(); $("command-dialog").showModal(); $("command-input").focus(); }
     if ((event.ctrlKey || event.metaKey) && event.key === ".") { event.preventDefault(); stopBtn.click(); }
   });
-  updateCounts(); promptEl.focus();
+  updateCounts();
+  if (initialQuery.get("view") === "operations")
+    setWorkspace("operations");
+  else promptEl.focus();
 })();

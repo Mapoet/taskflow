@@ -14,8 +14,10 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cstdlib>
 #include <mutex>
 #include <thread>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -39,6 +41,19 @@ Color state_color(UiRunState state) {
         case UiRunState::Failed: return Color::Red;
         case UiRunState::Cancelled: return Color::Magenta;
         case UiRunState::Idle: return Color::GrayLight;
+    }
+    return Color::GrayLight;
+}
+
+Color operations_color(OperationsStatus state) {
+    switch (state) {
+        case OperationsStatus::Passed: return Color::Green;
+        case OperationsStatus::Running: return Color::Yellow;
+        case OperationsStatus::Warning: return Color::YellowLight;
+        case OperationsStatus::Blocked:
+        case OperationsStatus::Failed: return Color::Red;
+        case OperationsStatus::Pending: return Color::BlueLight;
+        case OperationsStatus::Unknown: return Color::GrayLight;
     }
     return Color::GrayLight;
 }
@@ -83,6 +98,55 @@ Elements activity_rows(const UiPresentationSnapshot& snapshot) {
         if (!tool.result.empty()) rows.push_back(paragraph("result  " + truncate(tool.result.dump())));
         rows.push_back(separatorEmpty());
     }
+    return rows;
+}
+
+Elements operations_rows(const UiPresentationSnapshot& snapshot) {
+    Elements rows;
+    if (!snapshot.has_operations) {
+        rows.push_back(paragraph("No Phase 4 operations snapshot has been published.") | color(kMuted));
+        return rows;
+    }
+    const auto& ops = snapshot.operations;
+    rows.push_back(hbox({text(" " + std::string(Phase4OperationsProjection::status_name(ops.overall_status)) + " ") |
+                            bold | color(operations_color(ops.overall_status)),
+                        text(" run " + ops.run_id + " · plan r" + std::to_string(ops.plan_revision)) | color(kMuted)}));
+    rows.push_back(paragraph(ops.summary));
+    if (!ops.blocker.empty()) rows.push_back(paragraph("BLOCKER  " + ops.blocker) | bold | color(Color::RedLight));
+    if (!ops.residual_risk.empty()) rows.push_back(paragraph("RESIDUAL RISK  " + ops.residual_risk) | color(Color::YellowLight));
+    rows.push_back(separator());
+    rows.push_back(text("PLAN / EVIDENCE") | bold | color(kAccent));
+    for (const auto& stage : ops.stages) {
+        rows.push_back(hbox({text("[" + std::string(Phase4OperationsProjection::status_name(stage.status)) + "] ") |
+                                bold | color(operations_color(stage.status)),
+                            text(stage.label + "  r" + std::to_string(stage.revision)) | bold,
+                            text("  " + stage.role) | color(kMuted)}));
+        rows.push_back(paragraph("  " + stage.summary + " · evidence " + std::to_string(stage.evidence_ids.size())));
+    }
+    rows.push_back(separator());
+    rows.push_back(text("MEMORY VIEW") | bold | color(kAccent));
+    for (const auto& memory : ops.memory) {
+        rows.push_back(paragraph(std::string(memory.selected ? "selected  " : "excluded  ") +
+                                 memory.scope + " · " + memory.source + " · " + memory.authority +
+                                 " · " + memory.freshness + " · " + memory.selection_reason) |
+                       color(memory.selected ? Color::GreenLight : kMuted));
+    }
+    rows.push_back(separator());
+    rows.push_back(text("LLM INVOCATIONS") | bold | color(kAccent));
+    for (const auto& invocation : ops.invocations) {
+        rows.push_back(paragraph(invocation.role + " · " + invocation.provider + "/" + invocation.model +
+                                 " · " + invocation.prompt_version + " · " + invocation.view_id +
+                                 " · " + std::to_string(invocation.latency_ms) + " ms · " +
+                                 Phase4OperationsProjection::status_name(invocation.status)));
+    }
+    rows.push_back(separator());
+    rows.push_back(text("FIVE-LAYER ASSURANCE") | bold | color(kAccent));
+    for (const auto& layer : ops.assurance)
+        rows.push_back(hbox({text("[" + std::string(Phase4OperationsProjection::status_name(layer.status)) + "] ") |
+                                color(operations_color(layer.status)), text(layer.label + " · " + layer.oracle + " · " + layer.verifier)}));
+    for (const auto& request : ops.hitl)
+        rows.push_back(paragraph("HITL " + request.kind + " · " + request.summary + " · actions " +
+                                 std::to_string(request.allowed_actions.size())) | bold | color(Color::YellowLight));
     return rows;
 }
 
@@ -131,6 +195,7 @@ struct RenderState {
     int active_tab{1};
     float conversation_scroll{1.0F};
     float activity_scroll{1.0F};
+    float operations_scroll{0.0F};
     Element composer;
 };
 
@@ -151,10 +216,17 @@ Element render_document(RenderState state) {
                                  state.activity_scroll, state.active_tab == 2);
     auto caps = framed_panel("CAPABILITIES", capabilities(state.snapshot, state.skills),
                              0.0F, state.active_tab == 0);
+    auto operations = framed_panel("PHASE 4 OPERATIONS", vbox(operations_rows(state.snapshot)),
+                                   state.operations_scroll, state.active_tab == 3);
 
     Element body;
     std::string layout;
-    if (state.width >= 120) {
+    if (state.active_tab == 3) {
+        body = state.width >= 100
+                   ? hbox({caps | size(WIDTH, EQUAL, 24), operations | flex})
+                   : operations;
+        layout = "operations · canonical control-plane snapshot";
+    } else if (state.width >= 120) {
         body = hbox({caps | size(WIDTH, EQUAL, 24), conversation | flex,
                      activity | size(WIDTH, EQUAL, 40)});
         layout = "wide · three panels";
@@ -164,7 +236,7 @@ Element render_document(RenderState state) {
         layout = "medium · 1/2 conversation · 2/2 activity";
     } else {
         body = state.active_tab == 0 ? caps : state.active_tab == 2 ? activity : conversation;
-        layout = "compact · [1] capabilities  [2] conversation  [3] activity";
+        layout = "compact · [1] capabilities  [2] conversation  [3] activity  [4] operations";
     }
 
     std::string skill_line = state.skills.enabled
@@ -177,7 +249,7 @@ Element render_document(RenderState state) {
                                hbox({text("> ") | bold | color(kAccent), std::move(state.composer) | flex}),
                                hbox({text(skill_line) | color(kMuted), filler(),
                                      text(state.busy ? "RUNNING" : "READY") | bold | color(run_color)}),
-                               text("Enter send · Esc cancel · Ctrl+C quit · 1/2/3 panes · PgUp/PgDn scroll") | color(kMuted),
+                               text("Enter send · Esc cancel · Ctrl+C quit · 1/2/3/4 panes · PgUp/PgDn scroll") | color(kMuted),
                            })) |
                     size(HEIGHT, EQUAL, 5);
     auto footer = hbox({
@@ -198,7 +270,10 @@ struct FtxuiConsoleView::Impl {
          FtxuiConsoleCallbacks callbacks)
         : snapshot_provider(std::move(snapshot_provider)),
           skill_status_provider(std::move(skill_status_provider)),
-          callbacks(std::move(callbacks)) {}
+          callbacks(std::move(callbacks)) {
+        const char* initial = std::getenv("AGENT_UI_INITIAL_VIEW");
+        if (initial && std::string_view(initial) == "operations") active_tab = 3;
+    }
 
     SnapshotProvider snapshot_provider;
     SkillStatusProvider skill_status_provider;
@@ -210,9 +285,10 @@ struct FtxuiConsoleView::Impl {
     int active_tab{1};
     float conversation_scroll{1.0F};
     float activity_scroll{1.0F};
+    float operations_scroll{0.0F};
 
     void scroll(float delta) {
-        float& value = active_tab == 2 ? activity_scroll : conversation_scroll;
+        float& value = active_tab == 3 ? operations_scroll : active_tab == 2 ? activity_scroll : conversation_scroll;
         value = std::clamp(value + delta, 0.0F, 1.0F);
     }
 
@@ -227,6 +303,7 @@ struct FtxuiConsoleView::Impl {
             active_tab,
             conversation_scroll,
             activity_scroll,
+            operations_scroll,
             std::move(input),
         });
     }
@@ -274,6 +351,7 @@ int FtxuiConsoleView::run() {
         if (event == ftxui::Event::Character('1') && impl_->composer.empty()) { impl_->active_tab = 0; return true; }
         if (event == ftxui::Event::Character('2') && impl_->composer.empty()) { impl_->active_tab = 1; return true; }
         if (event == ftxui::Event::Character('3') && impl_->composer.empty()) { impl_->active_tab = 2; return true; }
+        if (event == ftxui::Event::Character('4') && impl_->composer.empty()) { impl_->active_tab = 3; return true; }
         if (event == ftxui::Event::PageUp) { impl_->scroll(-0.15F); return true; }
         if (event == ftxui::Event::PageDown) { impl_->scroll(0.15F); return true; }
         if (event.is_mouse()) {
@@ -319,7 +397,18 @@ std::string FtxuiConsoleView::render_for_test(const UiPresentationSnapshot& snap
     Screen screen = Screen::Create(Dimension::Fixed(width), Dimension::Fixed(height));
     const int active_tab = 1;
     auto document = render_document(RenderState{snapshot, skills, busy, width, height, active_tab,
-                                                 1.0F, 1.0F, text("test input")});
+                                                 1.0F, 1.0F, 0.0F, text("test input")});
+    Render(screen, document);
+    return screen.ToString();
+}
+
+std::string FtxuiConsoleView::render_operations_for_test(const UiPresentationSnapshot& snapshot,
+                                                         const FtxuiSkillStatus& skills,
+                                                         int width,
+                                                         int height) {
+    Screen screen = Screen::Create(Dimension::Fixed(width), Dimension::Fixed(height));
+    auto document = render_document(RenderState{snapshot, skills, false, width, height, 3,
+                                                 1.0F, 1.0F, 0.0F, text("test input")});
     Render(screen, document);
     return screen.ToString();
 }

@@ -5,6 +5,7 @@
 
 #include <agent/ui/ui_manager.hpp>
 #include <agent/ui/presentation_model.hpp>
+#include <agent/ui/phase4_operations.hpp>
 
 #include <cstdlib>
 #include <ctime>
@@ -112,6 +113,8 @@ void ImGuiHandler::handle_aux_event(std::string_view type, const json& payload) 
         return;
     }
     if (presentation_ && type == "artifact") presentation_->observe_artifact(payload);
+    if (presentation_ && type == Phase4OperationsProjection::event_type)
+        presentation_->observe_operations(Phase4OperationsProjection::from_json(payload));
     std::string mt = std::string("aux:") + std::string(type);
     push_message(mt, payload.dump());
 }

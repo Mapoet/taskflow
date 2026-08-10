@@ -10,6 +10,7 @@
 
 #include <agent/core/types.hpp>
 #include <agent/ui/thread_safe_queue.hpp>
+#include <agent/ui/phase4_operations.hpp>
 
 #include <atomic>
 #include <string>
@@ -99,6 +100,7 @@ public:
     void handle_stream_token(std::string_view token) override;
     void handle_final_result(const json& result) override;
     void handle_error(const std::string& error_message) override;
+    void handle_aux_event(std::string_view type, const json& payload) override;
     std::string get_handler_type() const override;
     bool is_active() const override;
 
@@ -248,6 +250,9 @@ public:
      * @param data 数据（JSON 格式）
      */
     void dispatch_message(const std::string& type, const json& data);
+
+    /** Publish the canonical display-safe Phase 4 control-plane projection. */
+    void publish_phase4_operations(const Phase4OperationsSnapshot& snapshot);
 
     /**
      * @brief WP2.U：终稿 JSON 分发到全部 handler（与 Sink 回调对齐）

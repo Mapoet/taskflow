@@ -13,6 +13,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 
 namespace agent_framework::example {
@@ -307,6 +308,96 @@ void render_activity(const UiPresentationSnapshot& s, float width) {
     ImGui::EndChild();
 }
 
+ImVec4 operations_color(OperationsStatus status) {
+    switch (status) {
+        case OperationsStatus::Passed: return kSuccess;
+        case OperationsStatus::Running:
+        case OperationsStatus::Warning: return ImVec4(0.91f, 0.70f, 0.36f, 1.0f);
+        case OperationsStatus::Blocked:
+        case OperationsStatus::Failed: return kDanger;
+        case OperationsStatus::Pending: return kAccent;
+        case OperationsStatus::Unknown: return kMuted;
+    }
+    return kMuted;
+}
+
+void render_operations(const UiPresentationSnapshot& s) {
+    ImGui::BeginChild("##operations", ImVec2(0, 0), true);
+    if (!s.has_operations) {
+        ImGui::TextColored(kAccent, "CONTROL PLANE");
+        ImGui::TextWrapped("No Phase 4 operations snapshot has been published.");
+        ImGui::EndChild();
+        return;
+    }
+    const auto& ops = s.operations;
+    ImGui::TextColored(kAccent, "PHASE 4 OPERATIONS");
+    ImGui::SameLine();
+    ImGui::TextColored(operations_color(ops.overall_status), "%s",
+                       Phase4OperationsProjection::status_name(ops.overall_status));
+    ImGui::SameLine(); ImGui::TextColored(kMuted, "run %s · plan r%llu · %s", ops.run_id.c_str(),
+                                         static_cast<unsigned long long>(ops.plan_revision), ops.updated_at.c_str());
+    ImGui::TextWrapped("%s", ops.summary.c_str());
+    if (!ops.blocker.empty()) ImGui::TextColored(kDanger, "BLOCKER  %s", ops.blocker.c_str());
+    if (!ops.residual_risk.empty()) ImGui::TextColored(operations_color(OperationsStatus::Warning),
+                                                       "RESIDUAL RISK  %s", ops.residual_risk.c_str());
+    ImGui::Separator();
+
+    ImGui::TextColored(kAccent, "PLAN / EVIDENCE");
+    if (ImGui::BeginTable("##ops-stages", 4, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg |
+                                               ImGuiTableFlags_SizingStretchProp)) {
+        ImGui::TableSetupColumn("Stage"); ImGui::TableSetupColumn("Status");
+        ImGui::TableSetupColumn("Role / revision"); ImGui::TableSetupColumn("Displayable summary");
+        ImGui::TableHeadersRow();
+        for (const auto& stage : ops.stages) {
+            ImGui::TableNextRow(); ImGui::TableSetColumnIndex(0); ImGui::TextUnformatted(stage.label.c_str());
+            ImGui::TableSetColumnIndex(1); ImGui::TextColored(operations_color(stage.status), "%s", Phase4OperationsProjection::status_name(stage.status));
+            ImGui::TableSetColumnIndex(2); ImGui::Text("%s / r%llu", stage.role.c_str(), static_cast<unsigned long long>(stage.revision));
+            ImGui::TableSetColumnIndex(3); ImGui::TextWrapped("%s", stage.summary.c_str());
+        }
+        ImGui::EndTable();
+    }
+
+    const float half = std::max(300.0f, (ImGui::GetContentRegionAvail().x - 8.0f) * 0.5f);
+    ImGui::BeginChild("##ops-memory", ImVec2(half, 260), true);
+    ImGui::TextColored(kAccent, "MEMORY VIEW · CONTENT HIDDEN");
+    for (const auto& item : ops.memory) {
+        ImGui::TextColored(item.selected ? kSuccess : kMuted, "%s  %s", item.selected ? "selected" : "excluded", item.scope.c_str());
+        ImGui::SameLine(); ImGui::TextWrapped("%s · %s · %s", item.source.c_str(), item.authority.c_str(), item.freshness.c_str());
+        ImGui::TextColored(kMuted, "%s", item.selection_reason.c_str()); ImGui::Separator();
+    }
+    ImGui::EndChild(); ImGui::SameLine();
+    ImGui::BeginChild("##ops-assurance", ImVec2(0, 260), true);
+    ImGui::TextColored(kAccent, "FIVE-LAYER ASSURANCE");
+    for (const auto& layer : ops.assurance) {
+        ImGui::TextColored(operations_color(layer.status), "%s", Phase4OperationsProjection::status_name(layer.status));
+        ImGui::SameLine(); ImGui::TextWrapped("%s", layer.label.c_str());
+        ImGui::TextColored(kMuted, "%s · %s", layer.oracle.c_str(), layer.verifier.c_str()); ImGui::Separator();
+    }
+    ImGui::EndChild();
+
+    ImGui::TextColored(kAccent, "LLM INVOCATIONS · PROMPT BODY AND SECRETS EXCLUDED");
+    if (ImGui::BeginTable("##ops-invocations", 6, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg |
+                                                   ImGuiTableFlags_SizingStretchProp)) {
+        for (const char* name : {"Role / model", "Prompt / view", "Tokens", "Cost", "Latency", "Status"}) ImGui::TableSetupColumn(name);
+        ImGui::TableHeadersRow();
+        for (const auto& item : ops.invocations) {
+            ImGui::TableNextRow(); ImGui::TableSetColumnIndex(0); ImGui::TextWrapped("%s\n%s / %s", item.role.c_str(), item.provider.c_str(), item.model.c_str());
+            ImGui::TableSetColumnIndex(1); ImGui::TextWrapped("%s\n%s", item.prompt_version.c_str(), item.view_id.c_str());
+            ImGui::TableSetColumnIndex(2); ImGui::Text("%llu / %llu", static_cast<unsigned long long>(item.input_tokens), static_cast<unsigned long long>(item.output_tokens));
+            ImGui::TableSetColumnIndex(3); ImGui::Text("$%.4f", item.cost_usd);
+            ImGui::TableSetColumnIndex(4); ImGui::Text("%lld ms", static_cast<long long>(item.latency_ms));
+            ImGui::TableSetColumnIndex(5); ImGui::TextColored(operations_color(item.status), "%s", Phase4OperationsProjection::status_name(item.status));
+        }
+        ImGui::EndTable();
+    }
+    for (const auto& request : ops.hitl) {
+        ImGui::Separator(); ImGui::TextColored(operations_color(request.status), "HITL · %s", request.kind.c_str());
+        ImGui::TextWrapped("%s", request.summary.c_str());
+        ImGui::TextColored(kMuted, "Requested by %s · due %s · %zu allowed actions", request.requested_by.c_str(), request.deadline.c_str(), request.allowed_actions.size());
+    }
+    ImGui::EndChild();
+}
+
 } // namespace
 
 void clear_imgui_artifact_textures() {
@@ -349,6 +440,12 @@ ImGuiConsoleAction render_scientific_console(const UiPresentationSnapshot& s,
                  ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
                      ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoSavedSettings);
     render_header(s);
+    static bool select_operations = [] {
+        const char* value = std::getenv("AGENT_UI_INITIAL_VIEW");
+        return value && std::string_view(value) == "operations";
+    }();
+    if (ImGui::BeginTabBar("##workspace-tabs")) {
+    if (ImGui::BeginTabItem("Conversation")) {
     const float avail = ImGui::GetContentRegionAvail().x;
     const bool wide = avail >= 1020.0f;
     const float left = wide ? 218.0f : 0.0f;
@@ -360,6 +457,16 @@ ImGuiConsoleAction render_scientific_console(const UiPresentationSnapshot& s,
     render_conversation(s, action, input, input_size, busy);
     ImGui::EndChild(); ImGui::EndGroup();
     ImGui::SameLine(); render_activity(s, right);
+    ImGui::EndTabItem();
+    }
+    if (ImGui::BeginTabItem("Phase 4 Operations", nullptr,
+                            select_operations ? ImGuiTabItemFlags_SetSelected : ImGuiTabItemFlags_None)) {
+        select_operations = false;
+        render_operations(s);
+        ImGui::EndTabItem();
+    }
+    ImGui::EndTabBar();
+    }
     ImGui::End();
     return action;
 }

@@ -56,6 +56,14 @@ void UIManager::dispatch_message(const std::string& type, const json& data) {
     }
 }
 
+void UIManager::publish_phase4_operations(const Phase4OperationsSnapshot& snapshot) {
+    // Round-trip validation at the UI boundary prevents malformed or unsupported schemas from
+    // reaching individual renderers and guarantees every adapter receives byte-equivalent facts.
+    const json canonical = Phase4OperationsProjection::to_json(snapshot);
+    (void)Phase4OperationsProjection::from_json(canonical);
+    dispatch_message(std::string(Phase4OperationsProjection::event_type), canonical);
+}
+
 void UIManager::dispatch_final_result(const json& result) {
     std::lock_guard<std::mutex> lock(handlers_mutex_);
     for (auto& h : handlers_) {

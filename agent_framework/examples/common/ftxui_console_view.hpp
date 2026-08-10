@@ -48,6 +48,10 @@ public:
                                        bool busy,
                                        int width,
                                        int height);
+    static std::string render_operations_for_test(const UiPresentationSnapshot& snapshot,
+                                                  const FtxuiSkillStatus& skills,
+                                                  int width,
+                                                  int height);
 
 private:
     struct Impl;

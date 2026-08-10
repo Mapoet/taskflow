@@ -1,0 +1,11 @@
+#include <cassert>
+#include <algorithm>
+#include "phase4_live_test_support.hpp"
+int main(){using namespace phase4_live_test;
+    {auto e=environment("task-f7l-skip");auto m=matrix(e);DeterministicExecutor x;x.mutations["memory"]=[](auto&r){r.executed=false;r.outcome=LiveCellOutcome::Inconclusive;r.invocation_id.clear();r.invocation_manifest_digest.clear();r.evidence_digests.clear();};InMemoryRoleCertificationStore s;RoleLiveCertificationWorkflow w(s,x);auto r=w.run(e,m,options("skip"));assert(r.state==RoleCertificationState::Inconclusive&&r.report);assert(std::any_of(r.report->blockers.begin(),r.report->blockers.end(),[](const auto&v){return v.find("required_not_executed:memory")!=std::string::npos;}));}
+    {auto e=environment("task-f7l-identity");auto m=matrix(e);DeterministicExecutor x;x.mutations["judge"]=[](auto&r){r.provider="wrong-provider";};InMemoryRoleCertificationStore s;RoleLiveCertificationWorkflow w(s,x);assert(w.run(e,m,options("identity")).state==RoleCertificationState::Inconclusive);}
+    {auto e=environment("task-f7l-oracle");auto m=matrix(e);DeterministicExecutor x;x.mutations["assurance"]=[](auto&r){r.oracle_digests.clear();r.blind=false;};InMemoryRoleCertificationStore s;RoleLiveCertificationWorkflow w(s,x);assert(w.run(e,m,options("oracle")).state==RoleCertificationState::Inconclusive);}
+    {auto e=environment("task-f7l-recovery");auto m=matrix(e);DeterministicExecutor x;x.mutations["recovery-timeout"]=[](auto&r){r.recovered=false;};InMemoryRoleCertificationStore s;RoleLiveCertificationWorkflow w(s,x);assert(w.run(e,m,options("recovery")).state==RoleCertificationState::Inconclusive);}
+    {auto e=environment("task-f7l-expiry");e.expires_at="2026-08-09T00:00:00Z";auto m=matrix(e);DeterministicExecutor x;InMemoryRoleCertificationStore s;RoleLiveCertificationWorkflow w(s,x);assert(w.run(e,m,options("expiry")).state==RoleCertificationState::Inconclusive);}
+    {auto e=environment("task-f7l-signature");auto m=matrix(e);DeterministicExecutor x;InMemoryRoleCertificationStore s;RoleLiveCertificationWorkflow w(s,x);auto o=options("signature");o.signature_verifier=[](const auto&){return false;};assert(w.run(e,m,o).state==RoleCertificationState::Inconclusive);}
+    return 0;}

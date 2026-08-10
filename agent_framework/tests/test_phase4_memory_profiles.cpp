@@ -66,6 +66,8 @@ int main() {
            memory_v2::MemoryViewMode::Execution);
     assert(router.route(memory_v2::MemoryViewMode::Execution, "verification_started") ==
            memory_v2::MemoryViewMode::Verification);
+    assert(router.route(memory_v2::MemoryViewMode::Verification, "evaluation_started") ==
+           memory_v2::MemoryViewMode::Evaluation);
     assert(!router.route(memory_v2::MemoryViewMode::Execution, "unknown_event"));
 
     auto wrong_tenant = query;

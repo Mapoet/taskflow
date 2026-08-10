@@ -35,6 +35,15 @@ int main() {
     assert(wide.find("RUNNING") != std::string::npos);
     assert(wide.find("wide") != std::string::npos);
 
+    const std::string operations =
+        FtxuiConsoleView::render_operations_for_test(snapshot, skills, 160, 96);
+    assert(operations.find("PHASE 4 OPERATIONS") != std::string::npos);
+    assert(operations.find("PLAN / EVIDENCE") != std::string::npos);
+    assert(operations.find("MEMORY VIEW") != std::string::npos);
+    assert(operations.find("LLM INVOCATIONS") != std::string::npos);
+    assert(operations.find("FIVE-LAYER ASSURANCE") != std::string::npos);
+    assert(operations.find("HITL") != std::string::npos);
+
     const std::string medium = FtxuiConsoleView::render_for_test(snapshot, skills, false, 100, 30);
     assert(medium.find("CAPABILITIES") != std::string::npos);
     assert(medium.find("CONVERSATION") != std::string::npos);

@@ -203,6 +203,7 @@ int main(int argc, char** argv) {
     int max_iterations = -1;
     bool verbose = false;
     bool mock = false;
+    bool demo_state = false;
     bool no_cursor_mcp = false;
     app.add_flag("-v,--verbose", verbose, "Same as AGENT_LOG_LEVEL=debug for this process");
     app.add_option("-p,--prompt", prompt_arg, "Single-turn user message; then exit");
@@ -214,6 +215,8 @@ int main(int argc, char** argv) {
     app.add_flag("--no-cursor-mcp", no_cursor_mcp,
                  "Skip Cursor MCP import (or env AGENT_TEST_SKIP_CURSOR_MCP / AGENT_CLI_SKIP_CURSOR_MCP)");
     app.add_flag("--mock", mock, "Reserved for WP1.7 (offline mock); not implemented yet");
+    app.add_flag("--demo-state", demo_state,
+                 "Print the deterministic Phase 4 operations snapshot and exit");
     app.set_help_flag("-h,--help", "Print this help and environment hints");
 
     CLI11_PARSE(app, argc, argv);
@@ -265,6 +268,12 @@ int main(int argc, char** argv) {
     AgentWorkflowDeps deps{runtime.llm, runtime.toolbus, runtime.skills,
                            runtime.memory_compaction_llm};
     AgentConfig cfg = runtime.config;
+    if (demo_state) {
+        cli.handle_aux_event(Phase4OperationsProjection::event_type,
+                             Phase4OperationsProjection::to_json(
+                                 Phase4OperationsProjection::demo_snapshot()));
+        return 0;
+    }
 
     tf::Executor executor;
 

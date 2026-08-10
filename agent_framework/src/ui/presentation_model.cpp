@@ -262,6 +262,12 @@ void UiPresentationModel::observe_tool(const ToolExecutionEvent& event) {
     trim_locked();
 }
 
+void UiPresentationModel::observe_operations(const Phase4OperationsSnapshot& snapshot) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    state_.operations = snapshot;
+    state_.has_operations = true;
+}
+
 void UiPresentationModel::trim_locked() {
     if (state_.turns.size() > max_turns_) {
         state_.turns.erase(state_.turns.begin(),
@@ -287,6 +293,7 @@ void UiPresentationModel::reset() {
 
 void UiPresentationModel::load_demo_state() {
     reset();
+    observe_operations(Phase4OperationsProjection::demo_snapshot());
     set_runtime_metadata("orbital-analysis", "OpenAI", "deepseek-chat", "MCP connected");
     begin_user_turn("请分析 sin(x) 在 [0, 2π] 上的极值，并给出可复现的计算过程。");
     append_thinking_token("已检查定义域、驻点和端点；下面只展示可验证的推理摘要。");

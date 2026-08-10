@@ -49,19 +49,25 @@ void assign_profile(MemoryViewSpec& spec, MemoryViewMode mode) {
         spec.allowed_kinds = {K::Instruction, K::Procedural, K::Evidentiary, K::Operational};
         spec.exclude_unverified_executor_claims = true;
         break;
+    case MemoryViewMode::Evaluation:
+        spec.allowed_levels = {L::System, L::Organization};
+        spec.allowed_kinds = {K::Instruction, K::Procedural, K::Evidentiary};
+        spec.include_procedural_skills = false;
+        spec.exclude_unverified_executor_claims = true;
+        break;
     }
 }
 }  // namespace
 
 std::string_view to_string(MemoryViewMode mode) noexcept {
-    static constexpr std::array<std::string_view, 8> values = {
+    static constexpr std::array<std::string_view, 9> values = {
         "intake", "investigation", "planning", "execution",
-        "verification", "replan", "resume", "handoff"};
+        "verification", "replan", "resume", "handoff", "evaluation"};
     return values[static_cast<std::size_t>(mode)];
 }
 
 std::optional<MemoryViewMode> memory_view_mode(std::string_view value) noexcept {
-    for(int i = 0; i != 8; ++i)
+    for(int i = 0; i != 9; ++i)
         if(to_string(static_cast<MemoryViewMode>(i)) == value)
             return static_cast<MemoryViewMode>(i);
     return std::nullopt;
@@ -91,6 +97,7 @@ std::optional<MemoryViewMode> MemoryViewRouter::route(
     if(event == "finding_requires_replan" || event == "execution_failed") return MemoryViewMode::Replan;
     if(event == "run_resumed") return MemoryViewMode::Resume;
     if(event == "handoff_started") return MemoryViewMode::Handoff;
+    if(event == "evaluation_started") return MemoryViewMode::Evaluation;
     if(event == "no_change") return current;
     return std::nullopt;
 }

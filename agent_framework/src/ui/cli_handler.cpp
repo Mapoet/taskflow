@@ -4,6 +4,7 @@
  */
 
 #include <agent/ui/ui_manager.hpp>
+#include <agent/ui/phase4_operations.hpp>
 
 #include <iostream>
 #include <sstream>
@@ -57,6 +58,14 @@ void CLIHandler::handle_error(const std::string& error_message) {
         return;
     }
     std::cerr << "[error] " << error_message << std::endl;
+}
+
+void CLIHandler::handle_aux_event(std::string_view type, const json& payload) {
+    if (!active_ || type != Phase4OperationsProjection::event_type) return;
+    const auto snapshot = Phase4OperationsProjection::from_json(payload);
+    std::lock_guard<std::mutex> lock(output_mutex_);
+    output_stream_ << Phase4OperationsProjection::render_text(snapshot);
+    output_stream_.flush();
 }
 
 std::string CLIHandler::get_handler_type() const {

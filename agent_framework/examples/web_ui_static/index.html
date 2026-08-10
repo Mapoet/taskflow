@@ -63,15 +63,39 @@
     <main class="conversation-panel" aria-label="Conversation">
       <div class="conversation-header">
         <div><span class="eyebrow">ACTIVE SESSION</span><h1 id="conversation-title">Scientific workspace</h1></div>
-        <button class="quiet-button" id="clear-button" type="button">Clear view</button>
+        <div class="workspace-tabs" role="tablist" aria-label="Workspace view">
+          <button class="workspace-tab selected" id="conversation-tab" role="tab" aria-selected="true" aria-controls="conversation-view" type="button">Conversation</button>
+          <button class="workspace-tab" id="operations-tab" role="tab" aria-selected="false" aria-controls="operations-view" type="button">Operations <span id="operations-badge">—</span></button>
+          <button class="quiet-button" id="clear-button" type="button">Clear view</button>
+        </div>
       </div>
-      <div class="conversation" id="conversation" aria-live="polite" aria-busy="false">
+      <div class="conversation" id="conversation-view" aria-live="polite" aria-busy="false" role="tabpanel" aria-labelledby="conversation-tab">
+        <div id="conversation">
         <section class="empty-state" id="empty-state">
           <span class="eyebrow">READY</span>
           <h2>Start a verifiable research task</h2>
           <p>Ask the agent to inspect files, search the web, evaluate an expression, or create a scientific artifact. Tool activity will remain visible beside the answer.</p>
         </section>
+        </div>
       </div>
+      <section class="operations-view" id="operations-view" role="tabpanel" aria-labelledby="operations-tab" hidden>
+        <div class="ops-empty" id="ops-empty"><span class="eyebrow">CONTROL PLANE</span><h2>No operations snapshot</h2><p>The canonical planning, memory, assurance and approval projection will appear when the runtime publishes it.</p></div>
+        <div id="ops-content" hidden>
+          <div class="ops-overview" aria-label="Operations summary">
+            <article><span>Overall</span><b id="ops-status">Unknown</b><small id="ops-updated">—</small></article>
+            <article><span>Plan revision</span><b id="ops-revision">r0</b><small id="ops-run">—</small></article>
+            <article><span>Evidence</span><b id="ops-evidence-count">0</b><small id="ops-risk">No residual risk recorded</small></article>
+            <article><span>Live certification</span><b id="ops-live">Unknown</b><small id="ops-blocker">No blocker</small></article>
+          </div>
+          <section class="ops-section"><div class="ops-section-head"><div><span class="eyebrow">PLAN / EVIDENCE</span><h2>Execution stages</h2></div><span id="ops-summary" class="ops-note"></span></div><div class="stage-grid" id="ops-stages"></div></section>
+          <div class="ops-split">
+            <section class="ops-section"><div class="ops-section-head"><div><span class="eyebrow">MEMORY</span><h2>Selected context</h2></div><span class="ops-note">content hidden</span></div><div class="ops-table-wrap"><table><thead><tr><th>Scope / source</th><th>Authority</th><th>Freshness</th><th>Decision</th></tr></thead><tbody id="ops-memory"></tbody></table></div></section>
+            <section class="ops-section"><div class="ops-section-head"><div><span class="eyebrow">ASSURANCE</span><h2>Five-layer gate</h2></div><span class="ops-note">oracle precedence</span></div><div class="assurance-list" id="ops-assurance"></div></section>
+          </div>
+          <section class="ops-section"><div class="ops-section-head"><div><span class="eyebrow">LLM INVOCATIONS</span><h2>Role execution</h2></div><span class="ops-note">prompt body and secrets excluded</span></div><div class="ops-table-wrap"><table><thead><tr><th>Role / model</th><th>Prompt / view</th><th>Tokens</th><th>Cost</th><th>Latency</th><th>Status</th></tr></thead><tbody id="ops-invocations"></tbody></table></div></section>
+          <section class="ops-section hitl-section"><div class="ops-section-head"><div><span class="eyebrow">HUMAN IN THE LOOP</span><h2>Accountable decisions</h2></div><span class="ops-note" id="hitl-feedback" role="status"></span></div><div id="ops-hitl"></div></section>
+        </div>
+      </section>
       <form class="composer" id="composer">
         <label class="sr-only" for="prompt">Message</label>
         <textarea id="prompt" rows="3" placeholder="Ask a question or describe a task…" autocomplete="off"></textarea>

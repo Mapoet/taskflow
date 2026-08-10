@@ -3,6 +3,7 @@
 
 #include <agent/core/types.hpp>
 #include <agent/toolbus/toolbus.hpp>
+#include <agent/ui/phase4_operations.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -87,6 +88,8 @@ struct UiPresentationSnapshot {
     std::string last_error;
     std::vector<UiTurn> turns;
     std::vector<UiToolActivity> tools;
+    Phase4OperationsSnapshot operations;
+    bool has_operations = false;
 };
 
 class UiPresentationModel {
@@ -105,6 +108,7 @@ public:
     void cancel(std::string message = "Run cancelled");
     void add_system_notice(std::string message, bool error = false);
     void observe_tool(const ToolExecutionEvent& event);
+    void observe_operations(const Phase4OperationsSnapshot& snapshot);
     void reset();
     void load_demo_state();
 

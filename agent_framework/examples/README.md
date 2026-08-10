@@ -22,6 +22,16 @@ otherwise scan Cursor's two default Skill roots.
 The fullscreen TUI uses the vendored FTXUI 7.0.1 backend from `3rd-party/FTXUI`; initialize
 submodules recursively before enabling `AGENT_BUILD_TUI`.
 
+## Phase 4 operations view
+
+The four interactive demos consume the same display-safe `phase4.operations.v1` projection. Use
+`--demo-state` for a deterministic UI acceptance snapshot; this mode still initializes the shared
+`LiveRuntime`, but does not claim production workflow execution. Set
+`AGENT_UI_INITIAL_VIEW=operations` to open the TUI/ImGui operations view initially. In TUI, key `4`
+selects the operations pane. Web exposes the Operations tab and, only in `--demo-state`, a bounded
+HITL interaction fixture. Normal runs without an accountable HITL executor fail the action endpoint
+closed.
+
 ## Focused examples
 
 - `tool_integration`: ToolBus schema validation and asynchronous local invocation.

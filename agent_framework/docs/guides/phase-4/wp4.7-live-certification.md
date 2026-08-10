@@ -31,3 +31,9 @@ Required matrix cell 必须产生 executed attestation；没有凭据、网络�
 ## 4. DoD 与回滚
 
 至少一个 production-like 环境完成多层记忆—认知—计划—审批—sandbox 执行—五层验收全链路；证明跨 session/重启恢复固定 View、跨 org/project 不泄漏、权限轮换生效、forget 可审计，且断网、限流和服务重启均有证据。Live 失败不破坏离线开发，但阻断对应发布渠道。
+
+## 5. 2026-08-10 实施状态
+
+F7L 已补齐 4.7.1–4.7.3、4.7.9–4.7.11 所需的通用控制面：typed environment/profile/matrix/cell/report、严格反序列化、RoleRuntime manifest adapter、required no-skip、SQLite CAS/restart、六类恢复、审批/签名/到期/版本失效/告警、GraphExecutor 和显式生产 report gate。`phase4-live-v2` 5/5 PASS 只证明控制面和 scripted RoleRuntime 集成。
+
+4.7.4–4.7.8 的真实 LLM/IdP/MCP/A2A/Sandbox/renderer 组合尚未执行；4.7.10 的部署侧 scheduled runner/KMS/secret/alert 配置也未提供。生产门禁只有在 `AGENT_ENABLE_PHASE4_LIVE_CERTIFICATION=ON` 时注册，缺任何报告或绑定参数即 `BLOCKED`/exit 2。当前没有批准且未过期的 `executed=true` 生产报告，因此本 WP 保持 partial。

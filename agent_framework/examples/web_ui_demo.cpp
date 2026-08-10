@@ -23,6 +23,7 @@
 
 #include <httplib.hpp>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstdlib>
@@ -292,6 +293,9 @@ int main(int argc, char** argv) {
 
     UIManager ui;
     ui.register_web_connection("default", std::move(web_handler));
+    auto operations = std::make_shared<Phase4OperationsSnapshot>(
+        Phase4OperationsProjection::demo_snapshot());
+    auto operations_mutex = std::make_shared<std::mutex>();
 
     auto state = std::make_shared<internal::AgentThreadState>();
     auto executor = std::make_shared<tf::Executor>();
@@ -351,6 +355,10 @@ int main(int argc, char** argv) {
         for (const auto& service : runtime.bootstrap.skipped_mcp_services)
             ui.dispatch_message("mcp_status", json{{"level", "info"}, {"message", "MCP skipped by policy: " + service}});
         if (!demo_state) return;
+        {
+            std::lock_guard<std::mutex> lock(*operations_mutex);
+            ui.publish_phase4_operations(*operations);
+        }
         ui.dispatch_message("demo_user", json{{"content", "分析 sin(x) 在 [0, 2π] 的极值，并给出可复核结果。"}});
         ui.stream_thinking("default", "已完成符号分析与数值交叉验证；以下仅展示可公开的推理摘要。\n");
         ui.stream_token("default",
@@ -421,6 +429,68 @@ int main(int argc, char** argv) {
         control->request_cancel();
         res.status = 202;
         res.set_content(R"({"cancelled":true})", "application/json");
+    });
+
+    svr.Post("/ui/operations/hitl", [&](const httplib::Request& req, httplib::Response& res) {
+        if (!demo_state) {
+            res.status = 409;
+            res.set_content(R"({"error":"no accountable HITL executor is attached to this run"})",
+                            "application/json");
+            return;
+        }
+        try {
+            const json body = json::parse(req.body);
+            const std::string request_id = body.at("request_id").get<std::string>();
+            const std::string action = body.at("action").get<std::string>();
+            std::lock_guard<std::mutex> lock(*operations_mutex);
+            auto request = std::find_if(operations->hitl.begin(), operations->hitl.end(),
+                                        [&](const auto& item) { return item.id == request_id; });
+            if (request == operations->hitl.end() ||
+                std::find(request->allowed_actions.begin(), request->allowed_actions.end(), action) ==
+                    request->allowed_actions.end()) {
+                res.status = 422;
+                res.set_content(R"({"error":"request or action is not allowed"})", "application/json");
+                return;
+            }
+            if (action == "approve") {
+                request->status = OperationsStatus::Passed;
+                request->summary = "Approved in deterministic UI acceptance mode";
+                operations->overall_status = OperationsStatus::Warning;
+                operations->blocker.clear();
+            } else if (action == "request_remediation") {
+                request->status = OperationsStatus::Running;
+                request->summary = "Remediation requested in deterministic UI acceptance mode";
+                operations->overall_status = OperationsStatus::Running;
+                operations->blocker = "Remediation workflow is active.";
+            } else if (action == "reject") {
+                request->status = OperationsStatus::Failed;
+                request->summary = "Release rejected in deterministic UI acceptance mode";
+                operations->overall_status = OperationsStatus::Failed;
+                operations->blocker = "Accountable reviewer rejected release.";
+            }
+            operations->snapshot_id += ".next";
+            operations->updated_at = "2026-08-10T14:35:00+08:00";
+            ui.publish_phase4_operations(*operations);
+            res.status = 202;
+            res.set_content(json{{"accepted", true}, {"snapshot_id", operations->snapshot_id}}.dump(),
+                            "application/json");
+        } catch (const std::exception& error) {
+            res.status = 400;
+            res.set_content(json{{"error", error.what()}}.dump(), "application/json");
+        }
+    });
+
+    svr.Get("/ui/operations/snapshot", [&](const httplib::Request&, httplib::Response& res) {
+        if (!demo_state) {
+            res.status = 404;
+            res.set_content(R"({"error":"no operations snapshot is attached to this run"})",
+                            "application/json");
+            return;
+        }
+        std::lock_guard<std::mutex> lock(*operations_mutex);
+        res.set_header("Cache-Control", "no-store");
+        res.set_content(Phase4OperationsProjection::to_json(*operations).dump(),
+                        "application/json");
     });
 
     svr.Get("/ui/sse", [web_h, &emit_bootstrap](const httplib::Request& req, httplib::Response& res) {

@@ -16,7 +16,8 @@ enum class MemoryViewMode {
     Verification,
     Replan,
     Resume,
-    Handoff
+    Handoff,
+    Evaluation
 };
 
 struct ViewBudget {

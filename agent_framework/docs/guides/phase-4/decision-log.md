@@ -124,6 +124,32 @@
 - **安全、兼容、迁移和回滚影响**：新增 remediation typed contracts 和 tenant-scoped SQLite schema v1，继续复用 `internal/sqlite_utils`；旧 Plan/F4V 契约不变。Plan commit 后进程死亡通过“当前 plan digest 等于 proposed digest”幂等恢复；另一 writer 改变 plan 时进入 manual review。任何 criterion 字段变化或 governed action 必须绑定 approval request digest/decision；无决定时停在 `AwaitingApproval`。
 - **验收标准变化及批准**：未降低原 AcceptanceContract。污染或 stale evidence 不得复用，受影响 strong oracle 必须列入 forced rerun。当前交付只证明离线 remediation/replan/selective-reverification 控制面；不声称已经执行修复动作、产生新 artifact 或完成 F4V 二次裁决，故 `R4V2-05` 保持 partial。
 
+### D4-014 — F6E 使用匿名多 Judge 认知面与确定性统计/发布裁决面分层
+
+- **日期 / 状态 / 决策者**：2026-08-10 / approved-for-offline-core / Codex（依据用户批准实施 F6E）
+- **关联 requirement / plan revision**：`R4V2-06` / `phase4-v2-plan-r1`
+- **决策**：Primary、Secondary 和争议 Adjudicator 只接收匿名题面、环境、criterion 与 `artifact-A/B`，不得看到 ground truth、revision、profile、prompt、provider 或 model 身份；不同 Judge 必须满足 provider/model/independence-group 隔离。模型只产生 advisory verdict，label 映射、agreement/kappa/bias/variance/CI、领域指标、regression/critical gate、PDP/HITL upgrade/rollback 由确定性控制面完成。
+- **替代方案及拒绝理由**：拒绝单 Judge 自评和把模型 winner 直接作为发布决定，因为存在位置偏差、共享故障、标签泄漏和弱语义证据覆盖强 oracle 的风险；拒绝把 task/executor memory 注入评测上下文，改用只含 System/Organization Instruction/Procedural/Evidentiary 的 Evaluation View。
+- **验收标准变化及批准**：未把离线 fake Judge 准确率等同生产校准。真实分层数据集、人工 inter-rater 基线、生产 profile/prompt/model 校准、nightly/signed report、trend/SLO 和 live matrix 仍 pending，故 `R4V2-06` 保持 partial。
+
+### D4-015 — F7L 将 Live 执行面、认证控制面和发布门禁分离
+
+- **日期 / 状态 / 决策者**：2026-08-10 / approved-for-offline-control-plane / Codex（依据用户批准实施 F7L）
+- **关联 requirement / plan revision**：`R4V2-07` / `phase4-v2-plan-r1`
+- **事实与证据**：本地环境能实现并测试 RoleRuntime 调用证明、矩阵校验、恢复、签名和 no-skip gate，但没有获批生产 role matrix、真实 provider credentials、部署侧 scheduler/KMS 或 IdP/MCP/A2A/Sandbox endpoint；因此不能制造 `executed=true` 外部证据。
+- **决定与理由**：以 `LiveCellExecutor` 隔离真实执行适配器，以确定性 validator 校验环境/Profile/Prompt/Provider/Model/Region/Calibration、依赖、只读/blind/oracle、独立性、预算和 recovery；以 CAS Store 持久化；以可插拔 signer/verifier 和显式启用的 `phase4_live_required` 验证发布报告。默认离线套件不注册生产 gate；一旦显式启用，缺任何配置或报告必须非零失败，禁止 skip-as-pass。
+- **安全、兼容、迁移和回滚影响**：旧 `live/certification.hpp` 保留兼容；新 schema 使用独立 SQLite 表和 secret reference，报告不保存 secret value。生产 gate 的 HMAC key 仅从运行环境读取并恒定时间比较；生产部署可以通过相同 signer/verifier 接口替换为 KMS asymmetric signing。
+- **验收标准变化及批准**：未降低 F7L exit gate。mock RoleRuntime 5/5 与 gate 的 `BLOCKED` 测试只接受为控制面证据；在真实 production chain 完整执行、签名、审批且未过期前，`R4V2-07` 必须保持 partial。
+
+### D4-016 — F8U 使用 canonical display projection 隔离控制面事实与 UI 适配器
+
+- **日期 / 状态 / 决策者**：2026-08-10 / approved-for-offline-ui-plane / Codex（依据用户批准实施 F8U）
+- **关联 requirement / plan revision**：`R4V2-08` / `phase4-v2-plan-r1`
+- **事实与证据**：现有 CLI/Web/TUI/ImGui 各自消费流式 answer/tool event，没有可表达 Plan/Memory/Invocation/Assurance/Live/HITL 的共享事实源；若每端直接读多个 Store，会复制 revision join、status inference、redaction 和权限逻辑，并产生跨端不一致。
+- **决定与理由**：增加 `phase4.operations.v1` canonical display-safe projection；业务控制面构造 snapshot，`UIManager` 在边界 round-trip validation 后把同一 JSON 分发给所有 adapter。Schema 只含 displayable summary、identifier/version、状态和指标，不含 raw Prompt、credential、tool payload、memory content 或 private chain-of-thought。UI 不推断 Arbiter/Approval 状态。
+- **安全、兼容、迁移和回滚影响**：旧 answer/tool UI 契约保持兼容；未知输入字段在 typed re-projection 时丢弃。deterministic demo HITL controller 只在 `--demo-state` 可用；普通运行缺 accountable executor 返回 409，不能伪装为 ApprovalStore decision。生产 Store assembler 和 Approval executor 后续通过相同 schema 接入。
+- **验收标准变化及批准**：真实截图证明实际渲染，不证明 production data executed。当前同源 UI、桌面截图和 interaction contract accepted；production Store revision aggregation、reviewer/PDP/SoD/expiry/resume、移动真机和 production Live snapshot 未关闭，因此 `R4V2-08` 保持 partial。
+
 ## 新决策模板
 
 ### D4-NNN — 标题
