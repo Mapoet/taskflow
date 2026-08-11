@@ -4,10 +4,9 @@
 #include <sstream>
 #include <string>
 
-#include <openssl/crypto.h>
-#include <openssl/hmac.h>
-
 #include "agent/live/role_certification.hpp"
+#include "agent/live/production_approval.hpp"
+#include "agent/live/production_signature.hpp"
 
 namespace
 {
@@ -21,27 +20,14 @@ namespace
         }
         return value;
     }
-    std::string hex(const unsigned char *data, unsigned int size)
+    std::string read_file(const std::string& path)
     {
-        static constexpr char digits[] = "0123456789abcdef";
-        std::string out;
-        out.reserve(size * 2);
-        for (unsigned int i = 0; i < size; ++i)
-        {
-            out.push_back(digits[data[i] >> 4]);
-            out.push_back(digits[data[i] & 15]);
-        }
-        return out;
+        std::ifstream input(path);
+        if(!input) return {};
+        std::ostringstream buffer;
+        buffer << input.rdbuf();
+        return buffer.str();
     }
-    std::string hmac_sha256(std::string_view key, std::string_view value)
-    {
-        unsigned char bytes[EVP_MAX_MD_SIZE];
-        unsigned int size = 0;
-        if (!HMAC(EVP_sha256(), key.data(), static_cast<int>(key.size()), reinterpret_cast<const unsigned char *>(value.data()), value.size(), bytes, &size))
-            return {};
-        return hex(bytes, size);
-    }
-    bool equal_constant_time(std::string_view a, std::string_view b) { return a.size() == b.size() && CRYPTO_memcmp(a.data(), b.data(), a.size()) == 0; }
 }
 
 int main()
@@ -51,7 +37,11 @@ int main()
     const auto expected_environment = required("AGENT_PHASE4_LIVE_EXPECTED_ENVIRONMENT_DIGEST");
     const auto expected_matrix = required("AGENT_PHASE4_LIVE_EXPECTED_MATRIX_DIGEST");
     const auto expected_key_id = required("AGENT_PHASE4_LIVE_SIGNING_KEY_ID");
-    const auto signing_key = required("AGENT_PHASE4_LIVE_REPORT_SIGNING_KEY");
+    const auto public_key_path = required("AGENT_PHASE4_LIVE_PUBLIC_KEY_FILE");
+    const auto expected_approval = required("AGENT_PHASE4_LIVE_APPROVAL_DECISION_ID");
+    const auto approval_store_path = required("AGENT_PHASE4_LIVE_APPROVAL_STORE");
+    const auto approval_tenant = required("AGENT_PHASE4_LIVE_APPROVAL_TENANT");
+    const auto approval_scope = required("AGENT_PHASE4_LIVE_APPROVAL_SCOPE");
     const auto now = required("AGENT_PHASE4_LIVE_NOW");
     std::ifstream input(report_path);
     if (!input)
@@ -92,6 +82,11 @@ int main()
         std::cerr << "FAILED: Live report is expired\n";
         return 1;
     }
+    if(report->approval_decision_id != expected_approval)
+    {
+        std::cerr << "FAILED: Live report is not bound to the expected approval decision\n";
+        return 1;
+    }
     for (const auto &cell : report->cells)
         if (!cell.executed || cell.outcome != LiveCellOutcome::Passed || cell.invocation_manifest_digest.empty() || cell.evidence_digests.empty())
         {
@@ -99,9 +94,22 @@ int main()
             return 1;
         }
     const auto digest = role_report_signing_digest(*report);
-    if (report->signature.algorithm != "hmac-sha256" || report->signature.key_id != expected_key_id || report->signature.signed_digest != digest || !equal_constant_time(report->signature.signature, hmac_sha256(signing_key, digest)))
+    agent_framework::approval::SQLiteApprovalStore approval_store(approval_store_path);
+    StoreBackedProductionApprovalVerifier approval_verifier(
+        approval_store, approval_tenant, approval_scope, now);
+    std::string approval_error;
+    if(!approval_verifier.verify(digest, expected_approval, &approval_error))
     {
-        std::cerr << "FAILED: Live report signature is invalid\n";
+        std::cerr << "FAILED: Live report approval is invalid: " << approval_error << '\n';
+        return 1;
+    }
+    std::string signature_error;
+    const auto public_key = read_file(public_key_path);
+    if (public_key.empty() || report->signature.key_id != expected_key_id ||
+        report->signature.signed_digest != digest ||
+        !verify_ed25519_signature(report->signature, public_key, &signature_error))
+    {
+        std::cerr << "FAILED: Live report Ed25519 signature is invalid: " << signature_error << '\n';
         return 1;
     }
     std::cout << "CERTIFIED: executed=true environment=" << report->environment_digest << " matrix=" << report->matrix_digest << '\n';

@@ -8,6 +8,8 @@
 
 用受控真实依赖证明 fixture/loopback 与现实一致。Live 是独立 scheduled/manual gate，不污染无密钥默认 CI，但必须防止 skip-as-pass。
 
+R6L 的执行、信任与签发口径以 [Production Live 实施计划](../phase-4-production-live-plan.md)为准。明确区分 `offline-control`、`production-like`、`production-certified`；只有最后一级能够关闭本 WP。
+
 ## 2. 可执行任务
 
 | ID | 任务 | 完成条件 |
@@ -27,6 +29,8 @@
 ## 3. 门禁规则
 
 Required matrix cell 必须产生 executed attestation；没有凭据、网络或 endpoint 时为 blocked/skipped，不得计为 pass。证书有有效期，provider 或关键依赖 revision 改变后自动失效。
+
+执行器不得作为自身执行事实的唯一证明者。生产 attestation 由独立事实源核验；HMAC 仅作测试兼容，生产报告使用非对称/KMS 签名并绑定 ApprovalStore decision。
 
 ## 4. DoD 与回滚
 

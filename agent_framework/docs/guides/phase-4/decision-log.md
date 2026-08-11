@@ -141,6 +141,15 @@
 - **安全、兼容、迁移和回滚影响**：旧 `live/certification.hpp` 保留兼容；新 schema 使用独立 SQLite 表和 secret reference，报告不保存 secret value。生产 gate 的 HMAC key 仅从运行环境读取并恒定时间比较；生产部署可以通过相同 signer/verifier 接口替换为 KMS asymmetric signing。
 - **验收标准变化及批准**：未降低 F7L exit gate。mock RoleRuntime 5/5 与 gate 的 `BLOCKED` 测试只接受为控制面证据；在真实 production chain 完整执行、签名、审批且未过期前，`R4V2-07` 必须保持 partial。
 
+### D4-015A — R6L 将生产执行声明、独立事实认证和报告签发三权分离
+
+- **日期 / 状态 / 决策者**：2026-08-11 / approved-executing / 用户批准 R6L-R0→R6 连续实施
+- **关联 requirement / plan revision**：`R4V2-RC-06` / `phase4-r6l-production-live-r1`
+- **事实与证据**：现有 `RoleRuntimeLiveCellExecutor` 可依据自身返回的 invocation ID 设置 `executed=true`，而 HMAC required gate 共享对称密钥；这些机制适合控制面测试，但不足以证明执行声明来自不可变外部事实，也不满足生产 signer/verifier 权限隔离。
+- **决定与理由**：执行器输出降为候选声明；独立 verifier 从 Invocation/Audit/Artifact/Oracle Store 重建 attestation；报告经绑定 digest 的 accountable approval 后由非对称/KMS signer 签发。定义 `offline-control`、`production-like`、`production-certified`，只有最后一级关闭 R6L。
+- **安全、兼容、迁移和回滚影响**：保留现有 RoleRuntime executor 和 HMAC gate 作为兼容 fixture；生产配置必须显式选择强信任后端。任何缺凭据、依赖、attestation、approval、signer 或有效期的运行保持 BLOCKED/inconclusive。
+- **验收标准变化及批准**：没有降低原门槛；新增 mandatory role/dependency matrix、证据闭包和 signer/approver 分离要求。完整计划见 `phase-4-production-live-plan.md`。
+
 ### D4-016 — F8U 使用 canonical display projection 隔离控制面事实与 UI 适配器
 
 - **日期 / 状态 / 决策者**：2026-08-10 / approved-for-offline-ui-plane / Codex（依据用户批准实施 F8U）

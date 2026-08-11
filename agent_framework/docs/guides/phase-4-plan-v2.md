@@ -251,6 +251,8 @@ Durable Evidence Plane
 
 **2026-08-10 实施边界**：已实现 typed environment/profile/matrix/cell/checkpoint/report、RoleRuntime manifest 适配、provider/model/group 独立性、六类 failure/recovery 语义、SQLite CAS/restart、审批、可插拔 signer/verifier、expiry/revision invalidation、alert 和 GraphExecutor；`phase4-live-v2` 5/5 只属于离线控制面证据。`AGENT_ENABLE_PHASE4_LIVE_CERTIFICATION=ON` 才注册生产门禁，缺 report/expected digest/key/时间返回 `BLOCKED` 且 exit 2。当前环境未提供生产凭据、生产 role matrix、外部 runner 和签名报告，因此退出门槛“至少一个批准生产组合 `executed=true`”仍未关闭。
 
+**2026-08-11 R6L 更新口径**：后续按 [`phase4-r6l-production-live-r1`](./phase-4-production-live-plan.md)实施。执行器返回的是候选声明，独立事实源验证后才可计 `executed=true`；HMAC gate 降为兼容测试口径，正式签发要求非对称/KMS signer、ApprovalStore digest binding 和完整 mandatory role/dependency matrix。
+
 ### P4-V2-F8U — 解释性 UI 与运维呈现
 
 **依赖**：核心 schema/event 稳定；真实运行环境可用。  

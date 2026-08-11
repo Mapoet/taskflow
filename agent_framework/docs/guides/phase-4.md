@@ -672,6 +672,8 @@ struct AcceptanceReport {
 
 将真实 IdP、LLM provider、MCP、A2A streaming、renderer、sandbox、断网、限流、凭据轮换、服务重启和长任务恢复组成受控 live/nightly 门禁。所有证据带环境 manifest，明确区分 fixture、loopback、staging 和 production-like。
 
+技术口径进一步分为 `offline-control`、`production-like` 和 `production-certified`。只有获批环境和完整 mandatory matrix 经独立事实源验证、Accountable Approval、非对称/KMS 签名且未过期，才能形成 `executed=true` 生产认证；执行器自报、mock、skip 或普通绿色 CTest 均不是生产证据。详见 [R6L 实施计划](./phase-4-production-live-plan.md)。
+
 ## WP4.8 — Distributed Control Plane（P2）
 
 在单机闭环稳定后，引入 durable worker queue、heartbeat、task ownership lease、timer service、PostgreSQL/object store、distributed capability registry、tenant quota、公平调度、admission control、HA、rolling upgrade 和 run migration。

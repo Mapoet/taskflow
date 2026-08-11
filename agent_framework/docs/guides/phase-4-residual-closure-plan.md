@@ -112,6 +112,8 @@ Execution/Evidence
 使用批准的 provider/profile/prompt/calibration、IdP/MCP/A2A/Sandbox/renderer 依赖和 KMS signer 执行完整 cognition→memory→execution→assurance→judge 矩阵。  
 退出门槛：报告 `executed=true`、所有 mandatory cell executed/pass、签名有效、未过期且无 blocker。缺凭据或依赖必须保持 `BLOCKED/inconclusive`，禁止 skip-as-pass。
 
+执行口径与 R0–R6 批次以 [R6L Production Live Certification 实施计划](./phase-4-production-live-plan.md)为单一事实源。`LiveCellExecutor` 自报的 invocation/result 只作为候选声明；生产 `executed=true` 必须由独立 Invocation/Audit/Artifact/Oracle 事实源重建。HMAC 只属于兼容测试，生产认证要求非对称或 KMS/HSM signer，并与 accountable approver 分离。
+
 ### R7D — Distributed / HA
 
 交付远程 durable queue、worker registry/heartbeat/scheduler、lease/fencing/idempotency、PostgreSQL 或等价共享事务 Store、object artifact/evidence store、tenant quota、rolling migration 和 chaos tests。  
