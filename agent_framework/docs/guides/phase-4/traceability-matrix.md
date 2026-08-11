@@ -44,7 +44,7 @@
 | `R4V2-RC-00` 基线治理 | `R0` | accepted | residual plan、status、trace、decision、ledger 一致 | 28 个本地链接、0 失效；26 个唯一 closure ID、0 重复 task definition；`git diff --check` PASS |
 | `R4V2-RC-01` Integrated Harness | `P4-V2-R1I.1–R1I.6` | partial | `harness/{types,store,runtime}`；SQLite saga/event/outbox；typed ports；revision pin；completion gate；Store-backed Operations projection；`phase4_harness_*` 3/3 | R1I runtime core accepted；真实 Cognition/Memory/Assurance/Remediation/Judge/Sandbox/Approval adapters 和默认生产入口由 R2X/R3A 继续关闭 |
 | `R4V2-RC-02` 修复执行与复验 | `P4-V2-R2X.1–R2X.6` | partial | jailed executor、SQLite durable journal/replay、rollback、真实 manifest/digest、filesystem oracle、Harness reject→repair→reverify→complete 与 failed repair→bounded ManualReview；47/47 | 具体 Sandbox command oracle 由 R4O 关闭 |
-| `R4V2-RC-03` Approval/Memory/UI | `P4-V2-R3A.1–R3A.6` | planned | ApprovalStore/PDP/identity/resume、governance、Store projection、真实 UI | 当前 UI 生产 action fail-closed，Store assembler 缺失 |
+| `R4V2-RC-03` Approval/Memory/UI | `P4-V2-R3A.1–R3A.6` | partial | accountable reviewer/SoD/delegation/双人复核/CAS/reconcile；Approval-bound promotion/correction/forget；Harness resume；Harness+Approval+Memory revision join、redacted snapshot/replay；Web durable action 与真实截图；51/51 | core accepted；默认生产 Harness composition、CLI/TUI/ImGui 对同一持久化 snapshot 的运行证据仍待关闭 |
 | `R4V2-RC-04` Sandbox/OTLP/SLO | `R4O` | planned | concrete provider、escape negative、OTLP loopback、release SLO | 当前只有接口/内存 sink |
 | `R4V2-RC-05` Dataset/Calibration/Nightly | `R5E` | planned | 真实版本化数据集、人工基线、nightly signed trend report | 当前只有离线 fixture/统计控制面 |
 | `R4V2-RC-06` Production Live | `R6L` | blocked | 未过期、签名、无 blocker 的 `executed=true` 报告 | 当前没有批准的外部环境/凭据/runner |

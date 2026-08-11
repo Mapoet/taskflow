@@ -5,6 +5,7 @@
 
 #include <agent/memory/memory.hpp>
 #include <agent/skills/skill_supply_chain.hpp>
+#include "agent/internal/sqlite_utils.hpp"
 
 #include <algorithm>
 #include <array>
@@ -32,6 +33,7 @@ namespace agent_framework
 {
     namespace
     {
+        namespace sqlite = internal::sqlite;
         namespace fs = std::filesystem;
 
         constexpr int kMemorySchemaVersion = 3;
@@ -902,9 +904,9 @@ namespace agent_framework
             sqlite3_stmt *statement = nullptr;
             sqlite_require(sqlite3_prepare_v2(database, sql, -1, &statement, nullptr), database,
                            "prepare sqlite migration query");
-            const int rc = sqlite3_step(statement);
+            const int rc = sqlite::step(statement);
             sqlite_require(rc, database, "run sqlite migration query");
-            const int value = rc == SQLITE_ROW ? sqlite3_column_int(statement, 0) : 0;
+            const int value = rc == SQLITE_ROW ? sqlite::column_int(statement, 0) : 0;
             sqlite3_finalize(statement);
             return value;
         };
@@ -931,10 +933,10 @@ namespace agent_framework
                     sqlite_require(sqlite3_prepare_v2(database, sql.c_str(), -1, &statement, nullptr),
                                    database, "prepare sqlite column migration");
                     bool found = false;
-                    while (sqlite3_step(statement) == SQLITE_ROW)
+                    while (sqlite::step(statement) == SQLITE_ROW)
                     {
-                        const auto *name = reinterpret_cast<const char *>(sqlite3_column_text(statement, 1));
-                        if (name && column == std::string(name))
+                        const auto name = sqlite::column_text(statement, 1);
+                        if (!name.empty() && column == name)
                             found = true;
                     }
                     sqlite3_finalize(statement);
@@ -974,13 +976,13 @@ namespace agent_framework
         const auto payload = event_json(event).dump();
         const auto session = event.data.value("session_id", "default");
         require_scope_id(session, "session id");
-        sqlite3_bind_text(statement, 1, tenant_id_.c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_text(statement, 2, agent_id_.c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_text(statement, 3, session.c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_text(statement, 4, event.node_name.c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_int64(statement, 5, event.timestamp);
-        sqlite3_bind_text(statement, 6, payload.c_str(), -1, SQLITE_TRANSIENT);
-        const int rc = sqlite3_step(statement);
+        sqlite::bind_text(statement, 1, tenant_id_);
+        sqlite::bind_text(statement, 2, agent_id_);
+        sqlite::bind_text(statement, 3, session);
+        sqlite::bind_text(statement, 4, event.node_name);
+        sqlite::bind_int64(statement, 5, event.timestamp);
+        sqlite::bind_text(statement, 6, payload);
+        const int rc = sqlite::step(statement);
         sqlite3_finalize(statement);
         sqlite_require(rc, database, "store event");
     }
@@ -1001,18 +1003,18 @@ namespace agent_framework
         sqlite3_stmt *statement = nullptr;
         sqlite_require(sqlite3_prepare_v2(database, sql.c_str(), -1, &statement, nullptr), database, "prepare query events");
         int index = 1;
-        sqlite3_bind_text(statement, index++, tenant_id_.c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_text(statement, index++, agent_id_.c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_text(statement, index++, session.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite::bind_text(statement, index++, tenant_id_);
+        sqlite::bind_text(statement, index++, agent_id_);
+        sqlite::bind_text(statement, index++, session);
         if (!node.empty())
-            sqlite3_bind_text(statement, index++, node.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite::bind_text(statement, index++, node);
         if (begin)
-            sqlite3_bind_int64(statement, index++, begin);
+            sqlite::bind_int64(statement, index++, begin);
         if (end)
-            sqlite3_bind_int64(statement, index++, end);
+            sqlite::bind_int64(statement, index++, end);
         std::vector<Event> result;
-        for (int rc; (rc = sqlite3_step(statement)) == SQLITE_ROW;)
-            result.push_back(parse_event(json::parse(reinterpret_cast<const char *>(sqlite3_column_text(statement, 0)))));
+        for (int rc; (rc = sqlite::step(statement)) == SQLITE_ROW;)
+            result.push_back(parse_event(json::parse(sqlite::column_text(statement, 0))));
         sqlite3_finalize(statement);
         return result;
     }
@@ -1024,12 +1026,12 @@ namespace agent_framework
         sqlite3_stmt *statement = nullptr;
         sqlite_require(sqlite3_prepare_v2(database, "INSERT INTO memory_messages(tenant,agent,session,ts,payload) VALUES(?,?,?,?,?)", -1, &statement, nullptr), database, "prepare message");
         const auto payload = message_json(message).dump();
-        sqlite3_bind_text(statement, 1, tenant_id_.c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_text(statement, 2, agent_id_.c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_text(statement, 3, session.c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_int64(statement, 4, message.timestamp);
-        sqlite3_bind_text(statement, 5, payload.c_str(), -1, SQLITE_TRANSIENT);
-        const int rc = sqlite3_step(statement);
+        sqlite::bind_text(statement, 1, tenant_id_);
+        sqlite::bind_text(statement, 2, agent_id_);
+        sqlite::bind_text(statement, 3, session);
+        sqlite::bind_int64(statement, 4, message.timestamp);
+        sqlite::bind_text(statement, 5, payload);
+        const int rc = sqlite::step(statement);
         sqlite3_finalize(statement);
         sqlite_require(rc, database, "store message");
     }
@@ -1040,13 +1042,13 @@ namespace agent_framework
         sqlite3_stmt *statement = nullptr;
         require_scope_id(session, "session id");
         sqlite_require(sqlite3_prepare_v2(database, "SELECT payload FROM memory_messages WHERE tenant=? AND agent=? AND session=? ORDER BY ts DESC LIMIT ?", -1, &statement, nullptr), database, "prepare history");
-        sqlite3_bind_text(statement, 1, tenant_id_.c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_text(statement, 2, agent_id_.c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_text(statement, 3, session.c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_int(statement, 4, maximum > 0 ? maximum : -1);
+        sqlite::bind_text(statement, 1, tenant_id_);
+        sqlite::bind_text(statement, 2, agent_id_);
+        sqlite::bind_text(statement, 3, session);
+        sqlite::bind_int(statement, 4, maximum > 0 ? maximum : -1);
         std::vector<Message> result;
-        while (sqlite3_step(statement) == SQLITE_ROW)
-            result.push_back(parse_message(json::parse(reinterpret_cast<const char *>(sqlite3_column_text(statement, 0)))));
+        while (sqlite::step(statement) == SQLITE_ROW)
+            result.push_back(parse_message(json::parse(sqlite::column_text(statement, 0))));
         sqlite3_finalize(statement);
         std::reverse(result.begin(), result.end());
         return result;
@@ -1059,14 +1061,14 @@ namespace agent_framework
         sqlite3_stmt *statement = nullptr;
         sqlite_require(sqlite3_prepare_v2(database, "INSERT INTO memory_summaries(tenant,agent,session,summary,payload,updated) VALUES(?,?,?,?,?,?)", -1, &statement, nullptr), database, "prepare summary");
         const auto payload = summary_json(summary).dump();
-        sqlite3_bind_text(statement, 1, tenant_id_.c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_text(statement, 2, agent_id_.c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_text(statement, 3, summary.session_id.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite::bind_text(statement, 1, tenant_id_);
+        sqlite::bind_text(statement, 2, agent_id_);
+        sqlite::bind_text(statement, 3, summary.session_id);
         const auto redacted = redact_text(summary.summary);
-        sqlite3_bind_text(statement, 4, redacted.c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_text(statement, 5, payload.c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_int64(statement, 6, summary.updated_at);
-        const int rc = sqlite3_step(statement);
+        sqlite::bind_text(statement, 4, redacted);
+        sqlite::bind_text(statement, 5, payload);
+        sqlite::bind_int64(statement, 6, summary.updated_at);
+        const int rc = sqlite::step(statement);
         sqlite3_finalize(statement);
         sqlite_require(rc, database, "store summary");
     }
@@ -1077,13 +1079,13 @@ namespace agent_framework
         sqlite3_stmt *statement = nullptr;
         sqlite_require(sqlite3_prepare_v2(database, "SELECT payload FROM memory_summaries WHERE tenant=? AND agent=? AND summary LIKE ? ORDER BY updated DESC LIMIT ?", -1, &statement, nullptr), database, "prepare summary query");
         const auto like = "%" + query + "%";
-        sqlite3_bind_text(statement, 1, tenant_id_.c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_text(statement, 2, agent_id_.c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_text(statement, 3, like.c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_int(statement, 4, top > 0 ? top : -1);
+        sqlite::bind_text(statement, 1, tenant_id_);
+        sqlite::bind_text(statement, 2, agent_id_);
+        sqlite::bind_text(statement, 3, like);
+        sqlite::bind_int(statement, 4, top > 0 ? top : -1);
         std::vector<MemorySummary> result;
-        while (sqlite3_step(statement) == SQLITE_ROW)
-            result.push_back(parse_summary(json::parse(reinterpret_cast<const char *>(sqlite3_column_text(statement, 0)))));
+        while (sqlite::step(statement) == SQLITE_ROW)
+            result.push_back(parse_summary(json::parse(sqlite::column_text(statement, 0))));
         sqlite3_finalize(statement);
         return result;
     }
@@ -1093,10 +1095,10 @@ namespace agent_framework
         auto *database = static_cast<sqlite3 *>(db_);
         sqlite3_stmt *statement = nullptr;
         sqlite_require(sqlite3_prepare_v2(database, "DELETE FROM memory_summaries WHERE tenant=? AND agent=? AND updated<?", -1, &statement, nullptr), database, "prepare cleanup");
-        sqlite3_bind_text(statement, 1, tenant_id_.c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_text(statement, 2, agent_id_.c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_int64(statement, 3, expiry);
-        const int rc = sqlite3_step(statement);
+        sqlite::bind_text(statement, 1, tenant_id_);
+        sqlite::bind_text(statement, 2, agent_id_);
+        sqlite::bind_int64(statement, 3, expiry);
+        const int rc = sqlite::step(statement);
         sqlite3_finalize(statement);
         sqlite_require(rc, database, "cleanup summaries");
     }

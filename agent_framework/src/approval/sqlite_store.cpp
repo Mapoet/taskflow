@@ -80,8 +80,8 @@ void SQLiteApprovalStore::migrate() {
         int version = 0;
         {
             sqlite::Statement query(db, "SELECT COALESCE(MAX(version),0) FROM approval_schema_version");
-            if(sqlite3_step(query.get()) == SQLITE_ROW)
-                version = sqlite3_column_int(query.get(), 0);
+            if(sqlite::step(query.get()) == SQLITE_ROW)
+                version = sqlite::column_int(query.get(), 0);
         }
         if(version > 1) throw std::runtime_error("approval schema newer than binary");
         if(version == 0) {
@@ -124,7 +124,7 @@ ApprovalStoreResult SQLiteApprovalStore::put_request(const ApprovalRequest& requ
     sqlite::bind_text(insert.get(), 4, digest);
     sqlite::bind_text(insert.get(), 5, request_value.expires_at);
     sqlite::bind_text(insert.get(), 6, contracts::canonical_json(document));
-    const auto status = sqlite3_step(insert.get());
+    const auto status = sqlite::step(insert.get());
     if(status != SQLITE_DONE) {
         auto result = failure(db, status);
         result.digest = digest;
@@ -137,7 +137,7 @@ std::optional<ApprovalRequest> SQLiteApprovalStore::request(std::string_view app
     std::lock_guard lock(mutex_);
     sqlite::Statement query(sqlite::database(db_), "SELECT document_json FROM approval_requests WHERE approval_id=?");
     sqlite::bind_text(query.get(), 1, approval_id);
-    return sqlite3_step(query.get()) == SQLITE_ROW
+    return sqlite::step(query.get()) == SQLITE_ROW
         ? decode_request(sqlite::column_text(query.get(), 0)) : std::nullopt;
 }
 
@@ -156,7 +156,7 @@ ApprovalStoreResult SQLiteApprovalStore::decide(
             sqlite::Statement query(db, "SELECT request_digest,document_json FROM approval_requests "
                                 "WHERE approval_id=?");
             sqlite::bind_text(query.get(), 1, decision_value.approval_id);
-            if(sqlite3_step(query.get()) != SQLITE_ROW) {
+            if(sqlite::step(query.get()) != SQLITE_ROW) {
                 sqlite::exec(db, "ROLLBACK");
                 return {ApprovalStoreStatus::NotFound, 0, {}, "approval request not found"};
             }
@@ -171,9 +171,9 @@ ApprovalStoreResult SQLiteApprovalStore::decide(
             sqlite::Statement query(db, "SELECT revision,decision FROM approval_decisions "
                                 "WHERE approval_id=? ORDER BY revision DESC LIMIT 1");
             sqlite::bind_text(query.get(), 1, decision_value.approval_id);
-            if(sqlite3_step(query.get()) == SQLITE_ROW) {
-                current_revision = static_cast<std::uint64_t>(sqlite3_column_int64(query.get(), 0));
-                current_decision = sqlite3_column_int(query.get(), 1);
+            if(sqlite::step(query.get()) == SQLITE_ROW) {
+                current_revision = static_cast<std::uint64_t>(sqlite::column_int64(query.get(), 0));
+                current_decision = sqlite::column_int(query.get(), 1);
             }
         }
         if(current_revision != expected_revision) {
@@ -208,10 +208,10 @@ ApprovalStoreResult SQLiteApprovalStore::decide(
         sqlite::Statement insert(db, "INSERT INTO approval_decisions(approval_id,revision,decision,"
                              "document_json) VALUES(?,?,?,?)");
         sqlite::bind_text(insert.get(), 1, decision_value.approval_id);
-        sqlite3_bind_int64(insert.get(), 2, static_cast<sqlite3_int64>(revision));
-        sqlite3_bind_int(insert.get(), 3, static_cast<int>(decision_value.decision));
+        sqlite::bind_int64(insert.get(), 2, static_cast<sqlite3_int64>(revision));
+        sqlite::bind_int(insert.get(), 3, static_cast<int>(decision_value.decision));
         sqlite::bind_text(insert.get(), 4, contracts::canonical_json(document));
-        const auto status = sqlite3_step(insert.get());
+        const auto status = sqlite::step(insert.get());
         if(status != SQLITE_DONE) {
             auto result = failure(db, status);
             sqlite::exec(db, "ROLLBACK");
@@ -231,7 +231,7 @@ std::optional<ApprovalDecision> SQLiteApprovalStore::latest_decision(
     sqlite::Statement query(sqlite::database(db_), "SELECT document_json FROM approval_decisions "
                                    "WHERE approval_id=? ORDER BY revision DESC LIMIT 1");
     sqlite::bind_text(query.get(), 1, approval_id);
-    return sqlite3_step(query.get()) == SQLITE_ROW
+    return sqlite::step(query.get()) == SQLITE_ROW
         ? decode_decision(sqlite::column_text(query.get(), 0)) : std::nullopt;
 }
 
@@ -242,7 +242,7 @@ std::vector<ApprovalDecision> SQLiteApprovalStore::decision_history(
     sqlite::Statement query(sqlite::database(db_), "SELECT document_json FROM approval_decisions "
                                    "WHERE approval_id=? ORDER BY revision ASC");
     sqlite::bind_text(query.get(), 1, approval_id);
-    while(sqlite3_step(query.get()) == SQLITE_ROW) {
+    while(sqlite::step(query.get()) == SQLITE_ROW) {
         auto decoded = decode_decision(sqlite::column_text(query.get(), 0));
         if(decoded) result.push_back(std::move(*decoded));
     }
@@ -260,8 +260,8 @@ std::vector<ApprovalRequest> SQLiteApprovalStore::pending(
         "ORDER BY r.created_at,r.approval_id LIMIT ?");
     sqlite::bind_text(query.get(), 1, tenant_id);
     sqlite::bind_text(query.get(), 2, now);
-    sqlite3_bind_int64(query.get(), 3, static_cast<sqlite3_int64>(limit));
-    while(sqlite3_step(query.get()) == SQLITE_ROW) {
+    sqlite::bind_int64(query.get(), 3, static_cast<sqlite3_int64>(limit));
+    while(sqlite::step(query.get()) == SQLITE_ROW) {
         auto decoded = decode_request(sqlite::column_text(query.get(), 0));
         if(decoded) result.push_back(std::move(*decoded));
     }

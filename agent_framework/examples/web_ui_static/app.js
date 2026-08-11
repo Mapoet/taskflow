@@ -304,15 +304,17 @@
       const head = document.createElement("div"); head.className = "hitl-head"; const title = document.createElement("b"); title.textContent = text(request.kind).replaceAll("_", " "); head.append(title, statusNode(request.status));
       const summary = document.createElement("p"); summary.textContent = text(request.summary); const meta = document.createElement("small"); meta.textContent = "Requested by " + text(request.requested_by || "system") + " · due " + text(request.deadline || "not set"); body.append(head, summary, meta);
       const actions = document.createElement("div"); actions.className = "hitl-actions";
-      (request.allowed_actions || []).forEach(function (action) { const button = document.createElement("button"); button.type = "button"; button.textContent = text(action).replaceAll("_", " "); button.addEventListener("click", function () { submitHitl(request.id, action, button); }); actions.append(button); });
+      if (request.status === "pending") (request.allowed_actions || []).forEach(function (action) { const button = document.createElement("button"); button.type = "button"; button.textContent = text(action).replaceAll("_", " "); button.addEventListener("click", function () { submitHitl(request.id, action, button); }); actions.append(button); });
       card.append(body, actions); hitl.append(card);
     });
   }
 
   async function submitHitl(requestId, action, button) {
+    const reviewerId = text($("reviewer-id").value).trim();
+    if (!reviewerId) { $("hitl-feedback").textContent = "Reviewer identity is required"; $("reviewer-id").focus(); return; }
     button.disabled = true; $("hitl-feedback").textContent = "Submitting accountable decision…";
     try {
-      const response = await fetch("/ui/operations/hitl", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ request_id: requestId, action }) });
+      const response = await fetch("/ui/operations/hitl", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ request_id: requestId, action, reviewer_id: reviewerId }) });
       if (!response.ok) throw new Error(await response.text());
       $("hitl-feedback").textContent = "Decision recorded and snapshot refreshed";
     } catch (error) { $("hitl-feedback").textContent = "Decision not applied: " + text(error.message || error); }

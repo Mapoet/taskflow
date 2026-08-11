@@ -1,4 +1,5 @@
 #include <agent/session/session_store.hpp>
+#include "agent/internal/sqlite_utils.hpp"
 
 #include <sqlite3.h>
 
@@ -13,6 +14,8 @@
 
 namespace agent_framework {
 namespace {
+
+namespace sqlite = internal::sqlite;
 
 constexpr int kSchemaVersion = 1;
 
@@ -231,7 +234,7 @@ void SQLiteSessionStore::migrate() {
         exec_sql(db, "CREATE TABLE IF NOT EXISTS schema_version(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)");
         sqlite3_stmt* st = nullptr;
         sqlite3_prepare_v2(db, "SELECT COALESCE(MAX(version),0) FROM schema_version", -1, &st, nullptr);
-        int version = sqlite3_step(st) == SQLITE_ROW ? sqlite3_column_int(st, 0) : 0;
+        int version = sqlite::step(st) == SQLITE_ROW ? sqlite::column_int(st, 0) : 0;
         sqlite3_finalize(st);
         if (version > kSchemaVersion) throw std::runtime_error("session database schema is newer than this binary");
         if (version < 1) {
@@ -250,12 +253,11 @@ SessionSnapshot SQLiteSessionStore::load_or_create(std::string_view id) {
     auto* db = static_cast<sqlite3*>(db_);
     sqlite3_stmt* st = nullptr;
     sqlite3_prepare_v2(db, "SELECT revision,checkpoint_id,state_payload FROM sessions WHERE session_id=?", -1, &st, nullptr);
-    sqlite3_bind_text(st, 1, id.data(), static_cast<int>(id.size()), SQLITE_TRANSIENT);
-    if (sqlite3_step(st) == SQLITE_ROW) {
-        auto rev = static_cast<std::uint64_t>(sqlite3_column_int64(st, 0));
-        std::string cp(reinterpret_cast<const char*>(sqlite3_column_text(st, 1)));
-        const auto* bytes = static_cast<const char*>(sqlite3_column_blob(st, 2));
-        std::string payload(bytes, bytes + sqlite3_column_bytes(st, 2));
+    sqlite::bind_text(st, 1, id);
+    if (sqlite::step(st) == SQLITE_ROW) {
+        auto rev = static_cast<std::uint64_t>(sqlite::column_int64(st, 0));
+        std::string cp = sqlite::column_text(st, 1);
+        std::string payload = sqlite::column_blob(st, 2);
         sqlite3_finalize(st);
         return snapshot_from_payload(std::string(id), rev, std::move(cp), options_.codec->decode(payload));
     }
@@ -270,9 +272,9 @@ SessionCommitResult SQLiteSessionStore::commit(const SessionSnapshot& next, std:
     try {
         sqlite3_stmt* st = nullptr;
         sqlite3_prepare_v2(db, "SELECT revision FROM sessions WHERE session_id=?", -1, &st, nullptr);
-        sqlite3_bind_text(st, 1, next.session_id.c_str(), -1, SQLITE_TRANSIENT);
-        const int step = sqlite3_step(st);
-        const std::uint64_t current = step == SQLITE_ROW ? static_cast<std::uint64_t>(sqlite3_column_int64(st, 0)) : 0;
+        sqlite::bind_text(st, 1, next.session_id);
+        const int step = sqlite::step(st);
+        const std::uint64_t current = step == SQLITE_ROW ? static_cast<std::uint64_t>(sqlite::column_int64(st, 0)) : 0;
         sqlite3_finalize(st);
         if (current != expected) {
             exec_sql(db, "ROLLBACK");
@@ -281,47 +283,47 @@ SessionCommitResult SQLiteSessionStore::commit(const SessionSnapshot& next, std:
         const std::string payload = options_.codec->encode(snapshot_to_json(next).dump());
         const std::string now = now_text();
         sqlite3_prepare_v2(db, "INSERT INTO sessions(session_id,revision,checkpoint_id,state_payload,terminal_status,created_at,updated_at) VALUES(?,?,?,?,?,?,?) ON CONFLICT(session_id) DO UPDATE SET revision=excluded.revision,checkpoint_id=excluded.checkpoint_id,state_payload=excluded.state_payload,terminal_status=excluded.terminal_status,updated_at=excluded.updated_at", -1, &st, nullptr);
-        sqlite3_bind_text(st, 1, next.session_id.c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_int64(st, 2, static_cast<sqlite3_int64>(expected + 1));
-        sqlite3_bind_text(st, 3, next.checkpoint_id.c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_blob(st, 4, payload.data(), static_cast<int>(payload.size()), SQLITE_TRANSIENT);
-        sqlite3_bind_text(st, 5, "committed", -1, SQLITE_STATIC);
-        sqlite3_bind_text(st, 6, now.c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_text(st, 7, now.c_str(), -1, SQLITE_TRANSIENT);
-        if (sqlite3_step(st) != SQLITE_DONE) throw std::runtime_error(sqlite3_errmsg(db));
+        sqlite::bind_text(st, 1, next.session_id);
+        sqlite::bind_int64(st, 2, static_cast<sqlite3_int64>(expected + 1));
+        sqlite::bind_text(st, 3, next.checkpoint_id);
+        sqlite::bind_blob(st, 4, payload.data(), payload.size());
+        sqlite::bind_text(st, 5, "committed");
+        sqlite::bind_text(st, 6, now);
+        sqlite::bind_text(st, 7, now);
+        if (sqlite::step(st) != SQLITE_DONE) throw std::runtime_error(sqlite3_errmsg(db));
         sqlite3_finalize(st);
 
         sqlite3_prepare_v2(db, "DELETE FROM tool_commits WHERE session_id=?", -1, &st, nullptr);
-        sqlite3_bind_text(st, 1, next.session_id.c_str(), -1, SQLITE_TRANSIENT);
-        if (sqlite3_step(st) != SQLITE_DONE) throw std::runtime_error(sqlite3_errmsg(db));
+        sqlite::bind_text(st, 1, next.session_id);
+        if (sqlite::step(st) != SQLITE_DONE) throw std::runtime_error(sqlite3_errmsg(db));
         sqlite3_finalize(st);
         for (const auto& tool : next.tool_commits) {
             sqlite3_prepare_v2(db, "INSERT INTO tool_commits(session_id,tool_call_id,attempt,status,result_digest,committed_at) VALUES(?,?,?,?,?,?)", -1, &st, nullptr);
-            sqlite3_bind_text(st, 1, next.session_id.c_str(), -1, SQLITE_TRANSIENT);
-            sqlite3_bind_text(st, 2, tool.tool_call_id.c_str(), -1, SQLITE_TRANSIENT);
-            sqlite3_bind_int64(st, 3, static_cast<sqlite3_int64>(tool.attempt));
-            sqlite3_bind_text(st, 4, tool.status.c_str(), -1, SQLITE_TRANSIENT);
-            sqlite3_bind_text(st, 5, tool.result_digest.c_str(), -1, SQLITE_TRANSIENT);
-            sqlite3_bind_text(st, 6, now.c_str(), -1, SQLITE_TRANSIENT);
-            if (sqlite3_step(st) != SQLITE_DONE) throw std::runtime_error(sqlite3_errmsg(db));
+            sqlite::bind_text(st, 1, next.session_id);
+            sqlite::bind_text(st, 2, tool.tool_call_id);
+            sqlite::bind_int64(st, 3, static_cast<sqlite3_int64>(tool.attempt));
+            sqlite::bind_text(st, 4, tool.status);
+            sqlite::bind_text(st, 5, tool.result_digest);
+            sqlite::bind_text(st, 6, now);
+            if (sqlite::step(st) != SQLITE_DONE) throw std::runtime_error(sqlite3_errmsg(db));
             sqlite3_finalize(st);
         }
 
         sqlite3_prepare_v2(db, "DELETE FROM child_tasks WHERE session_id=?", -1, &st, nullptr);
-        sqlite3_bind_text(st, 1, next.session_id.c_str(), -1, SQLITE_TRANSIENT);
-        if (sqlite3_step(st) != SQLITE_DONE) throw std::runtime_error(sqlite3_errmsg(db));
+        sqlite::bind_text(st, 1, next.session_id);
+        if (sqlite::step(st) != SQLITE_DONE) throw std::runtime_error(sqlite3_errmsg(db));
         sqlite3_finalize(st);
         for (const auto& child : next.child_tasks) {
             const std::string child_payload = options_.codec->encode(child.payload.dump());
             sqlite3_prepare_v2(db, "INSERT INTO child_tasks(session_id,child_id,backend,attempt,status,payload,updated_at) VALUES(?,?,?,?,?,?,?)", -1, &st, nullptr);
-            sqlite3_bind_text(st, 1, next.session_id.c_str(), -1, SQLITE_TRANSIENT);
-            sqlite3_bind_text(st, 2, child.child_id.c_str(), -1, SQLITE_TRANSIENT);
-            sqlite3_bind_text(st, 3, child.backend.c_str(), -1, SQLITE_TRANSIENT);
-            sqlite3_bind_int64(st, 4, static_cast<sqlite3_int64>(child.attempt));
-            sqlite3_bind_text(st, 5, child.status.c_str(), -1, SQLITE_TRANSIENT);
-            sqlite3_bind_blob(st, 6, child_payload.data(), static_cast<int>(child_payload.size()), SQLITE_TRANSIENT);
-            sqlite3_bind_text(st, 7, now.c_str(), -1, SQLITE_TRANSIENT);
-            if (sqlite3_step(st) != SQLITE_DONE) throw std::runtime_error(sqlite3_errmsg(db));
+            sqlite::bind_text(st, 1, next.session_id);
+            sqlite::bind_text(st, 2, child.child_id);
+            sqlite::bind_text(st, 3, child.backend);
+            sqlite::bind_int64(st, 4, static_cast<sqlite3_int64>(child.attempt));
+            sqlite::bind_text(st, 5, child.status);
+            sqlite::bind_blob(st, 6, child_payload.data(), child_payload.size());
+            sqlite::bind_text(st, 7, now);
+            if (sqlite::step(st) != SQLITE_DONE) throw std::runtime_error(sqlite3_errmsg(db));
             sqlite3_finalize(st);
         }
         exec_sql(db, "COMMIT");

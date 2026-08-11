@@ -131,7 +131,7 @@ SQLiteArtifactJournal::~SQLiteArtifactJournal() { if(db_) sqlite3_close(sqlite::
 std::optional<ArtifactJournalEntry> SQLiteArtifactJournal::load(std::string_view key) {
     std::lock_guard lock(mutex_); auto* db = sqlite::database(db_);
     sqlite::Statement query(db, "SELECT entry_json,entry_digest FROM phase4_artifact_journal WHERE idempotency_key=?");
-    sqlite::bind_text(query.get(), 1, key); const int rc = sqlite3_step(query.get());
+    sqlite::bind_text(query.get(), 1, key); const int rc = sqlite::step(query.get());
     if(rc == SQLITE_DONE) return std::nullopt;
     if(rc != SQLITE_ROW) throw std::runtime_error(sqlite3_errmsg(db));
     const auto document = sqlite::column_text(query.get(), 0);
@@ -145,7 +145,7 @@ bool SQLiteArtifactJournal::put_if_absent(const ArtifactJournalEntry& entry, std
         sqlite::Statement insert(db, "INSERT INTO phase4_artifact_journal(idempotency_key,entry_json,entry_digest) VALUES(?,?,?)");
         sqlite::bind_text(insert.get(), 1, entry.receipt.idempotency_key);
         sqlite::bind_text(insert.get(), 2, document); sqlite::bind_text(insert.get(), 3, digest(document));
-        const int rc = sqlite3_step(insert.get());
+        const int rc = sqlite::step(insert.get());
         if(rc == SQLITE_CONSTRAINT) return false;
         if(rc != SQLITE_DONE) { if(error) *error = sqlite3_errmsg(db); return false; }
         return true;

@@ -136,12 +136,12 @@ namespace agent_framework::live
         sqlite::bind_text(s.get(), 1, v.metadata.identity.tenant_id);
         sqlite::bind_text(s.get(), 2, v.workflow_id);
         sqlite::bind_text(s.get(), 3, v.metadata.identity.task_id);
-        sqlite3_bind_int64(s.get(), 4, v.revision);
+        sqlite::bind_int64(s.get(), 4, v.revision);
         sqlite::bind_text(s.get(), 5, role_certification_state_name(v.state));
         sqlite::bind_text(s.get(), 6, doc.dump());
         sqlite::bind_text(s.get(), 7, dg);
         sqlite::bind_text(s.get(), 8, v.updated_at);
-        int rc = sqlite3_step(s.get());
+        int rc = sqlite::step(s.get());
         if (rc == SQLITE_CONSTRAINT)
             return {RoleCertificationStoreStatus::AlreadyExists, 0, {}, {}};
         if (rc != SQLITE_DONE)
@@ -155,12 +155,12 @@ namespace agent_framework::live
         sqlite::Statement s(db, "SELECT revision,checkpoint_json,checkpoint_digest FROM live_cert_checkpoints WHERE tenant_id=? AND workflow_id=?");
         sqlite::bind_text(s.get(), 1, t);
         sqlite::bind_text(s.get(), 2, w);
-        int rc = sqlite3_step(s.get());
+        int rc = sqlite::step(s.get());
         if (rc == SQLITE_DONE)
             return std::nullopt;
         if (rc != SQLITE_ROW)
             throw std::runtime_error(sqlite3_errmsg(db));
-        auto rev = static_cast<std::uint64_t>(sqlite3_column_int64(s.get(), 0));
+        auto rev = static_cast<std::uint64_t>(sqlite::column_int64(s.get(), 0));
         auto text = sqlite::column_text(s.get(), 1);
         auto dg = sqlite::column_text(s.get(), 2);
         auto value = decode_role_certification_checkpoint(nlohmann::json::parse(text));
@@ -184,18 +184,18 @@ namespace agent_framework::live
         std::lock_guard lock(mutex_);
         auto *db = sqlite::database(db_);
         sqlite::Statement s(db, "UPDATE live_cert_checkpoints SET revision=?,state=?,checkpoint_json=?,checkpoint_digest=?,updated_at=? WHERE tenant_id=? AND workflow_id=? AND revision=?");
-        sqlite3_bind_int64(s.get(), 1, v.revision);
+        sqlite::bind_int64(s.get(), 1, v.revision);
         sqlite::bind_text(s.get(), 2, role_certification_state_name(v.state));
         sqlite::bind_text(s.get(), 3, doc.dump());
         sqlite::bind_text(s.get(), 4, dg);
         sqlite::bind_text(s.get(), 5, v.updated_at);
         sqlite::bind_text(s.get(), 6, v.metadata.identity.tenant_id);
         sqlite::bind_text(s.get(), 7, v.workflow_id);
-        sqlite3_bind_int64(s.get(), 8, expected);
-        int rc = sqlite3_step(s.get());
+        sqlite::bind_int64(s.get(), 8, expected);
+        int rc = sqlite::step(s.get());
         if (rc != SQLITE_DONE)
             return fail(db, rc);
-        if (sqlite3_changes(db) != 1)
+        if (sqlite::changes(db) != 1)
             return {RoleCertificationStoreStatus::RevisionConflict, expected, {}, {}};
         return {RoleCertificationStoreStatus::Committed, v.revision, dg, {}};
     }
@@ -217,16 +217,16 @@ namespace agent_framework::live
         {
             sqlite::exec(db, "BEGIN IMMEDIATE");
             sqlite::Statement u(db, "UPDATE live_cert_checkpoints SET revision=?,state=?,checkpoint_json=?,checkpoint_digest=?,updated_at=? WHERE tenant_id=? AND workflow_id=? AND revision=?");
-            sqlite3_bind_int64(u.get(), 1, v.revision);
+            sqlite::bind_int64(u.get(), 1, v.revision);
             sqlite::bind_text(u.get(), 2, role_certification_state_name(v.state));
             sqlite::bind_text(u.get(), 3, cp.dump());
             sqlite::bind_text(u.get(), 4, cp.at("canonical_digest").get<std::string>());
             sqlite::bind_text(u.get(), 5, v.updated_at);
             sqlite::bind_text(u.get(), 6, v.metadata.identity.tenant_id);
             sqlite::bind_text(u.get(), 7, v.workflow_id);
-            sqlite3_bind_int64(u.get(), 8, expected);
-            int rc = sqlite3_step(u.get());
-            if (rc != SQLITE_DONE || sqlite3_changes(db) != 1)
+            sqlite::bind_int64(u.get(), 8, expected);
+            int rc = sqlite::step(u.get());
+            if (rc != SQLITE_DONE || sqlite::changes(db) != 1)
             {
                 sqlite::exec(db, "ROLLBACK");
                 return rc == SQLITE_DONE ? RoleCertificationStoreCommit{RoleCertificationStoreStatus::RevisionConflict, expected, {}, {}} : fail(db, rc);
@@ -234,11 +234,11 @@ namespace agent_framework::live
             sqlite::Statement i(db, "INSERT INTO live_cert_reports(tenant_id,workflow_id,revision,report_json,report_digest,created_at) VALUES(?,?,?,?,?,?)");
             sqlite::bind_text(i.get(), 1, v.metadata.identity.tenant_id);
             sqlite::bind_text(i.get(), 2, v.workflow_id);
-            sqlite3_bind_int64(i.get(), 3, 1);
+            sqlite::bind_int64(i.get(), 3, 1);
             sqlite::bind_text(i.get(), 4, rp.dump());
             sqlite::bind_text(i.get(), 5, rp.at("canonical_digest").get<std::string>());
             sqlite::bind_text(i.get(), 6, r.issued_at);
-            rc = sqlite3_step(i.get());
+            rc = sqlite::step(i.get());
             if (rc != SQLITE_DONE)
             {
                 sqlite::exec(db, "ROLLBACK");
@@ -266,12 +266,12 @@ namespace agent_framework::live
         sqlite::Statement s(db, "SELECT revision,report_json,report_digest FROM live_cert_reports WHERE tenant_id=? AND workflow_id=?");
         sqlite::bind_text(s.get(), 1, t);
         sqlite::bind_text(s.get(), 2, w);
-        int rc = sqlite3_step(s.get());
+        int rc = sqlite::step(s.get());
         if (rc == SQLITE_DONE)
             return std::nullopt;
         if (rc != SQLITE_ROW)
             throw std::runtime_error(sqlite3_errmsg(db));
-        auto rev = static_cast<std::uint64_t>(sqlite3_column_int64(s.get(), 0));
+        auto rev = static_cast<std::uint64_t>(sqlite::column_int64(s.get(), 0));
         auto text = sqlite::column_text(s.get(), 1);
         auto dg = sqlite::column_text(s.get(), 2);
         auto value = decode_role_certification_report(nlohmann::json::parse(text));

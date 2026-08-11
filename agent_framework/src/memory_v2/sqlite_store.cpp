@@ -166,8 +166,8 @@ namespace agent_framework::memory_v2
         int v = 0;
         {
             sqlite::Statement s(d, "SELECT COALESCE(MAX(version),0) FROM memory_schema_version");
-            if (sqlite3_step(s.get()) == SQLITE_ROW)
-                v = sqlite3_column_int(s.get(), 0);
+            if (sqlite::step(s.get()) == SQLITE_ROW)
+                v = sqlite::column_int(s.get(), 0);
         }
         if (v > 1)
             throw std::runtime_error("memory schema newer than binary");
@@ -195,10 +195,10 @@ namespace agent_framework::memory_v2
             auto doc = encode(r).dump();
             sqlite::Statement h(d, "INSERT INTO memory_history(record_id,revision,document_json,approval_id)VALUES(?,?,?,?)");
             sqlite::bind_text(h.get(), 1, r.record_id);
-            sqlite3_bind_int64(h.get(), 2, 1);
+            sqlite::bind_int64(h.get(), 2, 1);
             sqlite::bind_text(h.get(), 3, doc);
             sqlite::bind_text(h.get(), 4, approval);
-            int rc = sqlite3_step(h.get());
+            int rc = sqlite::step(h.get());
             if (rc == SQLITE_CONSTRAINT || rc == SQLITE_CONSTRAINT_PRIMARYKEY ||
                 rc == SQLITE_CONSTRAINT_UNIQUE)
             {
@@ -212,11 +212,11 @@ namespace agent_framework::memory_v2
             sqlite::Statement c(d, "INSERT INTO memory_records(record_id,tenant_id,revision,level,status,document_json)VALUES(?,?,?,?,?,?)");
             sqlite::bind_text(c.get(), 1, r.record_id);
             sqlite::bind_text(c.get(), 2, r.scope.tenant_id);
-            sqlite3_bind_int64(c.get(), 3, 1);
-            sqlite3_bind_int(c.get(), 4, static_cast<int>(r.scope.level));
-            sqlite3_bind_int(c.get(), 5, static_cast<int>(r.status));
+            sqlite::bind_int64(c.get(), 3, 1);
+            sqlite::bind_int(c.get(), 4, static_cast<int>(r.scope.level));
+            sqlite::bind_int(c.get(), 5, static_cast<int>(r.status));
             sqlite::bind_text(c.get(), 6, doc);
-            rc = sqlite3_step(c.get());
+            rc = sqlite::step(c.get());
             if (rc != SQLITE_DONE)
                 return failure(d, rc);
             sqlite::exec(d, "UPDATE memory_generation SET generation=generation+1 WHERE singleton=1");
@@ -243,9 +243,9 @@ namespace agent_framework::memory_v2
             {
                 sqlite::Statement q(d, "SELECT revision,document_json FROM memory_records WHERE record_id=?");
                 sqlite::bind_text(q.get(), 1, r.record_id);
-                if (sqlite3_step(q.get()) != SQLITE_ROW)
+                if (sqlite::step(q.get()) != SQLITE_ROW)
                     return {CommitStatus::NotFound, 0, "record not found"};
-                actual = sqlite3_column_int64(q.get(), 0);
+                actual = sqlite::column_int64(q.get(), 0);
                 auto prior = decode_record(sqlite::column_text(q.get(), 1));
                 if (!prior)
                     return {CommitStatus::Error, actual, "corrupt memory record"};
@@ -253,28 +253,33 @@ namespace agent_framework::memory_v2
             }
             if (actual != expected)
                 return {CommitStatus::RevisionConflict, actual, "revision conflict"};
-            if (!can_transition(old, r.status))
+            const bool governed_correction = old == r.status && !approval.empty() &&
+                r.metadata.extensions.contains("correction_approval_id") &&
+                r.metadata.extensions.contains("correction_evidence_ids") &&
+                r.metadata.extensions.at("correction_evidence_ids").is_array() &&
+                !r.metadata.extensions.at("correction_evidence_ids").empty();
+            if (!can_transition(old, r.status) && !governed_correction)
                 return {CommitStatus::Invalid, actual, "illegal memory lifecycle transition"};
             auto doc = encode(r).dump();
             sqlite::Statement h(d, "INSERT INTO memory_history(record_id,revision,document_json,approval_id)VALUES(?,?,?,?)");
             sqlite::bind_text(h.get(), 1, r.record_id);
-            sqlite3_bind_int64(h.get(), 2, r.revision);
+            sqlite::bind_int64(h.get(), 2, r.revision);
             sqlite::bind_text(h.get(), 3, doc);
             sqlite::bind_text(h.get(), 4, approval);
-            int rc = sqlite3_step(h.get());
+            int rc = sqlite::step(h.get());
             if (rc != SQLITE_DONE)
                 return failure(d, rc);
             sqlite::Statement u(d, "UPDATE memory_records SET revision=?,level=?,status=?,document_json=?,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE record_id=? AND revision=?");
-            sqlite3_bind_int64(u.get(), 1, r.revision);
-            sqlite3_bind_int(u.get(), 2, static_cast<int>(r.scope.level));
-            sqlite3_bind_int(u.get(), 3, static_cast<int>(r.status));
+            sqlite::bind_int64(u.get(), 1, r.revision);
+            sqlite::bind_int(u.get(), 2, static_cast<int>(r.scope.level));
+            sqlite::bind_int(u.get(), 3, static_cast<int>(r.status));
             sqlite::bind_text(u.get(), 4, doc);
             sqlite::bind_text(u.get(), 5, r.record_id);
-            sqlite3_bind_int64(u.get(), 6, expected);
-            rc = sqlite3_step(u.get());
+            sqlite::bind_int64(u.get(), 6, expected);
+            rc = sqlite::step(u.get());
             if (rc != SQLITE_DONE)
                 return failure(d, rc);
-            if (sqlite3_changes(d) != 1)
+            if (sqlite::changes(d) != 1)
                 return {CommitStatus::RevisionConflict, actual, "concurrent revision"};
             sqlite::exec(d, "UPDATE memory_generation SET generation=generation+1 WHERE singleton=1");
             t.commit();
@@ -290,7 +295,7 @@ namespace agent_framework::memory_v2
         std::lock_guard l(mutex_);
         sqlite::Statement s(sqlite::database(db_), "SELECT document_json FROM memory_records WHERE record_id=?");
         sqlite::bind_text(s.get(), 1, id);
-        if (sqlite3_step(s.get()) != SQLITE_ROW)
+        if (sqlite::step(s.get()) != SQLITE_ROW)
             return std::nullopt;
         auto r = decode_record(sqlite::column_text(s.get(), 0));
         if (!r)
@@ -303,7 +308,7 @@ namespace agent_framework::memory_v2
         std::vector<MemoryRecord> o;
         sqlite::Statement s(sqlite::database(db_), "SELECT document_json FROM memory_history WHERE record_id=? ORDER BY revision");
         sqlite::bind_text(s.get(), 1, id);
-        while (sqlite3_step(s.get()) == SQLITE_ROW)
+        while (sqlite::step(s.get()) == SQLITE_ROW)
         {
             auto r = decode_record(sqlite::column_text(s.get(), 0));
             if (!r)
@@ -318,7 +323,7 @@ namespace agent_framework::memory_v2
         std::vector<MemoryRecord> o;
         sqlite::Statement s(sqlite::database(db_), "SELECT document_json FROM memory_records WHERE tenant_id=? ORDER BY level,record_id");
         sqlite::bind_text(s.get(), 1, q.subject.tenant_id);
-        while (sqlite3_step(s.get()) == SQLITE_ROW)
+        while (sqlite::step(s.get()) == SQLITE_ROW)
         {
             auto r = decode_record(sqlite::column_text(s.get(), 0));
             if (!r)
@@ -336,6 +341,6 @@ namespace agent_framework::memory_v2
     {
         std::lock_guard l(mutex_);
         sqlite::Statement s(sqlite::database(db_), "SELECT generation FROM memory_generation WHERE singleton=1");
-        return sqlite3_step(s.get()) == SQLITE_ROW ? static_cast<std::uint64_t>(sqlite3_column_int64(s.get(), 0)) : 0;
+        return sqlite::step(s.get()) == SQLITE_ROW ? static_cast<std::uint64_t>(sqlite::column_int64(s.get(), 0)) : 0;
     }
 } // namespace agent_framework::memory_v2

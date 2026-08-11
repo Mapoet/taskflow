@@ -81,7 +81,7 @@ void SQLiteRunStore::migrate() {
     int version = 0;
     {
         sqlite::Statement query(db, "SELECT COALESCE(MAX(version),0) FROM run_schema_version");
-        if(sqlite3_step(query.get()) == SQLITE_ROW) version = sqlite3_column_int(query.get(), 0);
+        if(sqlite::step(query.get()) == SQLITE_ROW) version = sqlite::column_int(query.get(), 0);
     }
     if(version > 1) throw std::runtime_error("run store schema is newer than this binary");
     if(version == 0) {
@@ -127,12 +127,12 @@ StoreResult SQLiteRunStore::create(const RunCheckpoint& initial) {
     sqlite::bind_text(statement.get(), 1, initial.metadata.identity.run_id);
     sqlite::bind_text(statement.get(), 2, initial.metadata.identity.tenant_id);
     sqlite::bind_text(statement.get(), 3, initial.metadata.identity.task_id);
-    sqlite3_bind_int64(statement.get(), 4, 1);
+    sqlite::bind_int64(statement.get(), 4, 1);
     sqlite::bind_text(statement.get(), 5, run_state_name(initial.state));
     sqlite::bind_text(statement.get(), 6, document);
     sqlite::bind_text(statement.get(), 7, initial.graph_revision);
     sqlite::bind_text(statement.get(), 8, initial.plan_digest);
-    const int rc = sqlite3_step(statement.get());
+    const int rc = sqlite::step(statement.get());
     if(rc == SQLITE_CONSTRAINT) return {StoreStatus::AlreadyExists, 0, "run already exists"};
     if(rc != SQLITE_DONE) return sqlite_failure(db, rc);
     return {StoreStatus::Committed, 1, {}};
@@ -143,11 +143,11 @@ std::optional<RunRecord> SQLiteRunStore::load(std::string_view run_id) {
     auto* db = sqlite::database(db_);
     sqlite::Statement statement(db, "SELECT revision,checkpoint_json,updated_at FROM runs WHERE run_id=?");
     sqlite::bind_text(statement.get(), 1, run_id);
-    if(sqlite3_step(statement.get()) != SQLITE_ROW) return std::nullopt;
+    if(sqlite::step(statement.get()) != SQLITE_ROW) return std::nullopt;
     auto checkpoint = checkpoint_from_text(sqlite::column_text(statement.get(), 1));
     if(!checkpoint) throw std::runtime_error("stored run checkpoint is corrupt");
     return RunRecord{std::move(*checkpoint),
-                     static_cast<std::uint64_t>(sqlite3_column_int64(statement.get(), 0)),
+                     static_cast<std::uint64_t>(sqlite::column_int64(statement.get(), 0)),
                      sqlite::column_text(statement.get(), 2)};
 }
 
@@ -164,9 +164,9 @@ StoreResult SQLiteRunStore::checkpoint(const RunCheckpoint& next, std::uint64_t 
         {
             sqlite::Statement query(db, "SELECT revision,checkpoint_json FROM runs WHERE run_id=?");
             sqlite::bind_text(query.get(), 1, next.metadata.identity.run_id);
-            if(sqlite3_step(query.get()) != SQLITE_ROW)
+            if(sqlite::step(query.get()) != SQLITE_ROW)
                 return {StoreStatus::NotFound, 0, "run not found"};
-            actual_revision = static_cast<std::uint64_t>(sqlite3_column_int64(query.get(), 0));
+            actual_revision = static_cast<std::uint64_t>(sqlite::column_int64(query.get(), 0));
             auto prior = checkpoint_from_text(sqlite::column_text(query.get(), 1));
             if(!prior) return {StoreStatus::Error, actual_revision, "stored checkpoint is corrupt"};
             prior_state = prior->state;
@@ -183,10 +183,10 @@ StoreResult SQLiteRunStore::checkpoint(const RunCheckpoint& next, std::uint64_t 
         sqlite::bind_text(update.get(), 3, next.graph_revision);
         sqlite::bind_text(update.get(), 4, next.plan_digest);
         sqlite::bind_text(update.get(), 5, next.metadata.identity.run_id);
-        sqlite3_bind_int64(update.get(), 6, static_cast<sqlite3_int64>(expected_revision));
-        const int rc = sqlite3_step(update.get());
+        sqlite::bind_int64(update.get(), 6, static_cast<sqlite3_int64>(expected_revision));
+        const int rc = sqlite::step(update.get());
         if(rc != SQLITE_DONE) return sqlite_failure(db, rc);
-        if(sqlite3_changes(db) != 1)
+        if(sqlite::changes(db) != 1)
             return {StoreStatus::RevisionConflict, actual_revision, "run revision changed concurrently"};
         transaction.commit();
         return {StoreStatus::Committed, expected_revision + 1, {}};
@@ -202,12 +202,12 @@ std::vector<RunRecord> SQLiteRunStore::list_recoverable(std::size_t limit) {
     sqlite::Statement statement(db, "SELECT revision,checkpoint_json,updated_at FROM runs "
                             "WHERE state NOT IN ('completed','partial','rejected','failed','cancelled') "
                             "ORDER BY updated_at LIMIT ?");
-    sqlite3_bind_int64(statement.get(), 1, static_cast<sqlite3_int64>(limit));
-    while(sqlite3_step(statement.get()) == SQLITE_ROW) {
+    sqlite::bind_int64(statement.get(), 1, static_cast<sqlite3_int64>(limit));
+    while(sqlite::step(statement.get()) == SQLITE_ROW) {
         auto checkpoint = checkpoint_from_text(sqlite::column_text(statement.get(), 1));
         if(!checkpoint) throw std::runtime_error("stored run checkpoint is corrupt");
         result.push_back({std::move(*checkpoint),
-            static_cast<std::uint64_t>(sqlite3_column_int64(statement.get(), 0)),
+            static_cast<std::uint64_t>(sqlite::column_int64(statement.get(), 0)),
             sqlite::column_text(statement.get(), 2)});
     }
     return result;
@@ -224,19 +224,19 @@ StoreResult SQLiteRunStore::append_event(const RunEvent& event) {
         if(sequence == 0) {
             sqlite::Statement query(db, "SELECT COALESCE(MAX(sequence),0)+1 FROM run_events WHERE run_id=?");
             sqlite::bind_text(query.get(), 1, event.run_id);
-            if(sqlite3_step(query.get()) == SQLITE_ROW)
-                sequence = static_cast<std::uint64_t>(sqlite3_column_int64(query.get(), 0));
+            if(sqlite::step(query.get()) == SQLITE_ROW)
+                sequence = static_cast<std::uint64_t>(sqlite::column_int64(query.get(), 0));
         }
         const auto digest = event.payload_digest.empty()
             ? contracts::embedded_digest(event.payload).value_or("") : event.payload_digest;
         sqlite::Statement insert(db, "INSERT INTO run_events(run_id,sequence,event_type,payload_json,payload_digest)"
                              " VALUES(?,?,?,?,?)");
         sqlite::bind_text(insert.get(), 1, event.run_id);
-        sqlite3_bind_int64(insert.get(), 2, static_cast<sqlite3_int64>(sequence));
+        sqlite::bind_int64(insert.get(), 2, static_cast<sqlite3_int64>(sequence));
         sqlite::bind_text(insert.get(), 3, event.event_type);
         sqlite::bind_text(insert.get(), 4, event.payload.dump());
         sqlite::bind_text(insert.get(), 5, digest);
-        const int rc = sqlite3_step(insert.get());
+        const int rc = sqlite::step(insert.get());
         if(rc == SQLITE_CONSTRAINT)
             return {StoreStatus::RevisionConflict, sequence, "event sequence already exists"};
         if(rc != SQLITE_DONE) return sqlite_failure(db, rc);
@@ -253,10 +253,10 @@ std::vector<RunEvent> SQLiteRunStore::events(std::string_view run_id,
     sqlite::Statement statement(db, "SELECT sequence,event_type,payload_json,payload_digest,created_at "
                             "FROM run_events WHERE run_id=? AND sequence>? ORDER BY sequence");
     sqlite::bind_text(statement.get(), 1, run_id);
-    sqlite3_bind_int64(statement.get(), 2, static_cast<sqlite3_int64>(after_sequence));
-    while(sqlite3_step(statement.get()) == SQLITE_ROW) {
+    sqlite::bind_int64(statement.get(), 2, static_cast<sqlite3_int64>(after_sequence));
+    while(sqlite::step(statement.get()) == SQLITE_ROW) {
         result.push_back({std::string(run_id),
-            static_cast<std::uint64_t>(sqlite3_column_int64(statement.get(), 0)),
+            static_cast<std::uint64_t>(sqlite::column_int64(statement.get(), 0)),
             sqlite::column_text(statement.get(), 1), json::parse(sqlite::column_text(statement.get(), 2)),
             sqlite::column_text(statement.get(), 3), sqlite::column_text(statement.get(), 4)});
     }
@@ -276,7 +276,7 @@ StoreResult SQLiteRunStore::put_interruption(const Interruption& interruption) {
     sqlite::bind_text(statement.get(), 3, interruption.resume_token_digest);
     sqlite::bind_text(statement.get(), 4, encode(interruption).dump());
     sqlite::bind_text(statement.get(), 5, interruption.expires_at);
-    const int rc = sqlite3_step(statement.get());
+    const int rc = sqlite::step(statement.get());
     if(rc == SQLITE_CONSTRAINT) return {StoreStatus::AlreadyExists, 0, "interruption already exists"};
     if(rc != SQLITE_DONE) return sqlite_failure(db, rc);
     return {StoreStatus::Committed, 1, {}};
@@ -287,7 +287,7 @@ std::optional<Interruption> SQLiteRunStore::load_interruption(std::string_view i
     auto* db = sqlite::database(db_);
     sqlite::Statement statement(db, "SELECT document_json FROM run_interruptions WHERE interruption_id=?");
     sqlite::bind_text(statement.get(), 1, interruption_id);
-    if(sqlite3_step(statement.get()) != SQLITE_ROW) return std::nullopt;
+    if(sqlite::step(statement.get()) != SQLITE_ROW) return std::nullopt;
     auto value = decode_interruption(json::parse(sqlite::column_text(statement.get(), 0)));
     if(!value) throw std::runtime_error("stored interruption is corrupt");
     return value;
@@ -303,9 +303,9 @@ StoreResult SQLiteRunStore::consume_resume_token(std::string_view interruption_i
     sqlite::bind_text(statement.get(), 1, interruption_id);
     sqlite::bind_text(statement.get(), 2, run_id);
     sqlite::bind_text(statement.get(), 3, token_digest);
-    const int rc = sqlite3_step(statement.get());
+    const int rc = sqlite::step(statement.get());
     if(rc != SQLITE_DONE) return sqlite_failure(db, rc);
-    if(sqlite3_changes(db) != 1)
+    if(sqlite::changes(db) != 1)
         return {StoreStatus::Invalid, 0, "resume token is invalid, expired, or already consumed"};
     return {StoreStatus::Committed, 1, {}};
 }
@@ -319,7 +319,7 @@ StoreResult SQLiteRunStore::register_graph(const GraphDefinitionRef& graph) {
                         "WHERE template_id=? AND revision=?");
     sqlite::bind_text(query.get(), 1, graph.template_id);
     sqlite::bind_text(query.get(), 2, graph.revision);
-    if(sqlite3_step(query.get()) == SQLITE_ROW) {
+    if(sqlite::step(query.get()) == SQLITE_ROW) {
         const bool same = sqlite::column_text(query.get(), 0) == graph.definition_digest &&
                           sqlite::column_text(query.get(), 1) == graph.compatibility_class;
         return {same ? StoreStatus::Committed : StoreStatus::RevisionConflict, 0,
@@ -329,7 +329,7 @@ StoreResult SQLiteRunStore::register_graph(const GraphDefinitionRef& graph) {
                          "compatibility_class) VALUES(?,?,?,?)");
     sqlite::bind_text(insert.get(), 1, graph.template_id); sqlite::bind_text(insert.get(), 2, graph.revision);
     sqlite::bind_text(insert.get(), 3, graph.definition_digest); sqlite::bind_text(insert.get(), 4, graph.compatibility_class);
-    const int rc = sqlite3_step(insert.get());
+    const int rc = sqlite::step(insert.get());
     return rc == SQLITE_DONE ? StoreResult{StoreStatus::Committed, 1, {}} : sqlite_failure(db, rc);
 }
 
@@ -340,7 +340,7 @@ std::optional<GraphDefinitionRef> SQLiteRunStore::load_graph(std::string_view te
     sqlite::Statement query(db, "SELECT definition_digest,compatibility_class FROM graph_definitions "
                         "WHERE template_id=? AND revision=?");
     sqlite::bind_text(query.get(), 1, template_id); sqlite::bind_text(query.get(), 2, revision);
-    if(sqlite3_step(query.get()) != SQLITE_ROW) return std::nullopt;
+    if(sqlite::step(query.get()) != SQLITE_ROW) return std::nullopt;
     return GraphDefinitionRef{std::string(template_id), std::string(revision),
                               sqlite::column_text(query.get(), 0), sqlite::column_text(query.get(), 1)};
 }
@@ -353,9 +353,9 @@ StoreResult SQLiteRunStore::schedule_timer(const DurableTimer& timer) {
     sqlite::Statement insert(db, "INSERT INTO durable_timers(timer_id,run_id,due_unix_ms,payload_json)"
                          " VALUES(?,?,?,?)");
     sqlite::bind_text(insert.get(), 1, timer.timer_id); sqlite::bind_text(insert.get(), 2, timer.run_id);
-    sqlite3_bind_int64(insert.get(), 3, timer.due_unix_ms);
+    sqlite::bind_int64(insert.get(), 3, timer.due_unix_ms);
     sqlite::bind_text(insert.get(), 4, timer.payload.dump());
-    const int rc = sqlite3_step(insert.get());
+    const int rc = sqlite::step(insert.get());
     if(rc == SQLITE_CONSTRAINT) return {StoreStatus::AlreadyExists, 0, "timer already exists"};
     return rc == SQLITE_DONE ? StoreResult{StoreStatus::Committed, 1, {}} : sqlite_failure(db, rc);
 }
@@ -370,22 +370,22 @@ std::vector<DurableTimer> SQLiteRunStore::claim_due_timers(std::int64_t now_unix
     sqlite::Statement query(db, "SELECT timer_id,run_id,due_unix_ms,payload_json FROM durable_timers "
                         "WHERE completed=0 AND due_unix_ms<=? AND lease_until_unix_ms<=? "
                         "ORDER BY due_unix_ms,timer_id LIMIT ?");
-    sqlite3_bind_int64(query.get(), 1, now_unix_ms);
-    sqlite3_bind_int64(query.get(), 2, now_unix_ms);
-    sqlite3_bind_int64(query.get(), 3, static_cast<sqlite3_int64>(limit));
-    while(sqlite3_step(query.get()) == SQLITE_ROW) {
+    sqlite::bind_int64(query.get(), 1, now_unix_ms);
+    sqlite::bind_int64(query.get(), 2, now_unix_ms);
+    sqlite::bind_int64(query.get(), 3, static_cast<sqlite3_int64>(limit));
+    while(sqlite::step(query.get()) == SQLITE_ROW) {
         result.push_back({sqlite::column_text(query.get(), 0), sqlite::column_text(query.get(), 1),
-            sqlite3_column_int64(query.get(), 2), json::parse(sqlite::column_text(query.get(), 3)),
+            sqlite::column_int64(query.get(), 2), json::parse(sqlite::column_text(query.get(), 3)),
             std::string(owner), now_unix_ms + lease_ms, false});
     }
     sqlite::Statement update(db, "UPDATE durable_timers SET owner=?,lease_until_unix_ms=? "
                          "WHERE timer_id=? AND completed=0 AND lease_until_unix_ms<=?");
     std::vector<DurableTimer> claimed;
     for(const auto& timer : result) {
-        sqlite3_reset(update.get()); sqlite3_clear_bindings(update.get());
-        sqlite::bind_text(update.get(), 1, owner); sqlite3_bind_int64(update.get(), 2, now_unix_ms + lease_ms);
-        sqlite::bind_text(update.get(), 3, timer.timer_id); sqlite3_bind_int64(update.get(), 4, now_unix_ms);
-        if(sqlite3_step(update.get()) == SQLITE_DONE && sqlite3_changes(db) == 1) claimed.push_back(timer);
+        sqlite::reset(update.get()); sqlite::clear_bindings(update.get());
+        sqlite::bind_text(update.get(), 1, owner); sqlite::bind_int64(update.get(), 2, now_unix_ms + lease_ms);
+        sqlite::bind_text(update.get(), 3, timer.timer_id); sqlite::bind_int64(update.get(), 4, now_unix_ms);
+        if(sqlite::step(update.get()) == SQLITE_DONE && sqlite::changes(db) == 1) claimed.push_back(timer);
     }
     transaction.commit();
     return claimed;
@@ -396,9 +396,9 @@ StoreResult SQLiteRunStore::complete_timer(std::string_view timer_id, std::strin
     auto* db = sqlite::database(db_);
     sqlite::Statement update(db, "UPDATE durable_timers SET completed=1 WHERE timer_id=? AND owner=? AND completed=0");
     sqlite::bind_text(update.get(), 1, timer_id); sqlite::bind_text(update.get(), 2, owner);
-    const int rc = sqlite3_step(update.get());
+    const int rc = sqlite::step(update.get());
     if(rc != SQLITE_DONE) return sqlite_failure(db, rc);
-    if(sqlite3_changes(db) != 1) return {StoreStatus::Invalid, 0, "timer is not owned by caller"};
+    if(sqlite::changes(db) != 1) return {StoreStatus::Invalid, 0, "timer is not owned by caller"};
     return {StoreStatus::Committed, 1, {}};
 }
 

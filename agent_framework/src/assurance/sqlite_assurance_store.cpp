@@ -202,12 +202,12 @@ AssuranceStoreCommit SQLiteAssuranceStore::create_checkpoint(
     sqlite::bind_text(statement.get(), 1, checkpoint.metadata.identity.tenant_id);
     sqlite::bind_text(statement.get(), 2, checkpoint.workflow_id);
     sqlite::bind_text(statement.get(), 3, checkpoint.metadata.identity.task_id);
-    sqlite3_bind_int64(statement.get(), 4, static_cast<sqlite3_int64>(checkpoint.revision));
+    sqlite::bind_int64(statement.get(), 4, static_cast<sqlite3_int64>(checkpoint.revision));
     sqlite::bind_text(statement.get(), 5, assurance_workflow_state_name(checkpoint.state));
     sqlite::bind_text(statement.get(), 6, document.dump());
     sqlite::bind_text(statement.get(), 7, digest);
     sqlite::bind_text(statement.get(), 8, checkpoint.updated_at);
-    const int rc = sqlite3_step(statement.get());
+    const int rc = sqlite::step(statement.get());
     if(rc == SQLITE_CONSTRAINT) return {AssuranceStoreStatus::AlreadyExists, 0, {}, {}};
     if(rc != SQLITE_DONE) return failure(db, rc);
     return {AssuranceStoreStatus::Committed, checkpoint.revision, digest, {}};
@@ -221,10 +221,10 @@ std::optional<StoredAssuranceCheckpoint> SQLiteAssuranceStore::load_checkpoint(
                                     "assurance_checkpoints WHERE tenant_id=? AND workflow_id=?");
     sqlite::bind_text(statement.get(), 1, tenant_id);
     sqlite::bind_text(statement.get(), 2, workflow_id);
-    const int rc = sqlite3_step(statement.get());
+    const int rc = sqlite::step(statement.get());
     if(rc == SQLITE_DONE) return std::nullopt;
     if(rc != SQLITE_ROW) throw std::runtime_error(sqlite3_errmsg(db));
-    const auto revision = static_cast<std::uint64_t>(sqlite3_column_int64(statement.get(), 0));
+    const auto revision = static_cast<std::uint64_t>(sqlite::column_int64(statement.get(), 0));
     const auto document_text = sqlite::column_text(statement.get(), 1);
     const auto stored_digest = sqlite::column_text(statement.get(), 2);
     auto checkpoint = decode_assurance_checkpoint(json::parse(document_text));
@@ -246,25 +246,25 @@ AssuranceStoreCommit SQLiteAssuranceStore::compare_exchange_checkpoint(
     auto* db = sqlite::database(db_);
     sqlite::Statement statement(db, "UPDATE assurance_checkpoints SET revision=?,state=?,"
         "checkpoint_json=?,checkpoint_digest=?,updated_at=? WHERE tenant_id=? AND workflow_id=? AND revision=?");
-    sqlite3_bind_int64(statement.get(), 1, static_cast<sqlite3_int64>(checkpoint.revision));
+    sqlite::bind_int64(statement.get(), 1, static_cast<sqlite3_int64>(checkpoint.revision));
     sqlite::bind_text(statement.get(), 2, assurance_workflow_state_name(checkpoint.state));
     sqlite::bind_text(statement.get(), 3, document.dump());
     sqlite::bind_text(statement.get(), 4, digest);
     sqlite::bind_text(statement.get(), 5, checkpoint.updated_at);
     sqlite::bind_text(statement.get(), 6, checkpoint.metadata.identity.tenant_id);
     sqlite::bind_text(statement.get(), 7, checkpoint.workflow_id);
-    sqlite3_bind_int64(statement.get(), 8, static_cast<sqlite3_int64>(expected_revision));
-    const int rc = sqlite3_step(statement.get());
+    sqlite::bind_int64(statement.get(), 8, static_cast<sqlite3_int64>(expected_revision));
+    const int rc = sqlite::step(statement.get());
     if(rc != SQLITE_DONE) return failure(db, rc);
-    if(sqlite3_changes(db) != 1) {
+    if(sqlite::changes(db) != 1) {
         sqlite::Statement query(db, "SELECT revision FROM assurance_checkpoints WHERE tenant_id=? AND workflow_id=?");
         sqlite::bind_text(query.get(), 1, checkpoint.metadata.identity.tenant_id);
         sqlite::bind_text(query.get(), 2, checkpoint.workflow_id);
-        const int query_rc = sqlite3_step(query.get());
+        const int query_rc = sqlite::step(query.get());
         if(query_rc == SQLITE_DONE) return {AssuranceStoreStatus::NotFound, 0, {}, {}};
         if(query_rc != SQLITE_ROW) return failure(db, query_rc);
         return {AssuranceStoreStatus::RevisionConflict,
-                static_cast<std::uint64_t>(sqlite3_column_int64(query.get(), 0)), {}, {}};
+                static_cast<std::uint64_t>(sqlite::column_int64(query.get(), 0)), {}, {}};
     }
     return {AssuranceStoreStatus::Committed, checkpoint.revision, digest, {}};
 }
@@ -289,25 +289,25 @@ AssuranceStoreCommit SQLiteAssuranceStore::commit_report(
         sqlite::bind_text(insert.get(), 1, checkpoint.metadata.identity.tenant_id);
         sqlite::bind_text(insert.get(), 2, checkpoint.workflow_id);
         sqlite::bind_text(insert.get(), 3, checkpoint.metadata.identity.task_id);
-        sqlite3_bind_int64(insert.get(), 4, static_cast<sqlite3_int64>(checkpoint.revision));
+        sqlite::bind_int64(insert.get(), 4, static_cast<sqlite3_int64>(checkpoint.revision));
         sqlite::bind_text(insert.get(), 5, report_document.dump());
         sqlite::bind_text(insert.get(), 6, report_digest);
-        int rc = sqlite3_step(insert.get());
+        int rc = sqlite::step(insert.get());
         if(rc == SQLITE_CONSTRAINT) return {AssuranceStoreStatus::AlreadyExists, 0, {}, {}};
         if(rc != SQLITE_DONE) return failure(db, rc);
         sqlite::Statement update(db, "UPDATE assurance_checkpoints SET revision=?,state=?,"
             "checkpoint_json=?,checkpoint_digest=?,updated_at=? WHERE tenant_id=? AND workflow_id=? AND revision=?");
-        sqlite3_bind_int64(update.get(), 1, static_cast<sqlite3_int64>(checkpoint.revision));
+        sqlite::bind_int64(update.get(), 1, static_cast<sqlite3_int64>(checkpoint.revision));
         sqlite::bind_text(update.get(), 2, assurance_workflow_state_name(checkpoint.state));
         sqlite::bind_text(update.get(), 3, checkpoint_document.dump());
         sqlite::bind_text(update.get(), 4, checkpoint_digest);
         sqlite::bind_text(update.get(), 5, checkpoint.updated_at);
         sqlite::bind_text(update.get(), 6, checkpoint.metadata.identity.tenant_id);
         sqlite::bind_text(update.get(), 7, checkpoint.workflow_id);
-        sqlite3_bind_int64(update.get(), 8, static_cast<sqlite3_int64>(expected_revision));
-        rc = sqlite3_step(update.get());
+        sqlite::bind_int64(update.get(), 8, static_cast<sqlite3_int64>(expected_revision));
+        rc = sqlite::step(update.get());
         if(rc != SQLITE_DONE) return failure(db, rc);
-        if(sqlite3_changes(db) != 1)
+        if(sqlite::changes(db) != 1)
             return {AssuranceStoreStatus::RevisionConflict, 0, {}, "checkpoint CAS failed"};
         transaction.commit();
         return {AssuranceStoreStatus::Committed, checkpoint.revision, report_digest, {}};
@@ -324,10 +324,10 @@ std::optional<StoredAcceptanceReport> SQLiteAssuranceStore::load_report(
                                     "acceptance_reports WHERE tenant_id=? AND workflow_id=?");
     sqlite::bind_text(statement.get(), 1, tenant_id);
     sqlite::bind_text(statement.get(), 2, workflow_id);
-    const int rc = sqlite3_step(statement.get());
+    const int rc = sqlite::step(statement.get());
     if(rc == SQLITE_DONE) return std::nullopt;
     if(rc != SQLITE_ROW) throw std::runtime_error(sqlite3_errmsg(db));
-    const auto revision = static_cast<std::uint64_t>(sqlite3_column_int64(statement.get(), 0));
+    const auto revision = static_cast<std::uint64_t>(sqlite::column_int64(statement.get(), 0));
     const auto document_text = sqlite::column_text(statement.get(), 1);
     const auto stored_digest = sqlite::column_text(statement.get(), 2);
     auto report = decode_acceptance_report(json::parse(document_text));

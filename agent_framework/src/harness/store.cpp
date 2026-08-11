@@ -205,12 +205,12 @@ HarnessStoreCommit SQLiteHarnessStore::create(const HarnessCheckpoint& checkpoin
         sqlite::bind_text(insert_checkpoint.get(), 1, checkpoint.metadata.identity.tenant_id);
         sqlite::bind_text(insert_checkpoint.get(), 2, checkpoint.harness_id);
         sqlite::bind_text(insert_checkpoint.get(), 3, checkpoint.metadata.identity.task_id);
-        sqlite3_bind_int64(insert_checkpoint.get(), 4, checkpoint.revision);
+        sqlite::bind_int64(insert_checkpoint.get(), 4, checkpoint.revision);
         sqlite::bind_text(insert_checkpoint.get(), 5, harness_state_name(checkpoint.state));
         sqlite::bind_text(insert_checkpoint.get(), 6, document.dump());
         sqlite::bind_text(insert_checkpoint.get(), 7, digest);
         sqlite::bind_text(insert_checkpoint.get(), 8, checkpoint.updated_at);
-        const int rc = sqlite3_step(insert_checkpoint.get());
+        const int rc = sqlite::step(insert_checkpoint.get());
         if(rc == SQLITE_CONSTRAINT)
             return {HarnessStoreStatus::AlreadyExists, 0, {}, {}};
         if(rc != SQLITE_DONE) return failure(db, rc);
@@ -219,13 +219,13 @@ HarnessStoreCommit SQLiteHarnessStore::create(const HarnessCheckpoint& checkpoin
             "event_type,payload_json,payload_digest,created_at) VALUES(?,?,?,?,?,?,?,?)");
         sqlite::bind_text(insert_event.get(), 1, checkpoint.metadata.identity.tenant_id);
         sqlite::bind_text(insert_event.get(), 2, checkpoint.harness_id);
-        sqlite3_bind_int64(insert_event.get(), 3, event.sequence);
-        sqlite3_bind_int64(insert_event.get(), 4, event.checkpoint_revision);
+        sqlite::bind_int64(insert_event.get(), 3, event.sequence);
+        sqlite::bind_int64(insert_event.get(), 4, event.checkpoint_revision);
         sqlite::bind_text(insert_event.get(), 5, event.event_type);
         sqlite::bind_text(insert_event.get(), 6, event.payload.dump());
         sqlite::bind_text(insert_event.get(), 7, event.payload_digest);
         sqlite::bind_text(insert_event.get(), 8, event.created_at);
-        if(sqlite3_step(insert_event.get()) != SQLITE_DONE) return failure(db, sqlite3_errcode(db));
+        if(sqlite::step(insert_event.get()) != SQLITE_DONE) return failure(db, sqlite3_errcode(db));
         transaction.commit();
         return {HarnessStoreStatus::Committed, checkpoint.revision, digest, {}};
     } catch(const std::exception& e) {
@@ -242,10 +242,10 @@ std::optional<StoredHarnessCheckpoint> SQLiteHarnessStore::load(
         "WHERE tenant_id=? AND harness_id=?");
     sqlite::bind_text(statement.get(), 1, tenant_id);
     sqlite::bind_text(statement.get(), 2, harness_id);
-    const int rc = sqlite3_step(statement.get());
+    const int rc = sqlite::step(statement.get());
     if(rc == SQLITE_DONE) return std::nullopt;
     if(rc != SQLITE_ROW) throw std::runtime_error(sqlite3_errmsg(db));
-    const auto revision = static_cast<std::uint64_t>(sqlite3_column_int64(statement.get(), 0));
+    const auto revision = static_cast<std::uint64_t>(sqlite::column_int64(statement.get(), 0));
     const auto text = sqlite::column_text(statement.get(), 1);
     const auto digest = sqlite::column_text(statement.get(), 2);
     auto checkpoint = decode_harness_checkpoint(nlohmann::json::parse(text));
@@ -274,39 +274,39 @@ HarnessStoreCommit SQLiteHarnessStore::compare_exchange(
         sqlite::Statement update(db,
             "UPDATE phase4_harness_checkpoints SET revision=?,state=?,checkpoint_json=?,"
             "checkpoint_digest=?,updated_at=? WHERE tenant_id=? AND harness_id=? AND revision=?");
-        sqlite3_bind_int64(update.get(), 1, checkpoint.revision);
+        sqlite::bind_int64(update.get(), 1, checkpoint.revision);
         sqlite::bind_text(update.get(), 2, harness_state_name(checkpoint.state));
         sqlite::bind_text(update.get(), 3, document.dump());
         sqlite::bind_text(update.get(), 4, digest);
         sqlite::bind_text(update.get(), 5, checkpoint.updated_at);
         sqlite::bind_text(update.get(), 6, checkpoint.metadata.identity.tenant_id);
         sqlite::bind_text(update.get(), 7, checkpoint.harness_id);
-        sqlite3_bind_int64(update.get(), 8, expected_revision);
-        const int rc = sqlite3_step(update.get());
+        sqlite::bind_int64(update.get(), 8, expected_revision);
+        const int rc = sqlite::step(update.get());
         if(rc != SQLITE_DONE) return failure(db, rc);
-        if(sqlite3_changes(db) != 1) {
+        if(sqlite::changes(db) != 1) {
             sqlite::Statement query(db,
                 "SELECT revision FROM phase4_harness_checkpoints WHERE tenant_id=? AND harness_id=?");
             sqlite::bind_text(query.get(), 1, checkpoint.metadata.identity.tenant_id);
             sqlite::bind_text(query.get(), 2, checkpoint.harness_id);
-            const int qrc = sqlite3_step(query.get());
+            const int qrc = sqlite::step(query.get());
             if(qrc == SQLITE_DONE) return {HarnessStoreStatus::NotFound, 0, {}, {}};
             if(qrc != SQLITE_ROW) return failure(db, qrc);
             return {HarnessStoreStatus::RevisionConflict,
-                    static_cast<std::uint64_t>(sqlite3_column_int64(query.get(), 0)), {}, {}};
+                    static_cast<std::uint64_t>(sqlite::column_int64(query.get(), 0)), {}, {}};
         }
         sqlite::Statement insert_event(db,
             "INSERT INTO phase4_harness_events(tenant_id,harness_id,sequence,checkpoint_revision,"
             "event_type,payload_json,payload_digest,created_at) VALUES(?,?,?,?,?,?,?,?)");
         sqlite::bind_text(insert_event.get(), 1, checkpoint.metadata.identity.tenant_id);
         sqlite::bind_text(insert_event.get(), 2, checkpoint.harness_id);
-        sqlite3_bind_int64(insert_event.get(), 3, event.sequence);
-        sqlite3_bind_int64(insert_event.get(), 4, event.checkpoint_revision);
+        sqlite::bind_int64(insert_event.get(), 3, event.sequence);
+        sqlite::bind_int64(insert_event.get(), 4, event.checkpoint_revision);
         sqlite::bind_text(insert_event.get(), 5, event.event_type);
         sqlite::bind_text(insert_event.get(), 6, event.payload.dump());
         sqlite::bind_text(insert_event.get(), 7, event.payload_digest);
         sqlite::bind_text(insert_event.get(), 8, event.created_at);
-        const int erc = sqlite3_step(insert_event.get());
+        const int erc = sqlite::step(insert_event.get());
         if(erc != SQLITE_DONE) return failure(db, erc);
         transaction.commit();
         return {HarnessStoreStatus::Committed, checkpoint.revision, digest, {}};
@@ -325,17 +325,17 @@ std::vector<HarnessEvent> SQLiteHarnessStore::events(
         "ORDER BY sequence");
     sqlite::bind_text(statement.get(), 1, tenant_id);
     sqlite::bind_text(statement.get(), 2, harness_id);
-    sqlite3_bind_int64(statement.get(), 3, after_sequence);
+    sqlite::bind_int64(statement.get(), 3, after_sequence);
     std::vector<HarnessEvent> result;
     while(true) {
-        const int rc = sqlite3_step(statement.get());
+        const int rc = sqlite::step(statement.get());
         if(rc == SQLITE_DONE) break;
         if(rc != SQLITE_ROW) throw std::runtime_error(sqlite3_errmsg(db));
         HarnessEvent event;
         event.harness_id = std::string(harness_id);
-        event.sequence = static_cast<std::uint64_t>(sqlite3_column_int64(statement.get(), 0));
+        event.sequence = static_cast<std::uint64_t>(sqlite::column_int64(statement.get(), 0));
         event.checkpoint_revision =
-            static_cast<std::uint64_t>(sqlite3_column_int64(statement.get(), 1));
+            static_cast<std::uint64_t>(sqlite::column_int64(statement.get(), 1));
         event.event_type = sqlite::column_text(statement.get(), 2);
         event.payload = nlohmann::json::parse(sqlite::column_text(statement.get(), 3));
         event.payload_digest = sqlite::column_text(statement.get(), 4);
@@ -356,13 +356,13 @@ std::vector<StoredHarnessCheckpoint> SQLiteHarnessStore::list_recoverable(
         "SELECT revision,checkpoint_json,checkpoint_digest FROM phase4_harness_checkpoints "
         "WHERE tenant_id=? AND state IN ('running','awaiting_approval') ORDER BY updated_at LIMIT ?");
     sqlite::bind_text(statement.get(), 1, tenant_id);
-    sqlite3_bind_int64(statement.get(), 2, static_cast<sqlite3_int64>(limit));
+    sqlite::bind_int64(statement.get(), 2, static_cast<sqlite3_int64>(limit));
     std::vector<StoredHarnessCheckpoint> result;
     while(true) {
-        const int rc = sqlite3_step(statement.get());
+        const int rc = sqlite::step(statement.get());
         if(rc == SQLITE_DONE) break;
         if(rc != SQLITE_ROW) throw std::runtime_error(sqlite3_errmsg(db));
-        const auto revision = static_cast<std::uint64_t>(sqlite3_column_int64(statement.get(), 0));
+        const auto revision = static_cast<std::uint64_t>(sqlite::column_int64(statement.get(), 0));
         auto checkpoint = decode_harness_checkpoint(
             nlohmann::json::parse(sqlite::column_text(statement.get(), 1)));
         const auto digest = sqlite::column_text(statement.get(), 2);

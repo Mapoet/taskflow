@@ -160,6 +160,9 @@ h1 { font-size: 19px; } h2 { font-size: 16px; }
 .ops-section { margin-top: 12px; padding: 16px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
 .ops-section-head { display: flex; justify-content: space-between; gap: 20px; align-items: flex-start; margin-bottom: 14px; }
 .ops-section-head h2 { font-size: 15px; }
+.reviewer-field { display: grid; gap: 5px; min-width: 190px; color: var(--muted); font-size: 11px; }
+.reviewer-field input { border: 1px solid var(--line); border-radius: 8px; padding: 7px 9px; background: var(--panel); color: var(--text); font: inherit; }
+.reviewer-field input:focus { outline: 2px solid color-mix(in srgb, var(--accent) 45%, transparent); outline-offset: 1px; }
 .ops-note { max-width: 58%; color: var(--muted); font-size: 11px; line-height: 1.45; text-align: right; }
 .stage-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 9px; }
 .stage-card { display: grid; grid-template-columns: 26px minmax(0,1fr); gap: 10px; min-height: 118px; padding: 12px; border: 1px solid var(--line); border-left: 3px solid var(--dim); border-radius: 5px; background: var(--surface-2); }

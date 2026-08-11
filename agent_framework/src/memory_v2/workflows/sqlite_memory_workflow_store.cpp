@@ -92,11 +92,11 @@ MemoryWorkflowStoreCommit SQLiteMemoryWorkflowCheckpointStore::create(
             "(tenant_id,workflow_id,revision,document,digest,updated_at) VALUES(?,?,?,?,?,?)");
         sqlite::bind_text(statement.get(), 1, checkpoint.metadata.identity.tenant_id);
         sqlite::bind_text(statement.get(), 2, checkpoint.workflow_id);
-        sqlite3_bind_int64(statement.get(), 3, 1);
+        sqlite::bind_int64(statement.get(), 3, 1);
         sqlite::bind_text(statement.get(), 4, document.dump());
         sqlite::bind_text(statement.get(), 5, digest);
         sqlite::bind_text(statement.get(), 6, checkpoint.updated_at);
-        const int rc = sqlite3_step(statement.get());
+        const int rc = sqlite::step(statement.get());
         if(rc == SQLITE_CONSTRAINT)
             return {MemoryWorkflowStoreStatus::AlreadyExists, 0, {}, {}};
         if(rc != SQLITE_DONE) return failure(db, rc);
@@ -116,8 +116,8 @@ std::optional<StoredMemoryWorkflowCheckpoint> SQLiteMemoryWorkflowCheckpointStor
             "WHERE tenant_id=? AND workflow_id=?");
         sqlite::bind_text(statement.get(), 1, tenant_id);
         sqlite::bind_text(statement.get(), 2, workflow_id);
-        if(sqlite3_step(statement.get()) != SQLITE_ROW) return std::nullopt;
-        const auto revision = static_cast<std::uint64_t>(sqlite3_column_int64(statement.get(), 0));
+        if(sqlite::step(statement.get()) != SQLITE_ROW) return std::nullopt;
+        const auto revision = static_cast<std::uint64_t>(sqlite::column_int64(statement.get(), 0));
         const auto document_text = sqlite::column_text(statement.get(), 1);
         const auto stored_digest = sqlite::column_text(statement.get(), 2);
         const auto document = json::parse(document_text);
@@ -150,24 +150,24 @@ MemoryWorkflowStoreCommit SQLiteMemoryWorkflowCheckpointStore::compare_exchange(
         sqlite::Statement statement(db,
             "UPDATE memory_workflow_checkpoints SET revision=?,document=?,digest=?,updated_at=? "
             "WHERE tenant_id=? AND workflow_id=? AND revision=?");
-        sqlite3_bind_int64(statement.get(), 1, static_cast<sqlite3_int64>(checkpoint.revision));
+        sqlite::bind_int64(statement.get(), 1, static_cast<sqlite3_int64>(checkpoint.revision));
         sqlite::bind_text(statement.get(), 2, document.dump());
         sqlite::bind_text(statement.get(), 3, digest);
         sqlite::bind_text(statement.get(), 4, checkpoint.updated_at);
         sqlite::bind_text(statement.get(), 5, checkpoint.metadata.identity.tenant_id);
         sqlite::bind_text(statement.get(), 6, checkpoint.workflow_id);
-        sqlite3_bind_int64(statement.get(), 7, static_cast<sqlite3_int64>(expected_revision));
-        const int rc = sqlite3_step(statement.get());
+        sqlite::bind_int64(statement.get(), 7, static_cast<sqlite3_int64>(expected_revision));
+        const int rc = sqlite::step(statement.get());
         if(rc != SQLITE_DONE) return failure(db, rc);
-        if(sqlite3_changes(db) != 1) {
+        if(sqlite::changes(db) != 1) {
             sqlite::Statement current(db,
                 "SELECT revision FROM memory_workflow_checkpoints WHERE tenant_id=? AND workflow_id=?");
             sqlite::bind_text(current.get(), 1, checkpoint.metadata.identity.tenant_id);
             sqlite::bind_text(current.get(), 2, checkpoint.workflow_id);
-            if(sqlite3_step(current.get()) != SQLITE_ROW)
+            if(sqlite::step(current.get()) != SQLITE_ROW)
                 return {MemoryWorkflowStoreStatus::NotFound, 0, {}, {}};
             return {MemoryWorkflowStoreStatus::RevisionConflict,
-                    static_cast<std::uint64_t>(sqlite3_column_int64(current.get(), 0)), {}, {}};
+                    static_cast<std::uint64_t>(sqlite::column_int64(current.get(), 0)), {}, {}};
         }
         transaction.commit();
         return {MemoryWorkflowStoreStatus::Committed, checkpoint.revision, digest, {}};

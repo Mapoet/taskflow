@@ -95,13 +95,13 @@ CognitionCheckpointCommit SQLiteCognitionCheckpointStore::create(
     sqlite::bind_text(statement.get(), 1, checkpoint.metadata.identity.tenant_id);
     sqlite::bind_text(statement.get(), 2, checkpoint.pipeline_id);
     sqlite::bind_text(statement.get(), 3, checkpoint.metadata.identity.task_id);
-    sqlite3_bind_int64(statement.get(), 4, static_cast<sqlite3_int64>(checkpoint.revision));
+    sqlite::bind_int64(statement.get(), 4, static_cast<sqlite3_int64>(checkpoint.revision));
     const auto state = cognition_pipeline_state_name(checkpoint.state);
     sqlite::bind_text(statement.get(), 5, state);
     sqlite::bind_text(statement.get(), 6, text);
     sqlite::bind_text(statement.get(), 7, digest);
     sqlite::bind_text(statement.get(), 8, checkpoint.updated_at);
-    const int rc = sqlite3_step(statement.get());
+    const int rc = sqlite::step(statement.get());
     if(rc == SQLITE_CONSTRAINT) return {CognitionCheckpointStatus::AlreadyExists, 0, {}, {}};
     if(rc != SQLITE_DONE) return failure(db, rc);
     return {CognitionCheckpointStatus::Committed, checkpoint.revision, digest, {}};
@@ -115,10 +115,10 @@ std::optional<StoredCognitionCheckpoint> SQLiteCognitionCheckpointStore::load(
                             "cognition_checkpoints WHERE tenant_id=? AND pipeline_id=?");
     sqlite::bind_text(statement.get(), 1, tenant_id);
     sqlite::bind_text(statement.get(), 2, pipeline_id);
-    const int rc = sqlite3_step(statement.get());
+    const int rc = sqlite::step(statement.get());
     if(rc == SQLITE_DONE) return std::nullopt;
     if(rc != SQLITE_ROW) throw std::runtime_error(sqlite3_errmsg(db));
-    const auto revision = static_cast<std::uint64_t>(sqlite3_column_int64(statement.get(), 0));
+    const auto revision = static_cast<std::uint64_t>(sqlite::column_int64(statement.get(), 0));
     const auto document_text = sqlite::column_text(statement.get(), 1);
     const auto stored_digest = sqlite::column_text(statement.get(), 2);
     auto checkpoint = decode_cognition_checkpoint(json::parse(document_text));
@@ -144,7 +144,7 @@ CognitionCheckpointCommit SQLiteCognitionCheckpointStore::compare_exchange(
         sqlite::Statement statement(db, "UPDATE cognition_checkpoints SET revision=?,state=?,"
             "checkpoint_json=?,checkpoint_digest=?,updated_at=? WHERE tenant_id=? AND "
             "pipeline_id=? AND revision=?");
-        sqlite3_bind_int64(statement.get(), 1, static_cast<sqlite3_int64>(checkpoint.revision));
+        sqlite::bind_int64(statement.get(), 1, static_cast<sqlite3_int64>(checkpoint.revision));
         const auto state = cognition_pipeline_state_name(checkpoint.state);
         sqlite::bind_text(statement.get(), 2, state);
         sqlite::bind_text(statement.get(), 3, text);
@@ -152,19 +152,19 @@ CognitionCheckpointCommit SQLiteCognitionCheckpointStore::compare_exchange(
         sqlite::bind_text(statement.get(), 5, checkpoint.updated_at);
         sqlite::bind_text(statement.get(), 6, checkpoint.metadata.identity.tenant_id);
         sqlite::bind_text(statement.get(), 7, checkpoint.pipeline_id);
-        sqlite3_bind_int64(statement.get(), 8, static_cast<sqlite3_int64>(expected_revision));
-        const int rc = sqlite3_step(statement.get());
+        sqlite::bind_int64(statement.get(), 8, static_cast<sqlite3_int64>(expected_revision));
+        const int rc = sqlite::step(statement.get());
         if(rc != SQLITE_DONE) return failure(db, rc);
-        if(sqlite3_changes(db) != 1) {
+        if(sqlite::changes(db) != 1) {
             sqlite::Statement query(db, "SELECT revision FROM cognition_checkpoints WHERE tenant_id=? AND pipeline_id=?");
             sqlite::bind_text(query.get(), 1, checkpoint.metadata.identity.tenant_id);
             sqlite::bind_text(query.get(), 2, checkpoint.pipeline_id);
-            const int query_rc = sqlite3_step(query.get());
+            const int query_rc = sqlite::step(query.get());
             if(query_rc == SQLITE_DONE)
                 return {CognitionCheckpointStatus::NotFound, 0, {}, {}};
             if(query_rc != SQLITE_ROW) return failure(db, query_rc);
             return {CognitionCheckpointStatus::RevisionConflict,
-                    static_cast<std::uint64_t>(sqlite3_column_int64(query.get(), 0)), {}, {}};
+                    static_cast<std::uint64_t>(sqlite::column_int64(query.get(), 0)), {}, {}};
         }
         transaction.commit();
         return {CognitionCheckpointStatus::Committed, checkpoint.revision, digest, {}};

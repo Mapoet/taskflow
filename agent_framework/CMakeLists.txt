@@ -313,6 +313,9 @@ endif()
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/approval/sqlite_store.cpp)
     list(APPEND AGENT_SOURCES src/approval/sqlite_store.cpp)
 endif()
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/approval/executor.cpp)
+    list(APPEND AGENT_SOURCES src/approval/executor.cpp)
+endif()
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/memory_v2/types.cpp)
     list(APPEND AGENT_SOURCES src/memory_v2/types.cpp)
 endif()
@@ -680,6 +683,9 @@ if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/ui/presentation_model.cpp)
 endif()
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/ui/phase4_operations.cpp)
     list(APPEND AGENT_SOURCES src/ui/phase4_operations.cpp)
+endif()
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/ui/store_backed_operations.cpp)
+    list(APPEND AGENT_SOURCES src/ui/store_backed_operations.cpp)
 endif()
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/ui/streaming_markdown.cpp)
     list(APPEND AGENT_SOURCES src/ui/streaming_markdown.cpp)
@@ -1592,6 +1598,38 @@ if(BUILD_TESTING)
         add_test(NAME phase4_artifact_execution COMMAND test_phase4_artifact_execution)
         set_tests_properties(phase4_artifact_execution PROPERTIES
             LABELS "phase4-execution;phase4-integration;phase4-offline;offline" RUN_SERIAL TRUE)
+    endif()
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_phase4_approval_executor.cpp)
+        add_executable(test_phase4_approval_executor tests/test_phase4_approval_executor.cpp)
+        target_link_libraries(test_phase4_approval_executor PRIVATE agent_framework)
+        add_test(NAME phase4_approval_executor COMMAND test_phase4_approval_executor)
+        set_tests_properties(phase4_approval_executor PROPERTIES
+            LABELS "phase4-approval;phase4-integration;phase4-durable;phase4-offline;offline" RUN_SERIAL TRUE)
+    endif()
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_phase4_memory_approval_governance.cpp)
+        add_executable(test_phase4_memory_approval_governance
+            tests/test_phase4_memory_approval_governance.cpp)
+        target_link_libraries(test_phase4_memory_approval_governance PRIVATE agent_framework)
+        add_test(NAME phase4_memory_approval_governance
+                 COMMAND test_phase4_memory_approval_governance)
+        set_tests_properties(phase4_memory_approval_governance PROPERTIES
+            LABELS "phase4-memory;phase4-approval;phase4-integration;phase4-durable;phase4-offline;offline"
+            RUN_SERIAL TRUE)
+    endif()
+    add_test(NAME sqlite_api_boundary
+        COMMAND ${CMAKE_COMMAND}
+            -DAGENT_FRAMEWORK_SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/check_sqlite_api_boundary.cmake)
+    set_tests_properties(sqlite_api_boundary PROPERTIES
+        LABELS "phase4-contract;phase4-offline;offline")
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_phase4_store_backed_operations.cpp)
+        add_executable(test_phase4_store_backed_operations
+            tests/test_phase4_store_backed_operations.cpp)
+        target_link_libraries(test_phase4_store_backed_operations PRIVATE agent_framework)
+        add_test(NAME phase4_store_backed_operations COMMAND test_phase4_store_backed_operations)
+        set_tests_properties(phase4_store_backed_operations PROPERTIES
+            LABELS "phase4-operations;phase4-ui-v2;phase4-integration;phase4-durable;phase4-offline;offline"
+            RUN_SERIAL TRUE)
     endif()
     if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_vectorstore_wp31.cpp)
         add_executable(test_vectorstore_wp31 tests/test_vectorstore_wp31.cpp)

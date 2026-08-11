@@ -499,6 +499,7 @@ Phase4OperationsSnapshot Phase4HarnessRuntime::project_operations(
     Phase4OperationsSnapshot snapshot;
     snapshot.snapshot_id = "harness:" + checkpoint.harness_id + ":r" +
                            std::to_string(checkpoint.revision);
+    snapshot.tenant_id = checkpoint.metadata.identity.tenant_id;
     snapshot.run_id = checkpoint.metadata.identity.run_id;
     snapshot.task_id = checkpoint.metadata.identity.task_id;
     snapshot.updated_at = checkpoint.updated_at;

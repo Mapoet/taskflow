@@ -20,6 +20,7 @@
 #include <agent/core/types.hpp>
 #include <agent/ui/ui_manager.hpp>
 #include <agent/agent/user_input_preprocessor.hpp>
+#include <agent/approval/executor.hpp>
 
 #include <httplib.hpp>
 
@@ -211,6 +212,7 @@ int main(int argc, char** argv) {
     std::string cursor_mcp_json_arg;
     std::string skills_root_arg;
     std::string skill_authoring_root_arg;
+    std::string phase4_state_dir_arg;
     int max_iterations = -1;
     bool verbose = false;
     bool no_cursor_mcp = false;
@@ -226,6 +228,8 @@ int main(int argc, char** argv) {
         ->check(CLI::ExistingDirectory);
     app.add_option("--skill-authoring-root", skill_authoring_root_arg,
                    "Writable root used by /skills create");
+    app.add_option("--phase4-state-dir", phase4_state_dir_arg,
+                   "Persistent directory for accountable Phase 4 UI state");
     app.add_flag("--no-skills", no_skills, "Disable Skill discovery and management");
     app.add_flag("--no-cursor-mcp", no_cursor_mcp,
                  "Skip MCP (or AGENT_TEST_SKIP_CURSOR_MCP / AGENT_CLI_SKIP_CURSOR_MCP)");
@@ -296,6 +300,36 @@ int main(int argc, char** argv) {
     auto operations = std::make_shared<Phase4OperationsSnapshot>(
         Phase4OperationsProjection::demo_snapshot());
     auto operations_mutex = std::make_shared<std::mutex>();
+    if (phase4_state_dir_arg.empty()) {
+        phase4_state_dir_arg = (std::filesystem::temp_directory_path() /
+            ("taskflow-web-ui-phase4-" + std::to_string(port))).string();
+    }
+    std::filesystem::create_directories(phase4_state_dir_arg);
+    auto approval_store = std::make_shared<approval::SQLiteApprovalStore>(
+        (std::filesystem::path(phase4_state_dir_arg) / "approval.sqlite3").string());
+    auto approval_executor = std::make_shared<approval::AccountableApprovalExecutor>(
+        (std::filesystem::path(phase4_state_dir_arg) / "approval-votes.sqlite3").string(),
+        *approval_store);
+    if (demo_state && !operations->hitl.empty()) {
+        approval::ApprovalRequest request;
+        request.metadata.identity.tenant_id = "demo-tenant";
+        request.metadata.identity.task_id = operations->task_id;
+        request.metadata.identity.run_id = operations->run_id;
+        request.approval_id = operations->hitl.front().id;
+        request.request_kind = operations->hitl.front().kind;
+        request.requester_id = operations->hitl.front().requested_by;
+        request.scope = "release:" + operations->run_id;
+        request.reason = "Accountable release decision";
+        request.risk_level = "medium";
+        request.policy_revision = "phase4-policy-v1";
+        request.plan_digest = "sha256:demo-plan";
+        request.arguments_digest = "sha256:demo-release-arguments";
+        request.artifact_digest = "sha256:demo-artifact";
+        request.memory_view_digest = "sha256:demo-memory-view";
+        request.created_at = "2026-08-10T12:00:00+08:00";
+        request.expires_at = "2027-08-10T18:00:00+08:00";
+        (void)approval_store->put_request(request);
+    }
 
     auto state = std::make_shared<internal::AgentThreadState>();
     auto executor = std::make_shared<tf::Executor>();
@@ -442,6 +476,13 @@ int main(int argc, char** argv) {
             const json body = json::parse(req.body);
             const std::string request_id = body.at("request_id").get<std::string>();
             const std::string action = body.at("action").get<std::string>();
+            const std::string reviewer_id = body.at("reviewer_id").get<std::string>();
+            auto persisted_request = approval_store->request(request_id);
+            if (!persisted_request) {
+                res.status = 404;
+                res.set_content(R"({"error":"approval request is not persisted"})", "application/json");
+                return;
+            }
             std::lock_guard<std::mutex> lock(*operations_mutex);
             auto request = std::find_if(operations->hitl.begin(), operations->hitl.end(),
                                         [&](const auto& item) { return item.id == request_id; });
@@ -452,27 +493,58 @@ int main(int argc, char** argv) {
                 res.set_content(R"({"error":"request or action is not allowed"})", "application/json");
                 return;
             }
+            approval::ApprovalReview review;
+            review.approval_id = request_id;
+            review.request_digest = approval::encode(*persisted_request).at("canonical_digest");
+            review.reviewer.principal_id = reviewer_id;
+            review.reviewer.roles = {"approver"};
+            review.decision = action == "approve" ? approval::Decision::Approved
+                                                   : approval::Decision::Rejected;
+            review.reason = action == "request_remediation"
+                ? "Reviewer rejected this revision and requested remediation" :
+                  "Accountable decision submitted from operations UI";
+            review.decided_at = "2026-08-10T14:35:00+08:00";
+            const auto result = approval_executor->review(
+                review, approval_executor->vote_revision(request_id));
+            if (result.outcome != approval::ReviewOutcome::Approved &&
+                result.outcome != approval::ReviewOutcome::Rejected) {
+                res.status = 409;
+                res.set_content(json{{"error", result.error_code},
+                                     {"detail", result.error_message}}.dump(), "application/json");
+                return;
+            }
             if (action == "approve") {
                 request->status = OperationsStatus::Passed;
-                request->summary = "Approved in deterministic UI acceptance mode";
+                request->summary = "Approved by " + reviewer_id + " · durable decision r" +
+                    std::to_string(result.decision_revision);
                 operations->overall_status = OperationsStatus::Warning;
                 operations->blocker.clear();
             } else if (action == "request_remediation") {
                 request->status = OperationsStatus::Running;
-                request->summary = "Remediation requested in deterministic UI acceptance mode";
+                request->summary = "Revision rejected by " + reviewer_id + "; remediation required";
                 operations->overall_status = OperationsStatus::Running;
                 operations->blocker = "Remediation workflow is active.";
             } else if (action == "reject") {
                 request->status = OperationsStatus::Failed;
-                request->summary = "Release rejected in deterministic UI acceptance mode";
+                request->summary = "Release rejected by " + reviewer_id + " · durable decision r" +
+                    std::to_string(result.decision_revision);
                 operations->overall_status = OperationsStatus::Failed;
                 operations->blocker = "Accountable reviewer rejected release.";
+            }
+            auto release = std::find_if(operations->stages.begin(), operations->stages.end(),
+                [](const auto& stage) { return stage.id == "release"; });
+            if (release != operations->stages.end()) {
+                release->status = action == "approve" ? OperationsStatus::Passed :
+                    action == "request_remediation" ? OperationsStatus::Running : OperationsStatus::Failed;
+                release->summary = request->summary;
+                ++release->revision;
             }
             operations->snapshot_id += ".next";
             operations->updated_at = "2026-08-10T14:35:00+08:00";
             ui.publish_phase4_operations(*operations);
             res.status = 202;
-            res.set_content(json{{"accepted", true}, {"snapshot_id", operations->snapshot_id}}.dump(),
+            res.set_content(json{{"accepted", true}, {"snapshot_id", operations->snapshot_id},
+                                 {"decision_digest", result.decision_digest}}.dump(),
                             "application/json");
         } catch (const std::exception& error) {
             res.status = 400;

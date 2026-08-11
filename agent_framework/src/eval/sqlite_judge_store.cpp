@@ -195,12 +195,12 @@ namespace agent_framework::eval
         sqlite::bind_text(s.get(), 1, v.metadata.identity.tenant_id);
         sqlite::bind_text(s.get(), 2, v.workflow_id);
         sqlite::bind_text(s.get(), 3, v.metadata.identity.task_id);
-        sqlite3_bind_int64(s.get(), 4, v.revision);
+        sqlite::bind_int64(s.get(), 4, v.revision);
         sqlite::bind_text(s.get(), 5, judge_workflow_state_name(v.state));
         sqlite::bind_text(s.get(), 6, doc.dump());
         sqlite::bind_text(s.get(), 7, dg);
         sqlite::bind_text(s.get(), 8, v.updated_at);
-        int rc = sqlite3_step(s.get());
+        int rc = sqlite::step(s.get());
         if (rc == SQLITE_CONSTRAINT)
             return {JudgeStoreStatus::AlreadyExists, 0, {}, {}};
         if (rc != SQLITE_DONE)
@@ -214,12 +214,12 @@ namespace agent_framework::eval
         sqlite::Statement s(db, "SELECT revision,checkpoint_json,checkpoint_digest FROM judge_checkpoints WHERE tenant_id=? AND workflow_id=?");
         sqlite::bind_text(s.get(), 1, tenant);
         sqlite::bind_text(s.get(), 2, workflow);
-        int rc = sqlite3_step(s.get());
+        int rc = sqlite::step(s.get());
         if (rc == SQLITE_DONE)
             return std::nullopt;
         if (rc != SQLITE_ROW)
             throw std::runtime_error(sqlite3_errmsg(db));
-        auto rev = static_cast<std::uint64_t>(sqlite3_column_int64(s.get(), 0));
+        auto rev = static_cast<std::uint64_t>(sqlite::column_int64(s.get(), 0));
         auto text = sqlite::column_text(s.get(), 1);
         auto dg = sqlite::column_text(s.get(), 2);
         auto value = decode_judge_checkpoint(nlohmann::json::parse(text));
@@ -244,18 +244,18 @@ namespace agent_framework::eval
         std::lock_guard lock(mutex_);
         auto *db = sqlite::database(db_);
         sqlite::Statement s(db, "UPDATE judge_checkpoints SET revision=?,state=?,checkpoint_json=?,checkpoint_digest=?,updated_at=? WHERE tenant_id=? AND workflow_id=? AND revision=?");
-        sqlite3_bind_int64(s.get(), 1, v.revision);
+        sqlite::bind_int64(s.get(), 1, v.revision);
         sqlite::bind_text(s.get(), 2, judge_workflow_state_name(v.state));
         sqlite::bind_text(s.get(), 3, doc.dump());
         sqlite::bind_text(s.get(), 4, dg);
         sqlite::bind_text(s.get(), 5, v.updated_at);
         sqlite::bind_text(s.get(), 6, v.metadata.identity.tenant_id);
         sqlite::bind_text(s.get(), 7, v.workflow_id);
-        sqlite3_bind_int64(s.get(), 8, expected);
-        int rc = sqlite3_step(s.get());
+        sqlite::bind_int64(s.get(), 8, expected);
+        int rc = sqlite::step(s.get());
         if (rc != SQLITE_DONE)
             return failure(db, rc);
-        if (sqlite3_changes(db) != 1)
+        if (sqlite::changes(db) != 1)
             return {JudgeStoreStatus::RevisionConflict, expected, {}, {}};
         return {JudgeStoreStatus::Committed, v.revision, dg, {}};
     }
@@ -275,31 +275,31 @@ namespace agent_framework::eval
             sqlite::Statement q(db, "SELECT checkpoint_json FROM judge_checkpoints WHERE tenant_id=? AND workflow_id=? AND revision=?");
             sqlite::bind_text(q.get(), 1, v.metadata.identity.tenant_id);
             sqlite::bind_text(q.get(), 2, v.workflow_id);
-            sqlite3_bind_int64(q.get(), 3, expected);
-            if (sqlite3_step(q.get()) != SQLITE_ROW)
+            sqlite::bind_int64(q.get(), 3, expected);
+            if (sqlite::step(q.get()) != SQLITE_ROW)
                 throw std::runtime_error("judge checkpoint revision conflict");
             auto previous = decode_judge_checkpoint(nlohmann::json::parse(sqlite::column_text(q.get(), 0)));
             if (!previous || !immutable_match(*previous, v))
                 throw std::runtime_error("immutable input binding changed");
             sqlite::Statement u(db, "UPDATE judge_checkpoints SET revision=?,state=?,checkpoint_json=?,checkpoint_digest=?,updated_at=? WHERE tenant_id=? AND workflow_id=? AND revision=?");
-            sqlite3_bind_int64(u.get(), 1, v.revision);
+            sqlite::bind_int64(u.get(), 1, v.revision);
             sqlite::bind_text(u.get(), 2, judge_workflow_state_name(v.state));
             sqlite::bind_text(u.get(), 3, cp.dump());
             sqlite::bind_text(u.get(), 4, cd);
             sqlite::bind_text(u.get(), 5, v.updated_at);
             sqlite::bind_text(u.get(), 6, v.metadata.identity.tenant_id);
             sqlite::bind_text(u.get(), 7, v.workflow_id);
-            sqlite3_bind_int64(u.get(), 8, expected);
-            if (sqlite3_step(u.get()) != SQLITE_DONE || sqlite3_changes(db) != 1)
+            sqlite::bind_int64(u.get(), 8, expected);
+            if (sqlite::step(u.get()) != SQLITE_DONE || sqlite::changes(db) != 1)
                 throw std::runtime_error("judge checkpoint revision conflict");
             sqlite::Statement ins(db, "INSERT INTO evaluation_reports(tenant_id,workflow_id,revision,report_json,report_digest,created_at) VALUES(?,?,?,?,?,?)");
             sqlite::bind_text(ins.get(), 1, v.metadata.identity.tenant_id);
             sqlite::bind_text(ins.get(), 2, v.workflow_id);
-            sqlite3_bind_int64(ins.get(), 3, 1);
+            sqlite::bind_int64(ins.get(), 3, 1);
             sqlite::bind_text(ins.get(), 4, rp.dump());
             sqlite::bind_text(ins.get(), 5, rd);
             sqlite::bind_text(ins.get(), 6, report.created_at);
-            int rc = sqlite3_step(ins.get());
+            int rc = sqlite::step(ins.get());
             if (rc != SQLITE_DONE)
                 throw std::runtime_error(sqlite3_errmsg(db));
             sqlite::exec(db, "COMMIT");
@@ -324,12 +324,12 @@ namespace agent_framework::eval
         sqlite::Statement s(db, "SELECT revision,report_json,report_digest FROM evaluation_reports WHERE tenant_id=? AND workflow_id=?");
         sqlite::bind_text(s.get(), 1, tenant);
         sqlite::bind_text(s.get(), 2, workflow);
-        int rc = sqlite3_step(s.get());
+        int rc = sqlite::step(s.get());
         if (rc == SQLITE_DONE)
             return std::nullopt;
         if (rc != SQLITE_ROW)
             throw std::runtime_error(sqlite3_errmsg(db));
-        auto rev = static_cast<std::uint64_t>(sqlite3_column_int64(s.get(), 0));
+        auto rev = static_cast<std::uint64_t>(sqlite::column_int64(s.get(), 0));
         auto value = decode_evaluation_report(nlohmann::json::parse(sqlite::column_text(s.get(), 1)));
         auto dg = sqlite::column_text(s.get(), 2);
         if (!value || encode(*value).at("canonical_digest").get<std::string>() != dg)

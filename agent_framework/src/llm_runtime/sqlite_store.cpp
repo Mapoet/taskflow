@@ -48,14 +48,14 @@ RuntimeStoreResult publish_document(sqlite3* db, const char* table,
     sqlite::bind_text(insert.get(), 1, tenant); sqlite::bind_text(insert.get(), 2, id);
     sqlite::bind_text(insert.get(), 3, revision); sqlite::bind_text(insert.get(), 4, digest);
     sqlite::bind_text(insert.get(), 5, contracts::canonical_json(document));
-    const int status = sqlite3_step(insert.get());
+    const int status = sqlite::step(insert.get());
     if(status == SQLITE_DONE) return {RuntimeStoreStatus::Committed, 1, digest, {}};
     if(status != SQLITE_CONSTRAINT) return sqlite_failure(db, status);
     const std::string query_sql = std::string("SELECT digest FROM ") + table +
         " WHERE tenant_id=? AND document_id=? AND revision=?";
     sqlite::Statement query(db, query_sql.c_str());
     sqlite::bind_text(query.get(), 1, tenant); sqlite::bind_text(query.get(), 2, id); sqlite::bind_text(query.get(), 3, revision);
-    if(sqlite3_step(query.get()) != SQLITE_ROW)
+    if(sqlite::step(query.get()) != SQLITE_ROW)
         return {RuntimeStoreStatus::Error, 0, digest, "constraint without existing document"};
     const bool same = sqlite::column_text(query.get(), 0) == digest;
     return {same ? RuntimeStoreStatus::AlreadyExists : RuntimeStoreStatus::RevisionConflict,
@@ -70,7 +70,7 @@ std::optional<T> load_document(sqlite3* db, const char* table,
         " WHERE tenant_id=? AND document_id=? AND revision=?";
     sqlite::Statement query(db, sql.c_str());
     sqlite::bind_text(query.get(), 1, tenant); sqlite::bind_text(query.get(), 2, id); sqlite::bind_text(query.get(), 3, revision);
-    if(sqlite3_step(query.get()) != SQLITE_ROW) return std::nullopt;
+    if(sqlite::step(query.get()) != SQLITE_ROW) return std::nullopt;
     auto decoded = decoder(json::parse(sqlite::column_text(query.get(), 0)));
     if(!decoded) throw std::runtime_error(std::string("corrupt ") + table + " document");
     return decoded;
@@ -121,7 +121,7 @@ void SQLiteLLMRuntimeStore::migrate() {
     int version = 0;
     {
         sqlite::Statement query(db, "SELECT COALESCE(MAX(version),0) FROM llm_runtime_schema_version");
-        if(sqlite3_step(query.get()) == SQLITE_ROW) version = sqlite3_column_int(query.get(), 0);
+        if(sqlite::step(query.get()) == SQLITE_ROW) version = sqlite::column_int(query.get(), 0);
     }
     if(version > 1) throw std::runtime_error("LLM runtime store schema is newer than this binary");
     if(version == 0) {
@@ -204,10 +204,10 @@ RuntimeStoreResult SQLiteLLMRuntimeStore::create_invocation(
                          " VALUES(?,?,?,?,?,?)");
     sqlite::bind_text(insert.get(),1,manifest.metadata.identity.tenant_id);
     sqlite::bind_text(insert.get(),2,manifest.invocation_id);
-    sqlite3_bind_int64(insert.get(),3,1);
+    sqlite::bind_int64(insert.get(),3,1);
     sqlite::bind_text(insert.get(),4,invocation_state_name(manifest.state));
     sqlite::bind_text(insert.get(),5,digest); sqlite::bind_text(insert.get(),6,contracts::canonical_json(document));
-    const int status=sqlite3_step(insert.get());
+    const int status=sqlite::step(insert.get());
     if(status==SQLITE_CONSTRAINT) return {RuntimeStoreStatus::AlreadyExists,0,digest,"invocation exists"};
     if(status!=SQLITE_DONE) return sqlite_failure(db,status);
     return {RuntimeStoreStatus::Committed,1,digest,{}};
@@ -225,9 +225,9 @@ RuntimeStoreResult SQLiteLLMRuntimeStore::update_invocation(
         {
             sqlite::Statement query(db,"SELECT revision,state FROM llm_invocations WHERE tenant_id=? AND invocation_id=?");
             sqlite::bind_text(query.get(),1,manifest.metadata.identity.tenant_id); sqlite::bind_text(query.get(),2,manifest.invocation_id);
-            if(sqlite3_step(query.get())!=SQLITE_ROW)
+            if(sqlite::step(query.get())!=SQLITE_ROW)
                 return {RuntimeStoreStatus::NotFound,0,{},"invocation not found"};
-            actual=static_cast<std::uint64_t>(sqlite3_column_int64(query.get(),0));
+            actual=static_cast<std::uint64_t>(sqlite::column_int64(query.get(),0));
             const auto decoded=invocation_state_from_name(sqlite::column_text(query.get(),1));
             if(!decoded) return {RuntimeStoreStatus::Error,actual,{},"stored invocation state is corrupt"};
             prior=*decoded;
@@ -244,10 +244,10 @@ RuntimeStoreResult SQLiteLLMRuntimeStore::update_invocation(
         sqlite::bind_text(update.get(),1,invocation_state_name(manifest.state)); sqlite::bind_text(update.get(),2,digest);
         sqlite::bind_text(update.get(),3,contracts::canonical_json(document));
         sqlite::bind_text(update.get(),4,manifest.metadata.identity.tenant_id); sqlite::bind_text(update.get(),5,manifest.invocation_id);
-        sqlite3_bind_int64(update.get(),6,static_cast<sqlite3_int64>(expected_revision));
-        const int status=sqlite3_step(update.get());
+        sqlite::bind_int64(update.get(),6,static_cast<sqlite3_int64>(expected_revision));
+        const int status=sqlite::step(update.get());
         if(status!=SQLITE_DONE) return sqlite_failure(db,status);
-        if(sqlite3_changes(db)!=1)
+        if(sqlite::changes(db)!=1)
             return {RuntimeStoreStatus::RevisionConflict,actual,{},"invocation revision changed concurrently"};
         transaction.commit();
         return {RuntimeStoreStatus::Committed,expected_revision+1,digest,{}};
@@ -263,11 +263,11 @@ std::optional<StoredInvocation> SQLiteLLMRuntimeStore::load_invocation(
     sqlite::Statement query(db,"SELECT revision,document_json,updated_at FROM llm_invocations "
                        "WHERE tenant_id=? AND invocation_id=?");
     sqlite::bind_text(query.get(),1,tenant_id); sqlite::bind_text(query.get(),2,invocation_id);
-    if(sqlite3_step(query.get())!=SQLITE_ROW) return std::nullopt;
+    if(sqlite::step(query.get())!=SQLITE_ROW) return std::nullopt;
     auto manifest=decode_invocation_manifest(json::parse(sqlite::column_text(query.get(),1)));
     if(!manifest) throw std::runtime_error("stored invocation manifest is corrupt");
     return StoredInvocation{std::move(*manifest),
-        static_cast<std::uint64_t>(sqlite3_column_int64(query.get(),0)),sqlite::column_text(query.get(),2)};
+        static_cast<std::uint64_t>(sqlite::column_int64(query.get(),0)),sqlite::column_text(query.get(),2)};
 }
 
 std::vector<StoredInvocation> SQLiteLLMRuntimeStore::list_recoverable(
@@ -279,12 +279,12 @@ std::vector<StoredInvocation> SQLiteLLMRuntimeStore::list_recoverable(
                        "WHERE tenant_id=? AND state NOT IN ('succeeded','failed','cancelled','manual_review') "
                        "ORDER BY updated_at LIMIT ?");
     sqlite::bind_text(query.get(),1,tenant_id);
-    sqlite3_bind_int64(query.get(),2,static_cast<sqlite3_int64>(limit));
-    while(sqlite3_step(query.get())==SQLITE_ROW) {
+    sqlite::bind_int64(query.get(),2,static_cast<sqlite3_int64>(limit));
+    while(sqlite::step(query.get())==SQLITE_ROW) {
         auto manifest=decode_invocation_manifest(json::parse(sqlite::column_text(query.get(),1)));
         if(!manifest) throw std::runtime_error("stored invocation manifest is corrupt");
         if(!terminal(manifest->state)) result.push_back({std::move(*manifest),
-            static_cast<std::uint64_t>(sqlite3_column_int64(query.get(),0)),sqlite::column_text(query.get(),2)});
+            static_cast<std::uint64_t>(sqlite::column_int64(query.get(),0)),sqlite::column_text(query.get(),2)});
     }
     return result;
 }

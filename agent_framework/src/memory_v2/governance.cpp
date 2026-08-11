@@ -78,4 +78,65 @@ GovernanceResult MemoryGovernanceService::forget(
     return result;
 }
 
+ApprovalBoundMemoryGovernance::ApprovalBoundMemoryGovernance(
+    std::shared_ptr<MemoryStore> store, approval::ApprovalStore& approvals)
+    : store_(std::move(store)), approvals_(approvals), governance_(store_) {
+    if(!store_) throw std::invalid_argument("memory store is required");
+}
+
+bool ApprovalBoundMemoryGovernance::register_forget_sink(std::shared_ptr<ForgetSink> sink) {
+    return governance_.register_forget_sink(std::move(sink));
+}
+
+std::string ApprovalBoundMemoryGovernance::validate(
+    std::string_view record_id, std::uint64_t revision,
+    std::string_view approval_id, std::string_view now) {
+    auto record = store_->current(record_id);
+    if(!record || record->revision != revision) return "memory_revision_mismatch";
+    auto request = approvals_.request(approval_id);
+    auto decision = approvals_.latest_decision(approval_id);
+    if(!request || !decision) return "memory_approval_missing";
+    const auto record_digest = encode(*record).at("canonical_digest").get<std::string>();
+    if(request->metadata.identity.tenant_id != record->scope.tenant_id ||
+       request->scope != "memory:" + std::string(record_id) ||
+       request->artifact_digest != record_digest ||
+       decision->request_digest != approval::encode(*request).at("canonical_digest").get<std::string>() ||
+       decision->artifact_digest != record_digest)
+        return "memory_approval_binding_mismatch";
+    if(decision->decision != approval::Decision::Approved)
+        return "memory_approval_not_approved";
+    if((!request->expires_at.empty() && now > request->expires_at) ||
+       (!decision->expires_at.empty() && now > decision->expires_at))
+        return "memory_approval_expired";
+    return {};
+}
+
+CommitResult ApprovalBoundMemoryGovernance::promote(
+    std::string_view id, std::uint64_t expected, MemoryStatus status, Authority authority,
+    std::string_view evidence, std::string_view approval, std::string_view now) {
+    if(const auto error = validate(id, expected, approval, now); !error.empty())
+        return {CommitStatus::Forbidden, expected, error};
+    return governance_.promote(id, expected, status, authority, evidence, approval);
+}
+
+CommitResult ApprovalBoundMemoryGovernance::correct(
+    const MemoryRecord& corrected, std::uint64_t expected,
+    const std::vector<std::string>& evidence, std::string_view approval, std::string_view now) {
+    if(evidence.empty()) return {CommitStatus::Invalid, expected, "correction evidence is required"};
+    if(const auto error = validate(corrected.record_id, expected, approval, now); !error.empty())
+        return {CommitStatus::Forbidden, expected, error};
+    auto value = corrected;
+    value.revision = expected + 1;
+    value.metadata.extensions["correction_approval_id"] = std::string(approval);
+    value.metadata.extensions["correction_evidence_ids"] = evidence;
+    return store_->revise(value, expected, approval);
+}
+
+GovernanceResult ApprovalBoundMemoryGovernance::forget(
+    std::string_view id, std::uint64_t expected, std::string_view approval, std::string_view now) {
+    if(const auto error = validate(id, expected, approval, now); !error.empty())
+        return {{CommitStatus::Forbidden, expected, error}, {}, {}};
+    return governance_.forget(id, expected, approval);
+}
+
 }  // namespace agent_framework::memory_v2

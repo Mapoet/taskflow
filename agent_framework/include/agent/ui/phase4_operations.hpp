@@ -78,6 +78,13 @@ struct OperationsHitlRequest {
     std::vector<std::string> allowed_actions;
 };
 
+struct OperationsSourceRevision {
+    std::string store;
+    std::string object_id;
+    std::uint64_t revision{0};
+    std::string digest;
+};
+
 /**
  * Canonical, display-safe Phase 4 control-plane projection.
  *
@@ -87,6 +94,7 @@ struct OperationsHitlRequest {
 struct Phase4OperationsSnapshot {
     std::string schema_version{"phase4.operations.v1"};
     std::string snapshot_id;
+    std::string tenant_id;
     std::string run_id;
     std::string task_id;
     std::string updated_at;
@@ -103,6 +111,7 @@ struct Phase4OperationsSnapshot {
     std::vector<OperationsInvocation> invocations;
     std::vector<OperationsAssuranceLayer> assurance;
     std::vector<OperationsHitlRequest> hitl;
+    std::vector<OperationsSourceRevision> source_revisions;
 };
 
 class Phase4OperationsProjection {

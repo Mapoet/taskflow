@@ -118,12 +118,12 @@ RemediationStoreCommit SQLiteRemediationStore::create(const RemediationCheckpoin
     sqlite::bind_text(statement.get(), 1, v.metadata.identity.tenant_id);
     sqlite::bind_text(statement.get(), 2, v.workflow_id);
     sqlite::bind_text(statement.get(), 3, v.metadata.identity.task_id);
-    sqlite3_bind_int64(statement.get(), 4, static_cast<sqlite3_int64>(v.revision));
+    sqlite::bind_int64(statement.get(), 4, static_cast<sqlite3_int64>(v.revision));
     sqlite::bind_text(statement.get(), 5, remediation_state_name(v.state));
     sqlite::bind_text(statement.get(), 6, document.dump());
     sqlite::bind_text(statement.get(), 7, digest);
     sqlite::bind_text(statement.get(), 8, v.updated_at);
-    const int rc = sqlite3_step(statement.get());
+    const int rc = sqlite::step(statement.get());
     if(rc == SQLITE_CONSTRAINT) return {RemediationStoreStatus::AlreadyExists, 0, {}, {}};
     if(rc != SQLITE_DONE) return failure(db, rc);
     return {RemediationStoreStatus::Committed, v.revision, digest, {}};
@@ -135,10 +135,10 @@ std::optional<StoredRemediationCheckpoint> SQLiteRemediationStore::load(
     sqlite::Statement statement(db, "SELECT revision,checkpoint_json,checkpoint_digest FROM remediation_checkpoints WHERE tenant_id=? AND workflow_id=?");
     sqlite::bind_text(statement.get(), 1, tenant);
     sqlite::bind_text(statement.get(), 2, workflow);
-    const int rc = sqlite3_step(statement.get());
+    const int rc = sqlite::step(statement.get());
     if(rc == SQLITE_DONE) return std::nullopt;
     if(rc != SQLITE_ROW) throw std::runtime_error(sqlite3_errmsg(db));
-    const auto revision = static_cast<std::uint64_t>(sqlite3_column_int64(statement.get(), 0));
+    const auto revision = static_cast<std::uint64_t>(sqlite::column_int64(statement.get(), 0));
     const auto text = sqlite::column_text(statement.get(), 1);
     const auto stored_digest = sqlite::column_text(statement.get(), 2);
     auto value = decode_remediation_checkpoint(nlohmann::json::parse(text));
@@ -157,25 +157,25 @@ RemediationStoreCommit SQLiteRemediationStore::compare_exchange(
     std::lock_guard lock(mutex_);
     auto* db = sqlite::database(db_);
     sqlite::Statement statement(db, "UPDATE remediation_checkpoints SET revision=?,state=?,checkpoint_json=?,checkpoint_digest=?,updated_at=? WHERE tenant_id=? AND workflow_id=? AND revision=?");
-    sqlite3_bind_int64(statement.get(), 1, static_cast<sqlite3_int64>(v.revision));
+    sqlite::bind_int64(statement.get(), 1, static_cast<sqlite3_int64>(v.revision));
     sqlite::bind_text(statement.get(), 2, remediation_state_name(v.state));
     sqlite::bind_text(statement.get(), 3, document.dump());
     sqlite::bind_text(statement.get(), 4, digest);
     sqlite::bind_text(statement.get(), 5, v.updated_at);
     sqlite::bind_text(statement.get(), 6, v.metadata.identity.tenant_id);
     sqlite::bind_text(statement.get(), 7, v.workflow_id);
-    sqlite3_bind_int64(statement.get(), 8, static_cast<sqlite3_int64>(expected));
-    const int rc = sqlite3_step(statement.get());
+    sqlite::bind_int64(statement.get(), 8, static_cast<sqlite3_int64>(expected));
+    const int rc = sqlite::step(statement.get());
     if(rc != SQLITE_DONE) return failure(db, rc);
-    if(sqlite3_changes(db) != 1) {
+    if(sqlite::changes(db) != 1) {
         sqlite::Statement query(db, "SELECT revision FROM remediation_checkpoints WHERE tenant_id=? AND workflow_id=?");
         sqlite::bind_text(query.get(), 1, v.metadata.identity.tenant_id);
         sqlite::bind_text(query.get(), 2, v.workflow_id);
-        const int qrc = sqlite3_step(query.get());
+        const int qrc = sqlite::step(query.get());
         if(qrc == SQLITE_DONE) return {RemediationStoreStatus::NotFound, 0, {}, {}};
         if(qrc != SQLITE_ROW) return failure(db, qrc);
         return {RemediationStoreStatus::RevisionConflict,
-                static_cast<std::uint64_t>(sqlite3_column_int64(query.get(), 0)), {}, {}};
+                static_cast<std::uint64_t>(sqlite::column_int64(query.get(), 0)), {}, {}};
     }
     return {RemediationStoreStatus::Committed, v.revision, digest, {}};
 }

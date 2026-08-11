@@ -137,7 +137,7 @@ namespace agent_framework
 
     json Phase4OperationsProjection::to_json(const Phase4OperationsSnapshot &s)
     {
-        json out{{"schema_version", s.schema_version}, {"snapshot_id", s.snapshot_id}, {"run_id", s.run_id}, {"task_id", s.task_id}, {"updated_at", s.updated_at}, {"overall_status", status_json(s.overall_status)}, {"plan_revision", s.plan_revision}, {"summary", s.summary}, {"blocker", s.blocker}, {"residual_risk", s.residual_risk}, {"live_certification", s.live_certification}, {"unknowns", s.unknowns}};
+        json out{{"schema_version", s.schema_version}, {"snapshot_id", s.snapshot_id}, {"tenant_id", s.tenant_id}, {"run_id", s.run_id}, {"task_id", s.task_id}, {"updated_at", s.updated_at}, {"overall_status", status_json(s.overall_status)}, {"plan_revision", s.plan_revision}, {"summary", s.summary}, {"blocker", s.blocker}, {"residual_risk", s.residual_risk}, {"live_certification", s.live_certification}, {"unknowns", s.unknowns}};
         out["stages"] = json::array();
         for (const auto &v : s.stages)
             out["stages"].push_back(json{{"id", v.id}, {"label", v.label}, {"status", status_json(v.status)}, {"revision", v.revision}, {"role", v.role}, {"summary", v.summary}, {"evidence_ids", v.evidence_ids}});
@@ -156,6 +156,10 @@ namespace agent_framework
         out["hitl"] = json::array();
         for (const auto &v : s.hitl)
             out["hitl"].push_back(json{{"id", v.id}, {"kind", v.kind}, {"status", status_json(v.status)}, {"summary", v.summary}, {"requested_by", v.requested_by}, {"deadline", v.deadline}, {"allowed_actions", v.allowed_actions}});
+        out["source_revisions"] = json::array();
+        for (const auto &v : s.source_revisions)
+            out["source_revisions"].push_back(json{{"store", v.store}, {"object_id", v.object_id},
+                {"revision", v.revision}, {"digest", v.digest}});
         return out;
     }
 
@@ -168,10 +172,11 @@ namespace agent_framework
         if (s.schema_version != "phase4.operations.v1")
             throw std::invalid_argument("unsupported operations schema");
         s.snapshot_id = bounded(root, "snapshot_id", true);
+        s.tenant_id = bounded(root, "tenant_id", true);
         s.run_id = bounded(root, "run_id", true);
         s.task_id = bounded(root, "task_id", true);
         s.updated_at = bounded(root, "updated_at", true);
-        if (s.snapshot_id.empty() || s.run_id.empty() || s.task_id.empty() || s.updated_at.empty())
+        if (s.snapshot_id.empty() || s.tenant_id.empty() || s.run_id.empty() || s.task_id.empty() || s.updated_at.empty())
             throw std::invalid_argument("operations identity fields must not be empty");
         s.overall_status = parse_status(bounded(root, "overall_status", true));
         s.plan_revision = root.value("plan_revision", std::uint64_t{0});
@@ -216,6 +221,11 @@ namespace agent_framework
         OperationsHitlRequest x; x.id = bounded(v, "id", true); x.kind = bounded(v, "kind", true);
         x.status = Phase4OperationsProjection::parse_status(bounded(v, "status", true)); x.summary = bounded(v, "summary", true);
         x.requested_by = bounded(v, "requested_by"); x.deadline = bounded(v, "deadline"); x.allowed_actions = strings(v, "allowed_actions"); return x; });
+        s.source_revisions = objects<OperationsSourceRevision>(root, "source_revisions", [](const json &v)
+        {
+        OperationsSourceRevision x; x.store = bounded(v, "store", true);
+        x.object_id = bounded(v, "object_id", true); x.revision = v.value("revision", std::uint64_t{0});
+        x.digest = bounded(v, "digest", true); return x; });
         require_unique_ids(s.stages, "stages");
         require_unique_ids(s.evidence, "evidence");
         require_unique_ids(s.memory, "memory");
@@ -258,6 +268,7 @@ namespace agent_framework
     {
         Phase4OperationsSnapshot s;
         s.snapshot_id = "ops-demo-001";
+        s.tenant_id = "demo-tenant";
         s.run_id = "run-orbit-042";
         s.task_id = "task-gnss-ro-qa";
         s.updated_at = "2026-08-10T14:32:18+08:00";

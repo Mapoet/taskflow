@@ -112,8 +112,8 @@ void SQLitePlanningStore::migrate() {
         int version = 0;
         {
             sqlite::Statement query(db, "SELECT COALESCE(MAX(version),0) FROM planning_schema_version");
-            if(sqlite3_step(query.get()) == SQLITE_ROW)
-                version = sqlite3_column_int(query.get(), 0);
+            if(sqlite::step(query.get()) == SQLITE_ROW)
+                version = sqlite::column_int(query.get(), 0);
         }
         if(version > 1) throw std::runtime_error("planning schema newer than binary");
         if(version == 0) {
@@ -155,7 +155,7 @@ PlanningCommitResult SQLitePlanningStore::append(
     sqlite::bind_text(statement.get(), 4, record.locator);
     sqlite::bind_text(statement.get(), 5, record.content_digest);
     sqlite::bind_text(statement.get(), 6, evidence_document(scope, record));
-    const auto status = sqlite3_step(statement.get());
+    const auto status = sqlite::step(statement.get());
     if(status != SQLITE_DONE) {
         auto result = sqlite_failure(db, status);
         result.digest = record.content_digest;
@@ -172,7 +172,7 @@ std::optional<EvidenceRecord> SQLitePlanningStore::get(
     sqlite::bind_text(query.get(), 1, scope.identity.tenant_id);
     sqlite::bind_text(query.get(), 2, scope.identity.task_id);
     sqlite::bind_text(query.get(), 3, evidence_id);
-    return sqlite3_step(query.get()) == SQLITE_ROW
+    return sqlite::step(query.get()) == SQLITE_ROW
         ? decode_evidence(sqlite::column_text(query.get(), 0)) : std::nullopt;
 }
 
@@ -187,7 +187,7 @@ EvidenceBundle SQLitePlanningStore::bundle(
         sqlite::bind_text(query.get(), 1, scope.identity.tenant_id);
         sqlite::bind_text(query.get(), 2, scope.identity.task_id);
         sqlite::bind_text(query.get(), 3, id);
-        if(sqlite3_step(query.get()) == SQLITE_ROW) {
+        if(sqlite::step(query.get()) == SQLITE_ROW) {
             auto record = decode_evidence(sqlite::column_text(query.get(), 0));
             if(record) result.records.push_back(std::move(*record));
         }
@@ -215,11 +215,11 @@ PlanningCommitResult SQLitePlanningStore::create(const ExecutionPlan& plan) {
     sqlite::bind_text(statement.get(), 1, plan.metadata.identity.tenant_id);
     sqlite::bind_text(statement.get(), 2, plan.metadata.identity.task_id);
     sqlite::bind_text(statement.get(), 3, plan.metadata.identity.plan_id);
-    sqlite3_bind_int64(statement.get(), 4, static_cast<sqlite3_int64>(plan.plan_revision));
+    sqlite::bind_int64(statement.get(), 4, static_cast<sqlite3_int64>(plan.plan_revision));
     sqlite::bind_text(statement.get(), 5, digest);
     sqlite::bind_text(statement.get(), 6, plan.parent_plan_digest);
     sqlite::bind_text(statement.get(), 7, contracts::canonical_json(document));
-    const auto status = sqlite3_step(statement.get());
+    const auto status = sqlite::step(statement.get());
     if(status != SQLITE_DONE) {
         auto result = sqlite_failure(db, status);
         result.digest = digest;
@@ -243,11 +243,11 @@ PlanningCommitResult SQLitePlanningStore::compare_exchange(
             sqlite::bind_text(query.get(), 1, plan.metadata.identity.tenant_id);
             sqlite::bind_text(query.get(), 2, plan.metadata.identity.task_id);
             sqlite::bind_text(query.get(), 3, plan.metadata.identity.plan_id);
-            if(sqlite3_step(query.get()) != SQLITE_ROW) {
+            if(sqlite::step(query.get()) != SQLITE_ROW) {
                 sqlite::exec(db, "ROLLBACK");
                 return {PlanningCommitStatus::NotFound, {}, "plan not found"};
             }
-            current_revision = static_cast<std::uint64_t>(sqlite3_column_int64(query.get(), 0));
+            current_revision = static_cast<std::uint64_t>(sqlite::column_int64(query.get(), 0));
             current_digest = sqlite::column_text(query.get(), 1);
         }
         if(current_revision != expected_revision) {
@@ -268,11 +268,11 @@ PlanningCommitResult SQLitePlanningStore::compare_exchange(
         sqlite::bind_text(insert.get(), 1, plan.metadata.identity.tenant_id);
         sqlite::bind_text(insert.get(), 2, plan.metadata.identity.task_id);
         sqlite::bind_text(insert.get(), 3, plan.metadata.identity.plan_id);
-        sqlite3_bind_int64(insert.get(), 4, static_cast<sqlite3_int64>(plan.plan_revision));
+        sqlite::bind_int64(insert.get(), 4, static_cast<sqlite3_int64>(plan.plan_revision));
         sqlite::bind_text(insert.get(), 5, digest);
         sqlite::bind_text(insert.get(), 6, plan.parent_plan_digest);
         sqlite::bind_text(insert.get(), 7, contracts::canonical_json(document));
-        const auto status = sqlite3_step(insert.get());
+        const auto status = sqlite::step(insert.get());
         if(status != SQLITE_DONE) {
             auto result = sqlite_failure(db, status);
             sqlite::exec(db, "ROLLBACK");
@@ -295,7 +295,7 @@ std::optional<ExecutionPlan> SQLitePlanningStore::current(
     sqlite::bind_text(query.get(), 1, identity.tenant_id);
     sqlite::bind_text(query.get(), 2, identity.task_id);
     sqlite::bind_text(query.get(), 3, identity.plan_id);
-    return sqlite3_step(query.get()) == SQLITE_ROW
+    return sqlite::step(query.get()) == SQLITE_ROW
         ? decode_plan(sqlite::column_text(query.get(), 0)) : std::nullopt;
 }
 
@@ -309,7 +309,7 @@ std::vector<ExecutionPlan> SQLitePlanningStore::history(
     sqlite::bind_text(query.get(), 1, identity.tenant_id);
     sqlite::bind_text(query.get(), 2, identity.task_id);
     sqlite::bind_text(query.get(), 3, identity.plan_id);
-    while(sqlite3_step(query.get()) == SQLITE_ROW) {
+    while(sqlite::step(query.get()) == SQLITE_ROW) {
         auto plan = decode_plan(sqlite::column_text(query.get(), 0));
         if(plan) result.push_back(std::move(*plan));
     }
