@@ -1,6 +1,7 @@
 # Phase 4 实施状态与证据矩阵
 
 **状态**：Phase 4 v2 技术状态重估基线（未完成项保持开放）  
+**Residual Closure**：[`phase4-v2-residual-r1`](./phase-4-residual-closure-plan.md) 已于 2026-08-11 批准执行；R1I–R7D 按直接集成/生产证据关闭，不以既有模块测试替代
 **最后核对日期**：2026-08-10
 **上游章程**：[phase-4.md](./phase-4.md)  
 **当前总体计划**：[phase-4-plan-v2.md](./phase-4-plan-v2.md)  
@@ -22,6 +23,8 @@
 按 Phase 4 v1 原始目标，当前总体满足度约为 **52–57%**。实现已形成共享契约、SQLite Run/Memory/Assurance/Remediation、动态 View、认知规划、多角色五层验收、有界 replan/选择性复验控制面、解释性 UI、Sandbox/Telemetry/Eval/Live/Queue 核心语义的离线垂直骨架；但真实 investigator/provider、实际修复执行→新产物→复验、统一进程/容器 sandbox、OTLP/SLO、scheduled live、远程持久化与 HA 尚未达到工作包 DoD，因此所有 WP 仍保持 `[~]`。
 
 [Phase 4 v2](./phase-4-plan-v2.md) 把“规划、验证和记忆均由专门 LLM 工作流驱动”提升为 mandatory target。完成 P4-V2-F1L–F8U 离线控制/呈现面后，按扩展目标重新计量，当前总体满足度约为 **72–76%**。该数值不把 mock RoleRuntime、deterministic UI snapshot 或 no-skip 门禁本身计作生产 `executed=true`，仍不包含实际 remediation executor、生产 Store snapshot assembler、领域/对抗/live 数据集和生产闭环。
+
+2026-08-11 完成性审计确认：旧 `phase4_vertical` 没有调用 Cognition、Approval、实际 Executor、Remediation、二次 Assurance、Judge 或 Store-backed Operations assembler。R1I 随后新增顶层 Harness contract、SQLite saga/outbox、revision pin、completion gate、审批暂停/恢复和进程死亡 reconciliation，离线门禁增至 45/45；但 stage ports 尚未全部绑定真实 workflow/Sandbox/ApprovalStore，因此仍不能证明生产 Harness 全闭环。后续状态提升必须由 R2X–R7D 的 system/live/HA 直接证据支持。
 
 | 评估口径 | 满足度 | 已证明 | 尚未证明 |
 |---|---:|---|---|
@@ -191,4 +194,4 @@ AgentServer 使用有界进程内 FIFO、worker threads、内存 active task map
 | 跨模块绑定 | Memory snapshot/view→Plan digest→Run checkpoint→五层 AcceptanceReport→restart terminal | `phase4_vertical` | 真实执行器副作用与远程依赖的端到端认证 |
 | Role-based LLM Runtime | immutable role/profile/prompt/calibration、provider pool、schema gate、能力/Memory View/独立性约束、InvocationManifest SQLite CAS/recovery、AgentLoop 可选接入 | `phase4_llm_runtime_contracts`、`phase4_llm_runtime_routing`、`phase4_llm_runtime_store`、`phase4_llm_runtime_integration` | 尚未证明所有 Cognition/Memory/Assurance/Judge 路径不可绕过；无真实 provider/calibration/live matrix |
 
-当前 `ctest -L phase4-offline` 为 **42/42 PASS**；Phase 3 `ctest -L phase3-offline` 为 **14/14 PASS**。首轮纵向证据见[首轮报告](./phase-4/acceptance-P4-F0R-F8-vertical-20260809.md)，P4-F2D 持久化增量见[增量报告](./phase-4/acceptance-P4-F2D-durable-stores-20260809.md)，F1L 证据边界见[Role Runtime 验收报告](./phase-4/acceptance-P4-V2-F1L-20260809.md)，F2C 证据边界见[多阶段认知规划验收报告](./phase-4/acceptance-P4-V2-F2C-20260809.md)，F3M 证据边界见[LLM 多层记忆验收报告](./phase-4/acceptance-P4-V2-F3M-20260810.md)，F4V 证据边界见[多角色专业验收报告](./phase-4/acceptance-P4-V2-F4V-20260810.md)，F5R 证据边界见[修复与选择性复验验收报告](./phase-4/acceptance-P4-V2-F5R-20260810.md)，F6E 证据边界见[Judge、评测与校准验收报告](./phase-4/acceptance-P4-V2-F6E-20260810.md)，F7L 证据边界见[真实角色与 Live 认证验收报告](./phase-4/acceptance-P4-V2-F7L-20260810.md)，F8U 证据边界见[解释性 UI 与运维呈现验收报告](./phase-4/acceptance-P4-V2-F8U-20260810.md)。
+当前 `ctest -L phase4-offline` 为 **45/45 PASS**；Phase 3 `ctest -L phase3-offline` 为 **14/14 PASS**。首轮纵向证据见[首轮报告](./phase-4/acceptance-P4-F0R-F8-vertical-20260809.md)，P4-F2D 持久化增量见[增量报告](./phase-4/acceptance-P4-F2D-durable-stores-20260809.md)，F1L 证据边界见[Role Runtime 验收报告](./phase-4/acceptance-P4-V2-F1L-20260809.md)，F2C 证据边界见[多阶段认知规划验收报告](./phase-4/acceptance-P4-V2-F2C-20260809.md)，F3M 证据边界见[LLM 多层记忆验收报告](./phase-4/acceptance-P4-V2-F3M-20260810.md)，F4V 证据边界见[多角色专业验收报告](./phase-4/acceptance-P4-V2-F4V-20260810.md)，F5R 证据边界见[修复与选择性复验验收报告](./phase-4/acceptance-P4-V2-F5R-20260810.md)，F6E 证据边界见[Judge、评测与校准验收报告](./phase-4/acceptance-P4-V2-F6E-20260810.md)，F7L 证据边界见[真实角色与 Live 认证验收报告](./phase-4/acceptance-P4-V2-F7L-20260810.md)，F8U 证据边界见[解释性 UI 与运维呈现验收报告](./phase-4/acceptance-P4-V2-F8U-20260810.md)，R1I 证据边界见[Integrated Harness Runtime 验收报告](./phase-4/acceptance-P4-V2-R1I-20260811.md)。

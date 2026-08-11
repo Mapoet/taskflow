@@ -1,8 +1,8 @@
 # Phase 4 v2：LLM 驱动规划、记忆与专业验收实施计划
 
-**状态**：规划基线已批准；F1L–F7L 离线控制面已实施，requirements 仍保持 partial
+**状态**：规划基线已批准；F1L–F8U 离线控制/呈现面已实施；Residual Closure R0–R7 已批准并开始执行，requirements 仍保持 partial
 **计划版本**：`phase4-v2-plan-r1`  
-**最后更新**：2026-08-10
+**最后更新**：2026-08-11
 **原始需求记录**：[phase-4-v2.md](./phase-4-v2.md)  
 **阶段章程**：[phase-4.md](./phase-4.md)  
 **事实状态**：[phase-4-status.md](./phase-4-status.md)  
@@ -59,7 +59,7 @@ Durable Evidence Plane
 | Eval/Judge | 分层 suite/run/trajectory、Evaluation View、blind Primary/Secondary/Adjudicator RoleRuntime、agreement/kappa/bias/variance/CI、24 项领域指标、flaky/regression/critical gate、PDP/HITL upgrade/rollback、SQLite report/restart、GraphExecutor | 真实分层数据集与人工基线、生产 Judge calibration、nightly scheduler、signed report、trend/SLO、跨 Store atomic、默认强制接入 | 70–75% |
 | LLM 可观测性 | Role Runtime InvocationManifest 记录 provider/model/profile/prompt/view/route/fallback/token/cost/latency/calibration，并桥接 Telemetry/Audit | OTLP/SLO、真实 provider usage 一致性、跨进程 correlation 和 live evidence | 50–55% |
 
-当前可复用离线证据为 `phase4-offline` **41/41 PASS**、`phase3-offline` **14/14 PASS**，其中 `phase4-cognition-v2` **3/3 PASS**、`phase4-memory-v2` **4/4 PASS**、`phase4-assurance-v2` **4/4 PASS**、`phase4-remediation-v2` **4/4 PASS**、`phase4-judge-v2` **4/4 PASS**、`phase4-live-v2` **5/5 PASS**。它证明确定性骨架及 F1L–F7L 离线控制面没有回归，不证明真实 investigator/oracle/provider matrix、模型专业准确性、实际修复执行→新产物→复验、生产 Judge 数据集/人工校准、长期记忆质量、nightly/live SLO 或外部生产认证已经执行。
+当前可复用离线证据为 `phase4-offline` **45/45 PASS**、`phase3-offline` **14/14 PASS**，其中 `phase4-cognition-v2` **3/3 PASS**、`phase4-memory-v2` **4/4 PASS**、`phase4-assurance-v2` **4/4 PASS**、`phase4-remediation-v2` **4/4 PASS**、`phase4-judge-v2` **4/4 PASS**、`phase4-live-v2` **5/5 PASS**、`phase4-ui-v2` **1/1 PASS**、`phase4-harness` **3/3 PASS**。它证明确定性骨架、F1L–F8U 离线控制/呈现面及 R1I 顶层 durable saga/outbox/completion gate 没有回归，不证明真实 investigator/oracle/provider matrix、实际 Sandbox executor、生产 Judge 数据集/人工校准、长期记忆质量、nightly/live SLO 或外部生产认证已经执行。
 
 ## 3. v2 需求编号
 
@@ -378,4 +378,6 @@ F0 → F1L → F2C → F3M → F4V → F5R → F6E → F7L → F8U
 
 `P4-V2-F1L`–`P4-V2-F7L` 离线控制面已经形成统一 RoleRuntime、任务认知规划、scope-first 多层记忆语义加工、专业验收、typed impact/replan/selective-reverification、blind multi-Judge、确定性校准/指标/升级门禁、真实角色认证契约/恢复/签名/no-skip gate、strict checkpoint、SQLite recovery/terminal report、AcceptanceReport、强 oracle 优先 evidence resolution、Plan CAS 和 GraphExecutor templates。`R4V2-01`–`R4V2-07` 仍为 partial：真实 profiles/prompts/provider/calibration matrix、生产 hybrid retrieval、真实 Sandbox/ToolBus oracle acquisition、实际修复执行→新产物→F4V 复验、真实领域/对抗/live eval 数据集与人工标注、nightly、跨 Store 原子提交、默认不可绕过门禁、外部生产认证 `executed=true`、HA/Inspector 尚未关闭。
 
-下一实施批次为 **P4-V2-F8U 解释性 UI 与运维呈现**；F7L 仍有一项外部生产执行门槛并行保持开放：由部署侧提供批准的 production role/profile/provider matrix、凭据/KMS key 和 scheduled runner，生成可验证且未过期的 `executed=true` 报告。F7L 的离线 fixture 与 mock RoleRuntime 只证明控制面语义，不能作为生产模型专业准确性或 live SLO 的证据。
+F8U 的统一离线 UI/运维呈现面已经实现。完成性审计确认现有 `phase4_vertical` 没有执行 Cognition、Approval、实际 Executor、Remediation、二次 Assurance、Judge 或 Store-backed UI assembler，不能证明 Phase 4 全局闭环。
+
+后续实施由已批准的 [Phase 4 v2 Residual Closure 计划](./phase-4-residual-closure-plan.md)接续，顺序为 `R0 → R1I → R2X → R3A → R4O → R5E → R6L → R7D`。R6L 的外部生产执行门槛保持 fail-closed：只有批准的 production role/profile/provider matrix、真实依赖、凭据/KMS key 和 scheduled runner 生成可验证且未过期的 `executed=true` 报告，才能关闭 Live requirement。

@@ -150,6 +150,16 @@
 - **安全、兼容、迁移和回滚影响**：旧 answer/tool UI 契约保持兼容；未知输入字段在 typed re-projection 时丢弃。deterministic demo HITL controller 只在 `--demo-state` 可用；普通运行缺 accountable executor 返回 409，不能伪装为 ApprovalStore decision。生产 Store assembler 和 Approval executor 后续通过相同 schema 接入。
 - **验收标准变化及批准**：真实截图证明实际渲染，不证明 production data executed。当前同源 UI、桌面截图和 interaction contract accepted；production Store revision aggregation、reviewer/PDP/SoD/expiry/resume、移动真机和 production Live snapshot 未关闭，因此 `R4V2-08` 保持 partial。
 
+### D4-017 — Residual Closure 采用顶层 durable saga 收敛已有 workflow
+
+- **日期 / 状态 / 决策者**：2026-08-11 / approved-executing / 用户明确批准 R0→R7 连续实施
+- **关联 requirement / plan revision**：`R4V2-RC-00`–`R4V2-RC-07` / `phase4-v2-residual-r1`
+- **事实与证据**：F1L–F8U 单模块离线门禁通过，但 `phase4_vertical` 手工构造计划和 evidence，没有调用 Cognition、Approval、Executor、Remediation、二次 Assurance、Judge 或 Store-backed UI；各 workflow checkpoint 分散，缺少顶层恢复与 completion gate。
+- **备选方案**：继续增加模块级 adapter 测试；或把全部 Store 合并成一个巨大事务。前者无法证明集成，后者把外部 effect 错误建模为 ACID exactly-once，并破坏现有边界。
+- **决定与理由**：增加 `Phase4HarnessRuntime` 与 durable saga/outbox，以 pinned revision、idempotency、fencing、reconciliation 协调现有 workflow；数据库内状态可事务提交，外部 effect 通过 journal/outbox 恢复，不承诺不可能的 exactly-once。生产完成路径必须经过确定性 completion gate。
+- **安全、兼容、迁移和回滚影响**：现有模块 API 和离线测试保留；新 Harness 先作为显式入口并 shadow 验证，未达到 R5E/R6L 门禁前不删除 legacy path。未知 effect、stale writer、缺审批或缺强 oracle 均 fail closed。
+- **验收标准变化及批准**：没有降低 Phase 4 全局 DoD。R6L 缺外部依赖保持 blocked；R7D 可继续实现本地/loopback，但不能借此宣告 production Live 或 Phase 4 完成。
+
 ## 新决策模板
 
 ### D4-NNN — 标题

@@ -2,7 +2,7 @@
 
 **用途**：防止需求、实现和验收脱节。状态只允许：`planned`、`in_progress`、`implemented`、`verified`、`accepted`、`partial`、`blocked`。
 
-**当前计划版本**：[`phase4-v2-plan-r1`](../phase-4-plan-v2.md)；原 R4.0–R4.9 行继续保留，v2 扩展要求使用 `R4V2-*`，不得覆盖已有实现证据。
+**当前计划版本**：[`phase4-v2-plan-r1`](../phase-4-plan-v2.md) + [`phase4-v2-residual-r1`](../phase-4-residual-closure-plan.md)；原 R4.0–R4.9 行继续保留，v2 扩展与 closure requirement 不得覆盖已有实现证据。
 
 ## 1. 主矩阵
 
@@ -37,7 +37,20 @@
 | `R4V2-07` LLM 角色 Live 认证 | `P4-V2-F7L.1–F7L.7` | partial | `live/{role_certification,role_certification_graph_template}`；InMemory/SQLite store；`RoleRuntimeLiveCellExecutor`；HMAC signed-report gate | `phase4-live-v2` 5/5：contract/workflow/negative/restart/真实 RoleRuntime manifest integration；`AGENT_ENABLE_PHASE4_LIVE_CERTIFICATION` 缺配置 exit 2 | 离线控制面 accepted；真实 production role/provider/profile/prompt/calibration matrix、scheduled runner、KMS/IdP/MCP/A2A/Sandbox evidence 和未过期 `executed=true` report 未执行，不能 verified |
 | `R4V2-08` 解释性 UI | `P4-V2-F8U.1–F8U.6` | partial | `ui/{phase4_operations,presentation_model,ui_manager}`；CLI/Web/TUI/ImGui adapters；Web snapshot/HITL routes | `phase4_operations_ui`、rich UI 6/6、`phase4-offline` 42/42、`phase3-offline` 14/14；Web/TUI/ImGui 真实截图；报告 `acceptance-P4-V2-F8U-20260810.md` | canonical/display-safe 同源呈现 accepted；production Store assembler、ApprovalStore executor、移动端真实截图和 production Live snapshot pending，故不升级 verified |
 
-## 3. 行更新规则
+## 3. Residual Closure 矩阵
+
+| Requirement | Plan tasks | Status | Direct evidence required | Current finding |
+|---|---|---|---|---|
+| `R4V2-RC-00` 基线治理 | `R0` | accepted | residual plan、status、trace、decision、ledger 一致 | 28 个本地链接、0 失效；26 个唯一 closure ID、0 重复 task definition；`git diff --check` PASS |
+| `R4V2-RC-01` Integrated Harness | `P4-V2-R1I.1–R1I.6` | partial | `harness/{types,store,runtime}`；SQLite saga/event/outbox；typed ports；revision pin；completion gate；Store-backed Operations projection；`phase4_harness_*` 3/3 | R1I runtime core accepted；真实 Cognition/Memory/Assurance/Remediation/Judge/Sandbox/Approval adapters 和默认生产入口由 R2X/R3A 继续关闭 |
+| `R4V2-RC-02` 修复执行与复验 | `P4-V2-R2X.1–R2X.6` | partial | jailed executor、批准门禁、幂等 receipt、rollback、真实文件 manifest/digest、独立 filesystem oracle、tamper/symlink/traversal negative、digest-bound evidence reuse；`phase4_artifact_execution` PASS | command oracle、durable artifact journal、Harness adapter 与 bounded failure/manual-review system case 待补 |
+| `R4V2-RC-03` Approval/Memory/UI | `P4-V2-R3A.1–R3A.6` | planned | ApprovalStore/PDP/identity/resume、governance、Store projection、真实 UI | 当前 UI 生产 action fail-closed，Store assembler 缺失 |
+| `R4V2-RC-04` Sandbox/OTLP/SLO | `R4O` | planned | concrete provider、escape negative、OTLP loopback、release SLO | 当前只有接口/内存 sink |
+| `R4V2-RC-05` Dataset/Calibration/Nightly | `R5E` | planned | 真实版本化数据集、人工基线、nightly signed trend report | 当前只有离线 fixture/统计控制面 |
+| `R4V2-RC-06` Production Live | `R6L` | blocked | 未过期、签名、无 blocker 的 `executed=true` 报告 | 当前没有批准的外部环境/凭据/runner |
+| `R4V2-RC-07` Distributed/HA | `R7D` | planned | remote durable queue/shared store/multi-process chaos | 当前仅进程内参考队列 |
+
+## 4. 行更新规则
 
 1. `implemented` 需要 source/API 和模块测试，但不代表任务完成。
 2. `verified` 需要所有适用层的 evidence；缺少真实依赖只能 partial/blocked。
@@ -47,7 +60,7 @@
 6. 任何 mandatory criterion 的删除或降级必须关联 HITL decision。
 7. 涉及 Memory 的 requirement 必须同时填写 source authority、scope、provider/index generation、ViewManifest 和 promotion/forget decision；只有 Prompt 或向量命中不能作为完成证据。
 
-## 4. 单任务扩展模板
+## 5. 单任务扩展模板
 
 | Requirement | Plan node/revision | Commit/files | Test layers | Evidence IDs | Findings | Decision |
 |---|---|---|---|---|---|---|
