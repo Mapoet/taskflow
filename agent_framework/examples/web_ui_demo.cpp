@@ -7,6 +7,7 @@
 
 #include "CLI11.hpp"
 #include "common/agent_example_bootstrap.hpp"
+#include "common/phase4_operations_bootstrap.hpp"
 
 #include <agent/agent/execution_context.hpp>
 #include <agent/agent/task_state_machine.hpp>
@@ -213,6 +214,9 @@ int main(int argc, char** argv) {
     std::string skills_root_arg;
     std::string skill_authoring_root_arg;
     std::string phase4_state_dir_arg;
+    std::string operations_db_arg;
+    std::string operations_tenant_arg{"demo-tenant"};
+    std::string operations_run_arg{"run-orbit-042"};
     int max_iterations = -1;
     bool verbose = false;
     bool no_cursor_mcp = false;
@@ -230,6 +234,9 @@ int main(int argc, char** argv) {
                    "Writable root used by /skills create");
     app.add_option("--phase4-state-dir", phase4_state_dir_arg,
                    "Persistent directory for accountable Phase 4 UI state");
+    app.add_option("--operations-db", operations_db_arg, "Operations snapshot SQLite database");
+    app.add_option("--operations-tenant", operations_tenant_arg, "Operations tenant identity");
+    app.add_option("--operations-run", operations_run_arg, "Operations run identity");
     app.add_flag("--no-skills", no_skills, "Disable Skill discovery and management");
     app.add_flag("--no-cursor-mcp", no_cursor_mcp,
                  "Skip MCP (or AGENT_TEST_SKIP_CURSOR_MCP / AGENT_CLI_SKIP_CURSOR_MCP)");
@@ -297,14 +304,21 @@ int main(int argc, char** argv) {
 
     UIManager ui;
     ui.register_web_connection("default", std::move(web_handler));
-    auto operations = std::make_shared<Phase4OperationsSnapshot>(
-        Phase4OperationsProjection::demo_snapshot());
-    auto operations_mutex = std::make_shared<std::mutex>();
     if (phase4_state_dir_arg.empty()) {
         phase4_state_dir_arg = (std::filesystem::temp_directory_path() /
             ("taskflow-web-ui-phase4-" + std::to_string(port))).string();
     }
     std::filesystem::create_directories(phase4_state_dir_arg);
+    if (operations_db_arg.empty()) {
+        operations_db_arg = (std::filesystem::path(phase4_state_dir_arg) /
+                             "operations.sqlite3").string();
+    }
+    auto operations_bootstrap = example::load_phase4_operations({
+        operations_db_arg, operations_tenant_arg, operations_run_arg, demo_state, true});
+    auto operations_store = operations_bootstrap.store;
+    auto operations = std::make_shared<Phase4OperationsSnapshot>(
+        std::move(operations_bootstrap.snapshot));
+    auto operations_mutex = std::make_shared<std::mutex>();
     auto approval_store = std::make_shared<approval::SQLiteApprovalStore>(
         (std::filesystem::path(phase4_state_dir_arg) / "approval.sqlite3").string());
     auto approval_executor = std::make_shared<approval::AccountableApprovalExecutor>(
@@ -541,6 +555,10 @@ int main(int argc, char** argv) {
             }
             operations->snapshot_id += ".next";
             operations->updated_at = "2026-08-10T14:35:00+08:00";
+            std::string snapshot_error;
+            if (!operations_store || !operations_store->save(*operations, &snapshot_error)) {
+                throw std::runtime_error("cannot persist operations snapshot: " + snapshot_error);
+            }
             ui.publish_phase4_operations(*operations);
             res.status = 202;
             res.set_content(json{{"accepted", true}, {"snapshot_id", operations->snapshot_id},

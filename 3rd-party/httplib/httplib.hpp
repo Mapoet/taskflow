@@ -1232,6 +1232,7 @@ public:
   ~SSLServer() override;
 
   bool is_valid() const override;
+  bool set_min_tls_version(int version);
 
 private:
   bool process_and_close_socket(socket_t sock) override;
@@ -6217,6 +6218,10 @@ inline SSLServer::SSLServer(X509 *cert, EVP_PKEY *private_key,
 
 inline SSLServer::~SSLServer() {
   if (ctx_) { SSL_CTX_free(ctx_); }
+}
+
+inline bool SSLServer::set_min_tls_version(int version) {
+  return ctx_ && SSL_CTX_set_min_proto_version(ctx_, version) == 1;
 }
 
 inline bool SSLServer::is_valid() const { return ctx_; }

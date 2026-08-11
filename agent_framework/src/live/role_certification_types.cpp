@@ -581,11 +581,23 @@ namespace agent_framework::live
         return out;
     }
 
-    bool role_certification_valid_for(const RoleCertificationReport &r, const LiveEnvironmentProfile &e, const RoleLiveMatrix &m, std::string_view now, const std::function<bool(const SignatureEnvelope &)> &verifier)
+    bool role_certification_valid_for(const RoleCertificationReport &r, const LiveEnvironmentProfile &e, const RoleLiveMatrix &m, std::string_view now, const std::function<bool(const SignatureEnvelope &)> &verifier, const std::function<bool(const LiveEnvironmentProfile &, const LiveCellSpec &, const LiveCellResult &, std::string *)> &cell_evidence_verifier)
     {
         if (r.state != RoleCertificationState::Certified || !r.executed || r.environment_digest != role_environment_digest(e) || r.matrix_digest != role_live_matrix_digest(m) || r.expires_at.empty() || (!now.empty() && r.expires_at < now) || r.signature.signed_digest != role_report_signing_digest(r) || !verifier || !verifier(r.signature))
             return false;
-        return validate_live_results(e, m, r.cells).empty();
+        if (!validate_live_results(e, m, r.cells).empty()) return false;
+        if (e.endpoint_class == "production")
+        {
+            if (!cell_evidence_verifier) return false;
+            for (const auto &spec : m.cells)
+            {
+                const auto found = std::find_if(r.cells.begin(), r.cells.end(),
+                    [&](const auto &cell) { return cell.cell_id == spec.cell_id; });
+                if (found == r.cells.end() || !found->executed ||
+                    !cell_evidence_verifier(e, spec, *found, nullptr)) return false;
+            }
+        }
+        return true;
     }
 
 } // namespace agent_framework::live

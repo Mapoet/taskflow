@@ -19,6 +19,7 @@
 #include "CLI11.hpp"
 #include "cli_multiline_tty.hpp"
 #include "common/agent_example_bootstrap.hpp"
+#include "common/phase4_operations_bootstrap.hpp"
 
 #include <agent/graph_executor/graph_executor.hpp>
 #include <agent/agent/execution_context.hpp>
@@ -200,6 +201,9 @@ int main(int argc, char** argv) {
     std::string prompt_arg;
     std::string provider_arg;
     std::string cursor_mcp_json_arg;
+    std::string operations_db_arg;
+    std::string operations_tenant_arg{"demo-tenant"};
+    std::string operations_run_arg{"run-orbit-042"};
     int max_iterations = -1;
     bool verbose = false;
     bool mock = false;
@@ -217,6 +221,10 @@ int main(int argc, char** argv) {
     app.add_flag("--mock", mock, "Reserved for WP1.7 (offline mock); not implemented yet");
     app.add_flag("--demo-state", demo_state,
                  "Print the deterministic Phase 4 operations snapshot and exit");
+    app.add_option("--operations-db", operations_db_arg,
+                   "Read the latest Phase 4 operations snapshot from this SQLite database");
+    app.add_option("--operations-tenant", operations_tenant_arg, "Operations tenant identity");
+    app.add_option("--operations-run", operations_run_arg, "Operations run identity");
     app.set_help_flag("-h,--help", "Print this help and environment hints");
 
     CLI11_PARSE(app, argc, argv);
@@ -269,9 +277,10 @@ int main(int argc, char** argv) {
                            runtime.memory_compaction_llm};
     AgentConfig cfg = runtime.config;
     if (demo_state) {
+        const auto bootstrap = example::load_phase4_operations({
+            operations_db_arg, operations_tenant_arg, operations_run_arg, true});
         cli.handle_aux_event(Phase4OperationsProjection::event_type,
-                             Phase4OperationsProjection::to_json(
-                                 Phase4OperationsProjection::demo_snapshot()));
+                             Phase4OperationsProjection::to_json(bootstrap.snapshot));
         return 0;
     }
 

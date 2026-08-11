@@ -35,9 +35,13 @@ v2 将 Role-based LLM Workflow Runtime 设为新的横向 P0 能力，并以“L
 - [P4-V2-F7L 真实角色与 Live 认证验收报告](./acceptance-P4-V2-F7L-20260810.md)
 - [P4-V2-F8U 解释性 UI 与运维呈现验收报告](./acceptance-P4-V2-F8U-20260810.md)
 - [Phase 4 v2 Residual Closure R0–R7 计划](../phase-4-residual-closure-plan.md)
+- [R5E Dataset / Calibration / Nightly 阶段验收](./acceptance-P4-V2-R5E-20260811.md)
+- [R7D Distributed / HA 阶段验收](./acceptance-P4-V2-R7D-20260811.md)
+- [R6L Production Live Certification 阶段验收](./acceptance-P4-V2-R6L-20260811.md)
 - [P4-V2-R1I Integrated Harness Runtime 验收报告](./acceptance-P4-V2-R1I-20260811.md)
 - [P4-V2-R2X Artifact Execution 增量验收报告](./acceptance-P4-V2-R2X-20260811.md)
 - [P4-V2-R3A Approval / Memory / Operations 集成验收报告](./acceptance-P4-V2-R3A-20260811.md)
+- [P4-V2-R4O Sandbox / OTLP / SLO 增量验收报告](./acceptance-P4-V2-R4O-20260811.md)
 
 ## 维护约束
 

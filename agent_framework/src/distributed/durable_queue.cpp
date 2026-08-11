@@ -1,9 +1,16 @@
 #include "agent/distributed/durable_queue.hpp"
 
 #include <algorithm>
+#include <limits>
 #include <vector>
 
 namespace agent_framework::distributed {
+namespace {
+bool valid_lease_time(std::int64_t now, std::int64_t lease_ms) {
+    return now >= 0 && lease_ms > 0 &&
+        now <= std::numeric_limits<std::int64_t>::max() - lease_ms;
+}
+}  // namespace
 
 bool InMemoryDurableQueue::enqueue(QueueTask task, std::string* error) {
     if(task.task_id.empty() || task.tenant_id.empty() || task.idempotency_key.empty() ||
@@ -13,10 +20,25 @@ bool InMemoryDurableQueue::enqueue(QueueTask task, std::string* error) {
     }
     std::lock_guard lock(mutex_);
     const auto idempotency = task.tenant_id + '\x1f' + task.idempotency_key;
-    if(idempotency_.count(idempotency) || tasks_.count(task.task_id)) {
-        if(error) *error = "duplicate queue task";
-        return false;
+    const auto keyed = idempotency_.find(idempotency);
+    const auto existing = tasks_.find(task.task_id);
+    if(keyed != idempotency_.end() || existing != tasks_.end()) {
+        const auto candidate = keyed == idempotency_.end() ? existing : tasks_.find(keyed->second);
+        const bool replay = candidate != tasks_.end() && candidate->second.task_id == task.task_id &&
+            candidate->second.tenant_id == task.tenant_id &&
+            candidate->second.idempotency_key == task.idempotency_key &&
+            candidate->second.payload_digest == task.payload_digest &&
+            candidate->second.priority == task.priority &&
+            candidate->second.available_at_ms == task.available_at_ms &&
+            candidate->second.max_attempts == task.max_attempts;
+        if(!replay && error) *error = "queue idempotency conflict";
+        return replay;
     }
+    task.state = QueueState::Pending;
+    task.attempts = 0;
+    task.owner.clear();
+    task.fencing_token = 0;
+    task.lease_expires_at_ms = 0;
     idempotency_[idempotency] = task.task_id;
     tasks_.emplace(task.task_id, std::move(task));
     return true;
@@ -24,7 +46,7 @@ bool InMemoryDurableQueue::enqueue(QueueTask task, std::string* error) {
 
 std::optional<Lease> InMemoryDurableQueue::claim(
     std::string_view worker, std::string_view tenant, std::int64_t now, std::int64_t lease_ms) {
-    if(worker.empty() || tenant.empty() || lease_ms <= 0) return std::nullopt;
+    if(worker.empty() || tenant.empty() || !valid_lease_time(now, lease_ms)) return std::nullopt;
     std::lock_guard lock(mutex_);
     std::vector<QueueTask*> eligible;
     for(auto& [id, task] : tasks_) {
@@ -64,7 +86,7 @@ bool InMemoryDurableQueue::renew(
     std::lock_guard lock(mutex_);
     auto found = tasks_.find(std::string(id));
     if(found == tasks_.end() || !owns(found->second, worker, token) ||
-       found->second.lease_expires_at_ms <= now || lease_ms <= 0) return false;
+       found->second.lease_expires_at_ms <= now || !valid_lease_time(now, lease_ms)) return false;
     found->second.lease_expires_at_ms = now + lease_ms;
     return true;
 }

@@ -309,6 +309,8 @@ struct RoleCertificationOptions {
     std::function<bool(std::string_view report_digest, std::string_view decision_id)> approval_validator;
     std::function<SignatureEnvelope(std::string_view signing_digest)> signer;
     std::function<bool(const SignatureEnvelope&)> signature_verifier;
+    std::function<bool(const LiveEnvironmentProfile&, const LiveCellSpec&,
+                       const LiveCellResult&, std::string* error)> cell_evidence_verifier;
     std::function<void(std::string_view severity, std::string_view message)> alert;
     std::function<bool()> cancelled;
 };
@@ -341,6 +343,9 @@ bool role_certification_valid_for(const RoleCertificationReport& report,
                                   const LiveEnvironmentProfile& environment,
                                   const RoleLiveMatrix& matrix,
                                   std::string_view now,
-                                  const std::function<bool(const SignatureEnvelope&)>& verifier);
+                                  const std::function<bool(const SignatureEnvelope&)>& verifier,
+                                  const std::function<bool(const LiveEnvironmentProfile&,
+                                      const LiveCellSpec&, const LiveCellResult&,
+                                      std::string* error)>& cell_evidence_verifier = {});
 
 }  // namespace agent_framework::live

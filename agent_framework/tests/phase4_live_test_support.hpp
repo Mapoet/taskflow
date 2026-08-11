@@ -164,6 +164,15 @@ namespace phase4_live_test
     };
     inline SignatureEnvelope sign(std::string_view d) { return {"kms-test-v1", "kms://taskflow/live/signing", std::string(d), "signature:" + std::string(d)}; }
     inline bool verify(const SignatureEnvelope &s) { return s.algorithm == "kms-test-v1" && s.key_id == "kms://taskflow/live/signing" && s.signature == "signature:" + s.signed_digest; }
+    inline bool verify_cell_evidence(const LiveEnvironmentProfile &e, const LiveCellSpec &spec,
+                                     const LiveCellResult &result, std::string *error)
+    {
+        const bool valid = result.spec_digest == live_cell_spec_digest(spec) &&
+            !result.invocation_manifest_digest.empty() && !result.evidence_digests.empty() &&
+            !e.build_digest.empty() && !e.provider_registry_digest.empty();
+        if (!valid && error) *error = "test attestation mismatch";
+        return valid;
+    }
     inline RoleCertificationOptions options(std::string workflow = "workflow-f7l")
     {
         RoleCertificationOptions o;
@@ -174,6 +183,7 @@ namespace phase4_live_test
         { return !d.empty() && id == "approval-f7l"; };
         o.signer = sign;
         o.signature_verifier = verify;
+        o.cell_evidence_verifier = verify_cell_evidence;
         return o;
     }
 }

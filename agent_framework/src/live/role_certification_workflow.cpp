@@ -228,6 +228,23 @@ namespace agent_framework::live
         report.expires_at = e.expires_at;
         report.approval_decision_id = o.approval_decision_id;
         report.blockers = validate_live_results(e, m, cp.cells);
+        if (e.endpoint_class == "production")
+        {
+            if (!o.cell_evidence_verifier)
+                report.blockers.push_back("cell_evidence_verifier_missing");
+            else
+                for (const auto &spec : m.cells)
+                {
+                    const auto found = std::find_if(cp.cells.begin(), cp.cells.end(),
+                        [&](const auto &cell) { return cell.cell_id == spec.cell_id; });
+                    if (found == cp.cells.end() || !found->executed) continue;
+                    std::string verification_error;
+                    if (!o.cell_evidence_verifier(e, spec, *found, &verification_error))
+                        report.blockers.push_back("cell_evidence_attestation_invalid:" +
+                            spec.cell_id + (verification_error.empty() ? std::string() :
+                            ":" + verification_error));
+                }
+        }
         if (!e.expires_at.empty() && !o.now.empty() && e.expires_at < o.now)
             report.blockers.push_back("certification_expired_before_issue");
         double total_cost = 0, total_tokens = 0, total_latency = 0;

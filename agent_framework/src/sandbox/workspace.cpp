@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <fstream>
+#include <map>
 #include <sstream>
 
 #include "agent/contracts/contract.hpp"
@@ -48,6 +49,23 @@ std::optional<WorkspaceSnapshot> snapshot_workspace(
     nlohmann::json basis = nlohmann::json::array();
     for(const auto& entry : out.entries) basis.push_back({entry.relative_path, entry.size, entry.digest});
     out.digest = contracts::embedded_digest(basis).value_or("");
+    return out;
+}
+
+WorkspaceDiff diff_workspace(const WorkspaceSnapshot& before, const WorkspaceSnapshot& after) {
+    WorkspaceDiff out; out.base_digest = before.digest; out.output_digest = after.digest;
+    std::map<std::string, std::string> left, right;
+    for (const auto& entry : before.entries) left[entry.relative_path] = entry.digest;
+    for (const auto& entry : after.entries) right[entry.relative_path] = entry.digest;
+    for (const auto& [path, digest] : right) {
+        const auto found = left.find(path);
+        if (found == left.end()) out.added.push_back(path);
+        else if (found->second != digest) out.modified.push_back(path);
+    }
+    for (const auto& [path, digest] : left) if (!right.contains(path)) out.removed.push_back(path);
+    out.digest = contracts::embedded_digest(nlohmann::json{{"base", out.base_digest},
+        {"output", out.output_digest}, {"added", out.added}, {"modified", out.modified},
+        {"removed", out.removed}}).value_or("");
     return out;
 }
 

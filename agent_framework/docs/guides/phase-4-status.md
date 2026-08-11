@@ -2,7 +2,7 @@
 
 **状态**：Phase 4 v2 技术状态重估基线（未完成项保持开放）  
 **Residual Closure**：[`phase4-v2-residual-r1`](./phase-4-residual-closure-plan.md) 已于 2026-08-11 批准执行；R1I–R7D 按直接集成/生产证据关闭，不以既有模块测试替代
-**最后核对日期**：2026-08-10
+**最后核对日期**：2026-08-11
 **上游章程**：[phase-4.md](./phase-4.md)  
 **当前总体计划**：[phase-4-plan-v2.md](./phase-4-plan-v2.md)  
 **v1 历史计划**：[phase-4-plan.md](./phase-4-plan.md)
@@ -20,9 +20,9 @@
 
 ## 2. 当前总体判断与双基线
 
-按 Phase 4 v1 原始目标，当前总体满足度约为 **52–57%**。实现已形成共享契约、SQLite Run/Memory/Assurance/Remediation、动态 View、认知规划、多角色五层验收、有界 replan/选择性复验控制面、解释性 UI、Sandbox/Telemetry/Eval/Live/Queue 核心语义的离线垂直骨架；但真实 investigator/provider、实际修复执行→新产物→复验、统一进程/容器 sandbox、OTLP/SLO、scheduled live、远程持久化与 HA 尚未达到工作包 DoD，因此所有 WP 仍保持 `[~]`。
+按 Phase 4 v1 原始目标，当前总体满足度约为 **68–73%**。实现已形成共享契约、durable Harness、真实产物修复→新摘要→复验、审批/记忆治理、Bubblewrap deny-all sandbox、credential broker、W3C trace、OTLP/spool/SLO、Eval campaign 治理以及 SQLite distributed control plane；但真实 investigator/provider、细粒度网络强制、生产数据/校准/Live、跨主机共享事务与 HA 尚未达到工作包 DoD，因此相关 WP 仍保持 `[~]`。
 
-[Phase 4 v2](./phase-4-plan-v2.md) 把“规划、验证和记忆均由专门 LLM 工作流驱动”提升为 mandatory target。完成 P4-V2-F1L–F8U 离线控制/呈现面后，按扩展目标重新计量，当前总体满足度约为 **72–76%**。该数值不把 mock RoleRuntime、deterministic UI snapshot 或 no-skip 门禁本身计作生产 `executed=true`，仍不包含实际 remediation executor、生产 Store snapshot assembler、领域/对抗/live 数据集和生产闭环。
+[Phase 4 v2](./phase-4-plan-v2.md) 把“规划、验证和记忆均由专门 LLM 工作流驱动”提升为 mandatory target。完成 F1L–F8U 及 R1I–R5E/R7D 本地闭环后，按扩展目标重新计量，当前总体满足度约为 **82–86%**。该数值不把 scripted RoleRuntime、deterministic UI snapshot、SQLite 多连接或 no-skip 门禁本身计作生产 `executed=true`/HA；生产数据、真实模型校准、外部 Live matrix 和跨主机 chaos 仍未计入完成。
 
 2026-08-11 完成性审计确认：旧 `phase4_vertical` 没有调用 Cognition、Approval、实际 Executor、Remediation、二次 Assurance、Judge 或 Store-backed Operations assembler。R1I 随后新增顶层 Harness contract、SQLite saga/outbox、revision pin、completion gate、审批暂停/恢复和进程死亡 reconciliation，离线门禁增至 45/45；但 stage ports 尚未全部绑定真实 workflow/Sandbox/ApprovalStore，因此仍不能证明生产 Harness 全闭环。后续状态提升必须由 R2X–R7D 的 system/live/HA 直接证据支持。
 
@@ -54,11 +54,11 @@ v2 采用“**LLM Cognitive Plane + Deterministic Control Plane**”：LLM 深�
 | WP4.1 Assurance Harness | `[~]` | 75% | AcceptanceContract、legacy verifier registry、Verification Planner、五专业角色与 Resolver、Manifest oracle、EvidenceLedger/resolution、oracle-strength arbiter、SQLite report/checkpoint、impact graph、remediation/selective reverify、restart/GraphExecutor | artifact/runtime/domain/security/metric 真实执行适配器、修复后自动复验、生产校准与 UI 未完成 |
 | WP4.2 Durable Run | `[~]` | 65% | SQLite RunStore、状态机、CAS checkpoint、event、interrupt/resume token、graph revision、durable timer/restart | graph cursor/effect/memory 原子提交、deterministic replay/time-travel 和执行器集成未完成 |
 | WP4.3 HITL/Policy | `[~]` | 58% | Approval schema、deterministic PDP、SQLite ApprovalStore、pending/CAS/TOCTOU/SoD/expiry/revocation、durable interruption/resume；四端 canonical HITL 呈现和 Web interaction contract | delegation/双人多签、edit→新 request、escalation、production UI→ApprovalStore/PDP/identity/resume 接入 |
-| WP4.4 Sandbox Runtime | `[~]` | 50% | Sandbox schema、provider/registry、policy validator、workspace snapshot/quota；既有 bwrap 原型可复用 | 统一 Process/Container/Remote provider、credential broker、network enforcement、逃逸 E2E 未完成 |
-| WP4.5 OTel/SLO | `[~]` | 45% | correlation schema、Span/Metric runtime、sink、attribute privacy/cardinality gate | OTLP batch exporter、跨进程传播、audit bridge、SLO registry/dashboard 未完成 |
-| WP4.6 Evaluation | `[~]` | 65–70% | dataset/trajectory/suite/run/report typed schema、immutable registry、ground-truth 隔离、blind multi-Judge、确定性校准/领域指标/regression/upgrade/rollback gate、SQLite resume/report 与 GraphExecutor | 生产分层数据集、人工基线与真实 Judge calibration、nightly scheduler、signed report、trend/SLO 和 live evidence 未完成 |
+| WP4.4 Sandbox Runtime | `[~]` | 72–78% | Sandbox schema/provider/registry/policy、真实 Bubblewrap deny-all Process provider、workspace diff/digest、resource/timeout/process-group kill、opaque credential pipe/redaction、Harness durable receipt/reconcile | 细粒度 egress enforcing proxy、Container/Remote provider、逃逸/内核攻击 E2E 与默认生产 composition |
+| WP4.5 OTel/SLO | `[~]` | 68–74% | correlation/privacy/cardinality、W3C trace context、OTLP HTTP batch、SQLite at-least-once spool/restart、audit bridge、SLO fail-closed、跨进程 loopback collector | 真实 Collector TLS/mTLS、scheduled exponential backoff、dashboard/alert backend、真实 provider usage 对账 |
+| WP4.6 Evaluation | `[~]` | 76–82% | 原有 Judge 能力；六层 versioned manifest/digest、双 reviewer label/kappa、flaky quarantine、immutable SQLite campaign/lease/report、签名防篡改、restart/trend | 生产分层数据与专家实际标注、真实 Judge calibration、部署 scheduler/KMS、长期 trend/SLO 和 live evidence |
 | WP4.7 Live Certification | `[~]` | 65–70% | typed Environment/Profile/Matrix/Cell/Checkpoint/Report；RoleRuntime invocation manifest 绑定；planner/critic/executor/verifier/Judge provider/model/group 独立；只读/blind/strong-oracle；六类 failure/recovery；SQLite CAS/restart；审批/签名/expiry/revision/alert；GraphExecutor；显式生产 no-skip report gate | 当前没有生产凭据、外部 scheduled runner、真实 LLM/IdP/MCP/A2A/sandbox 全矩阵或批准且未过期的 `executed=true` 报告，因此不能标 complete |
-| WP4.8 Distributed Control | `[~]` | 25% | queue/lease/fencing/idempotency/retry/dead-letter 的确定性内存参考实现 | 名称所指生产能力仍缺远程 durable queue、worker registry、scheduler、PostgreSQL/object store、HA/chaos |
+| WP4.8 Distributed Control | `[~]` | 89–92% | SQLite WAL/FULL durable queue 与真实 rolling DDL；PostgreSQL/libpq shared queue、`SKIP LOCKED` 并发、DB-time lease、fencing/idempotency/quota、worker registry/heartbeat、leader election、backend reconnect、immediate crash/restart recovery，以及事务化真实 rolling DDL/失败回滚/租约接管；content-addressed ObjectStore/篡改检测；真实 fork worker-crash recovery；认证 TCP queue、原生 mTLS 双向认证、hostname/CA 校验与 TLS 1.2 minimum；mTLS RemoteObjectStore/二进制/tenant/digest 验证 | 真实多主机 mTLS deployment、PostgreSQL 复制/自动故障转移、S3/分布式复制 object backend、跨主机 network partition/clock-skew/leader kill chaos |
 | WP4.9 Multi-layer Memory | `[~]` | 78% | SQLite v2 store、六层 namespace、authority/lifecycle/ACL、Provider/View、9 profiles（含隔离的 Evaluation View）、AGENTS resolver、九阶段 LLM workflow、promotion/forget、v1 dual-read/restart；display-safe Memory Inspector 与真实截图 | hybrid index/adapters、独立 conflict store、Run/Invocation/Approval 原子 pin、cross-scope migration、Inspector→真实 Store 查询/治理动作接入 |
 
 WP4.9 使用尾部编号只是为了不重排已经冻结的 116 个任务 ID；它是 P0，并应在认知规划和五层验收垂直闭环之前达到可用状态。

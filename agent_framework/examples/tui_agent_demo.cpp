@@ -7,6 +7,7 @@
 
 #include "CLI11.hpp"
 #include "common/agent_example_bootstrap.hpp"
+#include "common/phase4_operations_bootstrap.hpp"
 #include "common/ftxui_console_view.hpp"
 
 #include <agent/agent/execution_context.hpp>
@@ -199,6 +200,9 @@ int main(int argc, char** argv) {
     std::string cursor_mcp_json_arg;
     std::string skills_root_arg;
     std::string skill_authoring_root_arg;
+    std::string operations_db_arg;
+    std::string operations_tenant_arg{"demo-tenant"};
+    std::string operations_run_arg{"run-orbit-042"};
     int max_iterations = -1;
     bool verbose = false;
     bool no_cursor_mcp = false;
@@ -218,6 +222,9 @@ int main(int argc, char** argv) {
                  "Skip MCP (or AGENT_TEST_SKIP_CURSOR_MCP / AGENT_CLI_SKIP_CURSOR_MCP)");
     app.add_flag("--demo-state", demo_state,
                  "Load deterministic Scientific Console content without invoking the LLM");
+    app.add_option("--operations-db", operations_db_arg, "Operations snapshot SQLite database");
+    app.add_option("--operations-tenant", operations_tenant_arg, "Operations tenant identity");
+    app.add_option("--operations-run", operations_run_arg, "Operations run identity");
     app.add_flag("-v,--verbose", verbose, "AGENT_LOG_LEVEL=debug");
     CLI11_PARSE(app, argc, argv);
 
@@ -272,7 +279,10 @@ int main(int argc, char** argv) {
                                        cfg.model_config.model_name.empty() ? "provider default" : cfg.model_config.model_name,
                                        skip_cursor_mcp ? "Core tools ready" :
                                        mcp_boot.diagnostics.empty() ? "MCP connected" : "MCP partial");
-    if (demo_state) presentation->load_demo_state();
+    if (demo_state) {
+        presentation->observe_operations(example::load_phase4_operations({
+            operations_db_arg, operations_tenant_arg, operations_run_arg, true}).snapshot);
+    }
     for (const auto& diagnostic : mcp_boot.diagnostics)
         presentation->add_system_notice("MCP unavailable: " + diagnostic, true);
     for (const auto& service : mcp_boot.skipped_mcp_services)
