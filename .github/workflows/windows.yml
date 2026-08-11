@@ -26,7 +26,7 @@ jobs:
       shell: pwsh
       run: |
         $count = (ctest --test-dir build -N -L phase4-offline | Select-String 'Test +#[0-9]+:').Count
-        if ($count -lt 46) { throw "Expected at least 46 Phase 4 offline tests, found $count" }
+        if ($count -lt 47) { throw "Expected at least 47 Phase 4 offline tests, found $count" }
         ctest --test-dir build -L phase4-offline --output-on-failure
   
   release-test-cpp20:
@@ -47,6 +47,6 @@ jobs:
       shell: pwsh
       run: |
         $count = (ctest --test-dir build -N -L phase4-offline | Select-String 'Test +#[0-9]+:').Count
-        if ($count -lt 46) { throw "Expected at least 46 Phase 4 offline tests, found $count" }
+        if ($count -lt 47) { throw "Expected at least 47 Phase 4 offline tests, found $count" }
         ctest --test-dir build -L phase4-offline --output-on-failure
   

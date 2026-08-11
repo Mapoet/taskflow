@@ -7,6 +7,8 @@
 
 独立 filesystem oracle 重新读取文件并与 manifest/requirement 比较。系统用例刻意遗漏 README，首次验证产生 finding；最小修复生成新 manifest digest，旧 evidence 不可复用，强制复验后才通过。路径穿越、符号链接写穿、未批准 action、事后篡改均被拒绝。
 
-证据：`phase4_artifact_execution` 1/1 PASS，`phase4-offline` 46/46 PASS，`git diff --check` PASS。
+证据：`phase4_artifact_execution` 1/1 PASS、`phase4-harness` 4/4 PASS、`phase4-offline` 47/47 PASS、`phase3-offline` 14/14 PASS、`git diff --check` PASS。
 
-尚未关闭：Sandbox command oracle、跨进程 durable artifact journal、R1I Harness adapter、修复失败/循环上限/ManualReview 综合用例。因此 RC-02 保持 partial。
+SQLite durable artifact journal 已验证跨进程 replay/reconciliation；R1I Harness adapter 已验证真实首次拒绝、最小修复、父子 manifest、选择性复验、最终完成门禁，以及失败修复达到循环上限后进入 ManualReview。
+
+尚未关闭：由具体 SandboxProvider 支撑的 build/test/runtime/security/metric command oracle；它按计划在 R4O 与 Process Sandbox 一并关闭。因此 filesystem artifact closure 和 Harness repair loop accepted，RC-02 在 R4O 前仍保持 partial。

@@ -64,6 +64,28 @@ int main() {
 
     REQUIRE(executor.rollback(repaired));
     REQUIRE(!fs::exists(root / "README.md"));
+
+    const auto durable_root = root / "durable";
+    const auto database = root / "artifact-journal.sqlite3";
+    ArtifactAction durable{"durable", ArtifactActionKind::WriteText, "result.txt",
+                           "once\n", "key-durable", true};
+    std::string durable_effect;
+    {
+        SQLiteArtifactJournal journal(database.string());
+        WorkspaceArtifactExecutor first_process(durable_root, &journal);
+        auto receipt = first_process.execute("run-durable", durable);
+        REQUIRE(receipt.succeeded && !receipt.replayed);
+        durable_effect = receipt.effect_digest;
+    }
+    {
+        SQLiteArtifactJournal journal(database.string());
+        WorkspaceArtifactExecutor restarted_process(durable_root, &journal);
+        auto receipt = restarted_process.execute("run-durable", durable);
+        REQUIRE(receipt.succeeded && receipt.replayed);
+        REQUIRE(receipt.effect_digest == durable_effect);
+        REQUIRE(restarted_process.rollback(receipt));
+        REQUIRE(!fs::exists(durable_root / "result.txt"));
+    }
     fs::remove_all(root);
     std::cout << "phase4 artifact execution tests passed\n";
     return 0;
