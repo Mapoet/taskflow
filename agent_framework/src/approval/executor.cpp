@@ -17,6 +17,18 @@ bool approver(const ReviewerIdentity& reviewer) {
 bool high_risk(const ApprovalRequest& request) {
     return request.risk_level == "high" || request.risk_level == "critical";
 }
+int risk_rank(std::string_view risk) {
+    if(risk == "critical") return 4;
+    if(risk == "high") return 3;
+    if(risk == "medium") return 2;
+    return 1;
+}
+bool has_column(sqlite3* db, const char* table, std::string_view column) {
+    sqlite::Statement query(db, (std::string("PRAGMA table_info(") + table + ")").c_str());
+    while(sqlite::step(query.get()) == SQLITE_ROW)
+        if(sqlite::column_text(query.get(), 1) == column) return true;
+    return false;
+}
 ApprovalDecision final_decision(const ApprovalRequest& request, const ApprovalReview& review,
                                 Decision decision) {
     ApprovalDecision out;
@@ -57,8 +69,24 @@ AccountableApprovalExecutor::AccountableApprovalExecutor(
     sqlite::exec(opened, "CREATE TABLE IF NOT EXISTS phase4_approval_votes("
         "approval_id TEXT NOT NULL,vote_revision INTEGER NOT NULL,request_digest TEXT NOT NULL,"
         "reviewer_id TEXT NOT NULL,delegated_by TEXT NOT NULL,decision INTEGER NOT NULL,"
-        "reason TEXT NOT NULL,decided_at TEXT NOT NULL,PRIMARY KEY(approval_id,vote_revision),"
+        "reason TEXT NOT NULL,decided_at TEXT NOT NULL,reviewer_roles_json TEXT NOT NULL DEFAULT '[]',"
+        "identity_attestation TEXT NOT NULL DEFAULT '',PRIMARY KEY(approval_id,vote_revision),"
         "UNIQUE(approval_id,reviewer_id))");
+    if(!has_column(opened, "phase4_approval_votes", "reviewer_roles_json"))
+        sqlite::exec(opened, "ALTER TABLE phase4_approval_votes ADD COLUMN reviewer_roles_json TEXT NOT NULL DEFAULT '[]'");
+    if(!has_column(opened, "phase4_approval_votes", "identity_attestation"))
+        sqlite::exec(opened, "ALTER TABLE phase4_approval_votes ADD COLUMN identity_attestation TEXT NOT NULL DEFAULT ''");
+    sqlite::exec(opened, "CREATE TABLE IF NOT EXISTS phase4_delegation_grants("
+        "grant_id TEXT PRIMARY KEY,grantor_id TEXT NOT NULL,delegate_id TEXT NOT NULL,"
+        "scopes_json TEXT NOT NULL,roles_json TEXT NOT NULL,maximum_risk TEXT NOT NULL,"
+        "valid_from TEXT NOT NULL,expires_at TEXT NOT NULL,maximum_depth INTEGER NOT NULL,"
+        "authority_attestation TEXT NOT NULL,revoked_at TEXT NOT NULL DEFAULT '')");
+    sqlite::exec(opened, "CREATE TABLE IF NOT EXISTS phase4_approval_supersessions("
+        "original_id TEXT PRIMARY KEY,revised_id TEXT NOT NULL,parent_digest TEXT NOT NULL,"
+        "created_at TEXT NOT NULL)");
+    sqlite::exec(opened, "CREATE TABLE IF NOT EXISTS phase4_approval_escalations("
+        "escalation_id TEXT PRIMARY KEY,approval_id TEXT NOT NULL UNIQUE,target_group TEXT NOT NULL,"
+        "reason TEXT NOT NULL,created_at TEXT NOT NULL)");
 #if !defined(_WIN32)
     std::filesystem::permissions(file, std::filesystem::perms::owner_read |
         std::filesystem::perms::owner_write, std::filesystem::perm_options::replace, ec);
@@ -85,14 +113,31 @@ ReviewResult AccountableApprovalExecutor::review(
     const auto expected_digest = encode(*request).at("canonical_digest").get<std::string>();
     if(review.request_digest != expected_digest)
         return {ReviewOutcome::Denied, 0, 0, {}, "stale_request_digest", {}};
+    if(superseded(review.approval_id))
+        return {ReviewOutcome::Denied, 0, 0, {}, "approval_superseded", {}};
     if(review.reviewer.principal_id.empty() || !approver(review.reviewer))
         return {ReviewOutcome::Denied, 0, 0, {}, "reviewer_not_authorized", {}};
     if(review.reviewer.principal_id == request->requester_id ||
        (!review.reviewer.delegated_by.empty() && review.reviewer.delegated_by == request->requester_id))
         return {ReviewOutcome::Denied, 0, 0, {}, "separation_of_duties_violation", {}};
-    if(!review.reviewer.delegated_by.empty() &&
-       !review.reviewer.delegated_scopes.count(request->scope))
-        return {ReviewOutcome::Denied, 0, 0, {}, "delegation_scope_denied", {}};
+    if(!review.reviewer.delegated_by.empty()) {
+        if(review.reviewer.delegation_grant_id.empty())
+            return {ReviewOutcome::Denied, 0, 0, {}, "delegation_grant_required", {}};
+        std::lock_guard grant_lock(mutex_); auto* grant_db = sqlite::database(db_);
+        sqlite::Statement grant(grant_db, "SELECT grantor_id,delegate_id,scopes_json,roles_json,valid_from,expires_at,revoked_at,maximum_risk FROM phase4_delegation_grants WHERE grant_id=?");
+        sqlite::bind_text(grant.get(), 1, review.reviewer.delegation_grant_id);
+        if(sqlite::step(grant.get()) != SQLITE_ROW)
+            return {ReviewOutcome::Denied, 0, 0, {}, "delegation_grant_not_found", {}};
+        const auto scopes = nlohmann::json::parse(sqlite::column_text(grant.get(), 2)).get<std::set<std::string>>();
+        const auto roles = nlohmann::json::parse(sqlite::column_text(grant.get(), 3)).get<std::set<std::string>>();
+        if(sqlite::column_text(grant.get(), 0) != review.reviewer.delegated_by ||
+           sqlite::column_text(grant.get(), 1) != review.reviewer.principal_id || !scopes.count(request->scope) ||
+           !roles.count("approver") || (!sqlite::column_text(grant.get(), 4).empty() && review.decided_at < sqlite::column_text(grant.get(), 4)) ||
+           (!sqlite::column_text(grant.get(), 5).empty() && review.decided_at > sqlite::column_text(grant.get(), 5)) ||
+           !sqlite::column_text(grant.get(), 6).empty() ||
+           risk_rank(request->risk_level) > risk_rank(sqlite::column_text(grant.get(), 7)))
+            return {ReviewOutcome::Denied, 0, 0, {}, "delegation_scope_denied", {}};
+    }
     if(!request->expires_at.empty() && review.decided_at > request->expires_at)
         return {ReviewOutcome::Expired, expected, 0, {}, "approval_expired", {}};
     PolicyContext context;
@@ -119,7 +164,7 @@ ReviewResult AccountableApprovalExecutor::review(
         if(revision != expected)
             return {ReviewOutcome::RevisionConflict, revision, 0, {}, "vote_revision_conflict", {}};
         sqlite::Statement insert(db, "INSERT INTO phase4_approval_votes(approval_id,vote_revision,request_digest,"
-            "reviewer_id,delegated_by,decision,reason,decided_at) VALUES(?,?,?,?,?,?,?,?)");
+            "reviewer_id,delegated_by,decision,reason,decided_at,reviewer_roles_json,identity_attestation) VALUES(?,?,?,?,?,?,?,?,?,?)");
         sqlite::bind_text(insert.get(), 1, review.approval_id);
         sqlite::bind_int64(insert.get(), 2, static_cast<sqlite3_int64>(revision + 1));
         sqlite::bind_text(insert.get(), 3, review.request_digest);
@@ -128,6 +173,8 @@ ReviewResult AccountableApprovalExecutor::review(
         sqlite::bind_int(insert.get(), 6, static_cast<int>(review.decision));
         sqlite::bind_text(insert.get(), 7, review.reason);
         sqlite::bind_text(insert.get(), 8, review.decided_at);
+        sqlite::bind_text(insert.get(), 9, nlohmann::json(review.reviewer.roles).dump());
+        sqlite::bind_text(insert.get(), 10, review.reviewer.identity_attestation);
         if(sqlite::step(insert.get()) != SQLITE_DONE)
             return {ReviewOutcome::Denied, revision, 0, {}, "duplicate_or_invalid_reviewer", sqlite3_errmsg(db)};
 
@@ -139,7 +186,18 @@ ReviewResult AccountableApprovalExecutor::review(
         transaction.commit();
         const auto vote_revision = revision + 1;
         const bool rejected = review.decision == Decision::Rejected;
-        if(!rejected && approvals < (high_risk(*request) ? 2U : 1U))
+        const auto requested_quorum = request->proposed_change.value("required_quorum", high_risk(*request) ? 2U : 1U);
+        std::set<std::string> represented_roles;
+        sqlite::Statement role_query(db, "SELECT reviewer_roles_json FROM phase4_approval_votes WHERE approval_id=? AND decision=?");
+        sqlite::bind_text(role_query.get(), 1, review.approval_id); sqlite::bind_int(role_query.get(), 2, static_cast<int>(Decision::Approved));
+        while(sqlite::step(role_query.get()) == SQLITE_ROW) {
+            const auto roles = nlohmann::json::parse(sqlite::column_text(role_query.get(), 0)).get<std::set<std::string>>();
+            represented_roles.insert(roles.begin(), roles.end());
+        }
+        bool required_roles_met = true;
+        for(const auto& role : request->proposed_change.value("required_roles", std::vector<std::string>{}))
+            required_roles_met = required_roles_met && represented_roles.count(role);
+        if(!rejected && (approvals < requested_quorum || !required_roles_met))
             return {ReviewOutcome::AwaitingAdditionalReview, vote_revision, 0, {}, {}, {}};
         auto committed = store_.decide(final_decision(*request, review,
             rejected ? Decision::Rejected : Decision::Approved), 0);
@@ -179,8 +237,19 @@ ReviewResult AccountableApprovalExecutor::reconcile(
             approvals = sqlite::column_int64(count.get(), 0);
             revision = sqlite::column_int64(count.get(), 1);
         }
-        if(approvals < (high_risk(*request) ? 2U : 1U))
+        const auto requested_quorum = request->proposed_change.value("required_quorum", high_risk(*request) ? 2U : 1U);
+        if(approvals < requested_quorum)
             return {ReviewOutcome::AwaitingAdditionalReview, revision, 0, {}, {}, {}};
+        std::set<std::string> represented_roles;
+        sqlite::Statement roles(db, "SELECT reviewer_roles_json FROM phase4_approval_votes WHERE approval_id=? AND decision=?");
+        sqlite::bind_text(roles.get(), 1, approval_id); sqlite::bind_int(roles.get(), 2, static_cast<int>(Decision::Approved));
+        while(sqlite::step(roles.get()) == SQLITE_ROW) {
+            const auto values = nlohmann::json::parse(sqlite::column_text(roles.get(), 0)).get<std::set<std::string>>();
+            represented_roles.insert(values.begin(), values.end());
+        }
+        for(const auto& role : request->proposed_change.value("required_roles", std::vector<std::string>{}))
+            if(!represented_roles.count(role))
+                return {ReviewOutcome::AwaitingAdditionalReview, revision, 0, {}, {}, {}};
         sqlite::Statement query(db, "SELECT reviewer_id,reason,decided_at FROM phase4_approval_votes "
                                     "WHERE approval_id=? AND decision=? ORDER BY vote_revision DESC LIMIT 1");
         sqlite::bind_text(query.get(), 1, approval_id);
@@ -213,8 +282,88 @@ RevisionResult AccountableApprovalExecutor::revise(
        revised.proposed_change.empty())
         return {false, {}, "invalid_revised_request"};
     auto committed = store_.put_request(revised);
-    return committed ? RevisionResult{true, committed.digest, {}}
-                     : RevisionResult{false, {}, "revised_request_commit_failed"};
+    if(!committed) return {false, {}, "revised_request_commit_failed"};
+    {
+        std::lock_guard lock(mutex_); auto* db = sqlite::database(db_);
+        sqlite::Statement insert(db, "INSERT INTO phase4_approval_supersessions(original_id,revised_id,parent_digest,created_at) VALUES(?,?,?,strftime('%Y-%m-%dT%H:%M:%fZ','now'))");
+        sqlite::bind_text(insert.get(), 1, original_id); sqlite::bind_text(insert.get(), 2, revised.approval_id);
+        sqlite::bind_text(insert.get(), 3, original_digest);
+        if(sqlite::step(insert.get()) != SQLITE_DONE) return {false, {}, "supersession_commit_failed"};
+    }
+    return {true, committed.digest, {}};
+}
+
+bool AccountableApprovalExecutor::grant_delegation(const DelegationGrant& grant, std::string* error) {
+    if(grant.grant_id.empty() || grant.grantor_id.empty() || grant.delegate_id.empty() ||
+       grant.grantor_id == grant.delegate_id || grant.scopes.empty() || !grant.roles.count("approver") ||
+       grant.maximum_depth == 0) { if(error) *error = "invalid delegation grant"; return false; }
+    std::lock_guard lock(mutex_); auto* db = sqlite::database(db_);
+    sqlite::Statement insert(db, "INSERT INTO phase4_delegation_grants(grant_id,grantor_id,delegate_id,scopes_json,roles_json,maximum_risk,valid_from,expires_at,maximum_depth,authority_attestation) VALUES(?,?,?,?,?,?,?,?,?,?)");
+    sqlite::bind_text(insert.get(), 1, grant.grant_id); sqlite::bind_text(insert.get(), 2, grant.grantor_id);
+    sqlite::bind_text(insert.get(), 3, grant.delegate_id); sqlite::bind_text(insert.get(), 4, nlohmann::json(grant.scopes).dump());
+    sqlite::bind_text(insert.get(), 5, nlohmann::json(grant.roles).dump()); sqlite::bind_text(insert.get(), 6, grant.maximum_risk);
+    sqlite::bind_text(insert.get(), 7, grant.valid_from); sqlite::bind_text(insert.get(), 8, grant.expires_at);
+    sqlite::bind_uint64(insert.get(), 9, grant.maximum_depth); sqlite::bind_text(insert.get(), 10, grant.authority_attestation);
+    if(sqlite::step(insert.get()) != SQLITE_DONE) { if(error) *error = sqlite3_errmsg(db); return false; }
+    return true;
+}
+
+bool AccountableApprovalExecutor::revoke_delegation(std::string_view id, std::string_view at, std::string* error) {
+    std::lock_guard lock(mutex_); auto* db = sqlite::database(db_);
+    sqlite::Statement update(db, "UPDATE phase4_delegation_grants SET revoked_at=? WHERE grant_id=? AND revoked_at=''");
+    sqlite::bind_text(update.get(), 1, at); sqlite::bind_text(update.get(), 2, id);
+    if(sqlite::step(update.get()) != SQLITE_DONE || sqlite::changes(db) != 1) { if(error) *error = "grant not found or already revoked"; return false; }
+    return true;
+}
+
+bool AccountableApprovalExecutor::escalate(const EscalationRecord& value, std::string* error) {
+    if(value.escalation_id.empty() || value.approval_id.empty() || value.target_group.empty() || value.reason.empty()) {
+        if(error) *error = "invalid escalation";
+        return false;
+    }
+    if(!store_.request(value.approval_id) || store_.latest_decision(value.approval_id) || superseded(value.approval_id)) {
+        if(error) *error = "approval is not pending";
+        return false;
+    }
+    std::lock_guard lock(mutex_); auto* db = sqlite::database(db_);
+    sqlite::Statement insert(db, "INSERT INTO phase4_approval_escalations(escalation_id,approval_id,target_group,reason,created_at) VALUES(?,?,?,?,?)");
+    sqlite::bind_text(insert.get(), 1, value.escalation_id); sqlite::bind_text(insert.get(), 2, value.approval_id);
+    sqlite::bind_text(insert.get(), 3, value.target_group); sqlite::bind_text(insert.get(), 4, value.reason);
+    sqlite::bind_text(insert.get(), 5, value.created_at);
+    if(sqlite::step(insert.get()) != SQLITE_DONE) { if(error) *error = sqlite3_errmsg(db); return false; }
+    return true;
+}
+
+std::optional<EscalationRecord> AccountableApprovalExecutor::escalation(std::string_view approval_id) {
+    std::lock_guard lock(mutex_); auto* db = sqlite::database(db_);
+    sqlite::Statement query(db, "SELECT escalation_id,target_group,reason,created_at FROM phase4_approval_escalations WHERE approval_id=?");
+    sqlite::bind_text(query.get(), 1, approval_id); if(sqlite::step(query.get()) != SQLITE_ROW) return std::nullopt;
+    return EscalationRecord{sqlite::column_text(query.get(), 0), std::string(approval_id), sqlite::column_text(query.get(), 1), sqlite::column_text(query.get(), 2), sqlite::column_text(query.get(), 3)};
+}
+
+bool AccountableApprovalExecutor::superseded(std::string_view approval_id) {
+    std::lock_guard lock(mutex_); auto* db = sqlite::database(db_);
+    sqlite::Statement query(db, "SELECT 1 FROM phase4_approval_supersessions WHERE original_id=?");
+    sqlite::bind_text(query.get(), 1, approval_id); return sqlite::step(query.get()) == SQLITE_ROW;
+}
+
+ReviewResult AuthenticatedApprovalActionService::submit(
+    const AuthenticatedPrincipal& principal, const ApprovalActionIntent& intent) {
+    if(principal.principal_id.empty() || principal.identity_attestation.empty())
+        return {ReviewOutcome::Denied, 0, 0, {}, "authenticated_identity_required", {}};
+    if(intent.action != "approve" && intent.action != "reject" &&
+       intent.action != "request_remediation")
+        return {ReviewOutcome::Denied, 0, 0, {}, "unsupported_approval_action", {}};
+    ApprovalReview review;
+    review.approval_id = intent.approval_id;
+    review.request_digest = intent.request_digest;
+    review.reviewer.principal_id = principal.principal_id;
+    review.reviewer.roles = principal.roles;
+    review.reviewer.identity_attestation = principal.identity_attestation;
+    review.decision = intent.action == "approve" ? Decision::Approved : Decision::Rejected;
+    review.reason = intent.reason;
+    review.decided_at = intent.decided_at;
+    return executor_.review(review, intent.expected_vote_revision);
 }
 
 ApprovalHarnessPort::ApprovalHarnessPort(std::string id, ApprovalStore& store,

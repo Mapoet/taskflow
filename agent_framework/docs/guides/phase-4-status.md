@@ -2,7 +2,7 @@
 
 **状态**：Phase 4 v2 技术状态重估基线（未完成项保持开放）  
 **Residual Closure**：[`phase4-v2-residual-r1`](./phase-4-residual-closure-plan.md) 已于 2026-08-11 批准执行；R1I–R7D 按直接集成/生产证据关闭，不以既有模块测试替代
-**最后核对日期**：2026-08-11
+**最后核对日期**：2026-08-12
 **上游章程**：[phase-4.md](./phase-4.md)  
 **当前总体计划**：[phase-4-plan-v2.md](./phase-4-plan-v2.md)  
 **v1 历史计划**：[phase-4-plan.md](./phase-4-plan.md)
@@ -52,8 +52,8 @@ v2 采用“**LLM Cognitive Plane + Deterministic Control Plane**”：LLM 深�
 |---|---:|---:|---|---|
 | WP4.0 Task Cognition | `[~]` | 65% | TaskIntake/Evidence/Understanding/Plan schema、Investigator Registry、DAG critic、SQLite Evidence/Plan/Remediation CAS Store、memory-aware workflow、bounded replan | 真实 ToolBus/外部 investigator、remediation executor 自动回灌、默认强制接入/UI 未完成 |
 | WP4.1 Assurance Harness | `[~]` | 75% | AcceptanceContract、legacy verifier registry、Verification Planner、五专业角色与 Resolver、Manifest oracle、EvidenceLedger/resolution、oracle-strength arbiter、SQLite report/checkpoint、impact graph、remediation/selective reverify、restart/GraphExecutor | artifact/runtime/domain/security/metric 真实执行适配器、修复后自动复验、生产校准与 UI 未完成 |
-| WP4.2 Durable Run | `[~]` | 65% | SQLite RunStore、状态机、CAS checkpoint、event、interrupt/resume token、graph revision、durable timer/restart | graph cursor/effect/memory 原子提交、deterministic replay/time-travel 和执行器集成未完成 |
-| WP4.3 HITL/Policy | `[~]` | 58% | Approval schema、deterministic PDP、SQLite ApprovalStore、pending/CAS/TOCTOU/SoD/expiry/revocation、durable interruption/resume；四端 canonical HITL 呈现和 Web interaction contract | delegation/双人多签、edit→新 request、escalation、production UI→ApprovalStore/PDP/identity/resume 接入 |
+| WP4.2 Durable Run | `[~]` | 82–86% | SQLite RunStore、状态机、CAS；P4-DRA 原子 checkpoint/graph cursor/event/effect/memory pin/interruption；摘要链 replay/time-travel；durable timer/restart；`DurableRunCoordinator` 恢复接缝 | 旧 GraphExecutor 全路径默认强制接入、effect 状态推进适配器、跨 Store/外部系统事务与生产 crash matrix 仍未完成 |
+| WP4.3 HITL/Policy | `[~]` | 80–84% | Approval schema/PDP/Store、CAS/TOCTOU/SoD/expiry/revocation；durable delegation grant；策略 quorum/required roles；edit supersession；escalation；authenticated action service；Web 服务端 identity/CSRF→PDP/Store；Harness resume | 真实 IdP attestation、密码学/KMS 多签、delegation chain depth、跨 Approval/Run Store 原子事务及四端全部交互动作仍未完成 |
 | WP4.4 Sandbox Runtime | `[~]` | 72–78% | Sandbox schema/provider/registry/policy、真实 Bubblewrap deny-all Process provider、workspace diff/digest、resource/timeout/process-group kill、opaque credential pipe/redaction、Harness durable receipt/reconcile | 细粒度 egress enforcing proxy、Container/Remote provider、逃逸/内核攻击 E2E 与默认生产 composition |
 | WP4.5 OTel/SLO | `[~]` | 68–74% | correlation/privacy/cardinality、W3C trace context、OTLP HTTP batch、SQLite at-least-once spool/restart、audit bridge、SLO fail-closed、跨进程 loopback collector | 真实 Collector TLS/mTLS、scheduled exponential backoff、dashboard/alert backend、真实 provider usage 对账 |
 | WP4.6 Evaluation | `[~]` | 76–82% | 原有 Judge 能力；六层 versioned manifest/digest、双 reviewer label/kappa、flaky quarantine、immutable SQLite campaign/lease/report、签名防篡改、restart/trend | 生产分层数据与专家实际标注、真实 Judge calibration、部署 scheduler/KMS、长期 trend/SLO 和 live evidence |

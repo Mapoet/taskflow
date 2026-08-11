@@ -34,6 +34,41 @@ struct RunEvent {
     nlohmann::json payload = nlohmann::json::object();
     std::string payload_digest;
     std::string created_at;
+    std::string previous_digest;
+    std::string event_digest;
+    std::string state_digest;
+};
+
+enum class EffectState { Prepared, Unknown, Committed, Reconciled };
+
+struct EffectRecord {
+    std::string effect_id;
+    std::string idempotency_key;
+    EffectState state{EffectState::Prepared};
+    std::string request_digest;
+    std::string receipt_digest;
+    std::uint64_t fencing_token{0};
+};
+
+struct RunCommit {
+    RunCheckpoint checkpoint;
+    std::uint64_t expected_revision{0};
+    std::string event_type;
+    nlohmann::json event_payload = nlohmann::json::object();
+    std::optional<EffectRecord> effect;
+    std::optional<Interruption> interruption;
+};
+
+struct HistoricalRun {
+    RunCheckpoint checkpoint;
+    std::uint64_t sequence{0};
+    std::string state_digest;
+};
+
+struct HistoryVerification {
+    bool valid{false};
+    std::uint64_t verified_events{0};
+    std::string error;
 };
 
 struct GraphDefinitionRef {
@@ -79,6 +114,12 @@ public:
                                                        std::size_t limit) = 0;
     virtual StoreResult complete_timer(std::string_view timer_id,
                                        std::string_view owner) = 0;
+    virtual StoreResult commit(const RunCommit& commit) = 0;
+    virtual std::optional<HistoricalRun> reconstruct(std::string_view run_id,
+                                                     std::uint64_t sequence) = 0;
+    virtual HistoryVerification verify_history(std::string_view run_id) = 0;
+    virtual std::optional<EffectRecord> effect(std::string_view run_id,
+                                               std::string_view effect_id) = 0;
 };
 
 struct SQLiteRunStoreOptions {
@@ -113,6 +154,12 @@ public:
                                                std::int64_t lease_ms,
                                                std::size_t limit) override;
     StoreResult complete_timer(std::string_view timer_id, std::string_view owner) override;
+    StoreResult commit(const RunCommit& commit) override;
+    std::optional<HistoricalRun> reconstruct(std::string_view run_id,
+                                             std::uint64_t sequence) override;
+    HistoryVerification verify_history(std::string_view run_id) override;
+    std::optional<EffectRecord> effect(std::string_view run_id,
+                                       std::string_view effect_id) override;
 
     const std::string& path() const noexcept { return path_; }
 

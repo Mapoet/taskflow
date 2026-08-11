@@ -58,7 +58,7 @@ int main() {
         auto unauthorized = review(high, "viewer-a"); unauthorized.reviewer.roles = {"viewer"};
         assert(executor.review(unauthorized, 0).error_code == "reviewer_not_authorized");
         auto delegated = review(high, "delegate-a"); delegated.reviewer.delegated_by = "approver-root";
-        assert(executor.review(delegated, 0).error_code == "delegation_scope_denied");
+        assert(executor.review(delegated, 0).error_code == "delegation_grant_required");
         auto first = executor.review(review(high, "reviewer-a"), 0);
         assert(first.outcome == approval::ReviewOutcome::AwaitingAdditionalReview);
         assert(!store.latest_decision(high.approval_id));
@@ -79,6 +79,11 @@ int main() {
     const auto expired = request("approval-expired", "medium");
     assert(store.put_request(expired));
     approval::AccountableApprovalExecutor executor((root / "votes.sqlite3").string(), store);
+    approval::AuthenticatedApprovalActionService action_service(executor);
+    auto unauthenticated = action_service.submit({}, {expired.approval_id,
+        approval::encode(expired).at("canonical_digest"), "approve", "test",
+        "2026-08-11T01:00:00Z", 0});
+    assert(unauthenticated.error_code == "authenticated_identity_required");
     assert(executor.review(review(expired, "reviewer-a", "2026-08-13T00:00:00Z"), 0).outcome ==
            approval::ReviewOutcome::Expired);
 
@@ -87,9 +92,36 @@ int main() {
     auto delegated_review = review(delegated_request, "delegate-a");
     delegated_review.reviewer.delegated_by = "approver-root";
     delegated_review.reviewer.delegated_scopes = {delegated_request.scope};
+    delegated_review.reviewer.delegation_grant_id = "grant-a";
+    assert(executor.grant_delegation({"grant-a", "approver-root", "delegate-a",
+        {delegated_request.scope}, {"approver"}, "high", "2026-08-10T00:00:00Z",
+        "2026-08-12T00:00:00Z", 1, "sha256:authority"}));
     assert(executor.review(delegated_review, 0).outcome == approval::ReviewOutcome::Approved);
     assert(executor.reconcile(delegated_request.approval_id, "2026-08-11T02:00:00Z").outcome ==
            approval::ReviewOutcome::Approved);
+
+    const auto revoked_request = request("approval-delegation-revoked", "medium");
+    assert(store.put_request(revoked_request));
+    assert(executor.grant_delegation({"grant-revoked", "approver-root", "delegate-b",
+        {revoked_request.scope}, {"approver"}, "medium", "2026-08-10T00:00:00Z",
+        "2026-08-12T00:00:00Z", 1, "sha256:authority"}));
+    assert(executor.revoke_delegation("grant-revoked", "2026-08-11T00:30:00Z"));
+    auto revoked_review = review(revoked_request, "delegate-b");
+    revoked_review.reviewer.delegated_by = "approver-root";
+    revoked_review.reviewer.delegation_grant_id = "grant-revoked";
+    assert(executor.review(revoked_review, 0).error_code == "delegation_scope_denied");
+
+    auto role_quorum = request("approval-role-quorum", "medium");
+    role_quorum.proposed_change = {{"required_quorum", 2},
+                                   {"required_roles", {"security", "release"}}};
+    assert(store.put_request(role_quorum));
+    auto security_vote = review(role_quorum, "security-a");
+    security_vote.reviewer.roles = {"approver", "security"};
+    assert(executor.review(security_vote, 0).outcome ==
+           approval::ReviewOutcome::AwaitingAdditionalReview);
+    auto release_vote = review(role_quorum, "release-a");
+    release_vote.reviewer.roles = {"approver", "release"};
+    assert(executor.review(release_vote, 1).outcome == approval::ReviewOutcome::Approved);
 
     auto revised = request("approval-high-r2");
     revised.plan_digest = "sha256:plan-v2";
@@ -99,6 +131,14 @@ int main() {
         approval::encode(high).at("canonical_digest").get<std::string>());
     assert(revision.committed);
     assert(store.request(revised.approval_id)->plan_digest == "sha256:plan-v2");
+    assert(executor.superseded(high.approval_id));
+    assert(executor.review(review(high, "reviewer-after-edit"), 2).error_code == "approval_superseded");
+
+    const auto escalation_request = request("approval-escalation", "medium");
+    assert(store.put_request(escalation_request));
+    assert(executor.escalate({"escalation-a", escalation_request.approval_id,
+        "release-managers", "deadline approaching", "2026-08-11T02:00:00Z"}));
+    assert(executor.escalation(escalation_request.approval_id)->target_group == "release-managers");
 
     const auto harness_request = request("approval-harness", "medium");
     assert(store.put_request(harness_request));

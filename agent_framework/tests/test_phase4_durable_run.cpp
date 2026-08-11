@@ -5,6 +5,7 @@
 #include "agent/internal/platform_io.hpp"
 #include "agent/run/state_machine.hpp"
 #include "agent/run/store.hpp"
+#include "agent/run/durable_executor.hpp"
 
 namespace {
 using namespace agent_framework;
@@ -84,19 +85,34 @@ int main() {
 
         auto planning = checkpoint(run::RunState::Planning);
         assert(store.checkpoint(planning, 2).revision == 3);
+        auto running_atomic = checkpoint(run::RunState::Running);
+        running_atomic.node_id = "tool-a";
+        running_atomic.pending_successors = {"verify-a"};
+        run::RunCommit atomic{running_atomic, 3, "node_started", {{"node", "tool-a"}},
+            run::EffectRecord{"effect-a", "idem-a", run::EffectState::Prepared,
+                              "sha256:request", "", 7}, std::nullopt};
+        assert(store.commit(atomic).revision == 4);
+        assert(store.effect("run-a", "effect-a")->fencing_token == 7);
+        run::DurableRunCoordinator coordinator(store);
+        auto recovery = coordinator.recover("run-a", "effect-a");
+        assert(recovery.disposition == run::RecoveryDisposition::ReconcileEffect);
+        auto history = store.reconstruct("run-a", 3);
+        assert(history && history->checkpoint.node_id == "tool-a");
+        assert(store.verify_history("run-a").valid);
+        assert(store.commit(atomic).status == run::StoreStatus::RevisionConflict);
         assert(store.list_recoverable(10).size() == 1);
     }
 
     {
         run::SQLiteRunStore reopened(path.string());
         auto loaded = reopened.load("run-a");
-        assert(loaded && loaded->revision == 3 && loaded->checkpoint.state == run::RunState::Planning);
+        assert(loaded && loaded->revision == 4 && loaded->checkpoint.state == run::RunState::Running);
         auto running = checkpoint(run::RunState::Running);
-        assert(reopened.checkpoint(running, 3).revision == 4);
+        assert(reopened.checkpoint(running, 4).revision == 5);
         auto verifying = checkpoint(run::RunState::Verifying);
-        assert(reopened.checkpoint(verifying, 4).revision == 5);
+        assert(reopened.checkpoint(verifying, 5).revision == 6);
         auto complete = checkpoint(run::RunState::Completed);
-        assert(reopened.checkpoint(complete, 5).revision == 6);
+        assert(reopened.checkpoint(complete, 6).revision == 7);
         assert(reopened.list_recoverable(10).empty());
     }
 

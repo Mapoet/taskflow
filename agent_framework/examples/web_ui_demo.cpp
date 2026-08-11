@@ -324,6 +324,8 @@ int main(int argc, char** argv) {
     auto approval_executor = std::make_shared<approval::AccountableApprovalExecutor>(
         (std::filesystem::path(phase4_state_dir_arg) / "approval-votes.sqlite3").string(),
         *approval_store);
+    auto approval_actions = std::make_shared<approval::AuthenticatedApprovalActionService>(
+        *approval_executor);
     if (demo_state && !operations->hitl.empty()) {
         approval::ApprovalRequest request;
         request.metadata.identity.tenant_id = "demo-tenant";
@@ -487,10 +489,16 @@ int main(int argc, char** argv) {
             return;
         }
         try {
+            if (!req.has_header("X-CSRF-Token") || req.get_header_value("X-CSRF-Token") != "phase4-session") {
+                res.status = 403;
+                res.set_content(R"({"error":"invalid session CSRF token"})", "application/json");
+                return;
+            }
             const json body = json::parse(req.body);
             const std::string request_id = body.at("request_id").get<std::string>();
             const std::string action = body.at("action").get<std::string>();
-            const std::string reviewer_id = body.at("reviewer_id").get<std::string>();
+            const std::string reviewer_id = std::getenv("AGENT_WEB_REVIEWER_ID")
+                ? std::getenv("AGENT_WEB_REVIEWER_ID") : "reviewer-a";
             auto persisted_request = approval_store->request(request_id);
             if (!persisted_request) {
                 res.status = 404;
@@ -507,19 +515,15 @@ int main(int argc, char** argv) {
                 res.set_content(R"({"error":"request or action is not allowed"})", "application/json");
                 return;
             }
-            approval::ApprovalReview review;
-            review.approval_id = request_id;
-            review.request_digest = approval::encode(*persisted_request).at("canonical_digest");
-            review.reviewer.principal_id = reviewer_id;
-            review.reviewer.roles = {"approver"};
-            review.decision = action == "approve" ? approval::Decision::Approved
-                                                   : approval::Decision::Rejected;
-            review.reason = action == "request_remediation"
-                ? "Reviewer rejected this revision and requested remediation" :
-                  "Accountable decision submitted from operations UI";
-            review.decided_at = "2026-08-10T14:35:00+08:00";
-            const auto result = approval_executor->review(
-                review, approval_executor->vote_revision(request_id));
+            approval::AuthenticatedPrincipal principal{reviewer_id, {"approver"},
+                "server-session:" + reviewer_id};
+            approval::ApprovalActionIntent intent{request_id,
+                approval::encode(*persisted_request).at("canonical_digest"), action,
+                action == "request_remediation" ?
+                    "Reviewer rejected this revision and requested remediation" :
+                    "Accountable decision submitted from operations UI",
+                "2026-08-10T14:35:00+08:00", approval_executor->vote_revision(request_id)};
+            const auto result = approval_actions->submit(principal, intent);
             if (result.outcome != approval::ReviewOutcome::Approved &&
                 result.outcome != approval::ReviewOutcome::Rejected) {
                 res.status = 409;

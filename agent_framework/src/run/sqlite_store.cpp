@@ -83,7 +83,7 @@ void SQLiteRunStore::migrate() {
         sqlite::Statement query(db, "SELECT COALESCE(MAX(version),0) FROM run_schema_version");
         if(sqlite::step(query.get()) == SQLITE_ROW) version = sqlite::column_int(query.get(), 0);
     }
-    if(version > 1) throw std::runtime_error("run store schema is newer than this binary");
+    if(version > 2) throw std::runtime_error("run store schema is newer than this binary");
     if(version == 0) {
         sqlite::exec(db, "CREATE TABLE runs("
                  "run_id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, task_id TEXT NOT NULL,"
@@ -111,6 +111,19 @@ void SQLiteRunStore::migrate() {
         sqlite::exec(db, "CREATE INDEX durable_timers_due_idx ON durable_timers(completed,due_unix_ms,lease_until_unix_ms)");
         sqlite::exec(db, "INSERT INTO run_schema_version(version,applied_at) "
                  "VALUES(1,strftime('%Y-%m-%dT%H:%M:%fZ','now'))");
+        version = 1;
+    }
+    if(version == 1) {
+        sqlite::exec(db, "ALTER TABLE run_events ADD COLUMN previous_digest TEXT NOT NULL DEFAULT ''");
+        sqlite::exec(db, "ALTER TABLE run_events ADD COLUMN event_digest TEXT NOT NULL DEFAULT ''");
+        sqlite::exec(db, "ALTER TABLE run_events ADD COLUMN state_digest TEXT NOT NULL DEFAULT ''");
+        sqlite::exec(db, "CREATE TABLE run_effects(run_id TEXT NOT NULL,effect_id TEXT NOT NULL,"
+                 "idempotency_key TEXT NOT NULL,state INTEGER NOT NULL,request_digest TEXT NOT NULL,"
+                 "receipt_digest TEXT NOT NULL,fencing_token INTEGER NOT NULL,"
+                 "PRIMARY KEY(run_id,effect_id),UNIQUE(run_id,idempotency_key),"
+                 "FOREIGN KEY(run_id) REFERENCES runs(run_id))");
+        sqlite::exec(db, "INSERT INTO run_schema_version(version,applied_at) "
+                 "VALUES(2,strftime('%Y-%m-%dT%H:%M:%fZ','now'))");
     }
     transaction.commit();
 }
@@ -250,7 +263,8 @@ std::vector<RunEvent> SQLiteRunStore::events(std::string_view run_id,
     std::lock_guard lock(mutex_);
     std::vector<RunEvent> result;
     auto* db = sqlite::database(db_);
-    sqlite::Statement statement(db, "SELECT sequence,event_type,payload_json,payload_digest,created_at "
+    sqlite::Statement statement(db, "SELECT sequence,event_type,payload_json,payload_digest,created_at,"
+                            "previous_digest,event_digest,state_digest "
                             "FROM run_events WHERE run_id=? AND sequence>? ORDER BY sequence");
     sqlite::bind_text(statement.get(), 1, run_id);
     sqlite::bind_int64(statement.get(), 2, static_cast<sqlite3_int64>(after_sequence));
@@ -258,7 +272,9 @@ std::vector<RunEvent> SQLiteRunStore::events(std::string_view run_id,
         result.push_back({std::string(run_id),
             static_cast<std::uint64_t>(sqlite::column_int64(statement.get(), 0)),
             sqlite::column_text(statement.get(), 1), json::parse(sqlite::column_text(statement.get(), 2)),
-            sqlite::column_text(statement.get(), 3), sqlite::column_text(statement.get(), 4)});
+            sqlite::column_text(statement.get(), 3), sqlite::column_text(statement.get(), 4),
+            sqlite::column_text(statement.get(), 5), sqlite::column_text(statement.get(), 6),
+            sqlite::column_text(statement.get(), 7)});
     }
     return result;
 }
@@ -400,6 +416,131 @@ StoreResult SQLiteRunStore::complete_timer(std::string_view timer_id, std::strin
     if(rc != SQLITE_DONE) return sqlite_failure(db, rc);
     if(sqlite::changes(db) != 1) return {StoreStatus::Invalid, 0, "timer is not owned by caller"};
     return {StoreStatus::Committed, 1, {}};
+}
+
+StoreResult SQLiteRunStore::commit(const RunCommit& value) {
+    std::lock_guard lock(mutex_);
+    std::string validation_error;
+    if(!valid_checkpoint(value.checkpoint, &validation_error) || value.event_type.empty())
+        return {StoreStatus::Invalid, 0, validation_error.empty() ? "event_type is required" : validation_error};
+    if(value.checkpoint.memory_snapshot_id.empty() != value.checkpoint.memory_view_digest.empty())
+        return {StoreStatus::Invalid, 0, "memory snapshot and view digest must be pinned together"};
+    auto* db = sqlite::database(db_);
+    try {
+        sqlite::Transaction transaction(db);
+        const auto run_id = value.checkpoint.metadata.identity.run_id;
+        std::uint64_t actual = 0, sequence = 0;
+        RunState prior_state{};
+        std::string previous_digest;
+        {
+            sqlite::Statement query(db, "SELECT revision,checkpoint_json FROM runs WHERE run_id=?");
+            sqlite::bind_text(query.get(), 1, run_id);
+            if(sqlite::step(query.get()) != SQLITE_ROW) return {StoreStatus::NotFound, 0, "run not found"};
+            actual = sqlite::column_uint64(query.get(), 0);
+            auto prior = checkpoint_from_text(sqlite::column_text(query.get(), 1));
+            if(!prior) return {StoreStatus::Error, actual, "stored checkpoint is corrupt"};
+            prior_state = prior->state;
+        }
+        if(actual != value.expected_revision)
+            return {StoreStatus::RevisionConflict, actual, "run revision conflict"};
+        if(!can_transition(prior_state, value.checkpoint.state))
+            return {StoreStatus::Invalid, actual, "illegal run state transition"};
+        {
+            sqlite::Statement tail(db, "SELECT COALESCE(MAX(sequence),0),COALESCE((SELECT event_digest FROM run_events WHERE run_id=? ORDER BY sequence DESC LIMIT 1),'') FROM run_events WHERE run_id=?");
+            sqlite::bind_text(tail.get(), 1, run_id); sqlite::bind_text(tail.get(), 2, run_id);
+            if(sqlite::step(tail.get()) == SQLITE_ROW) { sequence = sqlite::column_uint64(tail.get(), 0) + 1; previous_digest = sqlite::column_text(tail.get(), 1); }
+        }
+        const auto checkpoint_json = encode(value.checkpoint);
+        const auto state_digest = contracts::embedded_digest(checkpoint_json).value_or("");
+        auto payload = value.event_payload;
+        payload["checkpoint"] = checkpoint_json;
+        const auto payload_digest = contracts::embedded_digest(payload).value_or("");
+        const auto event_digest = contracts::embedded_digest(json{{"run_id", run_id}, {"sequence", sequence},
+            {"event_type", value.event_type}, {"payload_digest", payload_digest},
+            {"previous_digest", previous_digest}, {"state_digest", state_digest}}).value_or("");
+        sqlite::Statement update(db, "UPDATE runs SET revision=revision+1,state=?,checkpoint_json=?,graph_revision=?,plan_digest=?,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE run_id=? AND revision=?");
+        sqlite::bind_text(update.get(), 1, run_state_name(value.checkpoint.state));
+        sqlite::bind_text(update.get(), 2, checkpoint_json.dump()); sqlite::bind_text(update.get(), 3, value.checkpoint.graph_revision);
+        sqlite::bind_text(update.get(), 4, value.checkpoint.plan_digest); sqlite::bind_text(update.get(), 5, run_id);
+        sqlite::bind_uint64(update.get(), 6, value.expected_revision);
+        if(sqlite::step(update.get()) != SQLITE_DONE || sqlite::changes(db) != 1)
+            return {StoreStatus::RevisionConflict, actual, "run revision changed concurrently"};
+        sqlite::Statement event(db, "INSERT INTO run_events(run_id,sequence,event_type,payload_json,payload_digest,previous_digest,event_digest,state_digest) VALUES(?,?,?,?,?,?,?,?)");
+        sqlite::bind_text(event.get(), 1, run_id); sqlite::bind_uint64(event.get(), 2, sequence);
+        sqlite::bind_text(event.get(), 3, value.event_type); sqlite::bind_text(event.get(), 4, payload.dump());
+        sqlite::bind_text(event.get(), 5, payload_digest); sqlite::bind_text(event.get(), 6, previous_digest);
+        sqlite::bind_text(event.get(), 7, event_digest); sqlite::bind_text(event.get(), 8, state_digest);
+        if(sqlite::step(event.get()) != SQLITE_DONE) return sqlite_failure(db, sqlite3_errcode(db));
+        if(value.effect) {
+            const auto& e = *value.effect;
+            if(e.effect_id.empty() || e.idempotency_key.empty() || e.request_digest.empty())
+                return {StoreStatus::Invalid, actual, "effect identity, idempotency key and request digest are required"};
+            sqlite::Statement effect_insert(db, "INSERT INTO run_effects(run_id,effect_id,idempotency_key,state,request_digest,receipt_digest,fencing_token) VALUES(?,?,?,?,?,?,?)");
+            sqlite::bind_text(effect_insert.get(), 1, run_id); sqlite::bind_text(effect_insert.get(), 2, e.effect_id);
+            sqlite::bind_text(effect_insert.get(), 3, e.idempotency_key); sqlite::bind_int(effect_insert.get(), 4, static_cast<int>(e.state));
+            sqlite::bind_text(effect_insert.get(), 5, e.request_digest); sqlite::bind_text(effect_insert.get(), 6, e.receipt_digest);
+            sqlite::bind_uint64(effect_insert.get(), 7, e.fencing_token);
+            if(sqlite::step(effect_insert.get()) != SQLITE_DONE)
+                return {StoreStatus::RevisionConflict, actual, "effect identity or idempotency key already exists"};
+        }
+        if(value.interruption) {
+            const auto& i = *value.interruption;
+            if(i.metadata.identity.run_id != run_id || i.interruption_id.empty() || i.resume_token_digest.empty())
+                return {StoreStatus::Invalid, actual, "interruption binding is invalid"};
+            sqlite::Statement interrupt(db, "INSERT INTO run_interruptions(interruption_id,run_id,token_digest,document_json,expires_at) VALUES(?,?,?,?,?)");
+            sqlite::bind_text(interrupt.get(), 1, i.interruption_id); sqlite::bind_text(interrupt.get(), 2, run_id);
+            sqlite::bind_text(interrupt.get(), 3, i.resume_token_digest); sqlite::bind_text(interrupt.get(), 4, encode(i).dump());
+            sqlite::bind_text(interrupt.get(), 5, i.expires_at);
+            if(sqlite::step(interrupt.get()) != SQLITE_DONE) return {StoreStatus::AlreadyExists, actual, "interruption already exists"};
+        }
+        transaction.commit();
+        return {StoreStatus::Committed, actual + 1, {}};
+    } catch(const std::exception& error) { return {StoreStatus::Error, 0, error.what()}; }
+}
+
+std::optional<HistoricalRun> SQLiteRunStore::reconstruct(std::string_view run_id, std::uint64_t sequence) {
+    std::lock_guard lock(mutex_); auto* db = sqlite::database(db_);
+    sqlite::Statement query(db, "SELECT sequence,payload_json,state_digest FROM run_events WHERE run_id=? AND sequence<=? AND state_digest<>'' ORDER BY sequence DESC LIMIT 1");
+    sqlite::bind_text(query.get(), 1, run_id); sqlite::bind_uint64(query.get(), 2, sequence);
+    if(sqlite::step(query.get()) != SQLITE_ROW) return std::nullopt;
+    const auto payload = json::parse(sqlite::column_text(query.get(), 1));
+    if(!payload.contains("checkpoint")) return std::nullopt;
+    auto checkpoint = checkpoint_from_text(payload.at("checkpoint").dump());
+    if(!checkpoint) throw std::runtime_error("historical checkpoint is corrupt");
+    return HistoricalRun{std::move(*checkpoint), sqlite::column_uint64(query.get(), 0), sqlite::column_text(query.get(), 2)};
+}
+
+HistoryVerification SQLiteRunStore::verify_history(std::string_view run_id) {
+    std::lock_guard lock(mutex_); auto* db = sqlite::database(db_); std::string previous; std::uint64_t expected = 1, count = 0;
+    sqlite::Statement query(db, "SELECT sequence,event_type,payload_json,payload_digest,previous_digest,event_digest,state_digest FROM run_events WHERE run_id=? ORDER BY sequence");
+    sqlite::bind_text(query.get(), 1, run_id);
+    while(sqlite::step(query.get()) == SQLITE_ROW) {
+        const auto sequence = sqlite::column_uint64(query.get(), 0); const auto event_type = sqlite::column_text(query.get(), 1);
+        const auto payload = json::parse(sqlite::column_text(query.get(), 2)); const auto payload_digest = sqlite::column_text(query.get(), 3);
+        const auto stored_previous = sqlite::column_text(query.get(), 4); const auto stored_event = sqlite::column_text(query.get(), 5);
+        const auto state_digest = sqlite::column_text(query.get(), 6);
+        if(sequence != expected++) return {false, count, "event sequence gap"};
+        if(stored_event.empty()) { previous.clear(); ++count; continue; } // legacy, unhashed prefix
+        if(stored_previous != previous || contracts::embedded_digest(payload).value_or("") != payload_digest)
+            return {false, count, "event digest chain mismatch"};
+        const auto calculated = contracts::embedded_digest(json{{"run_id", std::string(run_id)}, {"sequence", sequence},
+            {"event_type", event_type}, {"payload_digest", payload_digest}, {"previous_digest", stored_previous},
+            {"state_digest", state_digest}}).value_or("");
+        if(calculated != stored_event) return {false, count, "event digest mismatch"};
+        if(payload.contains("checkpoint") && contracts::embedded_digest(payload.at("checkpoint")).value_or("") != state_digest)
+            return {false, count, "historical state digest mismatch"};
+        previous = stored_event; ++count;
+    }
+    return {true, count, {}};
+}
+
+std::optional<EffectRecord> SQLiteRunStore::effect(std::string_view run_id, std::string_view effect_id) {
+    std::lock_guard lock(mutex_); auto* db = sqlite::database(db_);
+    sqlite::Statement query(db, "SELECT idempotency_key,state,request_digest,receipt_digest,fencing_token FROM run_effects WHERE run_id=? AND effect_id=?");
+    sqlite::bind_text(query.get(), 1, run_id); sqlite::bind_text(query.get(), 2, effect_id);
+    if(sqlite::step(query.get()) != SQLITE_ROW) return std::nullopt;
+    return EffectRecord{std::string(effect_id), sqlite::column_text(query.get(), 0), static_cast<EffectState>(sqlite::column_int(query.get(), 1)),
+        sqlite::column_text(query.get(), 2), sqlite::column_text(query.get(), 3), sqlite::column_uint64(query.get(), 4)};
 }
 
 }  // namespace agent_framework::run

@@ -310,11 +310,9 @@
   }
 
   async function submitHitl(requestId, action, button) {
-    const reviewerId = text($("reviewer-id").value).trim();
-    if (!reviewerId) { $("hitl-feedback").textContent = "Reviewer identity is required"; $("reviewer-id").focus(); return; }
     button.disabled = true; $("hitl-feedback").textContent = "Submitting accountable decision…";
     try {
-      const response = await fetch("/ui/operations/hitl", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ request_id: requestId, action, reviewer_id: reviewerId }) });
+      const response = await fetch("/ui/operations/hitl", { method: "POST", headers: { "Content-Type": "application/json", "X-CSRF-Token": "phase4-session" }, body: JSON.stringify({ request_id: requestId, action }) });
       if (!response.ok) throw new Error(await response.text());
       $("hitl-feedback").textContent = "Decision recorded and snapshot refreshed";
     } catch (error) { $("hitl-feedback").textContent = "Decision not applied: " + text(error.message || error); }
