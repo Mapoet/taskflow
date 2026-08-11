@@ -8,7 +8,9 @@
 
 生产签发从共享 HMAC 升级为 Ed25519 公钥验证；HMAC 仅保留历史 fixture 口径。required gate 新增 expected Approval decision、SQLite ApprovalStore、tenant/scope/time 验证。`StoreBackedProductionApprovalVerifier` 校验 request canonical digest、approved 状态、requester/reviewer SoD、policy revision、scope、expiry，以及 request/decision 对 report signing digest 的双重绑定。
 
-验证证据：`phase4_production_bundle`、`phase4_production_attestation`、`phase4_production_approval`、`phase4_production_signature` 全部 PASS；开启 `AGENT_ENABLE_PHASE4_LIVE_CERTIFICATION=ON` 后 required gate 构建成功，缺生产输入返回 `BLOCKED`/exit 2；全量构建 PASS，`phase4-offline` **61/61 PASS**，`phase3-offline` **14/14 PASS**，`git diff --check` PASS。
+新增 `ProductionLiveRunner` 统一装配 production bundle、durable certification checkpoint、独立 attestation verifier、ApprovalStore 与 signer。它仅接受 `production-certified` bundle；首次真实执行生成 `AwaitingApproval` 候选报告，`production_approval_signing_digest` 计算绑定 approval ID 的拟签发摘要，accountable decision 落盘后，同一 workflow 从 durable checkpoint 恢复，不重复已执行 cell，并在重新核验 evidence/approval/signature 后进入 Certified。
+
+验证证据：`phase4_production_bundle`、`phase4_production_attestation`、`phase4_production_approval`、`phase4_production_signature`、`phase4_production_runner` 全部 PASS；开启 `AGENT_ENABLE_PHASE4_LIVE_CERTIFICATION=ON` 后 required gate 构建成功，缺生产输入返回 `BLOCKED`/exit 2；全量构建 PASS，`phase4-offline` **62/62 PASS**，`phase3-offline` **14/14 PASS**，`git diff --check` PASS。
 
 `role_certification_valid_for` 同样要求 production report 提供 cell evidence verifier，避免已落盘报告在发布门禁处绕过二次证据核验。负例证明：同一份签名有效且 blocker-free 的 fixture report，在缺少 cell verifier 时仍然无效；workflow 缺 verifier 时生成 `cell_evidence_verifier_missing` blocker。
 
