@@ -2,6 +2,7 @@
 #include <functional>
 #include "agent/conversation/store.hpp"
 #include "agent/conversation/turn_state_machine.hpp"
+#include "agent/conversation/event_stream.hpp"
 
 namespace agent_framework::conversation
 {
@@ -18,14 +19,17 @@ namespace agent_framework::conversation
   class ConversationEngine
   {
   public:
-    ConversationEngine(ConversationStore &store, TurnExecutor executor, RuntimeEventSink sink = {})
-        : store_(store), executor_(std::move(executor)), sink_(std::move(sink)) {}
+    ConversationEngine(ConversationStore &store, TurnExecutor executor, RuntimeEventSink sink = {},
+                       EventStreamHub *events = nullptr)
+        : store_(store), executor_(std::move(executor)), sink_(std::move(sink)), events_(events) {}
     TurnResult start_turn(const TurnRequest &);
     TurnResult continue_turn(const TurnRequest &, TurnContinuationReason);
     bool interrupt_turn(const ConversationIdentity &, std::string_view, std::string * = nullptr);
     TurnResult resume_turn(const TurnRequest &, TurnContinuationReason);
     InputDisposition classify_input(std::string_view) const;
     bool submit_user_input(const TurnRequest &, InputDisposition, std::string * = nullptr);
+    SubscribeResult subscribe_events(const ConversationIdentity &, std::uint64_t after = 0,
+                                     std::size_t capacity = 256);
 
   private:
     TurnResult execute(const TurnRequest &, TurnCheckpoint);
@@ -34,5 +38,6 @@ namespace agent_framework::conversation
     ConversationStore &store_;
     TurnExecutor executor_;
     RuntimeEventSink sink_;
+    EventStreamHub *events_{nullptr};
   };
 }

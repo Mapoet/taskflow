@@ -32,7 +32,7 @@ Claude Code 的弱点是 Turn 结束容易成为事实上的任务结束；Agent
 | 工作包 | 状态 | 当前实现证据 | 仍需关闭的生产缺口 |
 |---|---:|---|---|
 | AF-CC0 契约冻结 | `[~]` | Conversation/Turn、`RuntimeEventEnvelope`、ContextProjection、CompactBoundary、六档 `TaskExecutionProfile` 已类型化；`ModelTurnOutcome` 不可签发 verified | 缺统一 `ToolContract`；影响权限、工具和上下文的全部 revision 尚未完整 pin 到 deployment/invocation manifest |
-| AF-CC1 ConversationEngine | `[~]` | start/continue/interrupt/resume、Turn CAS、SQLite WAL/FULL Store、append-only parent/digest 消息链、原子 Turn boundary、跨连接线性化 sequence、durable input inbox、重启恢复和 100 Turn 测试已完成；四个交互 demo 与 AgentServer/A2A 服务执行边界已接入 | GraphExecutor 仍作为受控 TurnExecutor adapter；queued input 消费/新 Turn 创建、SDK replay API、正式事件订阅和真实进程 crash matrix 尚缺 |
+| AF-CC1 ConversationEngine | `[~]` | start/continue/interrupt/resume、Turn CAS、SQLite WAL/FULL Store、append-only parent/digest 消息链、原子 Turn boundary、跨连接线性化 sequence、durable input inbox、Store-backed Event Subscription/Replay、重启恢复和 100 Turn 测试已完成；四个交互 demo 与 AgentServer/A2A 服务执行边界已接入 | GraphExecutor 仍作为受控 TurnExecutor adapter；queued input 消费/新 Turn 创建、SDK typed runtime-event callback、跨进程 fan-out 和真实进程 crash matrix 尚缺 |
 | AF-CC2 Tool Lifecycle | `[△]` | ToolBus、schema、Approval、Sandbox、Effect Journal、MCP、Skill policy 与 observer 已分别存在 | 缺不可绕过的版本化 Tool Contract、固定执行管线、改写后重验、统一 retention/CAS 与 reconciliation |
 | AF-CC3 Context/Compact | `[~]` | projection/boundary schema、mandatory contract/policy/citation 保留校验和 boundary 持久化已完成 | 尚未驱动真实模型调用；缺自动 compact、CAS 大结果外置、确定性 fallback 和恢复等价性测试 |
 | AF-CC4 三链持久化 | `[~]` | Conversation、Run/Harness、Effect 已有独立 Store 和 digest | 缺跨链 correlation/atomic boundary、全 durable 写点 crash injection、deterministic replay/time-travel 和 orphan reconciliation |
@@ -47,7 +47,7 @@ Claude Code 的弱点是 Turn 结束容易成为事实上的任务结束；Agent
 2. `[x]` message/event/input sequence 与 parent 校验已移入 `BEGIN IMMEDIATE`，双连接竞争测试证明同一 parent 只有一个 writer 成功。
 3. `[x]` Append/QueueNext/InterruptAndReplace 已使用 durable input inbox 区分；Append 才进入当前消息链，QueueNext/Replace 重启后仍为 queued，Replace 同事务中断当前 Turn。
 4. `[~]` queued input 尚缺“消费并创建下一 Turn”的 CAS 操作；取消传播仍未连接正在运行的 provider/tool executor。
-5. `[ ]` 事件输出只有构造时 sink 和 Store 查询，尚无正式 subscribe/replay cursor、背压、断线续传协议。
+5. `[~]` 已实现 durable sequence cursor、Store replay、live fan-out、慢订阅者隔离和 AgentServer SSE `Last-Event-ID` 续传；尚缺跨进程通知、保留期/compaction cursor 与 SDK typed callback。
 6. `[ ]` ContextProjection/CompactBoundary 当前是契约和 Store 能力，尚未接入模型 invocation；GraphTurnAdapter 已去除完成权威，但尚未成为默认生产路径。
 
 ### 0.3 AF-CC1R 行动进度
@@ -82,7 +82,22 @@ Claude Code 的弱点是 Turn 结束容易成为事实上的任务结束；Agent
 - `agent_server_demo` 默认启用独立 durable conversation DB；生产 task 是否 COMPLETED 仍由原有 closure/verified authority 决定，Conversation outcome 不得越权；
 - 四个交互 demo 与 agent_server_demo 均构建通过；AgentServer/A2A 针对测试 5/5、Phase 4 offline 74/74、Phase 3 22/22 PASS。
 
-尚未完成：SDK 尚缺 durable event replay/subscription API；AgentServer runtime event 尚未完整复用现有 SSE cursor/重连协议；queued input 尚缺跨 Turn 消费。当前可以认定服务端执行入口已迁移，但 AF-CC1 仍不能标记 `[x]`。
+尚未完成：SDK 尚缺 typed `RuntimeEventEnvelope` callback 和独立 runtime cursor；跨进程 live fan-out 与 event retention floor 尚缺；queued input 尚缺跨 Turn 消费。当前可以认定服务端执行入口和单进程 durable replay 已迁移，但 AF-CC1 仍不能标记 `[x]`。
+
+### 0.5 统一 Event Subscription/Replay 行动进度
+
+2026-08-13 已完成第一版统一事件订阅与重放：
+
+- 新增 `EventStreamHub`、`EventSubscription`、`SubscribeResult` 与显式 `Event/Timeout/Closed/Overflow` 读取状态；
+- durable `RuntimeEventEnvelope.sequence` 是唯一 cursor；ephemeral model/token/progress event 不写入 Store，也不进入 replay；
+- subscribe 在 hub 临界区内完成 Store head/read 与 live subscriber 注册，发布端在同一 hub 锁下 fan-out，避免进程内 replay/live 间隙丢事件；
+- subscription 按 sequence 去重；cursor 超过 head、replay digest/integrity 异常、replay 超过容量均 fail closed；
+- 慢消费者队列满时关闭该 subscription 并返回 `Overflow`，不丢旧 durable event、不阻塞其他消费者；
+- ConversationEngine 新增 `subscribe_events`，所有原子提交后的 durable event 同时 publish；
+- AgentServer SSE 接受数值 `Last-Event-ID`，以 `runtime_event` 和 `id: <sequence>` 返回 replay/live event；cursor 超前返回 HTTP 409 和当前 head；
+- 覆盖 live 顺序、cursor resume、重启 replay、容量拒绝、慢消费者 overflow 与 invalid cursor；针对测试 6/6、Phase 4 offline 74/74、Phase 3 22/22、五 demo 构建全部 PASS。
+
+剩余边界：当前 hub 是单进程 fan-out；多 AgentServer 节点需数据库通知/消息总线或轮询唤醒。Store 尚无 event retention floor，因此未来 compact/归档后必须区分 `cursor_expired` 与 integrity failure。现有 AgentClient 能发送 `Last-Event-ID`，但尚未向 SDK 暴露 typed `RuntimeEventEnvelope` callback 和独立 runtime cursor。
 
 ## 1. 证据边界
 

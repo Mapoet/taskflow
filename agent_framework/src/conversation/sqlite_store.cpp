@@ -273,6 +273,16 @@ namespace agent_framework::conversation
         return internal::sqlite::step(q.get()) == SQLITE_ROW
             ? internal::sqlite::column_uint64(q.get(), 0) : 0;
     }
+    std::uint64_t SQLiteConversationStore::event_retention_floor(
+        const ConversationIdentity &i)
+    {
+        std::lock_guard l(mutex_);
+        auto *db = internal::sqlite::database(db_);
+        Statement q(db, "SELECT COALESCE(MIN(sequence),0) FROM conversation_events WHERE tenant=? AND conversation=?");
+        bind_id(q.get(), i);
+        return internal::sqlite::step(q.get()) == SQLITE_ROW
+            ? internal::sqlite::column_uint64(q.get(), 0) : 0;
+    }
     bool SQLiteConversationStore::append_boundary(CompactBoundaryRecord v, std::string *e)
     {
         std::lock_guard l(mutex_);

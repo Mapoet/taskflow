@@ -37,7 +37,8 @@ SSEConnection::~SSEConnection() {
 
 void SSEConnection::subscribe(const std::map<std::string, std::string>& headers,
                               std::function<void(const AgentTask&)> on_status_update,
-                              std::function<void(const AgentArtifact&)> on_artifact_update) {
+                              std::function<void(const AgentArtifact&)> on_artifact_update,
+                              std::function<void(const conversation::RuntimeEventEnvelope&)> on_runtime_event) {
     std::thread prev;
     {
         std::lock_guard<std::mutex> lock(connection_mutex_);
@@ -47,6 +48,7 @@ void SSEConnection::subscribe(const std::map<std::string, std::string>& headers,
         }
         on_status_update_ = std::move(on_status_update);
         on_artifact_update_ = std::move(on_artifact_update);
+        on_runtime_event_ = std::move(on_runtime_event);
         request_headers_ = headers;
 
         cancelled_.store(false, std::memory_order_release);
@@ -107,24 +109,37 @@ bool SSEConnection::is_active() const {
     return active_;
 }
 
-void SSEConnection::handle_sse_event(const std::string& data_payload) {
-    try {
-        a2a::SseEvent ev;
-        ev.data = data_payload;
+std::uint64_t SSEConnection::runtime_cursor() const {
+    return runtime_cursor_.load(std::memory_order_acquire);
+}
 
+void SSEConnection::handle_sse_event(const a2a::SseEvent& event) {
+    try {
         AgentTask task;
-        if (a2a::try_parse_task_status_sse(ev, task)) {
+        if (a2a::try_parse_task_status_sse(event, task)) {
             if (on_status_update_) {
                 on_status_update_(task);
             }
             return;
         }
-        if (a2a::try_parse_task_message_sse(ev, task)) {
+        if (a2a::try_parse_task_message_sse(event, task)) {
             if(on_status_update_) on_status_update_(task);
             return;
         }
 
-        json root = json::parse(data_payload);
+        json root = json::parse(event.data);
+        if (event.event == "runtime_event") {
+            std::string error;
+            auto runtime = conversation::decode_runtime_event(root, &error);
+            if (!runtime || runtime->durability != conversation::EventDurability::Durable ||
+                !event.id || *event.id != std::to_string(runtime->sequence))
+                throw std::runtime_error(error.empty() ? "runtime_event_cursor_mismatch" : error);
+            const auto prior = runtime_cursor_.load(std::memory_order_acquire);
+            if (runtime->sequence <= prior) return;
+            runtime_cursor_.store(runtime->sequence, std::memory_order_release);
+            if (on_runtime_event_) on_runtime_event_(*runtime);
+            return;
+        }
         if (root.contains("artifactUpdate") && root["artifactUpdate"].is_object()) {
             const json& au = root["artifactUpdate"];
             if (au.contains("artifact") && on_artifact_update_) {
@@ -164,7 +179,13 @@ void SSEConnection::event_thread_func() {
             }
             httplib->post_sse(
                 endpoint_, *post_body_, request_headers_,
-                [&](const std::string&, const json& data) { handle_sse_event(data.dump()); }, 0);
+                [&](const std::string& event_name, const json& data, const std::string& event_id) {
+                    a2a::SseEvent event;
+                    event.event = event_name;
+                    event.data = data.dump();
+                    event.id = event_id;
+                    handle_sse_event(event);
+                }, 0);
             std::lock_guard<std::mutex> lock(connection_mutex_);
             active_ = false;
             return;
@@ -177,7 +198,7 @@ void SSEConnection::event_thread_func() {
                 std::vector<a2a::SseEvent> evs;
                 parser.drain_events(evs);
                 for (const auto& ev : evs) {
-                    handle_sse_event(ev.data);
+                    handle_sse_event(ev);
                 }
             },
             0,

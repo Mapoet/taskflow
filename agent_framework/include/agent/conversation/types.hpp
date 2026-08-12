@@ -167,6 +167,8 @@ namespace agent_framework::conversation
     nlohmann::json encode(const ConversationInput &);
     nlohmann::json encode(const TurnCheckpoint &);
     nlohmann::json encode(const RuntimeEventEnvelope &);
+    std::optional<RuntimeEventEnvelope> decode_runtime_event(const nlohmann::json &,
+                                                             std::string *error = nullptr);
     nlohmann::json encode(const ContextProjectionManifest &);
     nlohmann::json encode(const CompactBoundaryRecord &);
     std::optional<TaskExecutionProfile> task_execution_profile(std::string_view);

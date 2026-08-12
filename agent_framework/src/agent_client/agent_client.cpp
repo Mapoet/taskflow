@@ -311,6 +311,38 @@ void AgentClient::subscribe_task_updates(
     sse_connections_[sse_key] = std::move(sse_conn);
 }
 
+void AgentClient::subscribe_task_runtime_events(
+    const std::string& agent_endpoint,
+    const std::string& task_id,
+    std::function<void(const conversation::RuntimeEventEnvelope&)> on_runtime_event,
+    std::uint64_t after) {
+    std::lock_guard<std::mutex> lock(sse_mutex_);
+    const std::string key = make_sse_key(agent_endpoint, task_id);
+    std::string endpoint;
+    std::optional<json> post_body;
+    if (use_legacy_rest_) {
+        endpoint = join_url(server_url_, agent_endpoint + "/tasks/sendSubscribe?task_id=" + task_id);
+    } else {
+        endpoint = join_url(server_url_, json_rpc_path_);
+        post_body = {{"jsonrpc", "2.0"}, {"id", jsonrpc_next_id_.fetch_add(1)},
+                     {"method", a2a::kMethodSubscribeToTask}, {"params", {{"id", task_id}}}};
+    }
+    auto headers = build_auth_headers();
+    headers["Accept"] = "text/event-stream";
+    if (after > 0) headers["Last-Event-ID"] = std::to_string(after);
+    auto connection = std::make_unique<SSEConnection>(endpoint, task_id, http_client_.get(),
+                                                       std::move(post_body));
+    connection->subscribe(headers, {}, {}, std::move(on_runtime_event));
+    sse_connections_[key] = std::move(connection);
+}
+
+std::uint64_t AgentClient::task_runtime_cursor(const std::string& agent_endpoint,
+                                               const std::string& task_id) const {
+    std::lock_guard<std::mutex> lock(sse_mutex_);
+    const auto found = sse_connections_.find(make_sse_key(agent_endpoint, task_id));
+    return found == sse_connections_.end() ? 0 : found->second->runtime_cursor();
+}
+
 void AgentClient::send_streaming_task(
     const std::string& agent_endpoint,
     const AgentMessage& initial_message,

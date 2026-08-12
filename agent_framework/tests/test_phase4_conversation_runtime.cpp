@@ -181,4 +181,72 @@ int main()
     assert(first_store.messages(race_identity).size() == 2);
     assert(first_store.events(race_identity).size() == 2);
     std::filesystem::remove(race_path, ec);
+
+    auto stream_path = std::filesystem::temp_directory_path() /
+        ("conversation-stream-" + std::to_string(agent_framework::internal::current_process_id()) + ".sqlite3");
+    std::filesystem::remove(stream_path, ec);
+    {
+        SQLiteConversationStore stream_store(stream_path.string());
+        EventStreamHub hub(stream_store);
+        ConversationEngine stream_engine(stream_store,
+            [](const TurnRequest &, const TurnCheckpoint &) {
+                ModelTurnOutcome outcome; outcome.reason = ModelTurnStopReason::EndTurn;
+                outcome.candidate_answer = "streamed"; return outcome;
+            }, {}, &hub);
+        ConversationIdentity stream_identity{"tenant", "event-stream"};
+        auto live = stream_engine.subscribe_events(stream_identity, 0, 8);
+        assert(live.subscription && live.head_sequence == 0 && live.error.empty());
+        TurnRequest stream_turn{stream_identity, "stream-turn", "hello",
+                                TaskExecutionProfile::Conversation, 2};
+        assert(stream_engine.start_turn(stream_turn).error.empty());
+        RuntimeEventEnvelope delivered;
+        assert(live.subscription->next(delivered, std::chrono::milliseconds(20)) ==
+               SubscriptionRead::Event && delivered.sequence == 1);
+        assert(live.subscription->next(delivered, std::chrono::milliseconds(20)) ==
+               SubscriptionRead::Event && delivered.sequence == 2);
+        assert(live.subscription->cursor() == 2);
+        assert(stream_store.event_retention_floor(stream_identity) == 1);
+        auto resumed = stream_engine.subscribe_events(stream_identity, 1, 8);
+        assert(resumed.subscription && resumed.head_sequence == 2);
+        assert(resumed.subscription->next(delivered, std::chrono::milliseconds(20)) ==
+               SubscriptionRead::Event && delivered.sequence == 2);
+        assert(!stream_engine.subscribe_events(stream_identity, 3, 8).subscription);
+        assert(stream_engine.subscribe_events(stream_identity, 0, 1).error ==
+               "replay_exceeds_capacity");
+        auto slow = stream_engine.subscribe_events(stream_identity, 2, 1);
+        assert(slow.subscription);
+        TurnRequest second_turn{stream_identity, "stream-turn-2", "again",
+                                TaskExecutionProfile::Conversation, 2};
+        assert(stream_engine.start_turn(second_turn).error.empty());
+        assert(slow.subscription->overflowed());
+        assert(slow.subscription->next(delivered, std::chrono::milliseconds(20)) ==
+               SubscriptionRead::Event && delivered.sequence == 3);
+        assert(slow.subscription->next(delivered, std::chrono::milliseconds(20)) ==
+               SubscriptionRead::Overflow);
+        hub.close_all();
+    }
+    {
+        SQLiteConversationStore reopened(stream_path.string());
+        EventStreamHub hub(reopened);
+        auto replay = hub.subscribe({"tenant", "event-stream"}, 2, 8);
+        assert(replay.subscription && replay.head_sequence == 4);
+        RuntimeEventEnvelope event;
+        assert(replay.subscription->next(event, std::chrono::milliseconds(20)) ==
+               SubscriptionRead::Event && event.sequence == 3);
+        assert(replay.subscription->next(event, std::chrono::milliseconds(20)) ==
+               SubscriptionRead::Event && event.sequence == 4);
+    }
+    std::filesystem::remove(stream_path, ec);
+
+    RuntimeEventEnvelope decoded_source;
+    decoded_source.event_id = "decoded:1"; decoded_source.tenant_id = "tenant";
+    decoded_source.conversation_id = "decode"; decoded_source.turn_id = "turn";
+    decoded_source.run_id = "run"; decoded_source.sequence = 1;
+    decoded_source.durability = EventDurability::Durable;
+    decoded_source.event_type = "decoded"; decoded_source.timestamp = "now";
+    auto decoded = decode_runtime_event(encode(decoded_source));
+    assert(decoded && decoded->sequence == 1 && decoded->event_type == "decoded");
+    auto invalid_runtime_json = encode(decoded_source);
+    invalid_runtime_json["schema"] = "agent.runtime_event/v999";
+    assert(!decode_runtime_event(invalid_runtime_json));
 }

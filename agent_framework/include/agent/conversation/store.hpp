@@ -27,6 +27,7 @@ namespace agent_framework::conversation
         virtual std::vector<RuntimeEventEnvelope> events(const ConversationIdentity &,
                                                          std::uint64_t after = 0) = 0;
         virtual std::uint64_t last_event_sequence(const ConversationIdentity &) = 0;
+        virtual std::uint64_t event_retention_floor(const ConversationIdentity &) = 0;
         virtual bool append_boundary(CompactBoundaryRecord, std::string * = nullptr) = 0;
         virtual std::optional<CompactBoundaryRecord> latest_boundary(
             const ConversationIdentity &) = 0;
@@ -48,6 +49,7 @@ namespace agent_framework::conversation
         std::vector<RuntimeEventEnvelope> events(
             const ConversationIdentity &, std::uint64_t after = 0) override;
         std::uint64_t last_event_sequence(const ConversationIdentity &) override;
+        std::uint64_t event_retention_floor(const ConversationIdentity &) override;
         bool append_boundary(CompactBoundaryRecord, std::string *) override;
         std::optional<CompactBoundaryRecord> latest_boundary(const ConversationIdentity &) override;
         bool commit(ConversationCommit &, std::string * = nullptr) override;

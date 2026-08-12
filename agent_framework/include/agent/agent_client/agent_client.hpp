@@ -19,6 +19,7 @@
 #include <stdexcept>
 #include <string_view>
 #include <agent/core/types.hpp>
+#include <agent/conversation/types.hpp>
 #include <agent/agent_transport/sse_connection.hpp>
 #include <nlohmann/json.hpp>
 
@@ -159,6 +160,15 @@ public:
         std::function<void(const AgentTask&)> on_status_update,
         std::function<void(const AgentArtifact&)> on_artifact_update
     );
+
+    void subscribe_task_runtime_events(
+        const std::string& agent_endpoint,
+        const std::string& task_id,
+        std::function<void(const conversation::RuntimeEventEnvelope&)> on_runtime_event,
+        std::uint64_t after = 0);
+
+    std::uint64_t task_runtime_cursor(const std::string& agent_endpoint,
+                                      const std::string& task_id) const;
 
     /** SendStreamingMessage over JSON-RPC and consume its SSE stream asynchronously. */
     void send_streaming_task(

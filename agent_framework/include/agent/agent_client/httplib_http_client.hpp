@@ -60,12 +60,13 @@ public:
 
     /**
      * @brief POST JSON 并消费 SSE（text/event-stream）：对每个 data: 行解析 JSON 后回调
-     * @param on_event 参数为 event 名（可能为空）、data JSON；OpenAI 通常 event 为空
+     * @param on_event 参数为 event 名（可能为空）、data JSON、SSE id（可能为空）；OpenAI 通常 event/id 为空
      * @param timeout_sec 覆盖连接/读写超时；<=0 使用 set_timeout_sec 或库默认宏
      */
     void post_sse(const std::string& url, const json& body,
                   const std::map<std::string, std::string>& headers,
-                  const std::function<void(const std::string& event_name, const json& data)>& on_event,
+                  const std::function<void(const std::string& event_name, const json& data,
+                                           const std::string& event_id)>& on_event,
                   int timeout_sec = 0,
                   const std::function<bool()>& cancellation_requested = {});
 

@@ -44,7 +44,7 @@ class SseServerChannel;
 namespace a2a {
 class DispatchTable;
 }
-namespace conversation { class ConversationStore; }
+namespace conversation { class ConversationStore; class EventStreamHub; }
 
 using json = nlohmann::json;
 
@@ -153,6 +153,7 @@ private:
     std::shared_ptr<GraphExecutor> graph_executor_;
     std::shared_ptr<SessionStore> session_store_;
     std::shared_ptr<conversation::ConversationStore> conversation_store_;
+    std::shared_ptr<conversation::EventStreamHub> conversation_events_;
 
     std::unique_ptr<internal::TaskDispatchQueue> task_queue_;
     std::vector<std::thread> dispatch_workers_;
@@ -181,7 +182,8 @@ private:
     void handle_tasks_cancel(const httplib::Request& req, httplib::Response& res);
     void handle_tasks_update(const httplib::Request& req, httplib::Response& res);
     void handle_tasks_send_subscribe(const httplib::Request& req, httplib::Response& res);
-    void attach_task_stream(const std::string& task_id, httplib::Response& res);
+    void attach_task_stream(const std::string& task_id, httplib::Response& res,
+                            std::uint64_t runtime_cursor = 0);
     void handle_tasks_resubscribe(const httplib::Request& req, httplib::Response& res);
     void handle_push_notification_set(const httplib::Request& req, httplib::Response& res);
     void handle_push_notification_get(const httplib::Request& req, httplib::Response& res);

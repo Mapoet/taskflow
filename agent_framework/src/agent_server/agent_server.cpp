@@ -445,7 +445,7 @@ void AgentServer::run_agent_task_on_executor(const std::string& task_id,
                                                  const conversation::TurnCheckpoint&) mutable {
                                 r = graph_executor_->execute_sync(*process_executor_, std::move(request));
                                 return conversation::GraphTurnAdapter::from_execution(r);
-                            });
+                            }, {}, conversation_events_.get());
                         auto turn = engine.start_turn(turn_request);
                         if (!turn.error.empty() && !r.error)
                             r.error = turn.error;
@@ -654,6 +654,9 @@ void AgentServer::set_session_store(std::shared_ptr<SessionStore> store) {
 void AgentServer::set_conversation_store(
     std::shared_ptr<conversation::ConversationStore> store) {
     conversation_store_ = std::move(store);
+    conversation_events_ = conversation_store_
+        ? std::make_shared<conversation::EventStreamHub>(*conversation_store_)
+        : nullptr;
 }
 
 void AgentServer::set_authentication_validator(
@@ -912,11 +915,25 @@ void AgentServer::handle_jsonrpc_post(const httplib::Request& req, httplib::Resp
     const auto& jr = std::get<a2a::JsonRpcRequest>(parsed);
     json id = jr.id;
 
+    std::uint64_t runtime_cursor = 0;
+    const auto last_event_id = req.get_header_value("Last-Event-ID");
+    if (!last_event_id.empty()) {
+        try {
+            std::size_t consumed = 0;
+            runtime_cursor = std::stoull(last_event_id, &consumed);
+            if (consumed != last_event_id.size()) throw std::invalid_argument("trailing characters");
+        } catch (...) {
+            res.status = 400;
+            res.set_content(R"({"error":"Invalid Last-Event-ID"})", "application/json");
+            return;
+        }
+    }
+
     try {
         json params = jr.params.value_or(json::object());
         if (jr.method == "SendStreamingMessage") {
             json result = jsonrpc_send_message(params);
-            attach_task_stream(result.at("task").at("id").get<std::string>(), res);
+            attach_task_stream(result.at("task").at("id").get<std::string>(), res, runtime_cursor);
             return;
         }
         if (jr.method == "SubscribeToTask") {
@@ -924,7 +941,7 @@ void AgentServer::handle_jsonrpc_post(const httplib::Request& req, httplib::Resp
                 throw a2a::JsonRpcInvokeError(a2a::JsonRpcErrorCode::invalid_params,
                                               "SubscribeToTask requires string id");
             }
-            attach_task_stream(params["id"].get<std::string>(), res);
+            attach_task_stream(params["id"].get<std::string>(), res, runtime_cursor);
             return;
         }
         json result = rpc_dispatch_->invoke(jr.method, params);
@@ -1221,14 +1238,26 @@ void AgentServer::handle_tasks_send_subscribe(const httplib::Request& req, httpl
         return;
     }
 
-    attach_task_stream(req.get_param_value("task_id"), res);
+    std::uint64_t cursor = 0;
+    const auto header = req.get_header_value("Last-Event-ID");
+    if (!header.empty()) {
+        try { cursor = std::stoull(header); }
+        catch (...) {
+            res.status = 400;
+            res.set_content(R"({"error":"Invalid Last-Event-ID"})", "application/json");
+            return;
+        }
+    }
+    attach_task_stream(req.get_param_value("task_id"), res, cursor);
 }
 
-void AgentServer::attach_task_stream(const std::string& task_id, httplib::Response& res) {
+void AgentServer::attach_task_stream(const std::string& task_id, httplib::Response& res,
+                                     std::uint64_t runtime_cursor) {
     auto channel = std::make_shared<internal::SseServerChannel>(
         positive_size_env("AGENT_SERVER_SSE_QUEUE_CAP", 256),
         positive_size_env("AGENT_SERVER_SSE_MAX_DROPPED", 1024));
     AgentTask snapshot;
+    std::shared_ptr<conversation::EventSubscription> runtime_events;
     {
         std::lock_guard<std::mutex> lk(tasks_mutex_);
         auto it = active_tasks_.find(task_id);
@@ -1238,6 +1267,21 @@ void AgentServer::attach_task_stream(const std::string& task_id, httplib::Respon
             return;
         }
         snapshot = it->second;
+        if (conversation_events_) {
+            auto replay = conversation_events_->subscribe(
+                {"a2a", snapshot.session_id.value_or(task_id)}, runtime_cursor,
+                positive_size_env("AGENT_SERVER_SSE_QUEUE_CAP", 256));
+            if (!replay.error.empty()) {
+                res.status = replay.error == "cursor_ahead_of_head"
+                                 ? 409
+                                 : (replay.error == "cursor_expired" ? 410 : 422);
+                res.set_content(json{{"error", replay.error},
+                                     {"runtime_event_head", replay.head_sequence}}.dump(),
+                                "application/json");
+                return;
+            }
+            runtime_events = std::move(replay.subscription);
+        }
         json payload = a2a::stream_response_status_update(snapshot);
         apply_wire_payload_cap(payload, ContextBudgetLimits{}.max_wire_message_bytes, nullptr);
         std::string initial;
@@ -1260,9 +1304,10 @@ void AgentServer::attach_task_stream(const std::string& task_id, httplib::Respon
         ping_sec > 0 ? std::chrono::seconds(ping_sec) : std::chrono::seconds::max();
 
     auto weak_ch = std::weak_ptr<internal::SseServerChannel>(channel);
+    auto weak_runtime = std::weak_ptr<conversation::EventSubscription>(runtime_events);
     res.set_chunked_content_provider(
         "text/event-stream",
-        [weak_ch, ping_interval](std::size_t /*offset*/, httplib::DataSink& sink) {
+        [weak_ch, weak_runtime, ping_interval](std::size_t /*offset*/, httplib::DataSink& sink) {
             auto ch = weak_ch.lock();
             if (!ch) {
                 return false;
@@ -1270,6 +1315,19 @@ void AgentServer::attach_task_stream(const std::string& task_id, httplib::Respon
             static thread_local std::chrono::steady_clock::time_point last_ping =
                 std::chrono::steady_clock::now();
             std::string chunk;
+            if (auto runtime = weak_runtime.lock()) {
+                conversation::RuntimeEventEnvelope event;
+                const auto read = runtime->next(event, std::chrono::milliseconds(0));
+                if (read == conversation::SubscriptionRead::Event) {
+                    a2a::append_sse_event(chunk, "runtime_event", conversation::encode(event).dump(),
+                                          std::to_string(event.sequence));
+                    sink.write(chunk.data(), chunk.size());
+                    last_ping = std::chrono::steady_clock::now();
+                    return true;
+                }
+                if (read == conversation::SubscriptionRead::Overflow)
+                    return false;
+            }
             using PR = internal::SseServerChannel::PopResult;
             PR r = ch->pop_or_wait(chunk, std::chrono::milliseconds(500));
             if (r == PR::chunk) {
@@ -1290,7 +1348,10 @@ void AgentServer::attach_task_stream(const std::string& task_id, httplib::Respon
             }
             return true;
         },
-        [this, task_id, channel]() { remove_sse_channel(task_id, channel); });
+        [this, task_id, channel, runtime_events]() {
+            if (runtime_events) runtime_events->close();
+            remove_sse_channel(task_id, channel);
+        });
 }
 
 void AgentServer::handle_tasks_resubscribe(const httplib::Request& req, httplib::Response& res) {

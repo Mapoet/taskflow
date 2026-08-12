@@ -17,6 +17,8 @@
 #include <thread>
 #include <optional>
 #include <agent/core/types.hpp>
+#include <agent/conversation/types.hpp>
+#include <agent/a2a/sse_framing.hpp>
 #include <nlohmann/json.hpp>
 
 namespace agent_framework {
@@ -44,7 +46,8 @@ public:
 
     void subscribe(const std::map<std::string, std::string>& headers,
                    std::function<void(const AgentTask&)> on_status_update,
-                   std::function<void(const AgentArtifact&)> on_artifact_update);
+                   std::function<void(const AgentArtifact&)> on_artifact_update,
+                   std::function<void(const conversation::RuntimeEventEnvelope&)> on_runtime_event = {});
 
     void reconnect(const std::string& last_event_id);
     /** Reconnect with freshly resolved authentication headers. */
@@ -54,6 +57,7 @@ public:
     void close();
 
     bool is_active() const;
+    std::uint64_t runtime_cursor() const;
 
 private:
     std::string endpoint_;
@@ -70,8 +74,10 @@ private:
 
     std::function<void(const AgentTask&)> on_status_update_;
     std::function<void(const AgentArtifact&)> on_artifact_update_;
+    std::function<void(const conversation::RuntimeEventEnvelope&)> on_runtime_event_;
+    std::atomic<std::uint64_t> runtime_cursor_{0};
 
-    void handle_sse_event(const std::string& data_payload);
+    void handle_sse_event(const a2a::SseEvent& event);
     void event_thread_func();
 };
 

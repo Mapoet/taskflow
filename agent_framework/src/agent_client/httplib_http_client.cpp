@@ -429,8 +429,8 @@ void HttplibClient::get_sse(const std::string& url,
 
 void HttplibClient::post_sse(const std::string& url, const json& body,
                              const std::map<std::string, std::string>& headers,
-                             const std::function<void(const std::string& event_name, const json& data)>&
-                                 on_event,
+                             const std::function<void(const std::string& event_name, const json& data,
+                                                      const std::string& event_id)>& on_event,
                              int timeout_sec,
                              const std::function<bool()>& cancellation_requested) {
     ParsedHttpUrl parsed = parse_absolute_url(url);
@@ -448,6 +448,7 @@ void HttplibClient::post_sse(const std::string& url, const json& body,
 
     std::string sse_line_buffer;
     std::string current_event;
+    std::string current_event_id;
     std::string error_body_accum;
     int response_status = -1;
     bool headers_ok = true;
@@ -485,9 +486,15 @@ void HttplibClient::post_sse(const std::string& url, const json& body,
                 }
                 constexpr const char* k_data = "data:";
                 constexpr const char* k_event = "event:";
+                constexpr const char* k_id = "id:";
                 if (line.rfind(k_event, 0) == 0) {
                     current_event = line.substr(std::strlen(k_event));
                     trim_in_place(current_event);
+                    continue;
+                }
+                if (line.rfind(k_id, 0) == 0) {
+                    current_event_id = line.substr(std::strlen(k_id));
+                    trim_in_place(current_event_id);
                     continue;
                 }
                 if (line.rfind(k_data, 0) == 0) {
@@ -499,11 +506,12 @@ void HttplibClient::post_sse(const std::string& url, const json& body,
                     }
                     try {
                         json j = json::parse(payload);
-                        on_event(current_event, std::move(j));
+                        on_event(current_event, std::move(j), current_event_id);
                     } catch (const json::exception&) {
                         // 跳过无法解析的行（注释/心跳）
                     }
                     current_event.clear();
+                    current_event_id.clear();
                 }
             }
             return true;
@@ -559,7 +567,11 @@ void HttplibLlmTransport::post_sse(const std::string& url, const json& body,
                                    const std::map<std::string, std::string>& headers,
                                    const std::function<void(const std::string&, const json&)>& on_event,
                                    int timeout_sec, const std::string& /*provider*/) {
-    client_->post_sse(url, body, headers, on_event, timeout_sec);
+    client_->post_sse(url, body, headers,
+                      [&](const std::string& event, const json& data, const std::string&) {
+                          on_event(event, data);
+                      },
+                      timeout_sec);
 }
 
 void HttplibLlmTransport::post_sse_cancellable(
@@ -568,7 +580,11 @@ void HttplibLlmTransport::post_sse_cancellable(
     const std::function<void(const std::string&, const json&)>& on_event,
     int timeout_sec, const std::string& /*provider*/,
     const std::function<bool()>& cancellation_requested) {
-    client_->post_sse(url, body, headers, on_event, timeout_sec, cancellation_requested);
+    client_->post_sse(url, body, headers,
+                      [&](const std::string& event, const json& data, const std::string&) {
+                          on_event(event, data);
+                      },
+                      timeout_sec, cancellation_requested);
 }
 
 } // namespace agent_framework

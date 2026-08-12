@@ -294,6 +294,7 @@ if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/conversation/types.cpp)
         src/conversation/sqlite_store.cpp
         src/conversation/turn_state_machine.cpp
         src/conversation/conversation_engine.cpp
+        src/conversation/event_stream.cpp
         src/conversation/context_projection.cpp
         src/conversation/graph_turn_adapter.cpp
         src/conversation/production_bridge.cpp)

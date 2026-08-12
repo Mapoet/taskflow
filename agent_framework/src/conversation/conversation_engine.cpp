@@ -80,6 +80,8 @@ namespace agent_framework::conversation
         c = initial.checkpoint;
         if (sink_)
             sink_(initial.durable_events.front());
+        if (events_)
+            events_->publish(initial.durable_events.front());
         return execute(r, c);
     }
     TurnResult ConversationEngine::continue_turn(const TurnRequest &r, TurnContinuationReason why)
@@ -151,6 +153,8 @@ namespace agent_framework::conversation
         c = terminal.checkpoint;
         if (sink_)
             sink_(terminal.durable_events.front());
+        if (events_)
+            events_->publish(terminal.durable_events.front());
         return {c, o, {}};
     }
     bool ConversationEngine::interrupt_turn(const ConversationIdentity &i, std::string_view id, std::string *e)
@@ -177,6 +181,8 @@ namespace agent_framework::conversation
             return false;
         if (sink_)
             sink_(commit.durable_events.front());
+        if (events_)
+            events_->publish(commit.durable_events.front());
         return true;
     }
     InputDisposition ConversationEngine::classify_input(std::string_view v) const
@@ -251,6 +257,16 @@ namespace agent_framework::conversation
             return false;
         if (sink_)
             sink_(commit.durable_events.front());
+        if (events_)
+            events_->publish(commit.durable_events.front());
         return true;
+    }
+    SubscribeResult ConversationEngine::subscribe_events(const ConversationIdentity &identity,
+                                                          std::uint64_t after,
+                                                          std::size_t capacity)
+    {
+        if (!events_)
+            return {{}, store_.last_event_sequence(identity), "event_stream_not_configured"};
+        return events_->subscribe(identity, after, capacity);
     }
 }
