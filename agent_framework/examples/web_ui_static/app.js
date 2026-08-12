@@ -312,7 +312,9 @@
   async function submitHitl(requestId, action, button) {
     button.disabled = true; $("hitl-feedback").textContent = "Submitting accountable decision…";
     try {
-      const response = await fetch("/ui/operations/hitl", { method: "POST", headers: { "Content-Type": "application/json", "X-CSRF-Token": "phase4-session" }, body: JSON.stringify({ request_id: requestId, action }) });
+      const sessionToken = text(sessionStorage.getItem("agent_hitl_session_token")).trim();
+      if (!sessionToken) throw new Error("authenticated HITL session is not configured");
+      const response = await fetch("/ui/operations/hitl", { method: "POST", headers: { "Content-Type": "application/json", "X-Agent-Session": sessionToken }, body: JSON.stringify({ request_id: requestId, action }) });
       if (!response.ok) throw new Error(await response.text());
       $("hitl-feedback").textContent = "Decision recorded and snapshot refreshed";
     } catch (error) { $("hitl-feedback").textContent = "Decision not applied: " + text(error.message || error); }

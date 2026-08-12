@@ -117,6 +117,15 @@ int main() {
         assert(visible.size() == 2);
         assert(store->generation() == 8);
         assert(store->history("project-rule").size() == 2);
+        memory_v2::MemoryConflict conflict;
+        conflict.metadata.identity.tenant_id = "tenant-a";
+        conflict.conflict_id = "conflict-a";
+        conflict.record_revision_digests = {"sha256:record-a-r1", "sha256:record-b-r2"};
+        conflict.resolution_state = "open";
+        conflict.resolution_reason = "authority disagreement";
+        assert(store->put_conflict(conflict));
+        assert(store->conflict("conflict-a")->resolution_state == "open");
+        assert(store->conflicts("tenant-a").size() == 1);
 
         memory_v2::MemoryProviderRegistry providers;
         assert(providers.register_provider(
@@ -148,6 +157,7 @@ int main() {
         view_spec.mandatory_record_ids = {"system-rule"};
         auto recovered = engine.build(view_spec, "2026-08-09T00:00:00Z");
         assert(recovered.manifest.view_digest == first_view_digest);
+        assert(store->conflict("conflict-a"));
     }
     std::filesystem::remove_all(root, error);
     return 0;

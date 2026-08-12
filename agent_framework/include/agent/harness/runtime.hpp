@@ -38,6 +38,8 @@ public:
     virtual ~HarnessStagePort() = default;
     virtual std::string id() const = 0;
     virtual bool may_have_side_effects() const noexcept = 0;
+    virtual bool production_ready() const noexcept { return false; }
+    virtual std::string capability_manifest_digest() const { return {}; }
     virtual HarnessStageResult execute(const HarnessStageRequest& request) = 0;
     virtual std::optional<HarnessStageResult> reconcile(
         const HarnessStageRequest&) { return std::nullopt; }
@@ -68,6 +70,7 @@ class HarnessPortRegistry {
 public:
     bool bind(HarnessStage stage, std::shared_ptr<HarnessStagePort> port);
     std::shared_ptr<HarnessStagePort> find(HarnessStage stage) const;
+    std::vector<HarnessStage> bound_stages() const;
 
 private:
     std::map<HarnessStage, std::shared_ptr<HarnessStagePort>> ports_;

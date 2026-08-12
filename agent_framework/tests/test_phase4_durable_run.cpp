@@ -93,9 +93,14 @@ int main() {
                               "sha256:request", "", 7}, std::nullopt};
         assert(store.commit(atomic).revision == 4);
         assert(store.effect("run-a", "effect-a")->fencing_token == 7);
+        assert(store.advance_effect("run-a", "effect-a", run::EffectState::Prepared,
+                                    run::EffectState::Unknown));
+        assert(store.advance_effect("run-a", "effect-a", run::EffectState::Unknown,
+                                    run::EffectState::Reconciled, "sha256:receipt"));
+        assert(store.effect("run-a", "effect-a")->state == run::EffectState::Reconciled);
         run::DurableRunCoordinator coordinator(store);
         auto recovery = coordinator.recover("run-a", "effect-a");
-        assert(recovery.disposition == run::RecoveryDisposition::ReconcileEffect);
+        assert(recovery.disposition == run::RecoveryDisposition::Continue);
         auto history = store.reconstruct("run-a", 3);
         assert(history && history->checkpoint.node_id == "tool-a");
         assert(store.verify_history("run-a").valid);

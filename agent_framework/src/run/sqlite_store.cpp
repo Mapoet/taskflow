@@ -543,4 +543,23 @@ std::optional<EffectRecord> SQLiteRunStore::effect(std::string_view run_id, std:
         sqlite::column_text(query.get(), 2), sqlite::column_text(query.get(), 3), sqlite::column_uint64(query.get(), 4)};
 }
 
+StoreResult SQLiteRunStore::advance_effect(std::string_view run_id, std::string_view effect_id,
+    EffectState expected, EffectState next, std::string_view receipt_digest) {
+    std::lock_guard lock(mutex_); auto* db = sqlite::database(db_);
+    const bool legal =
+        (expected == EffectState::Prepared && (next == EffectState::Unknown || next == EffectState::Committed)) ||
+        (expected == EffectState::Unknown && (next == EffectState::Reconciled || next == EffectState::Committed));
+    if(!legal) return {StoreStatus::Invalid, 0, "illegal effect state transition"};
+    if((next == EffectState::Committed || next == EffectState::Reconciled) && receipt_digest.empty())
+        return {StoreStatus::Invalid, 0, "terminal effect transition requires receipt digest"};
+    sqlite::Statement update(db, "UPDATE run_effects SET state=?,receipt_digest=? WHERE run_id=? AND effect_id=? AND state=?");
+    sqlite::bind_int(update.get(), 1, static_cast<int>(next)); sqlite::bind_text(update.get(), 2, receipt_digest);
+    sqlite::bind_text(update.get(), 3, run_id); sqlite::bind_text(update.get(), 4, effect_id);
+    sqlite::bind_int(update.get(), 5, static_cast<int>(expected));
+    const int rc = sqlite::step(update.get());
+    if(rc != SQLITE_DONE) return sqlite_failure(db, rc);
+    if(sqlite::changes(db) != 1) return {StoreStatus::RevisionConflict, 0, "effect state changed or effect not found"};
+    return {StoreStatus::Committed, 1, {}};
+}
+
 }  // namespace agent_framework::run

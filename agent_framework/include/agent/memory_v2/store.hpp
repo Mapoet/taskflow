@@ -41,6 +41,11 @@ public:
     virtual std::vector<MemoryRecord> history(std::string_view record_id) = 0;
     virtual std::vector<MemoryRecord> query(const MemoryQuery& query) = 0;
     virtual std::uint64_t generation() = 0;
+    virtual CommitResult put_conflict(const MemoryConflict&) {
+        return {CommitStatus::Error, 0, "conflict store unsupported"};
+    }
+    virtual std::optional<MemoryConflict> conflict(std::string_view) { return std::nullopt; }
+    virtual std::vector<MemoryConflict> conflicts(std::string_view) { return {}; }
 };
 
 struct SQLiteMemoryStoreOptions {
@@ -61,6 +66,9 @@ public:
     std::vector<MemoryRecord> history(std::string_view record_id) override;
     std::vector<MemoryRecord> query(const MemoryQuery& query) override;
     std::uint64_t generation() override;
+    CommitResult put_conflict(const MemoryConflict& conflict) override;
+    std::optional<MemoryConflict> conflict(std::string_view conflict_id) override;
+    std::vector<MemoryConflict> conflicts(std::string_view tenant_id) override;
 private:
     void migrate();
     void* db_{nullptr};

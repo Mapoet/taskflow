@@ -46,6 +46,10 @@ std::optional<ExecResult> SQLiteSandboxReceiptJournal::find(std::string_view key
 
 SandboxExecutionHarnessPort::SandboxExecutionHarnessPort(std::string id,SandboxProvider& provider,SandboxSpec spec,SQLiteSandboxReceiptJournal& journal)
     :id_(std::move(id)),provider_(provider),spec_(std::move(spec)),journal_(journal){if(id_.empty())throw std::invalid_argument("sandbox port id required");}
+std::string SandboxExecutionHarnessPort::capability_manifest_digest() const {
+    return contracts::canonical_digest(nlohmann::json{{"port",id_},{"kind","sandbox_execution"},
+        {"spec_digest",encode(spec_).at("canonical_digest")}}).value_or("");
+}
 harness::HarnessStageResult SandboxExecutionHarnessPort::project(const ExecResult& result)const{
     harness::HarnessStageResult out;const auto manifest_digest=encode(result.manifest).at("canonical_digest").get<std::string>();out.invocation_manifest_digest=result.manifest.spec_digest;out.output_digest=result.manifest.workspace_output_digest;out.effect_receipt_digest=manifest_digest;
     if(result.timed_out){out.outcome=harness::StageOutcome::Retryable;out.error_code="sandbox_timeout";out.error_message="sandbox wall time exceeded";return out;}

@@ -109,6 +109,8 @@ public:
                         std::string approval_id, std::string now);
     std::string id() const override { return id_; }
     bool may_have_side_effects() const noexcept override { return false; }
+    bool production_ready() const noexcept override { return true; }
+    std::string capability_manifest_digest() const override;
     harness::HarnessStageResult execute(const harness::HarnessStageRequest& request) override;
 private:
     std::string id_;

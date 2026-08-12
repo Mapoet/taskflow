@@ -169,7 +169,7 @@ namespace agent_framework::memory_v2
             if (sqlite::step(s.get()) == SQLITE_ROW)
                 v = sqlite::column_int(s.get(), 0);
         }
-        if (v > 1)
+        if (v > 2)
             throw std::runtime_error("memory schema newer than binary");
         if (v == 0)
         {
@@ -179,6 +179,14 @@ namespace agent_framework::memory_v2
             sqlite::exec(d, "CREATE TABLE memory_generation(singleton INTEGER PRIMARY KEY CHECK(singleton=1),generation INTEGER NOT NULL)");
             sqlite::exec(d, "INSERT INTO memory_generation VALUES(1,0)");
             sqlite::exec(d, "INSERT INTO memory_schema_version VALUES(1,strftime('%Y-%m-%dT%H:%M:%fZ','now'))");
+            v = 1;
+        }
+        if(v == 1) {
+            sqlite::exec(d, "CREATE TABLE memory_conflicts(conflict_id TEXT PRIMARY KEY,tenant_id TEXT NOT NULL,"
+                "document_json TEXT NOT NULL,document_digest TEXT NOT NULL,"
+                "created_at TEXT NOT NULL DEFAULT(strftime('%Y-%m-%dT%H:%M:%fZ','now')))");
+            sqlite::exec(d, "CREATE INDEX memory_conflicts_tenant_idx ON memory_conflicts(tenant_id,created_at)");
+            sqlite::exec(d, "INSERT INTO memory_schema_version VALUES(2,strftime('%Y-%m-%dT%H:%M:%fZ','now'))");
         }
         t.commit();
     }
@@ -342,5 +350,52 @@ namespace agent_framework::memory_v2
         std::lock_guard l(mutex_);
         sqlite::Statement s(sqlite::database(db_), "SELECT generation FROM memory_generation WHERE singleton=1");
         return sqlite::step(s.get()) == SQLITE_ROW ? static_cast<std::uint64_t>(sqlite::column_int64(s.get(), 0)) : 0;
+    }
+    CommitResult SQLiteMemoryStore::put_conflict(const MemoryConflict &c)
+    {
+        std::lock_guard l(mutex_);
+        if(c.conflict_id.empty() || c.metadata.identity.tenant_id.empty() ||
+           c.record_revision_digests.size() < 2 || c.resolution_state.empty())
+            return {CommitStatus::Invalid, 0, "conflict identity, tenant, records and state are required"};
+        const auto document = encode(c);
+        const auto digest = document.at("canonical_digest").get<std::string>();
+        auto *d = sqlite::database(db_);
+        sqlite::Statement insert(d, "INSERT INTO memory_conflicts(conflict_id,tenant_id,document_json,document_digest) VALUES(?,?,?,?)");
+        sqlite::bind_text(insert.get(), 1, c.conflict_id);
+        sqlite::bind_text(insert.get(), 2, c.metadata.identity.tenant_id);
+        sqlite::bind_text(insert.get(), 3, document.dump());
+        sqlite::bind_text(insert.get(), 4, digest);
+        const int rc = sqlite::step(insert.get());
+        if(rc == SQLITE_CONSTRAINT) return {CommitStatus::AlreadyExists, 0, "conflict exists"};
+        if(rc != SQLITE_DONE) return failure(d, rc);
+        return {CommitStatus::Committed, 1, {}};
+    }
+    std::optional<MemoryConflict> SQLiteMemoryStore::conflict(std::string_view id)
+    {
+        std::lock_guard l(mutex_); auto *d = sqlite::database(db_);
+        sqlite::Statement query(d, "SELECT document_json,document_digest FROM memory_conflicts WHERE conflict_id=?");
+        sqlite::bind_text(query.get(), 1, id);
+        if(sqlite::step(query.get()) != SQLITE_ROW) return std::nullopt;
+        const auto document = json::parse(sqlite::column_text(query.get(), 0));
+        if(document.at("canonical_digest").get<std::string>() != sqlite::column_text(query.get(), 1))
+            throw std::runtime_error("memory conflict digest mismatch");
+        auto value = decode_memory_conflict(document);
+        if(!value) throw std::runtime_error("corrupt memory conflict");
+        return value;
+    }
+    std::vector<MemoryConflict> SQLiteMemoryStore::conflicts(std::string_view tenant)
+    {
+        std::lock_guard l(mutex_); std::vector<MemoryConflict> out; auto *d = sqlite::database(db_);
+        sqlite::Statement query(d, "SELECT document_json,document_digest FROM memory_conflicts WHERE tenant_id=? ORDER BY created_at,conflict_id");
+        sqlite::bind_text(query.get(), 1, tenant);
+        while(sqlite::step(query.get()) == SQLITE_ROW) {
+            const auto document = json::parse(sqlite::column_text(query.get(), 0));
+            if(document.at("canonical_digest").get<std::string>() != sqlite::column_text(query.get(), 1))
+                throw std::runtime_error("memory conflict digest mismatch");
+            auto value = decode_memory_conflict(document);
+            if(!value) throw std::runtime_error("corrupt memory conflict");
+            out.push_back(std::move(*value));
+        }
+        return out;
     }
 } // namespace agent_framework::memory_v2

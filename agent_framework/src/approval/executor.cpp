@@ -372,6 +372,11 @@ ApprovalHarnessPort::ApprovalHarnessPort(std::string id, ApprovalStore& store,
     if(id_.empty() || approval_id_.empty()) throw std::invalid_argument("approval harness port configuration is incomplete");
 }
 
+std::string ApprovalHarnessPort::capability_manifest_digest() const {
+    return contracts::canonical_digest(nlohmann::json{{"port", id_}, {"kind", "approval_store_pdp"},
+        {"approval_id", approval_id_}}).value_or("");
+}
+
 harness::HarnessStageResult ApprovalHarnessPort::execute(const harness::HarnessStageRequest& request) {
     harness::HarnessStageResult out;
     out.invocation_manifest_digest = request.request_digest;

@@ -28,6 +28,8 @@ public:
                                 SandboxSpec spec, SQLiteSandboxReceiptJournal& journal);
     std::string id() const override { return id_; }
     bool may_have_side_effects() const noexcept override { return true; }
+    bool production_ready() const noexcept override { return true; }
+    std::string capability_manifest_digest() const override;
     harness::HarnessStageResult execute(const harness::HarnessStageRequest& request) override;
     std::optional<harness::HarnessStageResult> reconcile(
         const harness::HarnessStageRequest& request) override;

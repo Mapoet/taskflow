@@ -19,6 +19,11 @@ ArtifactExecutionHarnessPort::ArtifactExecutionHarnessPort(
     if(id_.empty()) throw std::invalid_argument("artifact execution port id is required");
 }
 
+std::string ArtifactExecutionHarnessPort::capability_manifest_digest() const {
+    return json_digest({{"port", id_}, {"kind", "workspace_artifact_executor"},
+                        {"durable_journal", journal_ != nullptr}});
+}
+
 harness::HarnessStageResult ArtifactExecutionHarnessPort::invoke(
     const harness::HarnessStageRequest& request) {
     auto action = action_;
@@ -55,6 +60,11 @@ ArtifactAssuranceHarnessPort::ArtifactAssuranceHarnessPort(
       requirements_(std::move(requirements)) {
     if(id_.empty() || key_.empty() || requirements_.empty())
         throw std::invalid_argument("artifact assurance port configuration is incomplete");
+}
+
+std::string ArtifactAssuranceHarnessPort::capability_manifest_digest() const {
+    return json_digest({{"port", id_}, {"kind", "filesystem_artifact_oracle"},
+                        {"requirement_count", requirements_.size()}});
 }
 
 harness::HarnessStageResult ArtifactAssuranceHarnessPort::execute(

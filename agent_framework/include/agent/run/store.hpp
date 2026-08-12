@@ -120,6 +120,11 @@ public:
     virtual HistoryVerification verify_history(std::string_view run_id) = 0;
     virtual std::optional<EffectRecord> effect(std::string_view run_id,
                                                std::string_view effect_id) = 0;
+    virtual StoreResult advance_effect(std::string_view run_id,
+                                       std::string_view effect_id,
+                                       EffectState expected,
+                                       EffectState next,
+                                       std::string_view receipt_digest = {}) = 0;
 };
 
 struct SQLiteRunStoreOptions {
@@ -160,6 +165,9 @@ public:
     HistoryVerification verify_history(std::string_view run_id) override;
     std::optional<EffectRecord> effect(std::string_view run_id,
                                        std::string_view effect_id) override;
+    StoreResult advance_effect(std::string_view run_id, std::string_view effect_id,
+                               EffectState expected, EffectState next,
+                               std::string_view receipt_digest = {}) override;
 
     const std::string& path() const noexcept { return path_; }
 

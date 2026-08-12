@@ -12,6 +12,8 @@ public:
                                  std::string parent_idempotency_key = {});
     std::string id() const override { return id_; }
     bool may_have_side_effects() const noexcept override { return true; }
+    bool production_ready() const noexcept override { return journal_ != nullptr; }
+    std::string capability_manifest_digest() const override;
     harness::HarnessStageResult execute(const harness::HarnessStageRequest& request) override;
     std::optional<harness::HarnessStageResult> reconcile(
         const harness::HarnessStageRequest& request) override;
@@ -32,6 +34,8 @@ public:
                                  std::vector<ArtifactRequirement> requirements);
     std::string id() const override { return id_; }
     bool may_have_side_effects() const noexcept override { return false; }
+    bool production_ready() const noexcept override { return true; }
+    std::string capability_manifest_digest() const override;
     harness::HarnessStageResult execute(const harness::HarnessStageRequest& request) override;
 private:
     std::string id_;

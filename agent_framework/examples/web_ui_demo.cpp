@@ -489,16 +489,23 @@ int main(int argc, char** argv) {
             return;
         }
         try {
-            if (!req.has_header("X-CSRF-Token") || req.get_header_value("X-CSRF-Token") != "phase4-session") {
+            const char* configured_reviewer = std::getenv("AGENT_WEB_REVIEWER_ID");
+            const char* configured_session = std::getenv("AGENT_WEB_HITL_SESSION_TOKEN");
+            if (!configured_reviewer || !*configured_reviewer || !configured_session || !*configured_session) {
+                res.status = 503;
+                res.set_content(R"({"error":"authenticated HITL identity provider is not configured"})", "application/json");
+                return;
+            }
+            if (!req.has_header("X-Agent-Session") ||
+                req.get_header_value("X-Agent-Session") != configured_session) {
                 res.status = 403;
-                res.set_content(R"({"error":"invalid session CSRF token"})", "application/json");
+                res.set_content(R"({"error":"invalid authenticated HITL session"})", "application/json");
                 return;
             }
             const json body = json::parse(req.body);
             const std::string request_id = body.at("request_id").get<std::string>();
             const std::string action = body.at("action").get<std::string>();
-            const std::string reviewer_id = std::getenv("AGENT_WEB_REVIEWER_ID")
-                ? std::getenv("AGENT_WEB_REVIEWER_ID") : "reviewer-a";
+            const std::string reviewer_id = configured_reviewer;
             auto persisted_request = approval_store->request(request_id);
             if (!persisted_request) {
                 res.status = 404;

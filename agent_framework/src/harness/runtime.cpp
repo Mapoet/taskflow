@@ -172,6 +172,12 @@ std::shared_ptr<HarnessStagePort> HarnessPortRegistry::find(HarnessStage stage) 
     return found == ports_.end() ? nullptr : found->second;
 }
 
+std::vector<HarnessStage> HarnessPortRegistry::bound_stages() const {
+    std::vector<HarnessStage> stages;
+    for(const auto& [stage, port] : ports_) if(port) stages.push_back(stage);
+    return stages;
+}
+
 Phase4HarnessRuntime::Phase4HarnessRuntime(HarnessStore& store, HarnessPortRegistry ports)
     : store_(store), ports_(std::move(ports)) {}
 
