@@ -15,6 +15,7 @@ public:
     SQLiteTelemetrySpool& operator=(const SQLiteTelemetrySpool&) = delete;
     bool export_span(const SpanRecord& span) override;
     bool export_metric(const MetricResult& metric) override;
+    bool export_log(const LogRecord& log) override;
     bool flush() override;
     std::size_t pending() const;
 private:

@@ -59,6 +59,8 @@ struct CognitionCheckpoint {
     CognitionStage next_stage{CognitionStage::Intake};
     std::uint64_t critic_iteration{0};
     std::uint64_t tool_calls_used{0};
+    std::uint64_t evidence_added{0};
+    std::string investigation_stop_reason;
     std::map<std::string, std::uint64_t> stage_attempts;
     std::vector<std::string> completed_stages;
     std::vector<std::string> evidence_ids;
@@ -222,6 +224,8 @@ struct CognitionPipelineOptions {
     std::uint64_t investigator_tool_budget{64};
     std::uint64_t max_stage_attempts{2};
     std::uint64_t max_critic_revisions{2};
+    std::uint64_t minimum_new_evidence_per_step{0};
+    bool stop_when_fact_gaps_covered{true};
     nlohmann::json clarification_answers = nlohmann::json::object();
     nlohmann::json plan_revision_request = nlohmann::json::object();
     std::string approval_decision_id;

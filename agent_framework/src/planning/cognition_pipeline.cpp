@@ -472,7 +472,9 @@ json encode(const CognitionCheckpoint& value) {
          {"state", cognition_pipeline_state_name(value.state)},
          {"next_stage", cognition_stage_name(value.next_stage)},
          {"critic_iteration", value.critic_iteration},
-         {"tool_calls_used", value.tool_calls_used}, {"stage_attempts", value.stage_attempts},
+         {"tool_calls_used", value.tool_calls_used}, {"evidence_added", value.evidence_added},
+         {"investigation_stop_reason", value.investigation_stop_reason},
+         {"stage_attempts", value.stage_attempts},
          {"completed_stages", value.completed_stages}, {"evidence_ids", value.evidence_ids},
          {"artifacts", std::move(artifacts)},
          {"intake_digest", value.intake_digest},
@@ -491,7 +493,7 @@ std::optional<CognitionCheckpoint> decode_cognition_checkpoint(
     std::vector<contracts::ContractIssue>* issues) {
     static const std::set<std::string> fields = {
         "pipeline_id", "revision", "state", "next_stage", "critic_iteration",
-        "tool_calls_used", "stage_attempts", "completed_stages", "evidence_ids", "artifacts",
+        "tool_calls_used", "evidence_added", "investigation_stop_reason", "stage_attempts", "completed_stages", "evidence_ids", "artifacts",
         "intake_digest", "evidence_bundle_digest", "understanding_digest", "plan_digest", "plan_revision",
         "memory_snapshot_id", "memory_view_digest", "approval_decision_id",
         "error_code", "error_message", "updated_at"};
@@ -512,6 +514,8 @@ std::optional<CognitionCheckpoint> decode_cognition_checkpoint(
         result.next_stage = *stage;
         result.critic_iteration = payload.at("critic_iteration").get<std::uint64_t>();
         result.tool_calls_used = payload.at("tool_calls_used").get<std::uint64_t>();
+        result.evidence_added = payload.at("evidence_added").get<std::uint64_t>();
+        result.investigation_stop_reason = payload.at("investigation_stop_reason").get<std::string>();
         result.stage_attempts = payload.at("stage_attempts").get<std::map<std::string,std::uint64_t>>();
         result.completed_stages = payload.at("completed_stages").get<std::vector<std::string>>();
         result.evidence_ids = payload.at("evidence_ids").get<std::vector<std::string>>();
@@ -897,6 +901,15 @@ CognitionPipelineResult MultiStageCognitionWorkflow::run(
                                                         options.investigator_tool_budget);
             const auto& steps = strategy->output.at("steps");
             bool stopped = false;
+            auto fact_gaps_covered = [&]() {
+                if(intake.fact_gaps.empty()) return false;
+                std::set<std::string> claims;
+                for(const auto& evidence_id : checkpoint.evidence_ids)
+                    if(const auto item = evidence_.get(intake.metadata, evidence_id))
+                        claims.insert(item->supported_claims.begin(), item->supported_claims.end());
+                return std::all_of(intake.fact_gaps.begin(), intake.fact_gaps.end(),
+                    [&](const auto& gap) { return claims.count(gap) != 0; });
+            };
             for(std::size_t index = 0; index < steps.size(); ++index) {
                 const auto step_key = "investigation:" + std::to_string(index);
                 if(std::find(checkpoint.completed_stages.begin(), checkpoint.completed_stages.end(),
@@ -962,6 +975,7 @@ CognitionPipelineResult MultiStageCognitionWorkflow::run(
                 request.round = step.value("round", 1ULL);
                 request.prior_evidence_ids = checkpoint.evidence_ids;
                 std::string investigation_error;
+                const auto evidence_before = checkpoint.evidence_ids.size();
                 auto records = found->second->investigate(request, &investigation_error);
                 ++checkpoint.tool_calls_used;
                 if(!investigation_error.empty()) {
@@ -995,6 +1009,7 @@ CognitionPipelineResult MultiStageCognitionWorkflow::run(
                     }
                     known_digests.insert(record.content_digest);
                     checkpoint.evidence_ids.push_back(record.evidence_id);
+                    ++checkpoint.evidence_added;
                 }
                 if(stopped) break;
                 std::sort(checkpoint.evidence_ids.begin(), checkpoint.evidence_ids.end());
@@ -1006,8 +1021,27 @@ CognitionPipelineResult MultiStageCognitionWorkflow::run(
                 emit("investigator_completed", CognitionStage::Investigation,
                      {{"investigator_id", investigator_id}, {"step", index},
                       {"evidence_count", checkpoint.evidence_ids.size()}});
+                const auto added = checkpoint.evidence_ids.size() - evidence_before;
+                if(options.stop_when_fact_gaps_covered && fact_gaps_covered()) {
+                    checkpoint.investigation_stop_reason = "fact_gaps_covered";
+                    if(!persist()) { stopped = true; break; }
+                    emit("investigation_adaptive_stop", CognitionStage::Investigation,
+                         {{"reason", checkpoint.investigation_stop_reason}});
+                    break;
+                }
+                if(options.minimum_new_evidence_per_step > 0 &&
+                   added < options.minimum_new_evidence_per_step) {
+                    checkpoint.investigation_stop_reason = "insufficient_information_gain";
+                    if(!persist()) { stopped = true; break; }
+                    emit("investigation_adaptive_stop", CognitionStage::Investigation,
+                         {{"reason", checkpoint.investigation_stop_reason}});
+                    break;
+                }
             }
             if(stopped) break;
+            if(checkpoint.investigation_stop_reason.empty())
+                checkpoint.investigation_stop_reason = checkpoint.tool_calls_used >= budget
+                    ? "tool_budget_reached" : "strategy_complete";
             result.evidence = evidence_.bundle(intake.metadata, checkpoint.evidence_ids);
             checkpoint.evidence_bundle_digest =
                 encode(result.evidence).at("canonical_digest").get<std::string>();

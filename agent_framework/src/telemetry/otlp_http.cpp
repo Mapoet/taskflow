@@ -33,28 +33,45 @@ bool post(const OtlpHttpOptions& options,const std::string& path,const nlohmann:
 #endif
     const std::string origin = std::string(endpoint.tls ? "https://" : "http://") +
                                endpoint.host + ":" + std::to_string(endpoint.port);
-    httplib::Client client(origin.c_str());
-    client.set_connection_timeout(options.connect_timeout_ms / 1000,
-                                  (options.connect_timeout_ms % 1000) * 1000);
-    client.set_read_timeout(options.request_timeout_ms / 1000,
-                            (options.request_timeout_ms % 1000) * 1000);
     const auto request_path = endpoint.prefix + path;
-    const auto response=client.Post(request_path.c_str(),body.dump(),"application/json");
-    if(!response){error="OTLP transport error";return false;}
-    if(response->status<200||response->status>=300){error="OTLP HTTP status "+std::to_string(response->status);return false;}
-    return true;
+    auto configure_and_post = [&](auto& client) {
+        client.set_connection_timeout(options.connect_timeout_ms / 1000,
+                                      (options.connect_timeout_ms % 1000) * 1000);
+        client.set_read_timeout(options.request_timeout_ms / 1000,
+                                (options.request_timeout_ms % 1000) * 1000);
+        return client.Post(request_path.c_str(),body.dump(),"application/json");
+    };
+    auto accepted = [&](const httplib::Result& response) {
+        if(!response){error="OTLP transport error";return false;}
+        if(response->status<200||response->status>=300){error="OTLP HTTP status "+std::to_string(response->status);return false;}
+        return true;
+    };
+#ifdef CPPHTTPLIB_OPENSSL_SUPPORT
+    if(endpoint.tls) {
+        httplib::SSLClient ssl(endpoint.host, endpoint.port,
+            options.client_certificate_path.empty()?nullptr:options.client_certificate_path.c_str(),
+            options.client_private_key_path.empty()?nullptr:options.client_private_key_path.c_str());
+        if(!options.ca_certificate_path.empty()) ssl.set_ca_cert_path(options.ca_certificate_path.c_str());
+        ssl.enable_server_certificate_verification(options.verify_server_certificate);
+        return accepted(configure_and_post(ssl));
+    } else
+#endif
+    { httplib::Client client(origin.c_str()); return accepted(configure_and_post(client)); }
 }
 }
 
 OtlpHttpTelemetrySink::OtlpHttpTelemetrySink(OtlpHttpOptions options):options_(std::move(options)) {
-    (void)parse(options_.endpoint);if(options_.batch_size==0)throw std::invalid_argument("OTLP batch_size must be positive");
+    const auto endpoint=parse(options_.endpoint);if(options_.batch_size==0)throw std::invalid_argument("OTLP batch_size must be positive");
+    if(endpoint.tls&&options_.verify_server_certificate&&options_.ca_certificate_path.empty())throw std::invalid_argument("verified HTTPS OTLP requires an explicit CA certificate");
+    if(options_.client_certificate_path.empty()!=options_.client_private_key_path.empty())throw std::invalid_argument("OTLP client certificate and private key must be configured together");
 }
 bool OtlpHttpTelemetrySink::export_span(const SpanRecord& span){std::lock_guard lock(mutex_);spans_.push_back(span);return spans_.size()+metrics_.size()<options_.batch_size||flush_locked();}
 bool OtlpHttpTelemetrySink::export_metric(const MetricResult& metric){std::lock_guard lock(mutex_);metrics_.push_back(metric);return spans_.size()+metrics_.size()<options_.batch_size||flush_locked();}
+bool OtlpHttpTelemetrySink::export_log(const LogRecord& log){std::lock_guard lock(mutex_);logs_.push_back(log);return spans_.size()+metrics_.size()+logs_.size()<options_.batch_size||flush_locked();}
 bool OtlpHttpTelemetrySink::flush(){std::lock_guard lock(mutex_);return flush_locked();}
 std::string OtlpHttpTelemetrySink::last_error()const{std::lock_guard lock(mutex_);return last_error_;}
 bool OtlpHttpTelemetrySink::flush_locked(){
-    if(spans_.empty()&&metrics_.empty()) return true;
+    if(spans_.empty()&&metrics_.empty()&&logs_.empty()) return true;
     last_error_.clear();
     if(!spans_.empty()) {auto records=nlohmann::json::array();for(const auto&s:spans_)records.push_back({
         {"traceId",s.context.trace_id},{"spanId",s.context.span_id},{"parentSpanId",s.context.parent_span_id},
@@ -68,6 +85,7 @@ bool OtlpHttpTelemetrySink::flush_locked(){
         if(!post(options_,"/v1/metrics",body,last_error_)) return false;
         metrics_.clear();
     }
+    if(!logs_.empty()){auto records=nlohmann::json::array();for(const auto&l:logs_)records.push_back({{"timeUnixNano",l.timestamp},{"severityText",l.severity},{"body",{{"stringValue",l.body}}},{"traceId",l.context.trace_id},{"spanId",l.context.span_id},{"attributes",attributes(l.attributes)}});nlohmann::json body{{"resourceLogs",nlohmann::json::array({{{"scopeLogs",nlohmann::json::array({{{"scope",{{"name","taskflow-agent"}}},{"logRecords",records}}})}}})}};if(!post(options_,"/v1/logs",body,last_error_))return false;logs_.clear();}
     return true;
 }
 }  // namespace agent_framework::telemetry

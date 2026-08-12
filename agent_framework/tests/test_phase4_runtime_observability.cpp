@@ -144,6 +144,11 @@ int main() {
     metric.value = 110.0;
     auto violation = slos.evaluate({metric});
     assert(!violation.allowed && violation.evaluations.front().outcome == "failed");
+    assert(slos.register_error_budget({"errors", "request.latency", 0.90, 100.0, 60, 1.0, true}));
+    auto budget_ok=slos.evaluate_error_budgets({{"request.latency",50,100},{"request.latency",80,101}},110);
+    assert(budget_ok.first&&budget_ok.second.front().outcome=="passed");
+    auto budget_bad=slos.evaluate_error_budgets({{"request.latency",50,100},{"request.latency",180,101}},110);
+    assert(!budget_bad.first&&budget_bad.second.front().burn_rate>1.0);
 
     const auto spool_path = root / "telemetry-spool.sqlite3";
     span.attributes.erase("prompt");
