@@ -263,6 +263,10 @@ public:
     virtual ~DeterministicOracle() = default;
     virtual std::string id() const = 0;
     virtual std::vector<std::string> source_kinds() const = 0;
+    virtual bool production_ready() const noexcept { return false; }
+    virtual bool supports(std::string_view criterion_id,
+                          std::string_view source_kind) const;
+    virtual std::string capability_manifest_digest() const { return {}; }
     virtual OracleResult collect(const OracleContext& context) = 0;
 };
 
@@ -270,6 +274,9 @@ class OracleRegistry {
 public:
     bool register_oracle(std::shared_ptr<DeterministicOracle> oracle);
     std::vector<std::shared_ptr<DeterministicOracle>> all() const;
+    bool production_ready(const AcceptanceContract& contract,
+                          std::vector<std::string>* issues = nullptr) const;
+    std::string capability_manifest_digest() const;
 
 private:
     mutable std::mutex mutex_;
@@ -351,6 +358,7 @@ struct AssuranceWorkflowOptions {
     std::vector<std::string> forbidden_models;
     bool require_provider_diversity{false};
     bool require_model_diversity{false};
+    bool require_production_oracles{false};
     std::function<bool()> cancelled;
     std::function<std::string()> now;
     std::function<void(const AssuranceWorkflowEvent&)> event_sink;

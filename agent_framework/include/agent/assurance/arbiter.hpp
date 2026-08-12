@@ -16,6 +16,7 @@ struct ArbiterBindings {
 
 struct ArbiterOptions {
     bool require_all_five_layers{true};
+    OracleStrength minimum_mandatory_strength{OracleStrength::StaticAnalysis};
 };
 
 class AcceptanceArbiter {

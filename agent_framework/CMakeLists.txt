@@ -265,6 +265,7 @@ if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/assurance/professional_types.cpp)
 endif()
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/assurance/professional_workflow.cpp)
     list(APPEND AGENT_SOURCES src/assurance/professional_workflow.cpp)
+    list(APPEND AGENT_SOURCES src/assurance/production_oracles.cpp)
 endif()
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/assurance/sqlite_assurance_store.cpp)
     list(APPEND AGENT_SOURCES src/assurance/sqlite_assurance_store.cpp)
@@ -1754,6 +1755,14 @@ if(BUILD_TESTING)
                  COMMAND test_phase4_production_boundary_adapters)
         set_tests_properties(phase4_production_boundary_adapters PROPERTIES
             LABELS "phase4-harness;phase4-policy;phase4-execution;phase4-integration;phase4-offline;offline"
+            RUN_SERIAL TRUE)
+    endif()
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_phase4_production_oracles.cpp)
+        add_executable(test_phase4_production_oracles tests/test_phase4_production_oracles.cpp)
+        target_link_libraries(test_phase4_production_oracles PRIVATE agent_framework)
+        add_test(NAME phase4_production_oracles COMMAND test_phase4_production_oracles)
+        set_tests_properties(phase4_production_oracles PROPERTIES
+            LABELS "phase4-assurance-v2;phase4-sandbox;phase4-security;phase4-integration;phase4-offline;offline"
             RUN_SERIAL TRUE)
     endif()
     if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_phase4_live_distributed.cpp)

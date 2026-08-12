@@ -48,6 +48,19 @@ int main() {
     assert(repeated.report && repeated.report->decision == AcceptanceDecision::Accepted);
     assert(model.requests.size() == 7);
 
+    // A model opinion cannot satisfy a mandatory criterion even when it says pass.
+    {
+        AcceptanceContract weak_contract=value;
+        EvidenceLedger weak;
+        weak.append({"weak","functional","test","model://weak","sha256:weak",
+            "2026-08-10T00:00:00Z","2027-01-01T00:00:00Z",
+            OracleStrength::CalibratedModel,FindingOutcome::Pass,true});
+        AcceptanceArbiter arbiter;
+        const auto report=arbiter.decide(weak_contract,weak,{weak_contract.metadata,
+            "sha256:artifact","snapshot","view","2026-08-10T00:00:00Z"});
+        assert(report.decision==AcceptanceDecision::ManualReview);
+    }
+
     // Two independent roles may inspect the same criterion; equivalent findings are
     // normalized by criterion/outcome while retaining the union of their evidence.
     {

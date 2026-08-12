@@ -49,9 +49,15 @@ AcceptanceReport AcceptanceArbiter::decide(
         bool requirements_met = true;
         for(const auto& required : criterion.required_evidence)
             if(!kinds.count(required)) requirements_met = false;
-        if(!requirements_met || candidates.empty() || (best_pass == 99 && best_fail == 99)) {
+        const bool strength_met = !criterion.mandatory ||
+            best_pass <= strength(options_.minimum_mandatory_strength) ||
+            best_fail <= strength(options_.minimum_mandatory_strength);
+        if(!requirements_met || !strength_met || candidates.empty() ||
+           (best_pass == 99 && best_fail == 99)) {
             finding.outcome = FindingOutcome::Inconclusive;
-            finding.remediation = stale ? "refresh stale evidence" : "collect required independent evidence";
+            finding.remediation = stale ? "refresh stale evidence" :
+                !strength_met ? "collect evidence meeting the mandatory oracle strength" :
+                "collect required independent evidence";
         } else if(best_fail <= best_pass) {
             finding.outcome = FindingOutcome::Fail;
             finding.remediation = "remediate the highest-strength counter-evidence and reverify";

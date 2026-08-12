@@ -17,6 +17,7 @@
 - 设计文档：`../readme/guide_agent.md`（在父目录的 readme 文件夹中；长文见根目录 `readme/guide_agent.v3.md`）
 - Taskflow workflow 文档：`../../workflow/README.md`
 - Phase 4 Cognition / Observability Closure：[guides/phase-4-cognition-observability-closure.md](guides/phase-4-cognition-observability-closure.md)
+- Phase 4 Professional Assurance / Production Oracle Closure：[guides/phase-4-professional-assurance-oracle-closure.md](guides/phase-4-professional-assurance-oracle-closure.md)
 
 ## 生成 API 文档
 

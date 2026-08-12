@@ -430,6 +430,45 @@ std::vector<std::shared_ptr<DeterministicOracle>> OracleRegistry::all() const {
     return result;
 }
 
+bool DeterministicOracle::supports(std::string_view,
+                                   std::string_view source_kind) const {
+    const auto kinds = source_kinds();
+    return std::find(kinds.begin(), kinds.end(), source_kind) != kinds.end();
+}
+
+bool OracleRegistry::production_ready(const AcceptanceContract& contract,
+                                      std::vector<std::string>* issues) const {
+    std::lock_guard lock(mutex_);
+    bool ready = true;
+    for(const auto& criterion : contract.criteria) {
+        if(!criterion.mandatory) continue;
+        for(const auto& required : criterion.required_evidence) {
+            const auto found = std::find_if(oracles_.begin(), oracles_.end(),
+                [&](const auto& item) {
+                    return item.second->production_ready() &&
+                           item.second->supports(criterion.criterion_id, required);
+                });
+            if(found == oracles_.end()) {
+                ready = false;
+                if(issues) issues->push_back("required_production_oracle_missing:" +
+                    criterion.criterion_id + ":" + required);
+            }
+        }
+    }
+    return ready;
+}
+
+std::string OracleRegistry::capability_manifest_digest() const {
+    std::lock_guard lock(mutex_);
+    nlohmann::json entries = nlohmann::json::array();
+    for(const auto&[id,oracle]:oracles_) entries.push_back({{"id",id},
+        {"source_kinds",oracle->source_kinds()},
+        {"production_ready",oracle->production_ready()},
+        {"capability_manifest_digest",oracle->capability_manifest_digest()}});
+    return contracts::canonical_digest({{"schema","agent.oracle_registry/v1"},
+        {"oracles",std::move(entries)}}).value_or("");
+}
+
 ManifestEvidenceOracle::ManifestEvidenceOracle(
     std::string oracle_id, std::vector<std::string> source_kinds)
     : oracle_id_(std::move(oracle_id)), source_kinds_(std::move(source_kinds)) {
@@ -794,6 +833,20 @@ AssuranceWorkflowResult ProfessionalAssuranceWorkflow::run(
             continue;
         }
         if(stage == AssuranceStage::DeterministicEvidence) {
+            if(options.require_production_oracles) {
+                std::vector<std::string> issues;
+                if(!oracles_.production_ready(contract, &issues)) {
+                    checkpoint.state = AssuranceWorkflowState::ManualReview;
+                    checkpoint.error_code = "production_oracle_coverage_incomplete";
+                    checkpoint.error_message = issues.empty() ? "production oracle coverage is incomplete"
+                        : issues.front();
+                    checkpoint.updated_at = now();
+                    checkpoint.revision = store_revision + 1;
+                    const auto commit = store_.compare_exchange_checkpoint(checkpoint, store_revision);
+                    if(commit) store_revision = commit.revision;
+                    break;
+                }
+            }
             OracleContext context{contract.metadata, *checkpoint.verification_plan, contract,
                                   artifact_manifest, now()};
             EvidenceLedger ledger;

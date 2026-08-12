@@ -263,6 +263,7 @@ WorkflowStageExecution AssuranceWorkflowAdapter::run(const HarnessStageRequest& 
     if(digest(assurance::encode(input->contract)) != request.checkpoint.pins.acceptance_contract_digest)
         return failed("acceptance_contract_digest_mismatch", "contract does not match harness pin");
     input->options.cancelled = request.cancelled;
+    input->options.require_production_oracles = true;
     auto value = workflow_.run(input->contract, input->subject, input->task_context,
                                input->artifact_manifest, input->options);
     WorkflowStageExecution out;
