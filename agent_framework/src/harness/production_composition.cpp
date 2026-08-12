@@ -4,6 +4,7 @@
 #include <stdexcept>
 
 #include "agent/contracts/contract.hpp"
+#include "agent/harness/workflow_adapter.hpp"
 
 namespace agent_framework::harness {
 namespace {
@@ -53,9 +54,10 @@ ProductionCompositionReport Phase4ProductionComposition::validate() const {
             continue;
         }
         const auto digest = port->capability_manifest_digest();
-        if(!port->production_ready() || digest.empty()) {
+        if(!port->production_ready() || digest.empty() ||
+           dynamic_cast<WorkflowHarnessStagePort*>(port.get()) == nullptr) {
             report.issues.push_back({"port_not_production_ready", stage,
-                "stage port lacks a durable production capability manifest"});
+                "stage port must be a typed workflow adapter with observability and a durable capability manifest"});
             continue;
         }
         manifest.push_back({{"stage", harness_stage_name(stage)}, {"port", port->id()},

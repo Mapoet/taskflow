@@ -19,6 +19,8 @@ struct ProductionCompositionReport {
     std::vector<ProductionCompositionIssue> issues;
 };
 
+// Legacy callback wrapper retained for source compatibility. Production composition
+// deliberately rejects it; use WorkflowHarnessStagePort for production wiring.
 class ManifestHarnessStagePort final : public HarnessStagePort {
 public:
     using Execute = CallbackHarnessStagePort::Execute;
@@ -29,7 +31,7 @@ public:
                              Execute execute, Reconcile reconcile = {});
     std::string id() const override { return id_; }
     bool may_have_side_effects() const noexcept override { return side_effecting_; }
-    bool production_ready() const noexcept override { return true; }
+    bool production_ready() const noexcept override { return false; }
     std::string capability_manifest_digest() const override { return manifest_digest_; }
     HarnessStageResult execute(const HarnessStageRequest& request) override;
     std::optional<HarnessStageResult> reconcile(const HarnessStageRequest& request) override;

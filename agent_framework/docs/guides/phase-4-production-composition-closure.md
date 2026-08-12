@@ -2,7 +2,7 @@
 
 **批次**：P4-PC0–P4-PC7  
 **批准日期**：2026-08-12  
-**当前状态**：PC0/PC1、PC2 跨 Store saga 与 PC5 conflict persistence 已实施；其余生产适配器闭环保持开放
+**当前状态**：PC0/PC1、PC2 跨 Store saga、PC3 typed adapter/LLM observability contract 与 PC5 conflict persistence 已实施；领域输入装配及其余生产闭环保持开放
 
 ## 已实施事实
 
@@ -14,10 +14,13 @@
 - SQLite MemoryStore schema v2 增加独立、摘要校验、可重启的 `memory_conflicts` store。
 - Web HITL 移除默认 reviewer 和固定 token；未配置服务端 reviewer/session 时 fail closed，浏览器只从 session storage 提交 opaque session token。
 - `SQLiteRunHarnessSaga` 持久化 Run/Harness 双侧 revision 与 digest pin，以 CAS 推进 `Prepared→Committed→Reconciled`；重启可恢复，任一侧漂移均 fail closed 到 `ManualReview`。
+- production composition 只接受 `WorkflowHarnessStagePort`，以 `WorkflowAdapterKind + HarnessStage + implementation revision + configuration digest` 形成 capability manifest；历史 callback/manifest wrapper 无法进入生产组合。
+- Cognition、Memory、Assurance、Remediation、Reverification、Judge 被声明为 LLM-driven stage，必须返回完整 `LLMInvocationManifest`；缺失或 telemetry 导出失败均进入 `ManualReview`。
+- `TelemetryLLMInvocationObserver` 统一输出 GenAI span 与 duration/token/cache/cost metrics，并关联 provider/model/profile/prompt/route/calibration/fallback、harness stage、trace/span 和 memory pins。
 
 ## 未关闭边界
 
-- Cognition、Memory Workflow、Professional Assurance、Remediation、Judge、Live 的 workflow-to-harness production adapters 尚需逐一实现，不能用 manifest test adapter 冒充真实生产 adapter。
+- 类型化 adapter ABI 和不可伪装 callback 门禁已完成；Cognition、Memory、Professional Assurance、Remediation、Judge 等具体 workflow 的领域输入 provider/Store assembler 仍需逐一绑定，不能把测试实现作为 Live 证据。
 - Run/Harness saga journal 已具备，但尚未由 Harness runtime 在每个 stage checkpoint 自动写入，故仍不能声称统一事实源。
 - 真实 IdP/JWT/OIDC verifier、session rotation、KMS signer、四端交互仍未关闭。
 - production hybrid memory retrieval、真实 domain/security/metric oracle、OTLP mTLS、nightly expert eval 仍开放。
