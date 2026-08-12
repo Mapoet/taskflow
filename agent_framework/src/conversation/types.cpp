@@ -19,7 +19,7 @@ namespace agent_framework::conversation
     std::string_view name(InputDisposition v) { return choose(v, {"interrupt_and_replace", "append_to_current_turn", "queue_next_turn", "control_action", "status_query"}); }
     std::string_view name(InputState v) { return choose(v, {"queued", "consumed", "cancelled"}); }
     nlohmann::json encode(const ConversationMessage &v) { return {{"schema", "agent.conversation_message/v1"}, {"identity", identity(v.identity)}, {"message_id", v.message_id}, {"parent_id", v.parent_id}, {"turn_id", v.turn_id}, {"role", v.role}, {"content", v.content}, {"created_at", v.created_at}, {"sequence", v.sequence}}; }
-    nlohmann::json encode(const ConversationInput &v) { return {{"schema", "agent.conversation_input/v1"}, {"identity", identity(v.identity)}, {"input_id", v.input_id}, {"target_turn_id", v.target_turn_id}, {"content", v.content}, {"created_at", v.created_at}, {"disposition", name(v.disposition)}, {"state", name(v.state)}, {"sequence", v.sequence}}; }
+    nlohmann::json encode(const ConversationInput &v) { return {{"schema", "agent.conversation_input/v1"}, {"identity", identity(v.identity)}, {"input_id", v.input_id}, {"target_turn_id", v.target_turn_id}, {"consumed_turn_id", v.consumed_turn_id}, {"content", v.content}, {"created_at", v.created_at}, {"disposition", name(v.disposition)}, {"state", name(v.state)}, {"profile", name(v.profile)}, {"max_iterations", v.max_iterations}, {"max_input_tokens", v.max_input_tokens}, {"max_output_tokens", v.max_output_tokens}, {"sequence", v.sequence}}; }
     nlohmann::json encode(const TurnCheckpoint &v) { return {{"schema", "agent.turn_checkpoint/v1"}, {"identity", identity(v.identity)}, {"turn_id", v.turn_id}, {"revision", v.revision}, {"iteration", v.iteration}, {"phase", name(v.phase)}, {"continuation", name(v.continuation)}, {"last_message_id", v.last_message_id}, {"compact_boundary_digest", v.compact_boundary_digest}}; }
     nlohmann::json encode(const RuntimeEventEnvelope &v) { return {{"schema", "agent.runtime_event/v1"}, {"event_id", v.event_id}, {"tenant_id", v.tenant_id}, {"conversation_id", v.conversation_id}, {"turn_id", v.turn_id}, {"run_id", v.run_id}, {"tool_call_id", v.tool_call_id ? nlohmann::json(*v.tool_call_id) : nlohmann::json(nullptr)}, {"sequence", v.sequence}, {"durability", v.durability == EventDurability::Durable ? "durable" : "ephemeral"}, {"visibility", static_cast<int>(v.visibility)}, {"event_type", v.event_type}, {"timestamp", v.timestamp}, {"redaction_class", v.redaction_class}, {"payload", v.payload}}; }
     std::optional<RuntimeEventEnvelope> decode_runtime_event(const nlohmann::json &j,
@@ -30,9 +30,12 @@ namespace agent_framework::conversation
             if (j.value("schema", "") != "agent.runtime_event/v1")
                 throw std::runtime_error("unsupported_runtime_event_schema");
             RuntimeEventEnvelope v;
-            v.event_id = j.at("event_id"); v.tenant_id = j.at("tenant_id");
-            v.conversation_id = j.at("conversation_id"); v.turn_id = j.at("turn_id");
-            v.run_id = j.at("run_id"); v.sequence = j.at("sequence");
+            v.event_id = j.at("event_id");
+            v.tenant_id = j.at("tenant_id");
+            v.conversation_id = j.at("conversation_id");
+            v.turn_id = j.at("turn_id");
+            v.run_id = j.at("run_id");
+            v.sequence = j.at("sequence");
             if (v.event_id.empty() || v.tenant_id.empty() || v.conversation_id.empty() ||
                 v.sequence == 0)
                 throw std::runtime_error("runtime_event_identity_required");
@@ -46,14 +49,16 @@ namespace agent_framework::conversation
             if (visibility < 0 || visibility > static_cast<int>(EventVisibility::Audit))
                 throw std::runtime_error("unknown_event_visibility");
             v.visibility = static_cast<EventVisibility>(visibility);
-            v.event_type = j.at("event_type"); v.timestamp = j.at("timestamp");
+            v.event_type = j.at("event_type");
+            v.timestamp = j.at("timestamp");
             v.redaction_class = j.value("redaction_class", "public");
             v.payload = j.value("payload", nlohmann::json::object());
             return v;
         }
         catch (const std::exception &failure)
         {
-            if (error) *error = failure.what();
+            if (error)
+                *error = failure.what();
             return std::nullopt;
         }
     }

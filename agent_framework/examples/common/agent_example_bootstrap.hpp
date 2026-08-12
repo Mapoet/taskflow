@@ -273,8 +273,26 @@ inline void set_env_if_absent(const char* key, const std::string& value) {
     set_environment_override(key, value);
 }
 
+/**
+ * @brief Default AGENT_FS_ROOT to agent_framework/tools when unset (all live demos).
+ *
+ * Compile-time AGENT_DEMO_TOOLS_ROOT is injected by CMake for demo targets. Explicit
+ * AGENT_FS_ROOT / --fs-root always wins.
+ */
+inline void ensure_demo_fs_root_default() {
+    if(std::getenv("AGENT_FS_ROOT") != nullptr) return;
+#if defined(AGENT_DEMO_TOOLS_ROOT)
+    const std::filesystem::path tools_root{AGENT_DEMO_TOOLS_ROOT};
+    std::error_code ec;
+    if(std::filesystem::is_directory(tools_root, ec)) {
+        set_environment_override("AGENT_FS_ROOT", tools_root.string());
+    }
+#endif
+}
+
 /** Apply the provider defaults formerly copied into every live demo. */
 inline void apply_live_llm_env_defaults() {
+    ensure_demo_fs_root_default();
     if(std::getenv("OPENAI_API_KEY") == nullptr) {
         if(const char* key = std::getenv("DEEPSEEK_API_KEY"); key && *key)
             set_environment_override("OPENAI_API_KEY", key);

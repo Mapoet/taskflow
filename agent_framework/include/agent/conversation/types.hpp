@@ -99,9 +99,11 @@ namespace agent_framework::conversation
     struct ConversationInput
     {
         ConversationIdentity identity;
-        std::string input_id, target_turn_id, content, created_at;
+        std::string input_id, target_turn_id, consumed_turn_id, content, created_at;
         InputDisposition disposition{InputDisposition::AppendToCurrentTurn};
         InputState state{InputState::Queued};
+        TaskExecutionProfile profile{TaskExecutionProfile::Conversation};
+        std::uint64_t max_iterations{10}, max_input_tokens{0}, max_output_tokens{0};
         std::uint64_t sequence{0};
         std::string digest;
     };
@@ -132,6 +134,12 @@ namespace agent_framework::conversation
         std::string event_type, timestamp, redaction_class{"public"};
         nlohmann::json payload = nlohmann::json::object();
         std::string digest;
+    };
+    struct QueuedTurnClaim
+    {
+        ConversationInput input;
+        TurnCheckpoint checkpoint;
+        std::vector<RuntimeEventEnvelope> durable_events;
     };
     struct ContextSegment
     {

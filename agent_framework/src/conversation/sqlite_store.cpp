@@ -493,9 +493,15 @@ namespace agent_framework::conversation
                 input.identity = identity;
                 input.input_id = json.at("input_id");
                 input.target_turn_id = json.at("target_turn_id");
+                input.consumed_turn_id = json.value("consumed_turn_id", "");
                 input.content = json.at("content");
                 input.created_at = json.at("created_at");
                 input.sequence = json.at("sequence");
+                if (auto profile = task_execution_profile(json.value("profile", "conversation")))
+                    input.profile = *profile;
+                input.max_iterations = json.value("max_iterations", 10ULL);
+                input.max_input_tokens = json.value("max_input_tokens", 0ULL);
+                input.max_output_tokens = json.value("max_output_tokens", 0ULL);
                 const auto disposition = json.at("disposition").get<std::string>();
                 for (int i = 0; i < 5; ++i)
                     if (name(static_cast<InputDisposition>(i)) == disposition)
@@ -510,5 +516,154 @@ namespace agent_framework::conversation
             }
         }
         return result;
+    }
+    std::optional<QueuedTurnClaim> SQLiteConversationStore::consume_next_queued_input(
+        const ConversationIdentity &identity, std::string *e)
+    {
+        std::lock_guard l(mutex_);
+        auto *db = internal::sqlite::database(db_);
+        try
+        {
+            internal::sqlite::Transaction transaction(db);
+            Statement queued(db, "SELECT sequence,input_json,digest FROM conversation_inputs WHERE tenant=? AND conversation=? AND state='queued' AND disposition IN ('queue_next_turn','interrupt_and_replace') ORDER BY sequence LIMIT 1");
+            bind_id(queued.get(), identity);
+            if (internal::sqlite::step(queued.get()) != SQLITE_ROW)
+            {
+                transaction.commit();
+                return std::nullopt;
+            }
+            const auto input_sequence = internal::sqlite::column_uint64(queued.get(), 0);
+            auto json = nlohmann::json::parse(internal::sqlite::column_text(queued.get(), 1));
+            if (digest(json) != internal::sqlite::column_text(queued.get(), 2))
+                throw std::runtime_error("conversation input digest mismatch");
+
+            ConversationInput input;
+            input.identity = identity;
+            input.input_id = json.at("input_id");
+            input.target_turn_id = json.at("target_turn_id");
+            input.content = json.at("content");
+            input.created_at = json.at("created_at");
+            input.sequence = input_sequence;
+            if (auto profile = task_execution_profile(json.value("profile", "conversation")))
+                input.profile = *profile;
+            input.max_iterations = json.value("max_iterations", 10ULL);
+            input.max_input_tokens = json.value("max_input_tokens", 0ULL);
+            input.max_output_tokens = json.value("max_output_tokens", 0ULL);
+            const auto disposition = json.at("disposition").get<std::string>();
+            input.disposition = disposition == "interrupt_and_replace"
+                ? InputDisposition::InterruptAndReplace : InputDisposition::QueueNextTurn;
+            input.state = InputState::Consumed;
+            input.consumed_turn_id = input.input_id + ":turn";
+
+            Statement existing(db, "SELECT phase FROM conversation_turns WHERE tenant=? AND conversation=? AND turn_id=?");
+            bind_id(existing.get(), identity);
+            internal::sqlite::bind_text(existing.get(), 3, input.consumed_turn_id);
+            if (internal::sqlite::step(existing.get()) == SQLITE_ROW)
+                throw std::runtime_error("queued input already materialized");
+
+            Statement tail(db, "SELECT sequence,message_id FROM conversation_messages WHERE tenant=? AND conversation=? ORDER BY sequence DESC LIMIT 1");
+            bind_id(tail.get(), identity);
+            std::uint64_t message_sequence = 0;
+            std::string parent;
+            if (internal::sqlite::step(tail.get()) == SQLITE_ROW)
+            {
+                message_sequence = internal::sqlite::column_uint64(tail.get(), 0);
+                parent = internal::sqlite::column_text(tail.get(), 1);
+            }
+            ConversationMessage message;
+            message.identity = identity;
+            message.message_id = input.consumed_turn_id + ":user";
+            message.parent_id = parent;
+            message.turn_id = input.consumed_turn_id;
+            message.role = "user";
+            message.content = input.content;
+            message.created_at = input.created_at;
+            message.sequence = ++message_sequence;
+            message.digest = digest(encode(message));
+            Statement insert_message(db, "INSERT INTO conversation_messages VALUES(?,?,?,?,?,?,?,?,?,?)");
+            bind_id(insert_message.get(), identity);
+            internal::sqlite::bind_uint64(insert_message.get(), 3, message.sequence);
+            internal::sqlite::bind_text(insert_message.get(), 4, message.message_id);
+            internal::sqlite::bind_text(insert_message.get(), 5, message.parent_id);
+            internal::sqlite::bind_text(insert_message.get(), 6, message.turn_id);
+            internal::sqlite::bind_text(insert_message.get(), 7, message.role);
+            internal::sqlite::bind_text(insert_message.get(), 8, message.content);
+            internal::sqlite::bind_text(insert_message.get(), 9, message.created_at);
+            internal::sqlite::bind_text(insert_message.get(), 10, message.digest);
+            if (internal::sqlite::step(insert_message.get()) != SQLITE_DONE)
+                throw std::runtime_error(sqlite3_errmsg(db));
+
+            TurnCheckpoint checkpoint;
+            checkpoint.identity = identity;
+            checkpoint.turn_id = input.consumed_turn_id;
+            checkpoint.revision = 1;
+            checkpoint.phase = TurnPhase::Running;
+            checkpoint.continuation = TurnContinuationReason::QueuedUserInput;
+            checkpoint.last_message_id = message.message_id;
+            const auto checkpoint_digest = digest(encode(checkpoint));
+            Statement insert_turn(db, "INSERT INTO conversation_turns VALUES(?,?,?,?,?,?,?,?,?,?)");
+            bind_id(insert_turn.get(), identity);
+            internal::sqlite::bind_text(insert_turn.get(), 3, checkpoint.turn_id);
+            internal::sqlite::bind_uint64(insert_turn.get(), 4, checkpoint.revision);
+            internal::sqlite::bind_uint64(insert_turn.get(), 5, checkpoint.iteration);
+            internal::sqlite::bind_text(insert_turn.get(), 6, phase(checkpoint.phase));
+            internal::sqlite::bind_text(insert_turn.get(), 7, name(checkpoint.continuation));
+            internal::sqlite::bind_text(insert_turn.get(), 8, checkpoint.last_message_id);
+            internal::sqlite::bind_text(insert_turn.get(), 9, checkpoint.compact_boundary_digest);
+            internal::sqlite::bind_text(insert_turn.get(), 10, checkpoint_digest);
+            if (internal::sqlite::step(insert_turn.get()) != SQLITE_DONE)
+                throw std::runtime_error(sqlite3_errmsg(db));
+
+            Statement event_tail(db, "SELECT COALESCE(MAX(sequence),0) FROM conversation_events WHERE tenant=? AND conversation=?");
+            bind_id(event_tail.get(), identity);
+            std::uint64_t event_sequence = internal::sqlite::step(event_tail.get()) == SQLITE_ROW
+                ? internal::sqlite::column_uint64(event_tail.get(), 0) : 0;
+            std::vector<RuntimeEventEnvelope> events;
+            for (const auto *event_type : {"user_input_claimed", "user_input_consumed",
+                                           "turn_created_from_queued_input", "turn_started"})
+            {
+                RuntimeEventEnvelope event;
+                event.tenant_id = identity.tenant_id;
+                event.conversation_id = identity.conversation_id;
+                event.turn_id = checkpoint.turn_id;
+                event.run_id = checkpoint.turn_id;
+                event.sequence = ++event_sequence;
+                event.event_id = checkpoint.turn_id + ":" + std::to_string(event.sequence);
+                event.durability = EventDurability::Durable;
+                event.visibility = EventVisibility::Operations;
+                event.event_type = event_type;
+                event.timestamp = input.created_at;
+                event.payload = {{"input_id", input.input_id}, {"source_turn_id", input.target_turn_id},
+                                 {"disposition", name(input.disposition)}};
+                const auto event_json = encode(event);
+                event.digest = digest(event_json);
+                Statement insert_event(db, "INSERT INTO conversation_events VALUES(?,?,?,?,?)");
+                bind_id(insert_event.get(), identity);
+                internal::sqlite::bind_uint64(insert_event.get(), 3, event.sequence);
+                internal::sqlite::bind_text(insert_event.get(), 4, event_json.dump());
+                internal::sqlite::bind_text(insert_event.get(), 5, event.digest);
+                if (internal::sqlite::step(insert_event.get()) != SQLITE_DONE)
+                    throw std::runtime_error(sqlite3_errmsg(db));
+                events.push_back(std::move(event));
+            }
+
+            const auto consumed_json = encode(input);
+            input.digest = digest(consumed_json);
+            Statement update(db, "UPDATE conversation_inputs SET state='consumed',input_json=?,digest=? WHERE tenant=? AND conversation=? AND sequence=? AND state='queued'");
+            internal::sqlite::bind_text(update.get(), 1, consumed_json.dump());
+            internal::sqlite::bind_text(update.get(), 2, input.digest);
+            internal::sqlite::bind_text(update.get(), 3, identity.tenant_id);
+            internal::sqlite::bind_text(update.get(), 4, identity.conversation_id);
+            internal::sqlite::bind_uint64(update.get(), 5, input_sequence);
+            if (internal::sqlite::step(update.get()) != SQLITE_DONE || internal::sqlite::changes(db) != 1)
+                throw std::runtime_error("queued input claim conflict");
+            transaction.commit();
+            return QueuedTurnClaim{std::move(input), std::move(checkpoint), std::move(events)};
+        }
+        catch (const std::exception &failure)
+        {
+            if (e) *e = failure.what();
+            return std::nullopt;
+        }
     }
 }

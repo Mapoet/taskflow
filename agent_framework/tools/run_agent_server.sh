@@ -10,7 +10,7 @@ Usage: agent_framework/tools/run_agent_server.sh [options] [-- server options]
   --build-type TYPE      Release or Debug (default Release)
   --env-file PATH        Trusted shell env file (.env.server, then .env.ui)
   --port N               Server port (default 8080)
-  --fs-root PATH         Filesystem jail root (default repository root)
+  --fs-root PATH         Filesystem jail root (default: agent_framework/tools)
   --no-build             Start an existing binary
   --dry-run              Print redacted launch plan only
   -h, --help             Show help
@@ -21,7 +21,7 @@ ENV_FILE="${AGENT_SERVER_ENV_FILE:-}"
 BUILD_DIR="${AGENT_SERVER_BUILD_DIR:-${REPO_ROOT}/build-server}"
 BUILD_TYPE="${AGENT_SERVER_BUILD_TYPE:-Release}"
 PORT="${AGENT_SERVER_PORT:-8080}"
-FS_ROOT="${AGENT_FS_ROOT:-${REPO_ROOT}}"
+FS_ROOT="${AGENT_FS_ROOT:-${SCRIPT_DIR}}"
 NO_BUILD=0; DRY_RUN=0; EXTRA=()
 while (($#)); do case "$1" in
   --env-file) (($# >= 2)) || die '--env-file requires a path'; ENV_FILE="$2"; shift 2;;

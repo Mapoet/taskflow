@@ -62,14 +62,18 @@ int main()
         input_turn.input = "additional context";
         assert(input_engine.submit_user_input(input_turn, InputDisposition::AppendToCurrentTurn));
         assert(store.inputs(input_turn.identity, InputState::Consumed).size() == 1);
-        input_turn.input = "next task";
+        input_turn.input = "/next next task";
         assert(input_engine.submit_user_input(input_turn, InputDisposition::QueueNextTurn));
-        input_turn.input = "replacement task";
+        input_turn.input = "/replace replacement task";
         assert(input_engine.submit_user_input(input_turn, InputDisposition::InterruptAndReplace));
         auto queued_inputs = store.inputs(input_turn.identity, InputState::Queued);
         assert(queued_inputs.size() == 2);
         assert(queued_inputs[0].disposition == InputDisposition::QueueNextTurn);
+        assert(queued_inputs[0].content == "next task");
         assert(queued_inputs[1].disposition == InputDisposition::InterruptAndReplace);
+        assert(queued_inputs[1].content == "replacement task");
+        input_turn.input = "/next ";
+        assert(!input_engine.submit_user_input(input_turn, InputDisposition::QueueNextTurn));
         auto interrupted = store.load_turn(input_turn.identity, input_turn.turn_id);
         assert(interrupted && interrupted->phase == TurnPhase::Interrupted);
         assert(store.messages(input_turn.identity).size() == 2);
@@ -80,7 +84,35 @@ int main()
         assert(m.size() == 3);
         auto c = reopened.load_turn({"tenant", "conversation"}, "turn-1");
         assert(c && c->phase == TurnPhase::Completed);
-        assert(reopened.inputs({"tenant", "input-routing"}, InputState::Queued).size() == 2);
+        ConversationIdentity input_identity{"tenant", "input-routing"};
+        assert(reopened.inputs(input_identity, InputState::Queued).size() == 2);
+        ConversationEngine restarted(reopened, [](const TurnRequest &request, const TurnCheckpoint &) {
+            assert(request.profile == TaskExecutionProfile::Conversation);
+            assert(request.max_iterations == 10);
+            ModelTurnOutcome outcome; outcome.reason = ModelTurnStopReason::EndTurn;
+            outcome.candidate_answer = "queued complete"; return outcome;
+        });
+        auto drained = restarted.drain_queued_turns(input_identity, 10);
+        assert(drained.size() == 2);
+        assert(drained[0].error.empty() && drained[1].error.empty());
+        assert(drained[0].checkpoint.turn_id == "turn-input:input:4:turn");
+        assert(drained[1].checkpoint.turn_id == "turn-input:input:5:turn");
+        assert(reopened.inputs(input_identity, InputState::Queued).empty());
+        auto consumed = reopened.inputs(input_identity, InputState::Consumed);
+        assert(consumed.size() == 3);
+        assert(consumed[1].consumed_turn_id == drained[0].checkpoint.turn_id);
+        assert(consumed[2].consumed_turn_id == drained[1].checkpoint.turn_id);
+        assert(restarted.start_next_queued_turn(input_identity).error == "no_queued_input");
+        auto queued_messages = reopened.messages(input_identity);
+        assert(queued_messages.size() == 6);
+        for (std::size_t i = 1; i < queued_messages.size(); ++i)
+            assert(queued_messages[i].parent_id == queued_messages[i - 1].message_id);
+        auto queued_events = reopened.events(input_identity);
+        assert(queued_events.size() == 15);
+        assert(queued_events[5].event_type == "user_input_claimed");
+        assert(queued_events[6].event_type == "user_input_consumed");
+        assert(queued_events[7].event_type == "turn_created_from_queued_input");
+        assert(queued_events[8].event_type == "turn_started");
     }
     std::filesystem::remove(path, ec);
     ModelTurnOutcome invalid;
@@ -139,6 +171,33 @@ int main()
     auto race_path = std::filesystem::temp_directory_path() /
         ("conversation-race-" + std::to_string(agent_framework::internal::current_process_id()) + ".sqlite3");
     std::filesystem::remove(race_path, ec);
+
+    auto claim_path = std::filesystem::temp_directory_path() /
+        ("conversation-claim-" + std::to_string(agent_framework::internal::current_process_id()) + ".sqlite3");
+    std::filesystem::remove(claim_path, ec);
+    SQLiteConversationStore claim_seed_store(claim_path.string());
+    ConversationEngine claim_seed_engine(claim_seed_store,
+        [](const TurnRequest &, const TurnCheckpoint &) {
+            ModelTurnOutcome outcome; outcome.reason = ModelTurnStopReason::ToolRequested;
+            outcome.tool_receipt_refs = {"pending"}; return outcome;
+        });
+    TurnRequest claim_seed{{"tenant", "claim-race"}, "claim-seed", "seed",
+                           TaskExecutionProfile::Conversation, 2};
+    assert(claim_seed_engine.start_turn(claim_seed).error.empty());
+    claim_seed.input = "race payload";
+    assert(claim_seed_engine.submit_user_input(claim_seed, InputDisposition::QueueNextTurn));
+    SQLiteConversationStore claim_store_a(claim_path.string());
+    SQLiteConversationStore claim_store_b(claim_path.string());
+    std::optional<QueuedTurnClaim> claim_a, claim_b;
+    std::thread claimer_a([&] { claim_a = claim_store_a.consume_next_queued_input(claim_seed.identity); });
+    std::thread claimer_b([&] { claim_b = claim_store_b.consume_next_queued_input(claim_seed.identity); });
+    claimer_a.join(); claimer_b.join();
+    assert(claim_a.has_value() != claim_b.has_value());
+    assert(claim_seed_store.inputs(claim_seed.identity, InputState::Queued).empty());
+    assert(claim_seed_store.inputs(claim_seed.identity, InputState::Consumed).size() == 1);
+    assert(claim_seed_store.messages(claim_seed.identity).size() == 2);
+    assert(claim_seed_store.events(claim_seed.identity).size() == 7);
+    std::filesystem::remove(claim_path, ec);
     SQLiteConversationStore first_store(race_path.string());
     SQLiteConversationStore second_store(race_path.string());
     ConversationIdentity race_identity{"tenant", "race"};

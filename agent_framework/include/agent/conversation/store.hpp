@@ -34,6 +34,8 @@ namespace agent_framework::conversation
         virtual bool commit(ConversationCommit &, std::string * = nullptr) = 0;
         virtual std::vector<ConversationInput> inputs(const ConversationIdentity &,
                                                       InputState) = 0;
+        virtual std::optional<QueuedTurnClaim> consume_next_queued_input(
+            const ConversationIdentity &, std::string * = nullptr) = 0;
     };
 
     class SQLiteConversationStore final : public ConversationStore
@@ -54,6 +56,8 @@ namespace agent_framework::conversation
         std::optional<CompactBoundaryRecord> latest_boundary(const ConversationIdentity &) override;
         bool commit(ConversationCommit &, std::string * = nullptr) override;
         std::vector<ConversationInput> inputs(const ConversationIdentity &, InputState) override;
+        std::optional<QueuedTurnClaim> consume_next_queued_input(
+            const ConversationIdentity &, std::string * = nullptr) override;
 
     private:
         void *db_{nullptr};

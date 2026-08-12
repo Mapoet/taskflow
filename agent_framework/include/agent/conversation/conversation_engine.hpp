@@ -28,6 +28,9 @@ namespace agent_framework::conversation
     TurnResult resume_turn(const TurnRequest &, TurnContinuationReason);
     InputDisposition classify_input(std::string_view) const;
     bool submit_user_input(const TurnRequest &, InputDisposition, std::string * = nullptr);
+    TurnResult start_next_queued_turn(const ConversationIdentity &);
+    std::vector<TurnResult> drain_queued_turns(const ConversationIdentity &,
+                                              std::size_t limit = 100);
     SubscribeResult subscribe_events(const ConversationIdentity &, std::uint64_t after = 0,
                                      std::size_t capacity = 256);
 

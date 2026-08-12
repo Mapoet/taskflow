@@ -201,7 +201,18 @@ namespace agent_framework::conversation
     {
         if (d == InputDisposition::StatusQuery)
             return true;
-        auto c = store_.load_turn(r.identity, r.turn_id);
+        TurnRequest normalized = r;
+        if (d == InputDisposition::QueueNextTurn && normalized.input.rfind("/next ", 0) == 0)
+            normalized.input.erase(0, 6);
+        if (d == InputDisposition::InterruptAndReplace && normalized.input.rfind("/replace ", 0) == 0)
+            normalized.input.erase(0, 9);
+        if ((d == InputDisposition::QueueNextTurn || d == InputDisposition::InterruptAndReplace) &&
+            normalized.input.find_first_not_of(" \t\r\n") == std::string::npos)
+        {
+            if (e) *e = "queued_input_payload_required";
+            return false;
+        }
+        auto c = store_.load_turn(normalized.identity, normalized.turn_id);
         if (!c)
         {
             if (e)
@@ -220,14 +231,18 @@ namespace agent_framework::conversation
             ++c->revision;
             c->continuation = TurnContinuationReason::QueuedUserInput;
         }
-        auto prior = store_.messages(r.identity);
+        auto prior = store_.messages(normalized.identity);
         ConversationInput input;
-        input.identity = r.identity;
-        input.input_id = r.turn_id + ":input:" + std::to_string(expected + 1);
-        input.target_turn_id = r.turn_id;
-        input.content = r.input;
+        input.identity = normalized.identity;
+        input.input_id = normalized.turn_id + ":input:" + std::to_string(expected + 1);
+        input.target_turn_id = normalized.turn_id;
+        input.content = normalized.input;
         input.created_at = stamp();
         input.disposition = d;
+        input.profile = normalized.profile;
+        input.max_iterations = normalized.max_iterations;
+        input.max_input_tokens = normalized.max_input_tokens;
+        input.max_output_tokens = normalized.max_output_tokens;
         input.state = d == InputDisposition::AppendToCurrentTurn
             ? InputState::Consumed : InputState::Queued;
 
@@ -235,18 +250,18 @@ namespace agent_framework::conversation
         if (d == InputDisposition::AppendToCurrentTurn)
         {
             ConversationMessage message;
-            message.identity = r.identity;
+            message.identity = normalized.identity;
             message.message_id = input.input_id + ":message";
             message.parent_id = prior.empty() ? "" : prior.back().message_id;
-            message.turn_id = r.turn_id;
+            message.turn_id = normalized.turn_id;
             message.role = "user";
-            message.content = r.input;
+            message.content = normalized.input;
             message.created_at = input.created_at;
             messages.push_back(std::move(message));
         }
         RuntimeEventEnvelope event;
-        event.turn_id = r.turn_id;
-        event.run_id = r.turn_id;
+        event.turn_id = normalized.turn_id;
+        event.run_id = normalized.turn_id;
         event.durability = EventDurability::Durable;
         event.visibility = EventVisibility::Operations;
         event.event_type = "user_input_queued";
@@ -260,6 +275,42 @@ namespace agent_framework::conversation
         if (events_)
             events_->publish(commit.durable_events.front());
         return true;
+    }
+    TurnResult ConversationEngine::start_next_queued_turn(const ConversationIdentity &identity)
+    {
+        std::string error;
+        auto claim = store_.consume_next_queued_input(identity, &error);
+        if (!claim)
+            return {{}, {}, error.empty() ? "no_queued_input" : error};
+        for (const auto &event : claim->durable_events)
+        {
+            if (sink_) sink_(event);
+            if (events_) events_->publish(event);
+        }
+        TurnRequest request;
+        request.identity = identity;
+        request.turn_id = claim->checkpoint.turn_id;
+        request.input = claim->input.content;
+        request.profile = claim->input.profile;
+        request.max_iterations = claim->input.max_iterations;
+        request.max_input_tokens = claim->input.max_input_tokens;
+        request.max_output_tokens = claim->input.max_output_tokens;
+        return execute(request, claim->checkpoint);
+    }
+    std::vector<TurnResult> ConversationEngine::drain_queued_turns(
+        const ConversationIdentity &identity, std::size_t limit)
+    {
+        std::vector<TurnResult> results;
+        for (std::size_t i = 0; i < limit; ++i)
+        {
+            auto result = start_next_queued_turn(identity);
+            if (result.error == "no_queued_input") break;
+            results.push_back(result);
+            if (!result.error.empty() || (result.checkpoint.phase != TurnPhase::Completed &&
+                                           result.checkpoint.phase != TurnPhase::Failed))
+                break;
+        }
+        return results;
     }
     SubscribeResult ConversationEngine::subscribe_events(const ConversationIdentity &identity,
                                                           std::uint64_t after,

@@ -1344,6 +1344,17 @@ if(AGENT_BUILD_WEB_UI)
     endif()
 endif()
 
+# Live demos share a compile-time default FS jail: agent_framework/tools.
+# Overridable at runtime via AGENT_FS_ROOT / --fs-root.
+foreach(_agent_demo_target IN ITEMS
+        cli_agent_demo agent_server_demo tui_agent_demo imgui_agent_demo web_ui_demo
+        cli_agent_skills_demo cli_a2a_orchestrator_demo)
+    if(TARGET ${_agent_demo_target})
+        target_compile_definitions(${_agent_demo_target} PRIVATE
+            "AGENT_DEMO_TOOLS_ROOT=\"${CMAKE_CURRENT_SOURCE_DIR}/tools\"")
+    endif()
+endforeach()
+
 # 测试（WP1.1 LLM 轻量单测，无第三方框架）
 if(BUILD_TESTING)
     if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_phase4_operations_ui.cpp)

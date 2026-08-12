@@ -119,7 +119,11 @@ int main(int argc, char** argv) {
     set_env_if_missing("AGENT_EXPR_ENABLE", "1");
     set_env_if_missing("AGENT_DRAW_ENABLE", "1");
     set_env_if_missing("AGENT_VERIFIER", "on");
-    if(!fs_root.empty()) set_env("AGENT_FS_ROOT", fs_root);
+    if(!fs_root.empty()) {
+        set_env("AGENT_FS_ROOT", fs_root);
+    } else {
+        example::ensure_demo_fs_root_default();
+    }
     if(!skill_authoring_root.empty()) set_env("AGENT_SKILL_AUTHORING_DIR", skill_authoring_root);
     if(!verifier.empty()) set_env("AGENT_VERIFIER", verifier);
     if(!auth_token.empty()) set_env("AGENT_SERVER_AUTH_TOKEN", auth_token);
