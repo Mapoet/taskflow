@@ -10,6 +10,7 @@
 #include <agent/toolbus/fs_tools.hpp>
 #include <agent/toolbus/toolbus.hpp>
 #include <agent/toolbus/web_tools.hpp>
+#include <agent/conversation/production_bridge.hpp>
 
 #include <algorithm>
 #include <cstdint>
@@ -80,6 +81,8 @@ struct LiveRuntime {
     AgentConfig config;
     InputPolicyConfig input_policy;
     ExecutionTrustProfile trust_profile{ExecutionTrustProfile::Demo};
+    conversation::TaskExecutionProfile task_profile{
+        conversation::TaskExecutionProfile::Conversation};
     BootstrapResult bootstrap;
 };
 
@@ -91,6 +94,16 @@ inline ExecutionTrustProfile execution_trust_profile_from_env() {
     if(value == "production") return ExecutionTrustProfile::Production;
     throw std::invalid_argument(
         "AGENT_EXECUTION_PROFILE must be one of: demo, test, production");
+}
+
+inline conversation::TaskExecutionProfile task_execution_profile_from_env() {
+    const char* raw = std::getenv("AGENT_TASK_PROFILE");
+    const std::string value = raw && *raw ? raw : "conversation";
+    auto parsed = conversation::task_execution_profile(value);
+    if(!parsed) throw std::invalid_argument(
+        "AGENT_TASK_PROFILE must be one of: conversation, read_only_analysis, "
+        "artifact_delivery, code_change, external_action, professional");
+    return *parsed;
 }
 
 inline void require_direct_demo_execution(const LiveRuntime& runtime) {
@@ -270,6 +283,7 @@ inline LiveRuntime build_live_runtime(const LiveRuntimeOptions& options) {
 
     LiveRuntime runtime;
     runtime.trust_profile = execution_trust_profile_from_env();
+    runtime.task_profile = task_execution_profile_from_env();
     runtime.llm = std::make_shared<LLMClient>(LLMClient::from_env());
     runtime.llm->set_prompt_renderer(std::make_shared<PromptRenderer>());
     if(const char* strategy = std::getenv("AGENT_MEMORY_COMPACTOR");

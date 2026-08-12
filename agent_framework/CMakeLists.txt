@@ -288,6 +288,16 @@ endif()
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/run/types.cpp)
     list(APPEND AGENT_SOURCES src/run/types.cpp)
 endif()
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/conversation/types.cpp)
+    list(APPEND AGENT_SOURCES
+        src/conversation/types.cpp
+        src/conversation/sqlite_store.cpp
+        src/conversation/turn_state_machine.cpp
+        src/conversation/conversation_engine.cpp
+        src/conversation/context_projection.cpp
+        src/conversation/graph_turn_adapter.cpp
+        src/conversation/production_bridge.cpp)
+endif()
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/run/state_machine.cpp)
     list(APPEND AGENT_SOURCES src/run/state_machine.cpp)
 endif()
@@ -1729,6 +1739,14 @@ if(BUILD_TESTING)
         add_test(NAME phase4_task_closure COMMAND test_phase4_task_closure)
         set_tests_properties(phase4_task_closure PROPERTIES
             LABELS "phase4-offline;offline;phase4-harness;phase4-integration;phase4-security")
+    endif()
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_phase4_conversation_runtime.cpp)
+        add_executable(test_phase4_conversation_runtime
+            tests/test_phase4_conversation_runtime.cpp)
+        target_link_libraries(test_phase4_conversation_runtime PRIVATE agent_framework)
+        add_test(NAME phase4_conversation_runtime COMMAND test_phase4_conversation_runtime)
+        set_tests_properties(phase4_conversation_runtime PROPERTIES
+            LABELS "phase4-offline;offline;phase4-conversation;phase4-durable;phase4-integration;phase4-security")
     endif()
     if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_phase4_golden_path_closure.cpp)
         add_executable(test_phase4_golden_path_closure tests/test_phase4_golden_path_closure.cpp)

@@ -1,4 +1,4 @@
-结论先说：`agent_framework` 已经从“基于 Taskflow 的 ReAct Agent”演化成一个相当完整的 Agent 生产运行时原型。它最强的部分是确定性控制面、持久化契约、审批/验收/恢复设计；当前最大的短板不是功能少，而是功能面过宽、旧循环与新 Harness 双轨并存、完成判定尚未完全统一。
+结论先说：`agent_framework` 已经从“基于 Taskflow 的 ReAct Agent”演化成一个相当完整的 Agent 生产运行时原型。它最强的部分是确定性控制面、持久化契约、审批/验收/恢复设计；当前最大的短板不是功能少，而是功能面过宽，以及 Conversation/Turn、工具生命周期和 Harness 之间仍存在兼容适配层。GPC/GPW 已统一任务完成权威，CTR 又建立 typed Conversation/Turn control plane；因此“完成判定尚未统一”已不再是当前事实。
 
 若目标是“任务收敛与快速闭环”，下一阶段不应继续横向增加模块，而应把所有生产入口压缩到一条不可绕过的纵向路径：
 
@@ -173,7 +173,7 @@ Intake
 - `MODEL_FINAL`
 - `VERIFIED_COMPLETE`
 
-生产入口必须只承认第二种。
+GPW 已使生产入口只承认第二种；CTR 又规定任何 ModelTurnOutcome 都不能携带任务完成权威。当前剩余工作是让实时入口从兼容 React adapter 完全迁移到 ConversationEngine 和统一 Tool Lifecycle，而不是再次实现 completion gate。
 
 ### 4.2 终止、失败和完成混在一起
 
