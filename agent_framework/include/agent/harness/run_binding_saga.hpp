@@ -8,7 +8,7 @@
 #include <string_view>
 #include <vector>
 
-#include "agent/harness/store.hpp"
+#include "agent/harness/runtime.hpp"
 #include "agent/run/store.hpp"
 
 namespace agent_framework::harness {
@@ -35,7 +35,7 @@ struct RunBindingResult {
     std::string error;
 };
 
-class SQLiteRunHarnessSaga final {
+class SQLiteRunHarnessSaga final : public HarnessCheckpointObserver {
 public:
     SQLiteRunHarnessSaga(std::string journal_path, run::RunStore& runs,
                          HarnessStore& harnesses);
@@ -48,6 +48,8 @@ public:
     RunBindingResult reconcile(std::string_view binding_id);
     std::optional<RunHarnessBinding> load(std::string_view binding_id);
     std::vector<RunHarnessBinding> list_unresolved(std::size_t limit);
+    bool committed(const HarnessCheckpoint& checkpoint, std::string_view event_type,
+                   std::string* error = nullptr) override;
 
 private:
     RunBindingResult advance(std::string_view binding_id, RunBindingState expected,

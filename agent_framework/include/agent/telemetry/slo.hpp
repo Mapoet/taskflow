@@ -34,6 +34,15 @@ struct WindowedMetricSample {
     double value{0.0};
     std::uint64_t unix_time_seconds{0};
 };
+struct QuantileObjective {
+    std::string id;
+    std::string metric_name;
+    double quantile{0.95};
+    double threshold{0.0};
+    std::uint64_t window_seconds{3600};
+    std::uint64_t minimum_samples{1};
+    bool release_blocking{true};
+};
 struct ErrorBudgetObjective {
     std::string id;
     std::string metric_name;
@@ -42,6 +51,7 @@ struct ErrorBudgetObjective {
     std::uint64_t window_seconds{3600};
     double maximum_burn_rate{1.0};
     bool release_blocking{true};
+    std::vector<std::uint64_t> alert_windows_seconds;
 };
 struct ErrorBudgetEvaluation {
     std::string objective_id;
@@ -50,6 +60,7 @@ struct ErrorBudgetEvaluation {
     double burn_rate{0.0};
     std::uint64_t samples{0};
     std::string outcome;
+    std::map<std::uint64_t, double> window_burn_rates;
 };
 
 class SloRegistry {
@@ -57,11 +68,15 @@ public:
     bool register_objective(SloObjective objective, std::string* error = nullptr);
     SloReleaseDecision evaluate(const std::vector<MetricResult>& metrics) const;
     bool register_error_budget(ErrorBudgetObjective objective, std::string* error = nullptr);
+    bool register_quantile(QuantileObjective objective, std::string* error = nullptr);
+    SloReleaseDecision evaluate_quantiles(const std::vector<WindowedMetricSample>& samples,
+                                          std::uint64_t now_seconds) const;
     std::pair<bool, std::vector<ErrorBudgetEvaluation>> evaluate_error_budgets(
         const std::vector<WindowedMetricSample>& samples,
         std::uint64_t now_seconds) const;
 private:
     std::map<std::string, SloObjective> objectives_;
     std::map<std::string, ErrorBudgetObjective> error_budgets_;
+    std::map<std::string, QuantileObjective> quantiles_;
 };
 }  // namespace agent_framework::telemetry

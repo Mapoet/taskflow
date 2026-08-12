@@ -35,8 +35,9 @@ std::optional<HarnessStageResult> ManifestHarnessStagePort::reconcile(
 }
 
 Phase4ProductionComposition::Phase4ProductionComposition(
-    HarnessStore& harness_store, run::RunStore& run_store)
-    : harness_store_(harness_store), durable_runs_(run_store) {}
+    HarnessStore& harness_store, run::RunStore& run_store,
+    std::shared_ptr<HarnessCheckpointObserver> observer)
+    : harness_store_(harness_store), durable_runs_(run_store), observer_(std::move(observer)) {}
 
 bool Phase4ProductionComposition::bind(
     HarnessStage stage, std::shared_ptr<HarnessStagePort> port) {
@@ -76,7 +77,7 @@ std::optional<Phase4HarnessRuntime> Phase4ProductionComposition::build(std::stri
             : report.issues.front().code + ":" + report.issues.front().message;
         return std::nullopt;
     }
-    return Phase4HarnessRuntime(harness_store_, std::move(ports_));
+    return Phase4HarnessRuntime(harness_store_, std::move(ports_), observer_);
 }
 
 }  // namespace agent_framework::harness

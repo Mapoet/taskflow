@@ -24,7 +24,7 @@
 
 ```bash
 doxygen Doxyfile
-继续进行下一阶段,进行结合已有状态进行系统规划,全覆盖功能实现,以及完备性且系统性测试
+持续追踪 '/home/Mapoet/projects/taskflow/agent_framework/docs/guides/phase-4-status.md' '/home/Mapoet/projects/taskflow/agent_framework/docs/guides/phase-4-cognition-observability-closure.md' '/home/Mapoet/projects/taskflow/agent_framework/docs/guides/phase-4-residual-closure-plan.md' 等文件中实现短板 ,继续进行下一阶段,进行结合已有状态进行系统规划,全覆盖功能实现,以及完备性且系统性测试
 ```
 
 生成的文档将在 `api/html/` 目录中。

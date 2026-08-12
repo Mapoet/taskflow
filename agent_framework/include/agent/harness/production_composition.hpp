@@ -46,7 +46,8 @@ private:
 
 class Phase4ProductionComposition {
 public:
-    Phase4ProductionComposition(HarnessStore& harness_store, run::RunStore& run_store);
+    Phase4ProductionComposition(HarnessStore& harness_store, run::RunStore& run_store,
+                                std::shared_ptr<HarnessCheckpointObserver> observer = {});
     bool bind(HarnessStage stage, std::shared_ptr<HarnessStagePort> port);
     ProductionCompositionReport validate() const;
     std::optional<Phase4HarnessRuntime> build(std::string* error = nullptr);
@@ -55,6 +56,7 @@ private:
     HarnessStore& harness_store_;
     run::DurableRunCoordinator durable_runs_;
     HarnessPortRegistry ports_;
+    std::shared_ptr<HarnessCheckpointObserver> observer_;
 };
 
 }  // namespace agent_framework::harness

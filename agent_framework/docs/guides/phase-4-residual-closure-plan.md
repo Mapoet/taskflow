@@ -1,7 +1,7 @@
 # Phase 4 v2 Residual Closure：生产集成闭环计划
 
 **计划版本**：`phase4-v2-residual-r1`  
-**状态**：approved / executing  
+**状态**：approved / executing；PC0–PC6I、COBS0–COBS9 已并入当前事实基线
 **批准**：用户于 2026-08-11 明确批准 `R0→R7` 连续实施，测试通过后自动进入下一批  
 **上游计划**：[Phase 4 v2 计划](./phase-4-plan-v2.md)  
 **事实基线**：[Phase 4 状态](./phase-4-status.md)  
@@ -9,9 +9,11 @@
 
 ## 1. 立项事实
 
-F1L–F8U 已建立 Role Runtime、认知规划、多层记忆、专业验收、修复规划、Judge、Live 认证控制面和统一 UI。当前 `phase4-offline` 42/42、`phase3-offline` 14/14 通过，但这些证据主要证明单个 workflow 和确定性契约。
+F1L–F8U 已建立 Role Runtime、认知规划、多层记忆、专业验收、修复规划、Judge、Live 认证控制面和统一 UI；后续 PC/COBS/SIC 已补齐 11-stage production composition、typed adapters、durable input repository、生产 ToolBus Investigator、闭环修复审批与扩展 telemetry/SLO。2026-08-12 的 SIC9 全量 `phase4-offline` 为 **70/70 PASS**，但仍只证明 offline-control，不替代 production certification。
 
-现有 `phase4_vertical` 只手工拼接 Memory View、Plan、Run 和预制五层 evidence；它没有调用 Cognition、Approval、实际 Executor、Remediation、二次 Assurance、Judge 或 Store-backed UI projection。因此 Phase 4 尚未满足“一个不可绕过、可恢复、能实际修复和复验的专业 Harness”这一全局完成定义。
+历史 `phase4_vertical` 仍只是早期手工 fixture；当前另有不可缺阶段的 production composition，但 stage checkpoint 尚未自动绑定 Run/Harness saga，Approval/Execution/Operations 标准边界实现及实际修复→新 artifact→证据失效→复验仍未完全闭合。因此历史 vertical 不能作为当前 production composition 的端到端证明。
+
+SIC0–SIC8 的当前增量已完成以下本地控制面收口：每次 Harness checkpoint 自动通知 Run/Harness saga；Cognition 使用摘要/身份/策略/有效期绑定的 ApprovalStore resolver；新增 store-backed Intake、Approval、Artifact Execution、Operations typed boundary adapters；finding 路径调整为 `Remediation → PlanApproval → Reexecution → Reverification`，并在进入修复时清除旧 approval/report pin；artifact lineage 与有界失败路径有系统测试；telemetry spool 具备 backoff、容量、重试上限、dead-letter、retention，SLO 具备 quantile 与 multi-window burn-rate。SIC9 已完成本地全量门禁；production Live 仍须单独认证。
 
 Residual Closure 不新增平行演示系统，而是把现有模块收敛到同一生产路径。
 

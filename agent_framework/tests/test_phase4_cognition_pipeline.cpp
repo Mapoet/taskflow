@@ -1,8 +1,11 @@
 #include <algorithm>
 #include <cassert>
+#include <filesystem>
 #include <memory>
 
 #include "phase4_cognition_pipeline_test_support.hpp"
+#include "agent/approval/store.hpp"
+#include "agent/internal/platform_io.hpp"
 
 namespace {
 using namespace phase4_cognition_test;
@@ -229,6 +232,67 @@ int main() {
         const auto approved = workflow.run(task, subject(task), options);
         assert(approved.state == CognitionPipelineState::Approved);
         assert(approved.checkpoint.approval_decision_id == "approval-42");
+    }
+    {
+        // Production resolution is store-backed and binds identity, request digest,
+        // policy revision, plan digest, decision state and expiry.
+        Fixture fixture;
+        script_success(fixture.model, false, true);
+        MultiStageCognitionWorkflow workflow(
+            fixture.views, fixture.investigators, fixture.evidence, fixture.plans,
+            fixture.checkpoints, fixture.model);
+        CognitionPipelineOptions options;
+        options.pipeline_id = "pipeline-store-approval";
+        const auto task = intake("task-store-approval");
+        const auto waiting = workflow.run(task, subject(task), options);
+        assert(waiting.state == CognitionPipelineState::AwaitingApproval && waiting.plan);
+        const auto root = std::filesystem::temp_directory_path() /
+            ("agent-phase4-cognition-approval-" +
+             std::to_string(internal::current_process_id()));
+        std::error_code ec;
+        std::filesystem::remove_all(root, ec);
+        std::filesystem::create_directories(root);
+        approval::SQLiteApprovalStore approvals((root / "approval.sqlite3").string());
+        approval::ApprovalRequest request;
+        request.metadata = task.metadata;
+        request.approval_id = "approval-store-1";
+        request.request_kind = "plan";
+        request.requester_id = "requester-a";
+        request.scope = "plan:" + task.metadata.identity.plan_id;
+        request.reason = "high-risk plan";
+        request.risk_level = "high";
+        request.policy_revision = "policy-v1";
+        request.plan_digest = planning::encode(*waiting.plan).at("canonical_digest");
+        request.created_at = "2026-08-12T00:00:00Z";
+        request.expires_at = "2026-08-13T00:00:00Z";
+        assert(approvals.put_request(request));
+        approval::ApprovalDecision decision;
+        decision.metadata = request.metadata;
+        decision.approval_id = request.approval_id;
+        decision.request_digest = approval::encode(request).at("canonical_digest");
+        decision.reviewer_id = "reviewer-a";
+        decision.decision = approval::Decision::Approved;
+        decision.scope = request.scope;
+        decision.reason = "reviewed";
+        decision.policy_revision = request.policy_revision;
+        decision.plan_digest = request.plan_digest;
+        decision.decided_at = "2026-08-12T01:00:00Z";
+        decision.expires_at = request.expires_at;
+        assert(approvals.decide(decision, 0));
+        options.approval_decision_id = request.approval_id;
+        StoreBackedPlanApprovalResolver resolver(approvals);
+        options.approval_resolver = &resolver;
+        options.now = [] { return std::string("2026-08-12T02:00:00Z"); };
+        assert(workflow.run(task, subject(task), options).state ==
+               CognitionPipelineState::Approved);
+        std::string approval_error;
+        assert(!options.approval_resolver->approved(
+            intake("other-task").metadata.identity, request.plan_digest,
+            request.approval_id, "2026-08-12T02:00:00Z", &approval_error));
+        assert(!options.approval_resolver->approved(
+            task.metadata.identity, request.plan_digest, request.approval_id,
+            "2026-08-14T00:00:00Z", &approval_error));
+        std::filesystem::remove_all(root, ec);
     }
     return 0;
 }

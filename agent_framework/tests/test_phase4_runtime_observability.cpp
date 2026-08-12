@@ -149,20 +149,52 @@ int main() {
     assert(budget_ok.first&&budget_ok.second.front().outcome=="passed");
     auto budget_bad=slos.evaluate_error_budgets({{"request.latency",50,100},{"request.latency",180,101}},110);
     assert(!budget_bad.first&&budget_bad.second.front().burn_rate>1.0);
+    assert(slos.register_error_budget({"multi-window", "request.errors", 0.90, 0.0,
+        3600, 1.0, true, {60, 300}}));
+    auto multi_window = slos.evaluate_error_budgets(
+        {{"request.errors", 0, 100}, {"request.errors", 1, 109}}, 110);
+    assert(!multi_window.first);
+    assert(multi_window.second.back().window_burn_rates.size() == 2);
+    assert(slos.register_quantile({"p95", "request.duration", 0.95, 100.0, 60, 3, true}));
+    assert(slos.evaluate_quantiles({{"request.duration",10,100},{"request.duration",20,101},
+        {"request.duration",90,102}},110).allowed);
+    assert(!slos.evaluate_quantiles({{"request.duration",10,100},{"request.duration",20,101},
+        {"request.duration",190,102}},110).allowed);
 
     const auto spool_path = root / "telemetry-spool.sqlite3";
     span.attributes.erase("prompt");
     auto toggle = std::make_shared<ToggleSink>();
+    std::uint64_t recovery_clock = 1000;
+    telemetry::TelemetrySpoolOptions recovery_options;
+    recovery_options.now_ms = [&] { return recovery_clock; };
     {
-        telemetry::SQLiteTelemetrySpool spool(spool_path.string(), toggle);
+        telemetry::SQLiteTelemetrySpool spool(spool_path.string(), toggle, recovery_options);
         assert(spool.export_span(span)); assert(spool.export_metric(metric));
         assert(spool.pending() == 2 && !spool.flush() && spool.pending() == 2);
     }
     toggle->accept = true;
+    recovery_clock += recovery_options.initial_backoff_ms;
     {
-        telemetry::SQLiteTelemetrySpool recovered(spool_path.string(), toggle);
+        telemetry::SQLiteTelemetrySpool recovered(spool_path.string(), toggle, recovery_options);
         assert(recovered.pending() == 2 && recovered.flush() && recovered.pending() == 0);
     }
+    const auto dead_path = root / "telemetry-dead.sqlite3";
+    std::uint64_t clock = 1000;
+    toggle->accept = false;
+    telemetry::TelemetrySpoolOptions spool_options;
+    spool_options.maximum_attempts = 2;
+    spool_options.initial_backoff_ms = 10;
+    spool_options.maximum_backoff_ms = 10;
+    spool_options.maximum_records = 1;
+    spool_options.now_ms = [&] { return clock; };
+    telemetry::SQLiteTelemetrySpool bounded(dead_path.string(), toggle, spool_options);
+    assert(bounded.export_metric(metric));
+    assert(!bounded.export_metric(metric));
+    assert(!bounded.flush() && bounded.dead_letters() == 0);
+    ++clock;
+    assert(bounded.flush());  // retry is not yet eligible
+    clock += 10;
+    assert(!bounded.flush() && bounded.dead_letters() == 1);
     std::filesystem::remove_all(root, ec);
     return 0;
 }

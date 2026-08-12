@@ -444,6 +444,25 @@ void fill_result(CognitionPipelineResult& result, const CognitionCheckpoint& che
 
 }  // namespace
 
+bool StoreBackedPlanApprovalResolver::approved(
+    const contracts::ContractIdentity& identity,std::string_view plan_digest,
+    std::string_view decision_id,std::string_view now,std::string* error) {
+    const auto decision=store_.latest_decision(decision_id);
+    const auto request=store_.request(decision_id);
+    if(!decision||!request) { if(error)*error="approval request or decision not found";return false; }
+    const auto request_digest=approval::encode(*request).at("canonical_digest").get<std::string>();
+    const bool identity_ok=request->metadata.identity.tenant_id==identity.tenant_id&&
+        request->metadata.identity.task_id==identity.task_id&&
+        (identity.run_id.empty()||request->metadata.identity.run_id==identity.run_id);
+    const bool valid=identity_ok&&decision->decision==approval::Decision::Approved&&
+        decision->request_digest==request_digest&&request->plan_digest==plan_digest&&
+        decision->plan_digest==plan_digest&&decision->policy_revision==request->policy_revision&&
+        (decision->expires_at.empty()||now<decision->expires_at)&&
+        (request->expires_at.empty()||now<request->expires_at);
+    if(!valid&&error)*error="approval identity, digest, policy, state or expiry mismatch";
+    return valid;
+}
+
 std::string cognition_stage_name(CognitionStage value) {
     return kStageNames.at(static_cast<std::size_t>(value));
 }
@@ -751,9 +770,13 @@ CognitionPipelineResult MultiStageCognitionWorkflow::run(
             emit("plan_revision_requested", CognitionStage::Revision,
                  {{"request_digest", contracts::embedded_digest(
                      options.plan_revision_request).value_or("")}});
-        } else if(!options.approval_decision_id.empty() && options.approval_validator &&
-                  options.approval_validator(checkpoint.plan_digest,
-                                             options.approval_decision_id)) {
+        } else if(!options.approval_decision_id.empty() &&
+                  ((options.approval_resolver&&options.approval_resolver->approved(
+                      intake.metadata.identity,checkpoint.plan_digest,
+                      options.approval_decision_id,now(),nullptr))||
+                   (!options.approval_resolver&&options.approval_validator&&
+                    options.approval_validator(checkpoint.plan_digest,
+                                               options.approval_decision_id)))) {
             checkpoint.state = CognitionPipelineState::Approved;
             checkpoint.approval_decision_id = options.approval_decision_id;
             if(!persist()) return finish_result();

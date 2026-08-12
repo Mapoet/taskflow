@@ -185,4 +185,33 @@ std::vector<RunHarnessBinding> SQLiteRunHarnessSaga::list_unresolved(std::size_t
     return result;
 }
 
+bool SQLiteRunHarnessSaga::committed(const HarnessCheckpoint& checkpoint,
+                                     std::string_view event_type,
+                                     std::string* error) {
+    const auto& identity=checkpoint.metadata.identity;
+    if(identity.run_id.empty()) { if(error)*error="harness checkpoint has no run identity"; return false; }
+    const auto run=runs_.load(identity.run_id);
+    const auto harness=harnesses_.load(identity.tenant_id,checkpoint.harness_id);
+    if(!run||!harness||harness->revision!=checkpoint.revision) {
+        if(error)*error="run or committed harness checkpoint is unavailable"; return false;
+    }
+    RunHarnessBinding binding;
+    binding.binding_id=checkpoint.harness_id+":"+std::to_string(checkpoint.revision)+":"+
+        std::string(event_type);
+    binding.tenant_id=identity.tenant_id;binding.run_id=identity.run_id;
+    binding.harness_id=checkpoint.harness_id;binding.stage=checkpoint.next_stage;
+    binding.run_revision=run->revision;binding.run_digest=run_digest(run->checkpoint);
+    binding.harness_revision=harness->revision;binding.harness_digest=harness->digest;
+    auto prepared=prepare(binding);
+    if(!prepared.committed) {
+        const auto existing=load(binding.binding_id);
+        if(!existing) { if(error)*error=prepared.error; return false; }
+    }
+    const auto result=reconcile(binding.binding_id);
+    if(!result.committed||result.state==RunBindingState::ManualReview) {
+        if(error)*error=result.error.empty()?"run/harness binding failed":result.error;return false;
+    }
+    return true;
+}
+
 }  // namespace agent_framework::harness

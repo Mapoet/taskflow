@@ -76,6 +76,14 @@ private:
     std::map<HarnessStage, std::shared_ptr<HarnessStagePort>> ports_;
 };
 
+class HarnessCheckpointObserver {
+public:
+    virtual ~HarnessCheckpointObserver() = default;
+    virtual bool committed(const HarnessCheckpoint& checkpoint,
+                           std::string_view event_type,
+                           std::string* error = nullptr) = 0;
+};
+
 struct HarnessStart {
     contracts::ContractMetadata metadata;
     std::string harness_id;
@@ -104,7 +112,8 @@ struct HarnessRunResult {
 
 class Phase4HarnessRuntime {
 public:
-    Phase4HarnessRuntime(HarnessStore& store, HarnessPortRegistry ports);
+    Phase4HarnessRuntime(HarnessStore& store, HarnessPortRegistry ports,
+                         std::shared_ptr<HarnessCheckpointObserver> observer = {});
 
     HarnessRunResult run(const HarnessStart& start,
                          const HarnessRuntimeOptions& options = {});
@@ -122,6 +131,7 @@ private:
 
     HarnessStore& store_;
     HarnessPortRegistry ports_;
+    std::shared_ptr<HarnessCheckpointObserver> observer_;
 };
 
 }  // namespace agent_framework::harness

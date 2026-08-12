@@ -71,8 +71,10 @@ std::optional<Phase4HarnessRuntime> DefaultProductionCompositionBuilder::build(
         *dependencies_.judge_workflow, *dependencies_.input_assembler,
         resolver, revision, config);
 
+    auto saga_observer=std::shared_ptr<HarnessCheckpointObserver>(
+        dependencies_.run_harness_saga, [](HarnessCheckpointObserver*){});
     Phase4ProductionComposition composition(*dependencies_.harness_store,
-                                            *dependencies_.run_store);
+                                            *dependencies_.run_store, saga_observer);
     composition.bind(HarnessStage::Intake, port(boundary.intake, observer));
     composition.bind(HarnessStage::Cognition, port(cognition, observer));
     composition.bind(HarnessStage::PlanApproval, port(boundary.approval, observer));

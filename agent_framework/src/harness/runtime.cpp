@@ -118,7 +118,7 @@ HarnessStage next_linear(HarnessStage stage) {
         case HarnessStage::PlanApproval: return HarnessStage::Execution;
         case HarnessStage::Execution: return HarnessStage::MemoryUpdate;
         case HarnessStage::MemoryUpdate: return HarnessStage::Assurance;
-        case HarnessStage::Remediation: return HarnessStage::Reexecution;
+        case HarnessStage::Remediation: return HarnessStage::PlanApproval;
         case HarnessStage::Reexecution: return HarnessStage::Reverification;
         case HarnessStage::Judge: return HarnessStage::Operations;
         case HarnessStage::Operations:
@@ -178,8 +178,9 @@ std::vector<HarnessStage> HarnessPortRegistry::bound_stages() const {
     return stages;
 }
 
-Phase4HarnessRuntime::Phase4HarnessRuntime(HarnessStore& store, HarnessPortRegistry ports)
-    : store_(store), ports_(std::move(ports)) {}
+Phase4HarnessRuntime::Phase4HarnessRuntime(HarnessStore& store, HarnessPortRegistry ports,
+                                           std::shared_ptr<HarnessCheckpointObserver> observer)
+    : store_(store), ports_(std::move(ports)), observer_(std::move(observer)) {}
 
 HarnessRunResult Phase4HarnessRuntime::run(const HarnessStart& start,
                                            const HarnessRuntimeOptions& options) {
@@ -212,6 +213,8 @@ HarnessRunResult Phase4HarnessRuntime::run(const HarnessStart& start,
             return resume(start.metadata.identity.tenant_id, start.harness_id, options);
         return {HarnessState::Failed, checkpoint, "harness_create_failed", commit.error};
     }
+    if(observer_) { std::string error; if(!observer_->committed(checkpoint,"harness_created",&error))
+        return {HarnessState::ManualReview,checkpoint,"checkpoint_observer_failed",error}; }
     return drive(std::move(checkpoint), options);
 }
 
@@ -246,8 +249,15 @@ HarnessRunResult Phase4HarnessRuntime::drive(HarnessCheckpoint checkpoint,
         checkpoint.updated_at = now_value(options);
         auto commit = store_.compare_exchange(
             checkpoint, expected,
-            event_for(checkpoint, std::move(event_type), std::move(payload), options));
-        if(commit) return true;
+            event_for(checkpoint, event_type, std::move(payload), options));
+        if(commit) {
+            if(observer_) { std::string error; if(!observer_->committed(checkpoint,event_type,&error)) {
+                checkpoint.state=HarnessState::ManualReview;
+                checkpoint.terminal_reason="checkpoint_observer_failed:"+error;
+                return false;
+            }}
+            return true;
+        }
         checkpoint.revision = expected;
         checkpoint.state = HarnessState::ManualReview;
         checkpoint.terminal_reason = commit.status == HarnessStoreStatus::RevisionConflict
@@ -373,6 +383,10 @@ HarnessRunResult Phase4HarnessRuntime::drive(HarnessCheckpoint checkpoint,
                         checkpoint.next_stage = checkpoint.judge_required
                             ? HarnessStage::Judge : HarnessStage::Operations;
                     }
+                } else if(stage == HarnessStage::PlanApproval &&
+                          checkpoint.remediation_cycle > 0 &&
+                          !checkpoint.unresolved_findings.empty()) {
+                    checkpoint.next_stage = HarnessStage::Reexecution;
                 } else {
                     checkpoint.next_stage = next_linear(stage);
                 }
@@ -391,6 +405,10 @@ HarnessRunResult Phase4HarnessRuntime::drive(HarnessCheckpoint checkpoint,
                     checkpoint.terminal_reason = "remediation_cycle_limit";
                 } else {
                     ++checkpoint.remediation_cycle;
+                    // An artifact finding invalidates the old acceptance closure and
+                    // authorization. A new remediation plan must be approved and verified.
+                    checkpoint.pins.acceptance_report_digest.clear();
+                    checkpoint.pins.approval_decision_id.clear();
                     checkpoint.next_stage = HarnessStage::Remediation;
                 }
                 break;

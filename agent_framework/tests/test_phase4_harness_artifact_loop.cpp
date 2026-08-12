@@ -1,4 +1,5 @@
 #include <cassert>
+#include <algorithm>
 #include <filesystem>
 #include <memory>
 
@@ -65,6 +66,12 @@ int main() {
     assert(initial && repaired);
     assert(repaired->receipt.manifest.parent_manifest_digest == initial->receipt.manifest.manifest_digest);
     assert(repaired->receipt.manifest.manifest_digest != initial->receipt.manifest.manifest_digest);
+    const auto approval_count = std::count_if(result.checkpoint.stage_records.begin(),
+        result.checkpoint.stage_records.end(), [](const auto& record) {
+            return record.stage == HarnessStage::PlanApproval &&
+                   record.outcome == StageOutcome::Succeeded;
+        });
+    assert(approval_count == 2);  // initial plan and remediation plan are independently gated
 
     SQLiteHarnessStore failed_store((root / "failed-harness.sqlite3").string());
     SQLiteArtifactJournal failed_journal((root / "failed-artifacts.sqlite3").string());

@@ -4,7 +4,7 @@
 **批准日期**：2026-08-12  
 **原则**：LLM cognitive plane 负责调查、综合、规划与解释；deterministic control plane 负责权限、预算、CAS、审批、遥测隐私及发布门禁。
 
-**实施状态**：COBS0–COBS9 离线控制面已实施；`phase4-offline` 69/69 PASS。真实外部 Collector/provider 成本对账仍属于 production Live certification。
+**实施状态**：COBS0–COBS8 的本地控制面已实施；SIC8 又补齐 SQLite spool 的指数退避、容量背压、重试上限、死信、保留期，以及 quantile 与多窗口 burn-rate release gate。lease/jitter、真实外部 Collector/provider 成本对账仍属于 production-like/Live certification，不能由离线测试替代。
 
 ## 基线与完成定义
 

@@ -14,6 +14,7 @@
 
 #include "agent/llm_runtime/runtime.hpp"
 #include "agent/planning/cognition_workflow.hpp"
+#include "agent/approval/store.hpp"
 
 namespace agent_framework::planning {
 
@@ -231,9 +232,28 @@ struct CognitionPipelineOptions {
     std::string approval_decision_id;
     std::function<bool(std::string_view plan_digest,
                        std::string_view decision_id)> approval_validator;
+    class PlanApprovalResolver* approval_resolver{nullptr};
     std::function<bool()> cancelled;
     std::function<std::string()> now;
     std::function<void(const CognitionPipelineEvent&)> event_sink;
+};
+
+class PlanApprovalResolver {
+public:
+    virtual ~PlanApprovalResolver() = default;
+    virtual bool approved(const contracts::ContractIdentity& identity,
+                          std::string_view plan_digest,
+                          std::string_view decision_id,
+                          std::string_view now,
+                          std::string* error = nullptr) = 0;
+};
+
+class StoreBackedPlanApprovalResolver final : public PlanApprovalResolver {
+public:
+    explicit StoreBackedPlanApprovalResolver(approval::ApprovalStore& store) : store_(store) {}
+    bool approved(const contracts::ContractIdentity&, std::string_view, std::string_view,
+                  std::string_view, std::string*) override;
+private: approval::ApprovalStore& store_;
 };
 
 struct CognitionPipelineResult {
