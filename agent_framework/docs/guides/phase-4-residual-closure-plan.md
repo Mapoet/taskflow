@@ -11,7 +11,7 @@
 
 F1L–F8U 已建立 Role Runtime、认知规划、多层记忆、专业验收、修复规划、Judge、Live 认证控制面和统一 UI；后续 PC/COBS/SIC 已补齐 11-stage production composition、typed adapters、durable input repository、生产 ToolBus Investigator、闭环修复审批与扩展 telemetry/SLO。2026-08-12 的 SIC9 全量 `phase4-offline` 为 **70/70 PASS**，但仍只证明 offline-control，不替代 production certification。
 
-历史 `phase4_vertical` 仍只是早期手工 fixture，不能作为当前 production composition 的端到端证明。SIC 已关闭 stage checkpoint→Run/Harness saga、Approval/Execution/Operations 标准边界，以及修复→二次审批→新 artifact→旧证据失效→复验的本地控制面；当前最短板转为真实 production Oracle coverage、生产校准/benchmark 与外部 Live 认证。
+历史 `phase4_vertical` 仍只是早期手工 fixture，不能作为当前 production composition 的端到端证明。SIC 已关闭修复闭环，PAO 已补 production Oracle 控制面，CSAC 已补 WAL/FULL coordination journal、五类 Store revision/digest participant 与生产 mandatory gate。当前最短板转为 coordinator 主导的 command participant（Approval/Memory/Assurance/Artifact/Input/Judge）、生产校准/benchmark 与外部 Live 认证。
 
 SIC0–SIC8 的当前增量已完成以下本地控制面收口：每次 Harness checkpoint 自动通知 Run/Harness saga；Cognition 使用摘要/身份/策略/有效期绑定的 ApprovalStore resolver；新增 store-backed Intake、Approval、Artifact Execution、Operations typed boundary adapters；finding 路径调整为 `Remediation → PlanApproval → Reexecution → Reverification`，并在进入修复时清除旧 approval/report pin；artifact lineage 与有界失败路径有系统测试；telemetry spool 具备 backoff、容量、重试上限、dead-letter、retention，SLO 具备 quantile 与 multi-window burn-rate。SIC9 已完成本地全量门禁；production Live 仍须单独认证。
 

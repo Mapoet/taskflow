@@ -14,6 +14,7 @@ ProductionDependencyReport validate_production_dependencies(
     };
     require(d.harness_store, "harness_store"); require(d.run_store, "run_store");
     require(d.run_harness_saga, "run_harness_saga"); require(d.input_repository, "input_repository");
+    require(d.cross_store_coordinator, "cross_store_coordinator");
     require(d.plan_store, "plan_store"); require(d.llm_store != nullptr, "llm_store");
     require(d.role_runtime != nullptr, "role_runtime"); require(d.telemetry != nullptr, "telemetry");
     require(d.approval_store, "approval_store"); require(d.sandbox_provider, "sandbox_provider");
@@ -39,6 +40,16 @@ ProductionDependencyReport validate_production_dependencies(
     if(d.role_runtime && d.llm_store && d.role_runtime->store().get()!=d.llm_store.get())
         report.issues.push_back({"llm_store_identity_mismatch", "role_runtime",
             "RoleRuntime must use the declared durable LLM store"});
+    if(d.cross_store_coordinator) {
+        const auto digest=d.cross_store_coordinator->capability_manifest_digest();
+        if(digest.empty()) report.issues.push_back({"coordination_manifest_invalid",
+            "cross_store_coordinator", "coordination capability manifest is empty"});
+        manifest["cross_store_coordination_manifest_digest"]=digest;
+        std::vector<std::string> issues;
+        if(!d.cross_store_coordinator->production_ready(&issues))
+            for(const auto& issue:issues) report.issues.push_back({
+                "coordination_participant_missing", "cross_store_coordinator", issue});
+    }
     manifest["configuration_revision"]=d.configuration_revision;
     manifest["identity_verifier_manifest_digest"]=d.identity_verifier_manifest_digest;
     manifest["policy_manifest_digest"]=d.policy_manifest_digest;

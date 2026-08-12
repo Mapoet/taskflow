@@ -72,7 +72,7 @@ std::optional<Phase4HarnessRuntime> DefaultProductionCompositionBuilder::build(
         resolver, revision, config);
 
     auto saga_observer=std::shared_ptr<HarnessCheckpointObserver>(
-        dependencies_.run_harness_saga, [](HarnessCheckpointObserver*){});
+        dependencies_.cross_store_coordinator, [](HarnessCheckpointObserver*){});
     Phase4ProductionComposition composition(*dependencies_.harness_store,
                                             *dependencies_.run_store, saga_observer);
     composition.bind(HarnessStage::Intake, port(boundary.intake, observer));

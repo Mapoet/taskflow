@@ -11,7 +11,7 @@
 | R4.0 证据驱动任务理解 | 4.0.1–4.0.9 | implemented | `planning/types,evidence_store,sqlite_planning_store,cognition_workflow` | `phase4_cognition`、`phase4_planning_store` | durable EvidenceBundle/Understanding/View digest | real adapters pending |
 | R4.0 可执行计划与重规划 | 4.0.10–4.0.16 | partial | `planning/plan_store,sqlite_planning_store,plan_validator` | DAG/CAS/cycle/restart/parent-digest negative | durable plan revision digest | executor replan/UI pending |
 | R4.1 五层独立验收 | 4.1.1–4.1.16 | implemented | `assurance/evidence,verifier,registry,arbiter,harness` | `phase4_assurance` | Findings/AcceptanceReport | real verifier adapters/store pending |
-| R4.2 全运行持久化 | 4.2.1–4.2.12 | implemented | `run/state_machine,store` + SQLite | `phase4_durable_run` | restart/CAS/timer/token | executor replay pending |
+| R4.2 全运行持久化 | 4.2.1–4.2.12 + P4-CSAC0–9 | partial | `run/state_machine,store`；`harness/{run_binding_saga,cross_store_coordination}` | `phase4_durable_run`、`phase4_run_harness_saga`、`phase4_cross_store_coordination` | restart/CAS/timer/token；cross-Store receipt/manual-review | command participant、cross-process fencing/HA pending |
 | R4.3 Durable HITL | 4.3.1–4.3.12 | partial | `approval/types,policy,store`; Run interruption | `phase4_policy`、`phase4_approval_store`、durable run | PDP/request/decision/token/restart | delegation/multisig/edit-flow/UI pending |
 | R4.4 统一 Sandbox | 4.4.1–4.4.12 | partial | `sandbox/types,provider,workspace` | `phase4_runtime_observability` | deterministic workspace/spec | concrete providers pending |
 | R4.5 标准观测与 SLO | 4.5.1–4.5.12 | partial | `telemetry/types,runtime` | `phase4_runtime_observability` | span/metric/privacy gate | OTLP/SLO pending |

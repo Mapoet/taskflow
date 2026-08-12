@@ -311,6 +311,7 @@ if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/harness/production_composition.cpp)
 endif()
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/harness/run_binding_saga.cpp)
     list(APPEND AGENT_SOURCES src/harness/run_binding_saga.cpp)
+    list(APPEND AGENT_SOURCES src/harness/cross_store_coordination.cpp)
 endif()
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/harness/workflow_adapter.cpp)
     list(APPEND AGENT_SOURCES src/harness/workflow_adapter.cpp)
@@ -1712,6 +1713,14 @@ if(BUILD_TESTING)
         set_tests_properties(phase4_run_harness_saga PROPERTIES
             LABELS "phase4-harness;phase4-durable;phase4-integration;phase4-offline;offline"
             RUN_SERIAL TRUE)
+    endif()
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_phase4_cross_store_coordination.cpp)
+        add_executable(test_phase4_cross_store_coordination
+            tests/test_phase4_cross_store_coordination.cpp)
+        target_link_libraries(test_phase4_cross_store_coordination PRIVATE agent_framework)
+        add_test(NAME phase4_cross_store_coordination COMMAND test_phase4_cross_store_coordination)
+        set_tests_properties(phase4_cross_store_coordination PROPERTIES
+            LABELS "phase4-offline;offline;phase4-durable;phase4-harness;phase4-integration;phase4-security")
     endif()
     if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_phase4_production_workflow_adapters.cpp)
         add_executable(test_phase4_production_workflow_adapters

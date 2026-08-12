@@ -9,6 +9,7 @@
 #include "agent/eval/judge_workflow.hpp"
 #include "agent/execution/artifact_executor.hpp"
 #include "agent/harness/run_binding_saga.hpp"
+#include "agent/harness/cross_store_coordination.hpp"
 #include "agent/harness/sqlite_production_input_repository.hpp"
 #include "agent/llm_runtime/runtime.hpp"
 #include "agent/memory_v2/store.hpp"
@@ -25,6 +26,7 @@ struct ProductionCompositionDependencies {
     HarnessStore* harness_store{nullptr};
     run::RunStore* run_store{nullptr};
     SQLiteRunHarnessSaga* run_harness_saga{nullptr};
+    CrossStoreCoordinator* cross_store_coordinator{nullptr};
     ProductionWorkflowInputRepository* input_repository{nullptr};
     planning::PlanStore* plan_store{nullptr};
     std::shared_ptr<llm_runtime::LLMRuntimeStore> llm_store;

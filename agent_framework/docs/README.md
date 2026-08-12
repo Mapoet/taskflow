@@ -18,6 +18,7 @@
 - Taskflow workflow 文档：`../../workflow/README.md`
 - Phase 4 Cognition / Observability Closure：[guides/phase-4-cognition-observability-closure.md](guides/phase-4-cognition-observability-closure.md)
 - Phase 4 Professional Assurance / Production Oracle Closure：[guides/phase-4-professional-assurance-oracle-closure.md](guides/phase-4-professional-assurance-oracle-closure.md)
+- Phase 4 Cross-Store Atomic Coordination Closure：[guides/phase-4-cross-store-atomic-coordination-closure.md](guides/phase-4-cross-store-atomic-coordination-closure.md)
 
 ## 生成 API 文档
 
