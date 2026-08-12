@@ -112,6 +112,14 @@ Elements operations_rows(const UiPresentationSnapshot& snapshot) {
                             bold | color(operations_color(ops.overall_status)),
                         text(" run " + ops.run_id + " · plan r" + std::to_string(ops.plan_revision)) | color(kMuted)}));
     rows.push_back(paragraph(ops.summary));
+    rows.push_back(hbox({text(ops.task_completion_verified ? " VERIFIED " : " UNVERIFIED ") |
+                            bold | color(ops.task_completion_verified ? Color::GreenLight : Color::YellowLight),
+                        text(" closure " + ops.task_closure_state + " · authority " +
+                             ops.completion_authority + " · criteria " +
+                             std::to_string(ops.criteria_closed) + "/" +
+                             std::to_string(ops.criteria_total) + " · progress " +
+                             std::to_string(ops.progress_delta) + " · stagnant " +
+                             std::to_string(ops.stagnation_count)) | color(kMuted)}));
     if (!ops.blocker.empty()) rows.push_back(paragraph("BLOCKER  " + ops.blocker) | bold | color(Color::RedLight));
     if (!ops.residual_risk.empty()) rows.push_back(paragraph("RESIDUAL RISK  " + ops.residual_risk) | color(Color::YellowLight));
     rows.push_back(separator());

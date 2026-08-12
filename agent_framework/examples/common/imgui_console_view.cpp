@@ -337,6 +337,15 @@ void render_operations(const UiPresentationSnapshot& s) {
     ImGui::SameLine(); ImGui::TextColored(kMuted, "run %s · plan r%llu · %s", ops.run_id.c_str(),
                                          static_cast<unsigned long long>(ops.plan_revision), ops.updated_at.c_str());
     ImGui::TextWrapped("%s", ops.summary.c_str());
+    ImGui::TextColored(ops.task_completion_verified ? kSuccess : operations_color(OperationsStatus::Warning),
+                       "%s", ops.task_completion_verified ? "VERIFIED" : "UNVERIFIED");
+    ImGui::SameLine();
+    ImGui::TextColored(kMuted, "closure %s · authority %s · criteria %llu/%llu · progress %lld · stagnant %llu",
+        ops.task_closure_state.c_str(), ops.completion_authority.c_str(),
+        static_cast<unsigned long long>(ops.criteria_closed),
+        static_cast<unsigned long long>(ops.criteria_total),
+        static_cast<long long>(ops.progress_delta),
+        static_cast<unsigned long long>(ops.stagnation_count));
     if (!ops.blocker.empty()) ImGui::TextColored(kDanger, "BLOCKER  %s", ops.blocker.c_str());
     if (!ops.residual_risk.empty()) ImGui::TextColored(operations_color(OperationsStatus::Warning),
                                                        "RESIDUAL RISK  %s", ops.residual_risk.c_str());

@@ -250,12 +250,14 @@
     $("ops-empty").hidden = true; $("ops-content").hidden = false;
     $("operations-badge").textContent = statusLabel(snapshot.overall_status);
     $("operations-badge").dataset.state = text(snapshot.overall_status);
-    $("ops-status").replaceChildren(statusNode(snapshot.overall_status));
+    $("ops-closure").textContent = snapshot.task_completion_verified ? "VERIFIED" : "UNVERIFIED";
+    $("ops-closure").dataset.state = snapshot.task_completion_verified ? "passed" : "warning";
+    $("ops-authority").textContent = text(snapshot.task_closure_state || "running") + " · authority: " + text(snapshot.completion_authority || "none");
     $("ops-updated").textContent = text(snapshot.updated_at || "—");
     $("ops-revision").textContent = "r" + Number(snapshot.plan_revision || 0);
     $("ops-run").textContent = text(snapshot.run_id || "—");
-    $("ops-evidence-count").textContent = String((snapshot.evidence || []).length);
-    $("ops-risk").textContent = text(snapshot.residual_risk || "No residual risk recorded");
+    $("ops-criteria").textContent = Number(snapshot.criteria_closed || 0) + " / " + Number(snapshot.criteria_total || 0);
+    $("ops-progress").textContent = "delta " + Number(snapshot.progress_delta || 0) + " · stagnant " + Number(snapshot.stagnation_count || 0);
     $("ops-live").textContent = text(snapshot.live_certification || "Unknown");
     $("ops-blocker").textContent = text(snapshot.blocker || "No blocker");
     $("ops-summary").textContent = text(snapshot.summary || "");

@@ -104,6 +104,15 @@ struct Phase4OperationsSnapshot {
     std::string blocker;
     std::string residual_risk;
     std::string live_certification;
+    std::string task_closure_state{"running"};
+    std::string task_closure_reason;
+    std::string completion_authority{"none"};
+    bool task_completion_verified{false};
+    std::int64_t progress_delta{0};
+    std::uint64_t stagnation_count{0};
+    std::uint64_t criteria_closed{0};
+    std::uint64_t criteria_total{0};
+    double cost_per_closed_criterion{0.0};
     std::vector<std::string> unknowns;
     std::vector<OperationsStage> stages;
     std::vector<OperationsEvidence> evidence;

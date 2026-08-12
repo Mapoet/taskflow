@@ -41,6 +41,8 @@ executing/verifying → replanning → approved
 | `P4-PAO-20260812` | `P4-PAO0–P4-PAO9 / professional-assurance-oracle-closure` | partial | 2026-08-12 | Codex / user explicit approval | Oracle production readiness/capability manifest；repository/file completeness；Bubblewrap command；domain/security SPI；production mandatory coverage；mandatory strength；SIC 状态漂移校准 | PASS：targeted 3/3、`phase4-offline` 71/71、真实 Bubblewrap、negative strength/coverage、`git diff --check` | offline-control accepted；部署级完整规则、external domain/security adapters、provider calibration/benchmark、跨 Store atomic 与 Live 保持 partial/inconclusive |
 | `P4-CSAC-20260812` | `P4-CSAC0–P4-CSAC9 / cross-store-atomic-coordination-closure` | partial | 2026-08-12 | Codex / user explicit approval | WAL/FULL journal；CAS/history/receipt chain；typed Store participants；production mandatory coordination；restart/idempotency/manual-review | targeted 3/3、`phase4-offline` 72/72、`phase3-offline` 14/14、`git diff --check` PASS | local durable-saga pin/confirm control accepted；workflow command participant、cross-process fencing、HA/Live pending |
 
+| `P4-GPC-20260812` | `P4-GPC0–P4-GPC10 / golden-path-task-closure-r1` | partial | 2026-08-12 | Codex / user explicit continuous approval | 唯一任务完成语义；TaskClosureContract/Controller；WAL/FULL progress ledger 与全记录摘要；停滞/阻塞/澄清/失败终态；AgentLoop 回合停止语义；production router fail-closed；Golden Task A/B/C；四端 completion authority 投影 | PASS：targeted 5/5、`phase4-offline` 73/73；Web live snapshot `manual_review/UNVERIFIED/task_closure_controller/8-of-9`；真实 Web/TUI 截图；四 demo targets build | 本地 golden-path closure control accepted；生产入口全量 wiring、完整 crash matrix、外部 Live/KMS/IdP/多主机认证仍 partial |
+
 ## 3. 执行记录模板
 
 ### RUN-ID — 标题

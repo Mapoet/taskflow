@@ -206,6 +206,7 @@ AgentLoopNode::create(
         std::shared_ptr<internal::AgentThreadState> state;
         LLMOutput last_llm;
         std::string final_answer;
+        std::string stop_reason;
         bool is_final = false;
     };
 
@@ -243,11 +244,19 @@ AgentLoopNode::create(
             *shared->state = *incoming;
         }
         auto emit = [shared]() -> workflow::ValueMap {
+            if(shared->is_final && shared->stop_reason.empty()) {
+                if(shared->final_answer.rfind("[guard]",0)==0) shared->stop_reason="guard_stopped";
+                else if(shared->final_answer.rfind("[error]",0)==0) shared->stop_reason="provider_failed";
+                else if(shared->final_answer=="[task] cancelled") shared->stop_reason="cancelled";
+                else if(shared->final_answer=="[task] timeout") shared->stop_reason="deadline_exceeded";
+                else shared->stop_reason="model_turn_completed";
+            }
             return {
                 {std::string(internal::kFinalAnswer), std::any{shared->final_answer}},
                 {std::string(internal::kNextAgentState), std::any{shared->state}},
                 {std::string(internal::kLlmOutput), std::any{shared->last_llm}},
-                {std::string(internal::kIsFinal), std::any{shared->is_final}}
+                {std::string(internal::kIsFinal), std::any{shared->is_final}},
+                {std::string(internal::kModelStopReason), std::any{shared->stop_reason}}
             };
         };
 
@@ -449,6 +458,7 @@ AgentLoopNode::create(
                 std::cout.flush();
             }
             shared->is_final = true;
+            shared->stop_reason = task_control->is_cancel_requested() ? "cancelled" : "deadline_exceeded";
             shared->final_answer = "[memory] control command applied (no LLM turn).";
             shared->last_llm.is_final = true;
             shared->last_llm.final_answer = shared->final_answer;
@@ -721,6 +731,7 @@ AgentLoopNode::create(
             }
             // Set final state to break loop
             shared->is_final = true;
+            shared->stop_reason = "provider_failed";
             shared->final_answer = std::string("[error] LLM call failed: ") + e.what();
             shared->last_llm.is_final = true;
             shared->last_llm.final_answer = shared->final_answer;
@@ -820,6 +831,7 @@ AgentLoopNode::create(
             const int iter = shared->state ? shared->state->iteration : 0;
             const std::string details = trunc_copy(call_key, guard_trunc);
             shared->is_final = true;
+            shared->stop_reason = "guard_stopped";
             shared->final_answer =
                 "[guard] reason=repeat_tool_call_in_iteration iter=" + std::to_string(iter) +
                 "\nDetected repeated tool call within the same iteration. "

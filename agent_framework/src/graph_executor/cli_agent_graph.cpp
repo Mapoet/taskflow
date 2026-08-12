@@ -83,7 +83,7 @@ void build_cli_agent_graph_impl(workflow::GraphBuilder& builder,
          {"UserInput", std::string(internal::kUserQuery)},
          {"AgentState", std::string(internal::kAgentState)}},
         {std::string(internal::kFinalAnswer), std::string(internal::kNextAgentState),
-         std::string(internal::kLlmOutput)},
+         std::string(internal::kLlmOutput), std::string(internal::kModelStopReason)},
         graph_options.stream_callback,
         deps.skills,
         graph_options.task_control,
@@ -114,7 +114,8 @@ void append_cli_terminal_sink(workflow::GraphBuilder& builder,
     auto [sn, st] = builder.create_any_sink(
         sink_name,
         {{loop_name, std::string(internal::kFinalAnswer)},
-         {loop_name, std::string(internal::kNextAgentState)}},
+         {loop_name, std::string(internal::kNextAgentState)},
+         {loop_name, std::string(internal::kModelStopReason)}},
         [cb = std::move(cb), cb_state = std::move(cb_state)](
             const std::unordered_map<std::string, std::any>& outs) {
             const std::string final_answer =
@@ -125,6 +126,11 @@ void append_cli_terminal_sink(workflow::GraphBuilder& builder,
             j["final_answer"] = final_answer;
             j["iteration"] = st_ptr ? st_ptr->iteration : 0;
             j["history_size"] = st_ptr ? static_cast<std::size_t>(st_ptr->history.size()) : 0;
+            j["model_turn_complete"] = true;
+            j["task_completion_verified"] = false;
+            j["completion_authority"] = "none";
+            j["model_stop_reason"] = std::any_cast<std::string>(
+                outs.at(std::string(internal::kModelStopReason)));
             // Optional guard fields (best-effort; keep backward compatibility)
             // Convention: guard-triggered final_answer starts with "[guard]".
             bool guard_triggered = final_answer.rfind("[guard]", 0) == 0;

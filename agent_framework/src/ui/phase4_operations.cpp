@@ -137,7 +137,7 @@ namespace agent_framework
 
     json Phase4OperationsProjection::to_json(const Phase4OperationsSnapshot &s)
     {
-        json out{{"schema_version", s.schema_version}, {"snapshot_id", s.snapshot_id}, {"tenant_id", s.tenant_id}, {"run_id", s.run_id}, {"task_id", s.task_id}, {"updated_at", s.updated_at}, {"overall_status", status_json(s.overall_status)}, {"plan_revision", s.plan_revision}, {"summary", s.summary}, {"blocker", s.blocker}, {"residual_risk", s.residual_risk}, {"live_certification", s.live_certification}, {"unknowns", s.unknowns}};
+        json out{{"schema_version", s.schema_version}, {"snapshot_id", s.snapshot_id}, {"tenant_id", s.tenant_id}, {"run_id", s.run_id}, {"task_id", s.task_id}, {"updated_at", s.updated_at}, {"overall_status", status_json(s.overall_status)}, {"plan_revision", s.plan_revision}, {"summary", s.summary}, {"blocker", s.blocker}, {"residual_risk", s.residual_risk}, {"live_certification", s.live_certification}, {"task_closure_state",s.task_closure_state},{"task_closure_reason",s.task_closure_reason},{"completion_authority",s.completion_authority},{"task_completion_verified",s.task_completion_verified},{"progress_delta",s.progress_delta},{"stagnation_count",s.stagnation_count},{"criteria_closed",s.criteria_closed},{"criteria_total",s.criteria_total},{"cost_per_closed_criterion",s.cost_per_closed_criterion},{"unknowns", s.unknowns}};
         out["stages"] = json::array();
         for (const auto &v : s.stages)
             out["stages"].push_back(json{{"id", v.id}, {"label", v.label}, {"status", status_json(v.status)}, {"revision", v.revision}, {"role", v.role}, {"summary", v.summary}, {"evidence_ids", v.evidence_ids}});
@@ -184,6 +184,19 @@ namespace agent_framework
         s.blocker = bounded(root, "blocker");
         s.residual_risk = bounded(root, "residual_risk");
         s.live_certification = bounded(root, "live_certification");
+        s.task_closure_state = bounded(root,"task_closure_state");
+        if(s.task_closure_state.empty()) s.task_closure_state="running";
+        s.task_closure_reason = bounded(root,"task_closure_reason");
+        s.completion_authority = bounded(root,"completion_authority");
+        if(s.completion_authority.empty()) s.completion_authority="none";
+        s.task_completion_verified=root.value("task_completion_verified",false);
+        s.progress_delta=root.value("progress_delta",std::int64_t{0});
+        s.stagnation_count=root.value("stagnation_count",std::uint64_t{0});
+        s.criteria_closed=root.value("criteria_closed",std::uint64_t{0});
+        s.criteria_total=root.value("criteria_total",std::uint64_t{0});
+        s.cost_per_closed_criterion=root.value("cost_per_closed_criterion",0.0);
+        if(!std::isfinite(s.cost_per_closed_criterion)||s.cost_per_closed_criterion<0.0 ||
+           s.criteria_closed>s.criteria_total) throw std::invalid_argument("invalid closure metrics");
         s.unknowns = strings(root, "unknowns");
         s.stages = objects<OperationsStage>(root, "stages", [](const json &v)
                                             {
@@ -249,6 +262,11 @@ namespace agent_framework
         out << "\n[PHASE 4 OPERATIONS] " << status_name(s.overall_status) << "  run=" << s.run_id
             << "  plan=r" << s.plan_revision << "  updated=" << s.updated_at << '\n';
         out << clipped(s.summary, width) << '\n';
+        out << "Closure " << s.task_closure_state << " · "
+            << (s.task_completion_verified ? "VERIFIED" : "UNVERIFIED")
+            << " · authority=" << s.completion_authority << " · criteria="
+            << s.criteria_closed << '/' << s.criteria_total << " · progress="
+            << s.progress_delta << " · stagnant=" << s.stagnation_count << '\n';
         if (!s.blocker.empty())
             out << "BLOCKER: " << clipped(s.blocker, width - 9) << '\n';
         if (!s.residual_risk.empty())
@@ -278,6 +296,15 @@ namespace agent_framework
         s.blocker = "Architecture finding F-ARCH-07 requires manual review before release.";
         s.residual_risk = "Live provider certification is valid for staging only.";
         s.live_certification = "staging certified · production inconclusive";
+        s.task_closure_state = "manual_review";
+        s.task_closure_reason = "architecture_finding_open";
+        s.completion_authority = "task_closure_controller";
+        s.task_completion_verified = false;
+        s.progress_delta = 3;
+        s.stagnation_count = 0;
+        s.criteria_closed = 8;
+        s.criteria_total = 9;
+        s.cost_per_closed_criterion = 0.014;
         s.unknowns = {"Production KMS evidence not attached", "External domain benchmark pending"};
         s.stages = {{"intake", "Task cognition", OperationsStatus::Passed, 3, "analyst", "Requirements and boundaries frozen", {"EV-REQ-1"}},
                     {"plan", "Professional plan", OperationsStatus::Passed, 3, "planner", "12 executable tasks with acceptance criteria", {"EV-REQ-1"}},

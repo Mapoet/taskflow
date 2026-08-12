@@ -29,6 +29,9 @@ constexpr std::string_view kToolHadError = "tool_had_error";
 constexpr std::string_view kNextAgentState = "next_agent_state";
 constexpr std::string_view kIsFinal = "is_final";
 constexpr std::string_view kFinalAnswer = "final_answer";
+// `is_final` is retained for loop compatibility and means only that the model turn stopped.
+// It is never task-completion authority; production completion is issued by TaskClosureController.
+constexpr std::string_view kModelStopReason = "model_stop_reason";
 
 } // namespace internal
 } // namespace agent_framework

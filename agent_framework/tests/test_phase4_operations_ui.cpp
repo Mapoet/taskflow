@@ -29,6 +29,8 @@ int main() {
     assert(parsed.memory.size() == 5U);
     assert(parsed.invocations.size() == 4U);
     assert(parsed.hitl.size() == 1U);
+    assert(parsed.task_closure_state == "manual_review");
+    assert(!parsed.task_completion_verified && parsed.criteria_closed == 8);
     assert(canonical.dump().find("reasoning") == std::string::npos);
     assert(canonical.dump().find("api_key") == std::string::npos);
     assert(canonical.dump().find("raw_prompt") == std::string::npos);
@@ -86,5 +88,7 @@ int main() {
     const std::string text = Phase4OperationsProjection::render_text(expected, 96);
     assert(text.find("HITL pending") != std::string::npos);
     assert(text.find("BLOCKER") != std::string::npos);
+    assert(text.find("UNVERIFIED") != std::string::npos);
+    assert(text.find("authority=task_closure_controller") != std::string::npos);
     return 0;
 }
