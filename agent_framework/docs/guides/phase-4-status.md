@@ -20,16 +20,26 @@
 
 ## 2. 当前总体判断与双基线
 
-按 Phase 4 v1 原始目标，当前总体满足度约为 **68–73%**。实现已形成共享契约、durable Harness、真实产物修复→新摘要→复验、审批/记忆治理、Bubblewrap deny-all sandbox、credential broker、W3C trace、OTLP/spool/SLO、Eval campaign 治理以及 SQLite distributed control plane；但真实 investigator/provider、细粒度网络强制、生产数据/校准/Live、跨主机共享事务与 HA 尚未达到工作包 DoD，因此相关 WP 仍保持 `[~]`。
+本节采用两条需求基线、两条证据轴，避免再用一个百分比同时表达“代码已经存在”和“生产环境已经认证”：
 
-[Phase 4 v2](./phase-4-plan-v2.md) 把“规划、验证和记忆均由专门 LLM 工作流驱动”提升为 mandatory target。完成 F1L–F8U 及 R1I–R5E/R7D 本地闭环后，按扩展目标重新计量，当前总体满足度约为 **82–86%**。该数值不把 scripted RoleRuntime、deterministic UI snapshot、SQLite 多连接或 no-skip 门禁本身计作生产 `executed=true`/HA；生产数据、真实模型校准、外部 Live matrix 和跨主机 chaos 仍未计入完成。
+- **v1 基线**：`phase-4.md` 的生产 Harness、durable run、HITL、sandbox、观测、评测、Live 与分布式控制目标；
+- **v2 基线**：在 v1 上增加 LLM 驱动的任务认知/规划、多层记忆、专业验收、修复重规划、Judge 和解释性运维；
+- **工程实现成熟度**：契约、实现、持久化、集成测试和本地故障恢复已经具备的比例；
+- **生产认证成熟度**：真实身份、真实 provider/数据、不可绕过组合、外部调度、签名报告、跨进程/跨主机故障证据已经具备的比例。
 
-2026-08-11 完成性审计确认：旧 `phase4_vertical` 没有调用 Cognition、Approval、实际 Executor、Remediation、二次 Assurance、Judge 或 Store-backed Operations assembler。R1I 随后新增顶层 Harness contract、SQLite saga/outbox、revision pin、completion gate、审批暂停/恢复和进程死亡 reconciliation，离线门禁增至 45/45；但 stage ports 尚未全部绑定真实 workflow/Sandbox/ApprovalStore，因此仍不能证明生产 Harness 全闭环。后续状态提升必须由 R2X–R7D 的 system/live/HA 直接证据支持。
+截至 2026-08-12，v1 工程实现成熟度为 **76–80%**，v2 工程实现成熟度为 **82–86%**；Phase 4 整体生产认证成熟度为 **58–64%**。这些区间是按工作包 DoD 加权后的审计判断，不是代码覆盖率。前两项反映大量控制面和本地 durable 实现已经落地，后一项刻意扣除了 scripted RoleRuntime、deterministic UI snapshot、单机 SQLite、多连接模拟及 `executed=false` Live 报告。
 
-| 评估口径 | 满足度 | 已证明 | 尚未证明 |
+当前已证明的最高层次是：共享且版本化的契约；LLM Role Runtime 及规划、记忆、验收、修复、Judge 工作流；durable Harness；RunStore 原子 checkpoint/event/effect/memory/interruption；审批治理；Bubblewrap deny-all sandbox；credential broker；W3C trace、OTLP spool 与 SLO；Eval campaign；SQLite/PostgreSQL distributed control；四端同源 operations projection。P4-PC0 又增加了 11 阶段 fail-closed production composition 和 adapter capability manifest；P4-PC2 增加 Run/Harness 跨库 saga journal、双侧 revision/digest pin、重启恢复及漂移人工复核。当前离线 Phase 4 门禁为 **64/64**。
+
+但 `production_ready=true` 目前只证明适配器声明、manifest 和 reconcile 契约通过组合检查，**不等于真实工作流已接线，更不等于生产认证**。RunStore 与 HarnessStore 的跨库提交、各阶段真实 adapter、修复后新产物回填与复验、Approval/Run 跨 Store 协调、真实 IdP/KMS/provider 校准、外部 Live matrix，以及已暂缓的多节点 PostgreSQL/ObjectStore/Agent chaos 均保持开放。后续任何满足度提升必须由对应 system/live/HA 证据支持。
+
+| 基线 / 证据轴 | 当前值 | 已证明边界 | 仍未证明边界 |
 |---|---:|---|---|
-| v1 原始目标 | 50–55% | 确定性契约、Store、View、Harness、durable AcceptanceReport、impact/replan 控制面和离线纵向绑定 | 生产适配器、真实修复/复验闭环、真实 Live、远程 durable/HA |
-| v2 扩展目标（2026-08-10 历史基线） | 72–76% | v1 控制面；统一 Role Runtime；多阶段 cognition/planning；scope-first LLM memory workflow；多角色 professional assurance；LLM remediation；blind multi-Judge；typed/durable/signed/no-skip Live certification 控制面；canonical CLI/Web/TUI/ImGui 运维呈现；GraphExecutor 模板 | 当时尚无 residual closure 的真实执行、Store assembler 与 distributed control 证据；本行仅用于历史对照，当前值以本节上方 82–86% 为准 |
+| v1 工程实现成熟度 | 76–80% | durable Harness/Run、HITL 控制面、sandbox、OTel/SLO、Eval、Live certification 控制面、distributed control | 全阶段生产 adapter、跨 Store saga、真实身份/签名/数据、跨主机 HA |
+| v2 工程实现成熟度 | 82–86% | v1 能力，加 LLM cognition/planning、memory、professional assurance、remediation、multi-Judge、explainable operations | 默认不可绕过的真实 workflow composition、生产 calibration、真实闭环质量指标 |
+| Phase 4 生产认证成熟度 | 58–64% | 本地真实进程/SQLite/PostgreSQL/TLS/截图证据，以及 fail-closed/no-skip 门禁 | 获批且未过期的 `executed=true` Live bundle、真实多 provider/IdP/KMS、跨主机 chaos |
+
+因此，Phase 4 当前仍统一标记为 **`[~]`**。`[x]` 只在单个工作包的 mandatory DoD、追溯矩阵、执行台账和生产证据同时闭合时使用；不得用较高的 v2 工程实现百分比替代生产完成声明。
 
 ### 2.1 v2 横向能力状态
 
@@ -52,7 +62,7 @@ v2 采用“**LLM Cognitive Plane + Deterministic Control Plane**”：LLM 深�
 |---|---:|---:|---|---|
 | WP4.0 Task Cognition | `[~]` | 65% | TaskIntake/Evidence/Understanding/Plan schema、Investigator Registry、DAG critic、SQLite Evidence/Plan/Remediation CAS Store、memory-aware workflow、bounded replan | 真实 ToolBus/外部 investigator、remediation executor 自动回灌、默认强制接入/UI 未完成 |
 | WP4.1 Assurance Harness | `[~]` | 75% | AcceptanceContract、legacy verifier registry、Verification Planner、五专业角色与 Resolver、Manifest oracle、EvidenceLedger/resolution、oracle-strength arbiter、SQLite report/checkpoint、impact graph、remediation/selective reverify、restart/GraphExecutor | artifact/runtime/domain/security/metric 真实执行适配器、修复后自动复验、生产校准与 UI 未完成 |
-| WP4.2 Durable Run | `[~]` | 84–87% | SQLite RunStore、状态机、CAS；P4-DRA 原子 checkpoint/graph cursor/event/effect/memory pin/interruption；摘要链 replay/time-travel；durable timer/restart；`DurableRunCoordinator`；effect CAS/reconcile 状态推进 | workflow adapters 全路径默认强制接入、Run/Harness 跨 Store saga 与生产 crash matrix 仍未完成 |
+| WP4.2 Durable Run | `[~]` | 87–89% | SQLite RunStore、状态机、CAS；P4-DRA 原子 checkpoint/graph cursor/event/effect/memory pin/interruption；摘要链 replay/time-travel；durable timer/restart；`DurableRunCoordinator`；effect CAS/reconcile；Run/Harness 跨库 saga journal、双 revision/digest pin、restart reconciliation/manual review | workflow adapters 尚未在每个 checkpoint 自动写入 saga、Approval/Memory 跨 Store 协调与生产 crash matrix仍未完成 |
 | WP4.3 HITL/Policy | `[~]` | 81–85% | Approval schema/PDP/Store、CAS/TOCTOU/SoD/expiry/revocation；durable delegation grant；策略 quorum/required roles；edit supersession；escalation；authenticated action service；Web 移除默认 reviewer/fixed token 并在身份未配置时 fail closed；Harness resume | 真实 JWT/OIDC IdP attestation、session rotation、密码学/KMS 多签、delegation chain depth、跨 Approval/Run saga 及四端全部交互动作仍未完成 |
 | WP4.4 Sandbox Runtime | `[~]` | 72–78% | Sandbox schema/provider/registry/policy、真实 Bubblewrap deny-all Process provider、workspace diff/digest、resource/timeout/process-group kill、opaque credential pipe/redaction、Harness durable receipt/reconcile | 细粒度 egress enforcing proxy、Container/Remote provider、逃逸/内核攻击 E2E 与默认生产 composition |
 | WP4.5 OTel/SLO | `[~]` | 68–74% | correlation/privacy/cardinality、W3C trace context、OTLP HTTP batch、SQLite at-least-once spool/restart、audit bridge、SLO fail-closed、跨进程 loopback collector | 真实 Collector TLS/mTLS、scheduled exponential backoff、dashboard/alert backend、真实 provider usage 对账 |
