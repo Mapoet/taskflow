@@ -6,6 +6,7 @@
 #include "phase4_harness_test_support.hpp"
 #include <cassert>
 #include <filesystem>
+#include <thread>
 using namespace agent_framework::conversation;
 int main()
 {
@@ -101,4 +102,50 @@ int main()
     { SQLiteConversationStore reopened(long_path.string());
       assert(reopened.messages({"tenant","long"}).size()==200); }
     std::filesystem::remove(long_path, ec);
+
+    auto race_path = std::filesystem::temp_directory_path() /
+        ("conversation-race-" + std::to_string(agent_framework::internal::current_process_id()) + ".sqlite3");
+    std::filesystem::remove(race_path, ec);
+    SQLiteConversationStore first_store(race_path.string());
+    SQLiteConversationStore second_store(race_path.string());
+    ConversationIdentity race_identity{"tenant", "race"};
+    TurnCheckpoint seed_checkpoint{race_identity, "seed"};
+    seed_checkpoint.revision = 1;
+    seed_checkpoint.phase = TurnPhase::Completed;
+    ConversationMessage seed_message{race_identity, "seed-message", "", "seed", "user", "seed", "now", 0, ""};
+    RuntimeEventEnvelope seed_event;
+    seed_event.turn_id = "seed"; seed_event.run_id = "seed";
+    seed_event.event_type = "seeded"; seed_event.timestamp = "now";
+    seed_event.durability = EventDurability::Durable;
+    ConversationCommit seed{seed_checkpoint, 0, {seed_message}, {seed_event}};
+    assert(first_store.commit(seed));
+
+    auto make_race_commit = [&](std::string id) {
+        TurnCheckpoint checkpoint{race_identity, id};
+        checkpoint.revision = 1; checkpoint.phase = TurnPhase::Completed;
+        ConversationMessage message{race_identity, id + "-message", "seed-message", id,
+                                    "user", id, "now", 0, ""};
+        RuntimeEventEnvelope event;
+        event.turn_id = id; event.run_id = id; event.event_type = "race";
+        event.timestamp = "now"; event.durability = EventDurability::Durable;
+        return ConversationCommit{checkpoint, 0, {message}, {event}};
+    };
+    auto race_a = make_race_commit("race-a");
+    auto race_b = make_race_commit("race-b");
+    bool race_a_ok = false, race_b_ok = false;
+    std::thread writer_a([&] { race_a_ok = first_store.commit(race_a); });
+    std::thread writer_b([&] { race_b_ok = second_store.commit(race_b); });
+    writer_a.join(); writer_b.join();
+    assert(race_a_ok != race_b_ok);
+    assert(first_store.messages(race_identity).size() == 2);
+    auto race_events = first_store.events(race_identity);
+    assert(race_events.size() == 2 && race_events[0].sequence == 1 && race_events[1].sequence == 2);
+
+    auto rollback = make_race_commit("rollback");
+    rollback.messages.front().parent_id = "wrong-parent";
+    assert(!first_store.commit(rollback));
+    assert(!first_store.load_turn(race_identity, "rollback"));
+    assert(first_store.messages(race_identity).size() == 2);
+    assert(first_store.events(race_identity).size() == 2);
+    std::filesystem::remove(race_path, ec);
 }

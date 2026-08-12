@@ -4,7 +4,7 @@
 
 **基线日期**：2026-08-12
 
-**Agent Framework 基线**：`/home/Mapoet/projects/taskflow/agent_framework` 当前 Phase 4、GPC 与 GPW 事实状态
+**Agent Framework 基线**：`/home/Mapoet/projects/taskflow/agent_framework` 当前 Phase 4、GPC、GPW 与 CTR 事实状态
 
 **Claude Code 基线**：`/home/Mapoet/projects/claude-code-source-code/src`，`@anthropic-ai/claude-code` 2.1.88 发布包解包源码
 
@@ -23,7 +23,45 @@ Claude Code 在另一组问题上更成熟：会话级运行时、单轮 Agent �
 1. **Turn Loop**：完成一次模型—工具—观察循环，追求低延迟、流式反馈和上下文连续性；
 2. **Task Closure Loop**：跨多个 Turn、阶段和进程推进 AcceptanceContract，追求证据闭合、可恢复执行和可信终态。
 
-Claude Code 的弱点是 Turn 结束容易成为事实上的任务结束；Agent Framework 已用 GPC 的 `TaskClosureController` 解决了这一问题。Agent Framework 当前更突出的问题是 Task Closure 控制面远强于 Turn Runtime，导致生产能力丰富，但会话主路径、事件协议和多入口 wiring 仍显复杂。后续中心任务应是建立轻量、类型化、事件驱动的 `ConversationEngine`，作为 CLI、Web、TUI、ImGui、SDK、AgentServer 和 A2A 会话的统一 Turn Runtime，再由 `ProductionTaskRuntime` 与 `TaskClosureController` 掌握任务终态。
+Claude Code 的弱点是 Turn 结束容易成为事实上的任务结束；Agent Framework 已用 GPC 的 `TaskClosureController` 解决了这一问题。CTR0–CTR10 已建立轻量、类型化、事件驱动的 `ConversationEngine` 最小内核。当前中心任务不再是“新增 ConversationEngine”，而是修复其跨进程持久化原子性，并将它接入 CLI、Web、TUI、ImGui、SDK、AgentServer 和 A2A 的真实执行主路径，再以统一 Tool Lifecycle 消除能力旁路。`ProductionTaskRuntime` 与 `TaskClosureController` 继续独占任务终态权威。
+
+### 0.1 2026-08-12 技术缺口状态
+
+状态口径：`[x]` 已闭环且有测试证据；`[~]` 核心契约已实现但生产主路径未闭环；`[△]` 已有分散能力但尚未统一；`[ ]` 尚未实现。
+
+| 工作包 | 状态 | 当前实现证据 | 仍需关闭的生产缺口 |
+|---|---:|---|---|
+| AF-CC0 契约冻结 | `[~]` | Conversation/Turn、`RuntimeEventEnvelope`、ContextProjection、CompactBoundary、六档 `TaskExecutionProfile` 已类型化；`ModelTurnOutcome` 不可签发 verified | 缺统一 `ToolContract`；影响权限、工具和上下文的全部 revision 尚未完整 pin 到 deployment/invocation manifest |
+| AF-CC1 ConversationEngine | `[~]` | start/continue/interrupt/resume、Turn CAS、SQLite WAL/FULL Store、append-only parent/digest 消息链、重启恢复和 100 Turn 测试已完成 | 五个 demo 的模型执行仍走 `run_react_cli_sync`；SDK/AgentServer/A2A 尚未统一接入；存储提交跨表非原子，跨连接序列分配未线性化；输入五类仅部分实现 |
+| AF-CC2 Tool Lifecycle | `[△]` | ToolBus、schema、Approval、Sandbox、Effect Journal、MCP、Skill policy 与 observer 已分别存在 | 缺不可绕过的版本化 Tool Contract、固定执行管线、改写后重验、统一 retention/CAS 与 reconciliation |
+| AF-CC3 Context/Compact | `[~]` | projection/boundary schema、mandatory contract/policy/citation 保留校验和 boundary 持久化已完成 | 尚未驱动真实模型调用；缺自动 compact、CAS 大结果外置、确定性 fallback 和恢复等价性测试 |
+| AF-CC4 三链持久化 | `[~]` | Conversation、Run/Harness、Effect 已有独立 Store 和 digest | 缺跨链 correlation/atomic boundary、全 durable 写点 crash injection、deterministic replay/time-travel 和 orphan reconciliation |
+| AF-CC5 子 Agent 隔离 | `[△]` | ChildTask/A2A 已禁止远端或子任务自报完成直接关闭父任务 | capability intersection、独立 transcript namespace、父取消传播、远端证据本地强复验仍未形成统一内核 |
+| AF-CC6 Streaming/安全调度 | `[△]` | 已有同轮只读工具并行、A2A submit 并行和 Taskflow 执行基础 | 缺 effect/concurrency taxonomy、冲突 DAG、流式提前调度、abort 后 effect 协调和 critical-path 证据 |
+| AF-CC7 Experience/Operations | `[△]` | 五个 LiveRuntime demo 共享 bootstrap 与 `AGENT_TASK_PROFILE`；已有 Operations projection 和 candidate/verified 区分 | UI/CLI/SDK 尚未统一消费 ConversationEngine/RuntimeEventEnvelope；Approval 与断线续传动作仍有入口差异 |
+| AF-CC8 质量/Live | `[~]` | CTR10 基线为 Phase 4 offline 74/74、Phase 3 22/22，五个 demo 可构建 | 真实 provider/MCP/IdP/KMS/Sandbox 的 Live Certification 尚未关闭，不能以 offline pass 替代 |
+
+### 0.2 当前已确认的 Conversation 实现风险
+
+1. Turn 初始 checkpoint、user message 与 `turn_started` event 分次写入；assistant message、终态 checkpoint 与 `model_stop` 也分次写入，进程在中间崩溃会留下不可恢复的半提交状态。
+2. durable event 先读取 `MAX(sequence)` 再插入，两个 Store/进程可以获得相同 sequence；进程内 mutex 不能证明跨进程线性化。
+3. message parent 校验与 insert 不是同一 `BEGIN IMMEDIATE` 事务；双连接并发 append 只能依赖唯一键冲突，不能稳定给出链冲突语义。
+4. `QueueNextTurn`、`AppendToCurrentTurn` 与 `InterruptAndReplace` 当前最终都主要表现为 append，缺队列、替换、取消传播与消费状态。
+5. 事件输出只有构造时 sink 和 Store 查询，尚无正式 subscribe/replay cursor、背压、断线续传协议。
+6. ContextProjection/CompactBoundary 当前是契约和 Store 能力，尚未接入模型 invocation；GraphTurnAdapter 已去除完成权威，但尚未成为默认生产路径。
+
+### 0.3 AF-CC1R 行动进度
+
+2026-08-12 已完成 AF-CC1R 第一批：
+
+- 新增 `ConversationCommit`，将 Turn CAS、message append 和 durable event append 收敛到一个 Store 事务边界；
+- SQLite 实现使用 `BEGIN IMMEDIATE`，在持有数据库写锁后读取 message tail/event tail，并在数据库事务内分配连续 sequence；
+- ConversationEngine 的 `turn_started` 与 `model_stop` durable boundary 已改用原子 commit，不再采用 checkpoint/message/event 三次独立提交；
+- 双 SQLite 连接竞争同一 parent 时只允许一个 writer 成功，失败 writer 不留下 Turn、message 或 event；
+- parent mismatch 故障注入验证整个 batch 回滚；
+- 回归证据：`phase4_conversation_runtime` PASS，Phase 4 offline 74/74 PASS，Phase 3 22/22 PASS。
+
+仍未关闭的 AF-CC1R 范围：运行中用户输入 append、interrupt checkpoint 与未来 tool/effect reference 尚未全部纳入同类事务 API；需要继续增加真实进程 crash injection、busy/timeout、磁盘故障和 schema migration 测试。因此 AF-CC1 总状态保持 `[~]`，不能提升为 `[x]`。
 
 ## 1. 证据边界
 
@@ -47,7 +85,7 @@ Claude Code 的弱点是 Turn 结束容易成为事实上的任务结束；Agent
 
 当前 Agent Framework 已具备同轮只读工具并行、A2A submit 并行、Tool Effect Journal、Context Budget、Memory Compaction、Role Runtime、Cognition、Memory v2、Assurance、Remediation、Judge、Run/Harness/Approval Store、Bubblewrap、Credential Broker、OTLP/SLO、SQLite/PostgreSQL queue、lease/fencing、Object Store，以及 GPC 的 Task Closure、progress ledger、bounded stagnation 与 Golden Tasks。
 
-正在实施的 GPW 又开始把这些完成语义接入 GraphExecutor、AgentServer、A2A、ChildTask 和多个 UI 入口。因此，本报告不会重复建议“新增 TaskClosureController”或“增加只读工具并行”，而是从 GPC/GPW 之上继续补齐交互执行内核。
+GPW 已把完成语义接入 GraphExecutor、AgentServer、A2A、ChildTask 和多个 UI 入口；CTR 又新增 Conversation/Turn contracts、SQLite ConversationStore、状态机、事件 envelope、Context/Compact contracts 与 production bridge。因此，本报告不会重复建议“新增 TaskClosureController”“新增 ConversationEngine 骨架”或“增加只读工具并行”，而是从 GPC/GPW/CTR 之上继续完成交互执行内核的原子性、主路径接线和工具生命周期收敛。
 
 ## 2. 两个系统解决的层次不同
 
@@ -129,7 +167,7 @@ L0 Governance and Operations Plane
 
 ### L6：会话层
 
-这是最需要补齐的层。它对应 Claude Code 的 `QueryEngine + queryLoop`，但应拆成小状态机和策略对象，而不是复制巨型循环。它负责 Conversation、Turn、流式事件、输入中断、消息投影和恢复。
+该层已形成最小骨架，但仍是最需要生产化的层。它对应 Claude Code 的 `QueryEngine + queryLoop`，并已拆成 ConversationEngine、TurnStateMachine、Store 和策略对象。下一步负责补齐事务恢复、真实入口接线、流式订阅、输入中断语义和模型上下文投影。
 
 ### L5：认知层
 
@@ -205,13 +243,15 @@ Continuation 至少包括：`InitialRequest`、`ToolResultsAvailable`、`QueuedU
 
 Model stop 至少包括：`EndTurn`、`ToolRequested`、`GuardStopped`、`ProviderError`、`Cancelled`、`DeadlineExceeded`、`ContextExhausted`、`MaxIterations`。它们全部映射到 `task_completion_verified=false`。
 
-### 落点
+### 当前落点与剩余接线
 
--新增 `include/agent/conversation/` 与 `src/conversation/`；
--复用 `AgentThreadState`、SessionStore、TaskControl；
--让 `AgentLoopNode` 先适配 TurnStateMachine，再逐步瘦身；
-- CLI/Web/TUI/ImGui/SDK/AgentServer 只依赖 Conversation API；
-- legacy demo 可直连 AgentLoop，但必须标识 `unverified_model_response`。
+- `[x]` 已新增 `include/agent/conversation/` 与 `src/conversation/`，形成 types/store/state-machine/engine/context/bridge/adapter；
+- `[x]` 已建立 SQLite ConversationStore、Turn CAS、parent/digest chain、durable event 与 compact boundary；
+- `[x]` legacy Graph execution 经 `GraphTurnAdapter` 后只能产生 unverified model outcome；
+- `[~]` 五个 demo 已共享 LiveRuntime/profile bootstrap，但实际模型调用仍直达 `run_react_cli_sync`；
+- `[ ]` 让 `AgentLoopNode` 适配 TurnStateMachine 并逐步瘦身；
+- `[ ]` CLI/Web/TUI/ImGui/SDK/AgentServer/A2A 只依赖 Conversation API；
+- `[ ]` 正式实现 event subscribe/replay、输入队列、取消传播和 compact 驱动。
 
 ## 5. 升级方向二：Tool Lifecycle Kernel
 
@@ -455,39 +495,39 @@ Discovered → Resolved → Verified → Granted → Loaded → Invoked
 
 以下工作位于 GPC/GPW 之上。
 
-### AF-CC0：契约冻结
+### AF-CC0：契约冻结 `[~]`
 
 冻结 Conversation、Turn、RuntimeEvent、ToolContract、ContextProjection 和 CompactBoundary schema。未知 version fail closed；model-turn 与 task-terminal 在类型系统中不可互换；所有 profile/feature revision 进入 deployment manifest。
 
-### AF-CC1：ConversationEngine 最小闭环
+### AF-CC1：ConversationEngine 生产闭环 `[~]`
 
-CLI 与 SDK 先共享 start/continue/interrupt/resume 和 ConversationStore。要求连续 100 Turn 不丢链、取消传播正确、新输入五类路由、legacy 输出始终 unverified、重启恢复到一致 boundary。
+最小骨架、100 Turn 消息链、重启恢复和 legacy-unverified 已完成。下一退出条件是：事务化 Turn boundary、跨连接 sequence/parent linearizability、五类输入真实语义、subscribe/replay，以及 CLI/SDK/Server/A2A 共享 start/continue/interrupt/resume 和 ConversationStore。
 
-### AF-CC2：Tool Lifecycle Kernel
+### AF-CC2：Tool Lifecycle Kernel `[△]`
 
 Local/MCP/Skill/A2A/Artifact tools 统一进入生命周期。验证 Hook 改写后重新校验、deny precedence、未知 effect 拒绝、幂等不重复、unknown effect ManualReview、大结果 CAS 外置。
 
-### AF-CC3：Context Projection/Compact Boundary
+### AF-CC3：Context Projection/Compact Boundary `[~]`
 
 组合对话压缩与 Memory Governance。要求 Contract/Policy/Citation 不丢失、compact 前后恢复等价、reactive compact 有界、summary failure 有确定性 fallback、长会话 RSS/token 成本下降。
 
-### AF-CC4：三链持久化与恢复
+### AF-CC4：三链持久化与恢复 `[~]`
 
 Conversation、Workflow Event、Effect 链独立关联。对所有 durable 写点做 crash injection，确保无 orphan、无 effect 重放、digest 漂移转 ManualReview。
 
-### AF-CC5：子 Agent Capability Isolation
+### AF-CC5：子 Agent Capability Isolation `[△]`
 
 ChildTask/A2A/Skill 子运行时使用能力交集和独立 transcript。父授权不泄漏、子 Agent 无法扩权、父取消传播、子自报完成不能关闭父任务、远端证据本地复验。
 
-### AF-CC6：Streaming 与安全调度
+### AF-CC6：Streaming 与安全调度 `[△]`
 
 用 Taskflow subflow 构建工具批次。PureRead 并发应获得可量化延迟收益；冲突写永不并发；结果顺序符合 provider 协议；stream abort 不遗留未协调 effect；critical path 可观测。
 
-### AF-CC7：统一 Experience/Operations
+### AF-CC7：统一 Experience/Operations `[△]`
 
 CLI/Web/TUI/ImGui/SDK 消费同一事件与 snapshot。相同 Run 状态一致，真实 ApprovalStore 驱动动作，断线重连不回退，用户始终能区分 candidate answer 与 verified completion。
 
-### AF-CC8：质量、故障与生产认证
+### AF-CC8：质量、故障与生产认证 `[~]`
 
 把新交互运行时纳入 unit、contract、integration、recovery、adversarial、performance 和 live-production 七层测试。真实 provider/MCP/IdP/KMS/Sandbox 证据必须由现有 Live Certification 签发，不能 skip-as-pass。
 
@@ -528,14 +568,14 @@ CLI/Web/TUI/ImGui/SDK 消费同一事件与 snapshot。相同 Run 状态一致�
 
 ## 19. 优先级建议
 
-1. 先完成当前 GPW，使所有生产入口只接受 Closure 权威；
-2. 实施 AF-CC0/1，建立 Conversation/Turn 层；
-3. 实施 AF-CC2，统一 Tool Lifecycle；
-4. 实施 AF-CC3/4，解决长会话和三链恢复；
-5. 实施 AF-CC5/6，强化多 Agent 与低延迟调度；
-6. 实施 AF-CC7/8，形成产品一致性和真实认证。
+1. **AF-CC1R**：先事务化 ConversationStore，使用数据库内 sequence 分配和 CAS/`BEGIN IMMEDIATE` 关闭跨连接竞争，并增加双连接、回滚和 crash-window 测试；
+2. **AF-CC1W**：五个 demo、SDK、AgentServer、A2A 迁移到 ConversationEngine；`run_react_cli_sync` 只能位于受控 TurnExecutor adapter 后；
+3. **AF-CC2**：冻结 ToolContract 并统一 Local/MCP/Skill/A2A/Artifact Tool Lifecycle，禁止旁路；
+4. **AF-CC3/4**：ContextProjection 驱动真实模型 invocation，补齐 compact、CAS、大结果治理、三链 correlation 与 crash injection；
+5. **AF-CC5/6**：实现子 Agent capability intersection、独立 transcript 与 effect-aware Taskflow 调度；
+6. **AF-CC7/8**：统一事件订阅、Operations 动作和真实 provider/MCP/IdP/KMS/Sandbox Live Certification。
 
-在 AF-CC4 关闭前，建议冻结新增 provider adapter、新 Store 类型、无法进入统一生命周期的工具系统、平行 demo runtime，以及只有 fixture 没有 production wiring 的控制面。
+在 AF-CC1R/AF-CC4 关闭前，冻结新增 provider adapter、新 Store 类型、无法进入统一生命周期的工具系统、平行 demo runtime，以及只有 fixture 没有 production wiring 的控制面。
 
 ## 20. 最终目标
 

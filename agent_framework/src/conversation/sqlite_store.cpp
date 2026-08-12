@@ -335,4 +335,105 @@ namespace agent_framework::conversation
             return std::nullopt;
         }
     }
+    bool SQLiteConversationStore::commit(ConversationCommit &batch, std::string *e)
+    {
+        std::lock_guard l(mutex_);
+        auto *db = internal::sqlite::database(db_);
+        try
+        {
+            internal::sqlite::Transaction transaction(db);
+            const auto &identity = batch.checkpoint.identity;
+            if (identity.tenant_id.empty() || identity.conversation_id.empty() ||
+                batch.checkpoint.turn_id.empty())
+                throw std::runtime_error("conversation commit identity required");
+
+            Statement old(db, "SELECT revision FROM conversation_turns WHERE tenant=? AND conversation=? AND turn_id=?");
+            bind_id(old.get(), identity);
+            internal::sqlite::bind_text(old.get(), 3, batch.checkpoint.turn_id);
+            std::uint64_t actual = 0;
+            if (internal::sqlite::step(old.get()) == SQLITE_ROW)
+                actual = internal::sqlite::column_uint64(old.get(), 0);
+            if (actual != batch.expected_turn_revision ||
+                batch.checkpoint.revision != batch.expected_turn_revision + 1)
+                throw std::runtime_error("turn revision conflict");
+
+            Statement tail(db, "SELECT sequence,message_id FROM conversation_messages WHERE tenant=? AND conversation=? ORDER BY sequence DESC LIMIT 1");
+            bind_id(tail.get(), identity);
+            std::uint64_t message_sequence = 0;
+            std::string parent;
+            if (internal::sqlite::step(tail.get()) == SQLITE_ROW)
+            {
+                message_sequence = internal::sqlite::column_uint64(tail.get(), 0);
+                parent = internal::sqlite::column_text(tail.get(), 1);
+            }
+            for (auto &message : batch.messages)
+            {
+                if (message.identity.tenant_id != identity.tenant_id ||
+                    message.identity.conversation_id != identity.conversation_id ||
+                    message.parent_id != parent || message.message_id.empty())
+                    throw std::runtime_error("message parent chain mismatch");
+                message.sequence = ++message_sequence;
+                message.digest = digest(encode(message));
+                Statement insert(db, "INSERT INTO conversation_messages VALUES(?,?,?,?,?,?,?,?,?,?)");
+                bind_id(insert.get(), identity);
+                internal::sqlite::bind_uint64(insert.get(), 3, message.sequence);
+                internal::sqlite::bind_text(insert.get(), 4, message.message_id);
+                internal::sqlite::bind_text(insert.get(), 5, message.parent_id);
+                internal::sqlite::bind_text(insert.get(), 6, message.turn_id);
+                internal::sqlite::bind_text(insert.get(), 7, message.role);
+                internal::sqlite::bind_text(insert.get(), 8, message.content);
+                internal::sqlite::bind_text(insert.get(), 9, message.created_at);
+                internal::sqlite::bind_text(insert.get(), 10, message.digest);
+                if (internal::sqlite::step(insert.get()) != SQLITE_DONE)
+                    throw std::runtime_error(sqlite3_errmsg(db));
+                parent = message.message_id;
+            }
+            if (!batch.messages.empty())
+                batch.checkpoint.last_message_id = batch.messages.back().message_id;
+
+            Statement event_tail(db, "SELECT COALESCE(MAX(sequence),0) FROM conversation_events WHERE tenant=? AND conversation=?");
+            bind_id(event_tail.get(), identity);
+            std::uint64_t event_sequence = internal::sqlite::step(event_tail.get()) == SQLITE_ROW
+                ? internal::sqlite::column_uint64(event_tail.get(), 0) : 0;
+            for (auto &event : batch.durable_events)
+            {
+                event.tenant_id = identity.tenant_id;
+                event.conversation_id = identity.conversation_id;
+                event.sequence = ++event_sequence;
+                if (event.event_id.empty())
+                    event.event_id = event.turn_id + ":" + std::to_string(event.sequence);
+                const auto json = encode(event);
+                event.digest = digest(json);
+                Statement insert(db, "INSERT INTO conversation_events VALUES(?,?,?,?,?)");
+                bind_id(insert.get(), identity);
+                internal::sqlite::bind_uint64(insert.get(), 3, event.sequence);
+                internal::sqlite::bind_text(insert.get(), 4, json.dump());
+                internal::sqlite::bind_text(insert.get(), 5, event.digest);
+                if (internal::sqlite::step(insert.get()) != SQLITE_DONE)
+                    throw std::runtime_error(sqlite3_errmsg(db));
+            }
+
+            const auto checkpoint_digest = digest(encode(batch.checkpoint));
+            Statement turn(db, "INSERT INTO conversation_turns VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(tenant,conversation,turn_id) DO UPDATE SET revision=excluded.revision,iteration=excluded.iteration,phase=excluded.phase,continuation=excluded.continuation,last_message_id=excluded.last_message_id,boundary_digest=excluded.boundary_digest,digest=excluded.digest");
+            bind_id(turn.get(), identity);
+            internal::sqlite::bind_text(turn.get(), 3, batch.checkpoint.turn_id);
+            internal::sqlite::bind_uint64(turn.get(), 4, batch.checkpoint.revision);
+            internal::sqlite::bind_uint64(turn.get(), 5, batch.checkpoint.iteration);
+            internal::sqlite::bind_text(turn.get(), 6, phase(batch.checkpoint.phase));
+            internal::sqlite::bind_text(turn.get(), 7, name(batch.checkpoint.continuation));
+            internal::sqlite::bind_text(turn.get(), 8, batch.checkpoint.last_message_id);
+            internal::sqlite::bind_text(turn.get(), 9, batch.checkpoint.compact_boundary_digest);
+            internal::sqlite::bind_text(turn.get(), 10, checkpoint_digest);
+            if (internal::sqlite::step(turn.get()) != SQLITE_DONE)
+                throw std::runtime_error(sqlite3_errmsg(db));
+            transaction.commit();
+            return true;
+        }
+        catch (const std::exception &failure)
+        {
+            if (e)
+                *e = failure.what();
+            return false;
+        }
+    }
 }

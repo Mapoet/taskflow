@@ -55,8 +55,6 @@ namespace agent_framework::conversation
         std::string err;
         if (!TurnStateMachine::transition(c, TurnPhase::Running, TurnContinuationReason::InitialRequest, &err))
             return {c, {}, err};
-        if (!store_.commit_turn(c, 0, &err))
-            return {c, {}, err};
         auto prior = store_.messages(r.identity);
         ConversationMessage m;
         m.identity = r.identity;
@@ -66,11 +64,22 @@ namespace agent_framework::conversation
         m.role = "user";
         m.content = r.input;
         m.created_at = stamp();
-        m.sequence = prior.size() + 1;
-        if (!store_.append_message(m, &err))
+        RuntimeEventEnvelope started;
+        started.tenant_id = r.identity.tenant_id;
+        started.conversation_id = r.identity.conversation_id;
+        started.turn_id = r.turn_id;
+        started.run_id = r.turn_id;
+        started.durability = EventDurability::Durable;
+        started.visibility = EventVisibility::Operations;
+        started.event_type = "turn_started";
+        started.timestamp = stamp();
+        started.payload = {{"profile", name(r.profile)}};
+        ConversationCommit initial{c, 0, {m}, {started}};
+        if (!store_.commit(initial, &err))
             return {c, {}, err};
-        c.last_message_id = m.message_id;
-        event(r, c, "turn_started", {{"profile", name(r.profile)}}, EventDurability::Durable, EventVisibility::Operations);
+        c = initial.checkpoint;
+        if (sink_)
+            sink_(initial.durable_events.front());
         return execute(r, c);
     }
     TurnResult ConversationEngine::continue_turn(const TurnRequest &r, TurnContinuationReason why)
@@ -112,6 +121,7 @@ namespace agent_framework::conversation
         std::string err;
         if (!TurnStateMachine::transition(c, next, next == TurnPhase::AwaitingTool ? TurnContinuationReason::ToolResultsAvailable : TurnContinuationReason::None, &err))
             return {c, o, err};
+        std::vector<ConversationMessage> pending_messages;
         if (!o.candidate_answer.empty())
         {
             auto prior = store_.messages(r.identity);
@@ -123,14 +133,24 @@ namespace agent_framework::conversation
             m.role = "assistant";
             m.content = o.candidate_answer;
             m.created_at = stamp();
-            m.sequence = prior.size() + 1;
-            if (!store_.append_message(m, &err))
-                return {c, o, err};
-            c.last_message_id = m.message_id;
+            pending_messages.push_back(std::move(m));
         }
-        if (!store_.commit_turn(c, expected, &err))
+        RuntimeEventEnvelope stopped;
+        stopped.tenant_id = r.identity.tenant_id;
+        stopped.conversation_id = r.identity.conversation_id;
+        stopped.turn_id = r.turn_id;
+        stopped.run_id = r.turn_id;
+        stopped.durability = EventDurability::Durable;
+        stopped.visibility = EventVisibility::User;
+        stopped.event_type = "model_stop";
+        stopped.timestamp = stamp();
+        stopped.payload = {{"reason", name(o.reason)}, {"task_completion_verified", false}};
+        ConversationCommit terminal{c, expected, std::move(pending_messages), {stopped}};
+        if (!store_.commit(terminal, &err))
             return {c, o, err};
-        event(r, c, "model_stop", {{"reason", name(o.reason)}, {"task_completion_verified", false}}, EventDurability::Durable, EventVisibility::User);
+        c = terminal.checkpoint;
+        if (sink_)
+            sink_(terminal.durable_events.front());
         return {c, o, {}};
     }
     bool ConversationEngine::interrupt_turn(const ConversationIdentity &i, std::string_view id, std::string *e)
