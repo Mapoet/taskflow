@@ -56,6 +56,104 @@ std::optional<JudgeWorkflowInput> CallbackProductionWorkflowInputAssembler::judg
     return judge_fn(request, error);
 }
 
+StoreBackedProductionWorkflowInputAssembler::StoreBackedProductionWorkflowInputAssembler(
+    ProductionWorkflowInputRepository& repository, planning::PlanStore& plans,
+    memory_v2::MemoryScope subject)
+    : repository_(repository), plans_(plans), subject_(std::move(subject)) {}
+
+bool StoreBackedProductionWorkflowInputAssembler::identity_matches(
+    const contracts::ContractIdentity& expected,
+    const contracts::ContractIdentity& actual) const {
+    return expected.tenant_id == actual.tenant_id && expected.task_id == actual.task_id &&
+           expected.run_id == actual.run_id;
+}
+
+std::optional<CognitionWorkflowInput> StoreBackedProductionWorkflowInputAssembler::cognition(
+    const HarnessStageRequest& request, std::string* error) {
+    auto intake = repository_.intake(request.checkpoint.metadata.identity);
+    if(!intake || !identity_matches(request.checkpoint.metadata.identity, intake->metadata.identity)) {
+        if(error) *error = "store-backed intake missing or identity mismatch";
+        return std::nullopt;
+    }
+    CognitionWorkflowInput input;
+    input.intake = std::move(*intake); input.subject = subject_;
+    input.options.pipeline_id = request.checkpoint.harness_id + ":cognition";
+    input.options.approval_decision_id = request.checkpoint.pins.approval_decision_id;
+    return input;
+}
+
+std::optional<MemoryWorkflowAdapterInput> StoreBackedProductionWorkflowInputAssembler::memory(
+    const HarnessStageRequest& request, std::string* error) {
+    auto value = repository_.memory_input(request.checkpoint.metadata.identity,
+                                           request.checkpoint.pins.artifact_manifest_digest);
+    if(!value || !identity_matches(request.checkpoint.metadata.identity, value->metadata.identity)) {
+        if(error) *error = "store-backed memory input missing or identity mismatch";
+        return std::nullopt;
+    }
+    MemoryWorkflowAdapterInput input; input.input = std::move(*value);
+    input.options.approval_decision_id = request.checkpoint.pins.approval_decision_id;
+    return input;
+}
+
+std::optional<AssuranceWorkflowInput> StoreBackedProductionWorkflowInputAssembler::assurance(
+    const HarnessStageRequest& request, bool reverification, std::string* error) {
+    auto contract = repository_.acceptance_contract(
+        request.checkpoint.metadata.identity, request.checkpoint.pins.acceptance_contract_digest);
+    auto context = repository_.task_context(
+        request.checkpoint.metadata.identity, request.checkpoint.pins.plan_digest);
+    auto artifact = repository_.artifact_manifest(
+        request.checkpoint.metadata.identity, request.checkpoint.pins.artifact_manifest_digest);
+    if(!contract || !context || !artifact ||
+       !identity_matches(request.checkpoint.metadata.identity, contract->metadata.identity)) {
+        if(error) *error = "store-backed assurance contract/context/artifact missing or identity mismatch";
+        return std::nullopt;
+    }
+    AssuranceWorkflowInput input;
+    input.contract = std::move(*contract); input.subject = subject_;
+    input.task_context = std::move(*context); input.artifact_manifest = std::move(*artifact);
+    input.options.workflow_id = request.checkpoint.harness_id +
+        (reverification ? ":reverification" : ":assurance");
+    return input;
+}
+
+std::optional<RemediationWorkflowInput> StoreBackedProductionWorkflowInputAssembler::remediation(
+    const HarnessStageRequest& request, std::string* error) {
+    auto plan = plans_.current(request.checkpoint.metadata.identity);
+    auto contract = repository_.acceptance_contract(
+        request.checkpoint.metadata.identity, request.checkpoint.pins.acceptance_contract_digest);
+    auto report = repository_.acceptance_report(
+        request.checkpoint.metadata.identity, request.checkpoint.pins.acceptance_report_digest);
+    auto checkpoint = repository_.assurance_checkpoint(
+        request.checkpoint.metadata.identity, request.checkpoint.pins.acceptance_report_digest);
+    auto inventory = repository_.impact_inventory(
+        request.checkpoint.metadata.identity, request.checkpoint.pins.artifact_manifest_digest);
+    if(!plan || !contract || !report || !checkpoint || !inventory) {
+        if(error) *error = "store-backed remediation inputs are incomplete";
+        return std::nullopt;
+    }
+    RemediationWorkflowInput input;
+    input.current_plan = std::move(*plan); input.contract = std::move(*contract);
+    input.report = std::move(*report); input.assurance_checkpoint = std::move(*checkpoint);
+    input.inventory = std::move(*inventory); input.subject = subject_;
+    input.options.workflow_id = request.checkpoint.harness_id + ":remediation";
+    input.options.approval_decision_id = request.checkpoint.pins.approval_decision_id;
+    return input;
+}
+
+std::optional<JudgeWorkflowInput> StoreBackedProductionWorkflowInputAssembler::judge(
+    const HarnessStageRequest& request, std::string* error) {
+    auto input = repository_.evaluation_input(request.checkpoint.metadata.identity);
+    if(!input || !input->datasets ||
+       !identity_matches(request.checkpoint.metadata.identity, input->suite.metadata.identity)) {
+        if(error) *error = "store-backed evaluation suite/runs/datasets missing or identity mismatch";
+        return std::nullopt;
+    }
+    input->subject = subject_;
+    input->options.workflow_id = request.checkpoint.harness_id + ":judge";
+    input->options.approval_decision_id = request.checkpoint.pins.approval_decision_id;
+    return input;
+}
+
 std::vector<llm_runtime::LLMInvocationManifest> InvocationManifestResolver::resolve(
     std::string_view tenant_id, const std::vector<std::string>& ids, std::string* error) const {
     std::vector<llm_runtime::LLMInvocationManifest> result;

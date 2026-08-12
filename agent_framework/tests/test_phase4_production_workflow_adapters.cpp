@@ -4,6 +4,30 @@
 #include "agent/harness/production_workflow_adapters.hpp"
 #include "phase4_harness_test_support.hpp"
 
+namespace {
+using namespace agent_framework;
+class EmptyRepository final : public harness::ProductionWorkflowInputRepository {
+public:
+    std::optional<planning::TaskIntake> intake(const contracts::ContractIdentity&) override { return {}; }
+    std::optional<memory_v2::workflows::MemoryWorkflowInput> memory_input(
+        const contracts::ContractIdentity&, std::string_view) override { return {}; }
+    std::optional<assurance::AcceptanceContract> acceptance_contract(
+        const contracts::ContractIdentity&, std::string_view) override { return {}; }
+    std::optional<nlohmann::json> task_context(
+        const contracts::ContractIdentity&, std::string_view) override { return {}; }
+    std::optional<nlohmann::json> artifact_manifest(
+        const contracts::ContractIdentity&, std::string_view) override { return {}; }
+    std::optional<assurance::AcceptanceReport> acceptance_report(
+        const contracts::ContractIdentity&, std::string_view) override { return {}; }
+    std::optional<assurance::AssuranceCheckpoint> assurance_checkpoint(
+        const contracts::ContractIdentity&, std::string_view) override { return {}; }
+    std::optional<remediation::ImpactInventory> impact_inventory(
+        const contracts::ContractIdentity&, std::string_view) override { return {}; }
+    std::optional<harness::JudgeWorkflowInput> evaluation_input(
+        const contracts::ContractIdentity&) override { return {}; }
+};
+}
+
 int main() {
     using namespace agent_framework;
     using namespace agent_framework::harness;
@@ -16,6 +40,17 @@ int main() {
     error.clear(); assert(!inputs.assurance(request, false, &error) && !error.empty());
     error.clear(); assert(!inputs.remediation(request, &error) && !error.empty());
     error.clear(); assert(!inputs.judge(request, &error) && !error.empty());
+
+    EmptyRepository repository;
+    planning::InMemoryPlanStore plans;
+    memory_v2::MemoryScope subject;
+    subject.tenant_id = "tenant-a"; subject.task_id = "task-a"; subject.run_id = "run-harness";
+    StoreBackedProductionWorkflowInputAssembler store_inputs(repository, plans, subject);
+    error.clear(); assert(!store_inputs.cognition(request, &error) && !error.empty());
+    error.clear(); assert(!store_inputs.memory(request, &error) && !error.empty());
+    error.clear(); assert(!store_inputs.assurance(request, false, &error) && !error.empty());
+    error.clear(); assert(!store_inputs.remediation(request, &error) && !error.empty());
+    error.clear(); assert(!store_inputs.judge(request, &error) && !error.empty());
 
     auto store = std::make_shared<llm_runtime::InMemoryLLMRuntimeStore>();
     llm_runtime::LLMInvocationManifest manifest;

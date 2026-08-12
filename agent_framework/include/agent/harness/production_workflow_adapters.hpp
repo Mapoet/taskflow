@@ -63,6 +63,47 @@ public:
         const HarnessStageRequest&, std::string*) = 0;
 };
 
+class ProductionWorkflowInputRepository {
+public:
+    virtual ~ProductionWorkflowInputRepository() = default;
+    virtual std::optional<planning::TaskIntake> intake(
+        const contracts::ContractIdentity&) = 0;
+    virtual std::optional<memory_v2::workflows::MemoryWorkflowInput> memory_input(
+        const contracts::ContractIdentity&, std::string_view artifact_digest) = 0;
+    virtual std::optional<assurance::AcceptanceContract> acceptance_contract(
+        const contracts::ContractIdentity&, std::string_view contract_digest) = 0;
+    virtual std::optional<nlohmann::json> task_context(
+        const contracts::ContractIdentity&, std::string_view plan_digest) = 0;
+    virtual std::optional<nlohmann::json> artifact_manifest(
+        const contracts::ContractIdentity&, std::string_view artifact_digest) = 0;
+    virtual std::optional<assurance::AcceptanceReport> acceptance_report(
+        const contracts::ContractIdentity&, std::string_view report_digest) = 0;
+    virtual std::optional<assurance::AssuranceCheckpoint> assurance_checkpoint(
+        const contracts::ContractIdentity&, std::string_view report_digest) = 0;
+    virtual std::optional<remediation::ImpactInventory> impact_inventory(
+        const contracts::ContractIdentity&, std::string_view artifact_digest) = 0;
+    virtual std::optional<JudgeWorkflowInput> evaluation_input(
+        const contracts::ContractIdentity&) = 0;
+};
+
+class StoreBackedProductionWorkflowInputAssembler final
+    : public ProductionWorkflowInputAssembler {
+public:
+    StoreBackedProductionWorkflowInputAssembler(
+        ProductionWorkflowInputRepository& repository, planning::PlanStore& plans,
+        memory_v2::MemoryScope subject);
+    std::optional<CognitionWorkflowInput> cognition(const HarnessStageRequest&, std::string*) override;
+    std::optional<MemoryWorkflowAdapterInput> memory(const HarnessStageRequest&, std::string*) override;
+    std::optional<AssuranceWorkflowInput> assurance(const HarnessStageRequest&, bool, std::string*) override;
+    std::optional<RemediationWorkflowInput> remediation(const HarnessStageRequest&, std::string*) override;
+    std::optional<JudgeWorkflowInput> judge(const HarnessStageRequest&, std::string*) override;
+private:
+    bool identity_matches(const contracts::ContractIdentity&, const contracts::ContractIdentity&) const;
+    ProductionWorkflowInputRepository& repository_;
+    planning::PlanStore& plans_;
+    memory_v2::MemoryScope subject_;
+};
+
 class CallbackProductionWorkflowInputAssembler final
     : public ProductionWorkflowInputAssembler {
 public:
