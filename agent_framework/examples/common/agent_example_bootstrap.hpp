@@ -79,8 +79,26 @@ struct LiveRuntime {
     std::shared_ptr<SkillServices> skills;
     AgentConfig config;
     InputPolicyConfig input_policy;
+    ExecutionTrustProfile trust_profile{ExecutionTrustProfile::Demo};
     BootstrapResult bootstrap;
 };
+
+inline ExecutionTrustProfile execution_trust_profile_from_env() {
+    const char* raw = std::getenv("AGENT_EXECUTION_PROFILE");
+    const std::string value = raw && *raw ? raw : "demo";
+    if(value == "demo") return ExecutionTrustProfile::Demo;
+    if(value == "test") return ExecutionTrustProfile::Test;
+    if(value == "production") return ExecutionTrustProfile::Production;
+    throw std::invalid_argument(
+        "AGENT_EXECUTION_PROFILE must be one of: demo, test, production");
+}
+
+inline void require_direct_demo_execution(const LiveRuntime& runtime) {
+    if(runtime.trust_profile == ExecutionTrustProfile::Production)
+        throw std::runtime_error(
+            "production_direct_react_execution_forbidden: use the production harness "
+            "and TaskClosureController binding");
+}
 
 inline void set_environment_override(const char* key, const std::string& value) {
 #if defined(_WIN32)
@@ -251,6 +269,7 @@ inline LiveRuntime build_live_runtime(const LiveRuntimeOptions& options) {
     apply_live_llm_env_defaults();
 
     LiveRuntime runtime;
+    runtime.trust_profile = execution_trust_profile_from_env();
     runtime.llm = std::make_shared<LLMClient>(LLMClient::from_env());
     runtime.llm->set_prompt_renderer(std::make_shared<PromptRenderer>());
     if(const char* strategy = std::getenv("AGENT_MEMORY_COMPACTOR");
@@ -317,6 +336,7 @@ inline AgentExecutionProfile to_execution_profile(const LiveRuntime& runtime) {
     profile.deps = {runtime.llm, runtime.toolbus, runtime.skills,
                     runtime.memory_compaction_llm};
     profile.input_policy = runtime.input_policy;
+    profile.trust_profile = runtime.trust_profile;
     return profile;
 }
 

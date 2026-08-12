@@ -64,6 +64,10 @@ struct ChildTaskResult {
     json checkpoint = json::object();
 
     bool ok() const { return status == ChildTaskStatus::Completed; }
+    bool verified_complete() const {
+        return ok() && outputs.value("task_completion_verified", false) &&
+               outputs.value("completion_authority", std::string()) == "task_closure_controller";
+    }
 };
 
 const char* child_task_start_mode_cstr(ChildTaskStartMode mode) noexcept;

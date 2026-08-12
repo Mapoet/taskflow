@@ -306,6 +306,37 @@ void test_i6_unknown_template_fails_before_execution() {
     assert(result.error == "unknown workflow template: missing_template");
 }
 
+void test_i7_production_completion_is_fail_closed() {
+    GraphExecutor gx; tf::Executor executor;
+    ExecutionRequest missing;
+    missing.trust_profile = ExecutionTrustProfile::Production;
+    auto denied = gx.execute_sync(executor, std::move(missing));
+    assert(!denied.success && denied.error == "production_closure_binding_required");
+    assert(!denied.outputs.at("task_completion_verified").get<bool>());
+
+    auto adapter = std::make_shared<TwoTurnHistoryAdapter>();
+    auto llm = std::make_shared<LLMClient>();
+    llm->set_prompt_renderer(std::make_shared<PromptRenderer>());
+    llm->register_adapter("fake", adapter); llm->set_default_adapter("fake");
+    ExecutionRequest bound;
+    bound.config.system_prompt="sys"; bound.config.max_iterations=4;
+    bound.deps={llm,std::make_shared<ToolBus>(),nullptr};
+    bound.session=std::make_shared<internal::AgentThreadState>();
+    bound.session->initial_user_prompt=kFirstUser;
+    bound.context.session_id="production-closure";
+    bound.options.persist_session=false;
+    bound.options.react.sink.on_final_json=[](const json&){};
+    bound.trust_profile=ExecutionTrustProfile::Production;
+    bound.production_closure=ProductionClosureBinding{"sha256:deps","sha256:composition",
+        [](const ExecutionResult& execution){assert(execution.success);
+            return json{{"state","completed_verified"},
+            {"task_completion_verified",true},{"terminal_authority","task_closure_controller"},
+            {"reason_code","verified"},{"receipt_digest","sha256:closure"}};}};
+    auto verified=gx.execute_sync(executor,std::move(bound));
+    assert(verified.success && verified.outputs.at("task_completion_verified").get<bool>());
+    assert(verified.outputs.at("completion_authority") == "task_closure_controller");
+}
+
 } // namespace
 
 int main() {
@@ -315,5 +346,6 @@ int main() {
     test_i4_cancel_does_not_commit_or_mutate_session();
     test_i5_template_registry_drives_unified_execution();
     test_i6_unknown_template_fails_before_execution();
+    test_i7_production_completion_is_fail_closed();
     return 0;
 }

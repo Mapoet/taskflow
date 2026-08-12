@@ -1,4 +1,6 @@
 #include <agent/harness/task_closure.hpp>
+#include <agent/a2a/orchestration.hpp>
+#include <agent/agent/child_task.hpp>
 #include "phase4_harness_test_support.hpp"
 
 #include <cassert>
@@ -59,5 +61,15 @@ int main() {
     cf.external_blockers.clear();
     cf.missing_facts={"credential reference"};
     assert(controller.evaluate(c,cf).state==TaskTerminalState::NeedsUserInput);
+    std::string reason;
+    assert(!agent_framework::a2a::accept_remote_completion({true,true,false,false,""},&reason));
+    assert(reason=="local_artifact_verification_required");
+    assert(agent_framework::a2a::accept_remote_completion({true,true,true,true,"sha256:local"}));
+    agent_framework::ChildTaskResult child;
+    child.status=agent_framework::ChildTaskStatus::Completed;
+    child.outputs={{"task_completion_verified",false},{"completion_authority","none"}};
+    assert(child.ok() && !child.verified_complete());
+    child.outputs={{"task_completion_verified",true},{"completion_authority","task_closure_controller"}};
+    assert(child.verified_complete());
     return 0;
 }

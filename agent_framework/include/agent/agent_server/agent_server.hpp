@@ -54,6 +54,8 @@ struct AgentExecutionProfile {
     AgentConfig config;
     AgentWorkflowDeps deps;
     InputPolicyConfig input_policy;
+    ExecutionTrustProfile trust_profile{ExecutionTrustProfile::Demo};
+    std::optional<ProductionClosureBinding> production_closure;
 };
 
 /**

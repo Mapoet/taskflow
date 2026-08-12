@@ -266,6 +266,7 @@ int main(int argc, char** argv) {
                                       env_truthy("AGENT_CLI_SKIP_CURSOR_MCP"));
         options.verbose = verbose || env_truthy("AGENT_TEST_AGENT_LOOP_DEBUG");
         runtime = example::build_live_runtime(options);
+        example::require_direct_demo_execution(runtime);
     } catch (const std::exception& e) {
         std::cerr << "[error] LLM init: " << e.what() << "\n"
                   << "Set AGENT_LLM_PROVIDER, OPENAI_API_KEY / ANTHROPIC_API_KEY, or DEEPSEEK_API_KEY "

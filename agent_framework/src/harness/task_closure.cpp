@@ -268,4 +268,51 @@ namespace agent_framework::harness
         if(!d.allowed)d.route="fail_closed";
         return d;
     }
+
+    TaskClosureDecision ProductionTaskRuntime::start(const HarnessStart& start,
+        const HarnessRuntimeOptions& options) { return close(harness_.run(start,options)); }
+    TaskClosureDecision ProductionTaskRuntime::resume(std::string_view tenant,std::string_view id,
+        const HarnessRuntimeOptions& options) { return close(harness_.resume(tenant,id,options)); }
+    TaskClosureDecision ProductionTaskRuntime::close(const HarnessRunResult& run)
+    {
+        const auto& identity=contract_.metadata.identity;
+        auto previous=progress_.latest(identity.tenant_id,identity.task_id);
+        auto prior_assessment=progress_.latest_assessment(identity.tenant_id,identity.task_id);
+        ProgressObservation current;
+        current.observation_id=run.checkpoint.harness_id+":"+std::to_string(run.checkpoint.revision);
+        current.revision=run.checkpoint.revision;
+        current.active_findings=run.checkpoint.unresolved_findings;
+        current.semantic_plan_digest=identity.plan_id;
+        if(!run.checkpoint.pins.artifact_manifest_digest.empty())
+            current.artifact_digests.push_back(run.checkpoint.pins.artifact_manifest_digest);
+        if(!run.checkpoint.pins.acceptance_report_digest.empty())
+            current.valid_evidence_digests.push_back(run.checkpoint.pins.acceptance_report_digest);
+        if(!run.checkpoint.pins.judge_report_digest.empty())
+            current.valid_evidence_digests.push_back(run.checkpoint.pins.judge_report_digest);
+        const bool verified=run.checkpoint.state==HarnessState::Completed &&
+            Phase4HarnessRuntime::completion_gate_issues(run.checkpoint).empty();
+        if(verified) current.closed_criteria=contract_.mandatory_criteria;
+        ProgressAssessment assessment;
+        if(previous && previous->revision==current.revision && prior_assessment) {
+            current=*previous;
+            assessment=*prior_assessment;
+        } else if(current.revision>0) {
+            assessment=ProgressEvaluator::assess(previous,current,
+                prior_assessment ? prior_assessment->consecutive_no_progress : 0);
+            std::string ignored;
+            progress_.append(identity.tenant_id,identity.task_id,current,assessment,&ignored);
+        }
+        ClosureFacts facts; facts.checkpoint=run.checkpoint;
+        facts.cancelled=run.checkpoint.state==HarnessState::Cancelled;
+        facts.execution_failed=run.checkpoint.state==HarnessState::Failed;
+        facts.unknown_side_effect=run.checkpoint.state==HarnessState::ManualReview;
+        facts.verification_failed=run.error_code=="verification_failed";
+        facts.last_progress_revision=run.checkpoint.revision;
+        facts.finding_refs=run.checkpoint.unresolved_findings;
+        facts.satisfied_criteria=current.closed_criteria;
+        facts.strong_evidence_refs=current.valid_evidence_digests;
+        facts.artifact_refs=current.artifact_digests;
+        facts.progress=assessment;
+        return closure_.evaluate(contract_,facts);
+    }
 } // namespace agent_framework::harness

@@ -141,4 +141,20 @@ public:
                                  const ClosureFacts& facts) const;
 };
 
+class ProductionTaskRuntime {
+public:
+    ProductionTaskRuntime(TaskClosureContract contract, Phase4HarnessRuntime& harness,
+                          SQLiteProgressLedger& progress, TaskClosureController& closure)
+        : contract_(std::move(contract)), harness_(harness), progress_(progress), closure_(closure) {}
+    TaskClosureDecision start(const HarnessStart&, const HarnessRuntimeOptions& = {});
+    TaskClosureDecision resume(std::string_view tenant_id, std::string_view harness_id,
+                               const HarnessRuntimeOptions& = {});
+private:
+    TaskClosureDecision close(const HarnessRunResult&);
+    TaskClosureContract contract_;
+    Phase4HarnessRuntime& harness_;
+    SQLiteProgressLedger& progress_;
+    TaskClosureController& closure_;
+};
+
 } // namespace agent_framework::harness

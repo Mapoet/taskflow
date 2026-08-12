@@ -384,6 +384,8 @@ void AgentServer::run_agent_task_on_executor(const std::string& task_id,
             request.options.react.require_final_json_callback = false;
             request.options.input_already_processed = false;
             request.input_policy = profile.input_policy;
+            request.trust_profile = profile.trust_profile;
+            request.production_closure = profile.production_closure;
             request.options.react.graph_options.stream_callback = [this, task_id](std::string_view chunk) {
                 if(!chunk.empty()) push_message_delta(task_id, chunk, "answer");
             };
@@ -420,12 +422,19 @@ void AgentServer::run_agent_task_on_executor(const std::string& task_id,
                 }
             };
             fut = std::async(std::launch::async,
-                [this, request = std::move(request), snap = std::move(snap)]() mutable {
+                [this, request = std::move(request), snap = std::move(snap),
+                 trust_profile = profile.trust_profile]() mutable {
                     AgentTask done = std::move(snap);
                     ExecutionResult r = graph_executor_->execute_sync(*process_executor_, std::move(request));
-                    done.status = r.success ? AgentTaskStatus::COMPLETED : AgentTaskStatus::FAILED;
+                    const bool verified = r.outputs.value("task_completion_verified", false);
+                    const bool accepted = r.success &&
+                        (trust_profile != ExecutionTrustProfile::Production || verified);
+                    done.status = accepted ? AgentTaskStatus::COMPLETED : AgentTaskStatus::FAILED;
                     done.session_id = r.session_id;
-                    done.metadata["execution_status"] = r.success ? "completed" : "failed";
+                    done.metadata["execution_status"] = verified ? "completed_verified" :
+                        r.outputs.value("task_closure_state", r.success ? "unverified_model_response" : "failed");
+                    done.metadata["task_completion_verified"] = verified;
+                    done.metadata["completion_authority"] = r.outputs.value("completion_authority", "none");
                     done.metadata["session_revision"] = r.committed_revision;
                     if (r.error) done.metadata["execution_error"] = *r.error;
                     if (r.outputs.contains("final_answer")) {

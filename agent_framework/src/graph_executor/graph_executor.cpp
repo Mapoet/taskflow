@@ -627,6 +627,18 @@ std::future<WorkflowResult> GraphExecutor::run_react_cli_async(tf::Executor& exe
 }
 
 ExecutionResult GraphExecutor::execute_sync(tf::Executor& executor, ExecutionRequest request) {
+    if(request.trust_profile == ExecutionTrustProfile::Production) {
+        if(!request.production_closure || !request.production_closure->evaluate ||
+           request.production_closure->dependency_manifest_digest.empty() ||
+           request.production_closure->composition_manifest_digest.empty()) {
+            ExecutionResult denied;
+            denied.error = "production_closure_binding_required";
+            denied.outputs = {{"task_completion_verified",false},
+                {"task_closure_state","manual_review"},{"completion_authority","none"},
+                {"reason_code","production_closure_binding_required"}};
+            return denied;
+        }
+    }
     ExecutionResult result;
     const std::shared_ptr<WorkflowTemplate> workflow_template = get_template(request.template_id);
     if (!workflow_template) {
@@ -918,10 +930,32 @@ ExecutionResult GraphExecutor::execute_sync(tf::Executor& executor, ExecutionReq
         }
     }
     *committed_session = *working_session;
+    // The workflow reached its commit boundary. Expose that execution fact to
+    // the closure evaluator without treating it as verified task completion.
     result.success = true;
     result.exit_code = 0;
     result.status = ExecutionTerminalStatus::Completed;
-    emit(ExecutionEventType::ExecutionCompleted, {{"success", true}});
+    if(request.trust_profile == ExecutionTrustProfile::Production) {
+        const json closure=request.production_closure->evaluate(result);
+        result.outputs["task_closure_state"]=closure.value("state","manual_review");
+        result.outputs["task_completion_verified"]=closure.value("task_completion_verified",false);
+        result.outputs["completion_authority"]=closure.value("terminal_authority","none");
+        result.outputs["closure_receipt_digest"]=closure.value("receipt_digest","");
+        result.outputs["closure_reason_code"]=closure.value("reason_code","closure_decision_missing");
+        if(!result.outputs["task_completion_verified"].get<bool>()) {
+            result.success=false; result.exit_code=2; result.status=ExecutionTerminalStatus::Failed;
+            result.error="production_task_not_verified";
+            emit(ExecutionEventType::ExecutionCompleted, {{"success",false},{"verified",false},
+                {"closure_state",result.outputs["task_closure_state"]}});
+            return result;
+        }
+    } else {
+        result.outputs["task_completion_verified"]=false;
+        result.outputs["completion_authority"]="none";
+        result.outputs["task_closure_state"]="unverified_model_response";
+    }
+    emit(ExecutionEventType::ExecutionCompleted, {{"success", true},
+        {"verified",result.outputs.value("task_completion_verified",false)}});
     return result;
 }
 

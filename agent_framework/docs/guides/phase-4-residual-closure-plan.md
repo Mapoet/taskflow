@@ -15,6 +15,8 @@ F1L–F8U 已建立 Role Runtime、认知规划、多层记忆、专业验收、
 
 SIC0–SIC8 的当前增量已完成以下本地控制面收口：每次 Harness checkpoint 自动通知 Run/Harness saga；Cognition 使用摘要/身份/策略/有效期绑定的 ApprovalStore resolver；新增 store-backed Intake、Approval、Artifact Execution、Operations typed boundary adapters；finding 路径调整为 `Remediation → PlanApproval → Reexecution → Reverification`，并在进入修复时清除旧 approval/report pin；artifact lineage 与有界失败路径有系统测试；telemetry spool 具备 backoff、容量、重试上限、dead-letter、retention，SLO 具备 quantile 与 multi-window burn-rate。SIC9 已完成本地全量门禁；production Live 仍须单独认证。
 
+GPC/GPW 随后关闭了旧 AgentLoop 与生产 Harness 双轨中的“完成权威”缺口：production profile 必须提供 closure binding 和 manifest 摘要，五个 LiveRuntime 入口传播同一信任配置，A2A/ChildTask 不接受远端或子任务自报完成，Harness revision 自动进入 progress ledger。本地工程门禁更新为 `phase4-offline` 73/73；R6L 外部认证仍独立开放。
+
 Residual Closure 不新增平行演示系统，而是把现有模块收敛到同一生产路径。
 
 ## 2. 目标架构

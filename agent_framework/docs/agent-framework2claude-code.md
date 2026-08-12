@@ -1,0 +1,564 @@
+# Agent Framework 对照 Claude Code 的系统性升级报告
+
+**文档性质**：架构审计、目标架构与实施蓝图
+
+**基线日期**：2026-08-12
+
+**Agent Framework 基线**：`/home/Mapoet/projects/taskflow/agent_framework` 当前 Phase 4、GPC 与 GPW 事实状态
+
+**Claude Code 基线**：`/home/Mapoet/projects/claude-code-source-code/src`，`@anthropic-ai/claude-code` 2.1.88 发布包解包源码
+
+## 0. 核心结论
+
+Agent Framework 已经不是简单的 C++ ReAct 示例，而是由 LLM 认知平面、Taskflow/Workflow 执行平面、Durable Run/Harness 控制平面、Approval/Sandbox 安全平面、Memory/Artifact/Evidence 数据平面和 Operations/Telemetry 运维平面共同组成的生产运行时原型。它在确定性任务完成、专业验收、修复复验、跨 Store 摘要绑定和生产认证控制方面，已经超过 Claude Code 客户端源码所呈现的边界。
+
+Claude Code 在另一组问题上更成熟：会话级运行时、单轮 Agent 状态机、流式事件协议、工具生命周期、权限交互、动态工具池、上下文投影、compact boundary、JSONL 消息链、子 Agent 权限重建、后台通知和交互产品一致性。这些机制不直接证明任务完成，却显著提高了 Agent 在真实长会话中的连续性、响应速度、可恢复性和用户可控性。
+
+因此，正确升级方向不是把 Agent Framework 改写成 Claude Code，也不是用巨型 C++ `queryLoop` 替代 Workflow/Harness，而是：
+
+> 保留 Agent Framework 的确定性完成权威和 durable workflow，以 Claude Code 的 Conversation、Turn、Tool、Context 工程补齐交互式执行内核。
+
+目标系统必须明确分离两个循环：
+
+1. **Turn Loop**：完成一次模型—工具—观察循环，追求低延迟、流式反馈和上下文连续性；
+2. **Task Closure Loop**：跨多个 Turn、阶段和进程推进 AcceptanceContract，追求证据闭合、可恢复执行和可信终态。
+
+Claude Code 的弱点是 Turn 结束容易成为事实上的任务结束；Agent Framework 已用 GPC 的 `TaskClosureController` 解决了这一问题。Agent Framework 当前更突出的问题是 Task Closure 控制面远强于 Turn Runtime，导致生产能力丰富，但会话主路径、事件协议和多入口 wiring 仍显复杂。后续中心任务应是建立轻量、类型化、事件驱动的 `ConversationEngine`，作为 CLI、Web、TUI、ImGui、SDK、AgentServer 和 A2A 会话的统一 Turn Runtime，再由 `ProductionTaskRuntime` 与 `TaskClosureController` 掌握任务终态。
+
+## 1. 证据边界
+
+### 1.1 Claude Code 不是原始 monorepo
+
+所分析源码来自发布 bundle 的解包和 TypeScript 重建。部分 `feature()` 分支已被死代码消除，重建脚本还会关闭 feature gate 并为缺失模块生成 stub。因此，本报告只把以下可直接读出的机制作为架构证据：
+
+- `QueryEngine` 的会话生命周期；
+- `query()` 的显式状态循环；
+- Tool 类型和动态工具池；
+- validation、PreToolUse、permission、execution、PostToolUse 管线；
+-流式 API、工具事件与取消；
+-上下文预算、工具结果外置、compact boundary；
+- JSONL transcript 与 parent UUID 链；
+-子 Agent 独立上下文、权限、MCP 和 transcript；
+-后台任务、通知队列和用户输入中断。
+
+内部代号、未发布工具、线上 feature flag 值、服务端数据用途及未来模型路线不作为升级依据。
+
+### 1.2 Agent Framework 使用当前事实，而非旧比较结论
+
+当前 Agent Framework 已具备同轮只读工具并行、A2A submit 并行、Tool Effect Journal、Context Budget、Memory Compaction、Role Runtime、Cognition、Memory v2、Assurance、Remediation、Judge、Run/Harness/Approval Store、Bubblewrap、Credential Broker、OTLP/SLO、SQLite/PostgreSQL queue、lease/fencing、Object Store，以及 GPC 的 Task Closure、progress ledger、bounded stagnation 与 Golden Tasks。
+
+正在实施的 GPW 又开始把这些完成语义接入 GraphExecutor、AgentServer、A2A、ChildTask 和多个 UI 入口。因此，本报告不会重复建议“新增 TaskClosureController”或“增加只读工具并行”，而是从 GPC/GPW 之上继续补齐交互执行内核。
+
+## 2. 两个系统解决的层次不同
+
+### 2.1 Claude Code：Conversation/Turn 中心
+
+Claude Code 的核心单位是 conversation。一个 `QueryEngine` 持有跨 Turn 的消息、usage、权限拒绝、文件缓存、技能发现和 AbortController。每次 `submitMessage()` 启动一个 Turn，Turn 内 `queryLoop` 反复请求模型、执行工具、追加 tool result，直到自然结束、Hook 阻塞、预算耗尽、错误或取消。
+
+它解决的是：
+
+> 如何让一个交互式 Agent 在长会话、流式输出、权限询问、工具并发和上下文膨胀下持续工作？
+
+### 2.2 Agent Framework：Run/Verified Task 中心
+
+Phase 4 的核心单位是可恢复 Run/Harness。TaskIntake、Plan、AcceptanceContract、Approval、Artifact、Evidence、AcceptanceReport、Remediation 和 Closure Receipt 都拥有身份、revision 与 digest。
+
+它解决的是：
+
+> 如何证明一个复杂任务经过授权执行，产生了真实产物，并满足不可由模型自行降低的验收标准？
+
+### 2.3 必须保留的双循环
+
+```text
+Conversation / Turn Loop
+  User Input
+    → Context Projection
+    → Model Stream
+    → Tool Lifecycle
+    → Observation
+    → ModelTurnOutcome
+
+Task Closure Loop
+  Task Intake
+    → Contract / Plan
+    → Approved Stage Execution
+    → Artifact / Evidence
+    → Assurance
+    → Remediation / Reverification
+    → TaskClosureDecision
+```
+
+边界必须严格：
+
+- Turn Loop 输出 `ModelTurnOutcome`、Tool Effect Receipt、Observation、usage 和 context boundary；
+- Closure Loop 输出下一阶段、能力、预算、澄清请求和任务终态；
+- Turn Loop 永远不能签发 `completed_verified`；
+- Closure Loop 不负责 token streaming、终端渲染或单工具动画。
+
+## 3. 目标八层架构
+
+```text
+L7 Experience Plane
+   CLI / Web / TUI / ImGui / SDK / A2A Gateway
+
+L6 Conversation Plane
+   ConversationEngine / TurnStateMachine / Stream Protocol / Input Queue
+
+L5 Cognitive Plane
+   RoleRuntime / Prompt / Skills / Planning / Memory View / AgentLoop Policy
+
+L4 Capability Plane
+   Tool Registry / Tool Lifecycle / MCP / A2A / Child Agent / Hooks
+
+L3 Execution Plane
+   Workflow / Taskflow / Sandbox / Artifact Executor / Streaming Executor
+
+L2 Deterministic Control Plane
+   ProductionTaskRuntime / Approval / Assurance / Remediation / Closure
+
+L1 Durable Data Plane
+   Run / Harness / Transcript / Effect / Artifact / Evidence / Memory Stores
+
+L0 Governance and Operations Plane
+   Policy / Identity / Audit / Telemetry / SLO / Eval / Live Certification
+```
+
+### L7：体验层
+
+只负责呈现和用户动作，不持有隐藏完成逻辑。所有前端消费相同 typed events，不能根据输出文本、退出码或 spinner 推断任务完成。
+
+### L6：会话层
+
+这是最需要补齐的层。它对应 Claude Code 的 `QueryEngine + queryLoop`，但应拆成小状态机和策略对象，而不是复制巨型循环。它负责 Conversation、Turn、流式事件、输入中断、消息投影和恢复。
+
+### L5：认知层
+
+LLM 提出理解、计划、工具调用和解释。Memory View、Skill snapshot、Prompt/Profile revision 必须 pin；LLM 不拥有权限、effect commit 或任务完成权。
+
+### L4：能力层
+
+内建工具、MCP、A2A、Skill script 和子 Agent 统一经过 Tool Lifecycle Kernel，禁止执行旁路。
+
+### L3：执行层
+
+Taskflow/Workflow 提供依赖调度，Sandbox 和 Artifact Executor 执行副作用。该层只返回 receipt，不判断任务完成。
+
+### L2：确定性控制层
+
+继续发挥 Agent Framework 的优势：Approval、Assurance、Remediation、Reverification 和 Closure 必须确定性、可恢复、fail-closed。
+
+### L1：持久数据层
+
+严格区分 transcript、workflow event、external effect、artifact/evidence 和 memory，避免把所有状态塞进 session history 或一个 checkpoint。
+
+### L0：治理与运维层
+
+Policy、身份、审计、trace、cost、SLO、Eval 和 Certification 横切所有层，但通过统一 envelope 关联，不把业务模块变成遥测字段拼装器。
+
+## 4. 升级方向一：ConversationEngine
+
+### 原因
+
+`AgentLoopNode` 适合嵌入 Workflow 图，但目前仍承载 Prompt、Memory、LLM、工具、压缩和回合退出。不同 UI/Server 又各自管理会话和流式状态，产生以下问题：
+
+-入口之间可能形成不同会话语义；
+- model-turn 和 task-terminal 容易混淆；
+-压缩、取消、用户输入插队难以统一复用；
+-生产 Harness 强，但轻量聊天路径边界不清；
+-Run 恢复强于面向用户的 Conversation 恢复。
+
+### 建议接口
+
+```cpp
+struct TurnRequest {
+  ConversationId conversation_id;
+  TurnId turn_id;
+  UserInput input;
+  ExecutionTrustProfile trust_profile;
+  ContextProjectionRef context;
+  CapabilityGrantSet grants;
+  TurnBudget budget;
+};
+
+struct TurnState {
+  std::vector<MessageRef> messages;
+  std::optional<CompactBoundaryRef> boundary;
+  TurnContinuationReason continuation;
+  UsageSnapshot usage;
+  std::uint64_t iteration;
+};
+
+struct ModelTurnOutcome {
+  ModelTurnStopReason reason;
+  std::string candidate_answer;
+  std::vector<ToolCallReceiptRef> tool_receipts;
+  std::optional<ClarificationRequest> clarification;
+  bool task_completion_verified{false};
+};
+```
+
+`ConversationEngine` 应提供 `start_turn`、`continue_turn`、`interrupt_turn`、`resume_turn`、`submit_user_input`、`subscribe_events` 和 `project_context`。
+
+### continuation 与 terminal 必须分离
+
+Continuation 至少包括：`InitialRequest`、`ToolResultsAvailable`、`QueuedUserInput`、`StopHookBlocked`、`ContextCompacted`、`PromptTooLongRecovery`、`OutputTokenRecovery`、`BudgetContinuation`、`ReplanRequested`、`ClarificationAnswered`、`ResumeAfterApproval`。
+
+Model stop 至少包括：`EndTurn`、`ToolRequested`、`GuardStopped`、`ProviderError`、`Cancelled`、`DeadlineExceeded`、`ContextExhausted`、`MaxIterations`。它们全部映射到 `task_completion_verified=false`。
+
+### 落点
+
+-新增 `include/agent/conversation/` 与 `src/conversation/`；
+-复用 `AgentThreadState`、SessionStore、TaskControl；
+-让 `AgentLoopNode` 先适配 TurnStateMachine，再逐步瘦身；
+- CLI/Web/TUI/ImGui/SDK/AgentServer 只依赖 Conversation API；
+- legacy demo 可直连 AgentLoop，但必须标识 `unverified_model_response`。
+
+## 5. 升级方向二：Tool Lifecycle Kernel
+
+### 原因
+
+当前已有 ToolBus、schema、effect journal、approval、sandbox、Skill policy 和 observer，但能力分散在不同路径。Claude Code 最值得借鉴的不是某条 Bash 正则，而是统一工具生命周期：
+
+```text
+Resolve → Parse → Validate → Pre Hook → Policy → Approval
+→ Sandbox/Execute → Output Validate → Effect Commit → Post Hook → Observe
+```
+
+### 版本化 Tool Contract
+
+```cpp
+struct ToolContract {
+  ToolIdentity identity;
+  JsonSchema input_schema;
+  JsonSchema output_schema;
+  ToolEffectClass effect;
+  ConcurrencyClass concurrency;
+  InterruptBehavior interrupt_behavior;
+  ResultRetentionPolicy retention;
+  SandboxRequirement sandbox;
+  ApprovalRequirement approval;
+  CapabilitySet capabilities;
+  TelemetryPolicy telemetry;
+};
+```
+
+生产默认必须保守：
+
+-未声明 effect 按有副作用处理；
+-未声明 concurrency 按串行处理；
+-未声明 sandbox 的写操作拒绝；
+- destructive 必须显式声明；
+-输入改写产生新 digest，原始模型输入保留；
+-Tool Contract revision 进入 Run/Invocation manifest。
+
+### 固定执行顺序
+
+1. schema parse；
+2. deterministic normalization；
+3. tool-specific validation；
+4. PreToolUse advisory hook；
+5. Policy Decision Point；
+6. Approval resolution；
+7. sandbox binding；
+8. effect reservation/idempotency lookup；
+9. execution；
+10. output validation；
+11. effect commit/reconciliation；
+12. PostToolUse hook；
+13. retention/context projection。
+
+Hook 不能绕过 policy；修改输入后必须重新 validation 和 policy。未知外部 effect 进入 `ManualReview`。
+
+### 大结果治理
+
+使用现有 ObjectStore/CAS：小结果内联，大结果保存为 content-addressed artifact，模型只获得 preview、URI、digest、MIME、size 和读取方法。压缩只替换 Context Projection，不删除原始 effect/evidence；所有裁剪生成 `TruncationReceipt`。
+
+## 6. 升级方向三：统一流式事件协议
+
+### 原因
+
+Claude Code 能同时服务 REPL、print、SDK 和远程模式，关键是持续产生结构化事件。Agent Framework 已有 SSE、UI queue、Audit 和 Operations projection，但缺少覆盖整个 Turn 生命周期的统一协议。
+
+```cpp
+struct RuntimeEventEnvelope {
+  EventId event_id;
+  TraceContext trace;
+  TenantId tenant_id;
+  ConversationId conversation_id;
+  TurnId turn_id;
+  RunId run_id;
+  std::optional<NodeAttemptId> node_attempt;
+  std::optional<ToolCallId> tool_call_id;
+  EventSequence sequence;
+  EventDurability durability;
+  Visibility visibility;
+  RedactionClass redaction;
+  RuntimeEvent payload;
+};
+```
+
+事件应覆盖 model request/stream/usage/stop，tool queued/permission/started/progress/completed，user input queued/consumed，compact boundary，Harness transition，approval，artifact/evidence 和 closure。
+
+Token delta、spinner 属于 ephemeral；approval、effect、boundary、checkpoint、closure 属于 durable。高频 progress 不得进入恢复消息链。
+
+## 7. 升级方向四：Conversation、Workflow、Effect 三链分离
+
+```text
+Conversation Chain
+  用户/助手/工具可见语义，支持 branch、resume、compact projection
+
+Workflow Event Chain
+  stage/node/attempt/checkpoint/approval/closure 状态变化
+
+Effect Chain
+  副作用 reservation、started、observed、committed、unknown、reconciled
+```
+
+建议新增 append-only `ConversationStore`：消息具有 `message_id`、`parent_id`、`turn_id`；compact boundary 是一等记录；progress 不参与 parent chain；tool result 引用 effect receipt；candidate answer 引用 model invocation；Conversation Store 不拥有任务终态。
+
+恢复时分别重建 Conversation projection、Run/Harness cursor、未决 approval、effect reconciliation queue 以及 pinned Memory/Skill/Prompt/Profile。摘要或 revision 漂移必须进入 ManualReview。
+
+## 8. 升级方向五：Context Projection 与 Compact Boundary
+
+### 原因
+
+Memory v2 治理长期事实，compact boundary 治理长对话，两者不是替代关系。每次模型调用应使用不可变 `ContextProjectionManifest`：
+
+```text
+System/Policy reserved
+Task Contract/Plan reserved
+Working turn
+Recent conversation
+Relevant Memory View
+Tool/Skill definitions
+Artifact/Evidence previews
+```
+
+每段记录来源 revision/digest、authority、freshness、sensitivity、token budget、裁剪理由、外置 URI 及是否可用于验证。
+
+`CompactBoundaryRecord` 应记录 pre/post token、summary digest、preserved head/tail、归档范围、profile/prompt/model、fallback 原因和一致性检查。压缩失败不得无限重试；一次 reactive compact 后仍超长，应进入 `ContextExhausted`。
+
+压缩顺序建议：工具结果外置 → 确定性去重 → 旧 tool group 结构化摘要 → 对话 compact → Memory consolidation → 最后 UTF-8 安全截断。Contract、Policy、Approval、Citation 不得静默裁剪。
+
+## 9. 升级方向六：子 Agent 与任务隔离
+
+子 Agent 必须重新计算工具、MCP、filesystem/network/sandbox grants、Memory View、模型/profile、预算、交互权限和 transcript namespace，而不是复制父 Agent 全部授权。
+
+```text
+effective_grants =
+  parent_delegable_grants
+  ∩ child_role_capabilities
+  ∩ task_contract_capabilities
+  ∩ policy_decision
+  ∩ deployment_manifest
+```
+
+父任务只能接收子 Agent 的候选 Artifact、Evidence、Finding、Investigation result 和 execution receipt，不能根据子 Agent 自报 completed 推出父任务完成。
+
+子任务状态应细化为：
+
+```text
+Pending → Admitted → Running → AwaitingInput/Approval
+→ Reconciling → SucceededCandidate/Failed/Cancelled/UnknownEffect
+```
+
+A2A peer 的 completed 只是 assertion；生产端必须校验身份与 digest，并本地重做 mandatory strong oracle。无法观测的远端副作用进入 ManualReview。
+
+## 10. 升级方向七：流式工具执行与依赖安全调度
+
+建议把工具从只读/写二分升级为：`PureRead`、`SnapshotRead`、`WorkspaceWrite`、`ExternalIdempotentWrite`、`ExternalNonIdempotentWrite`、`Interactive`、`Barrier`。
+
+- PureRead 可在相同 snapshot 并发；
+- SnapshotRead 必须 pin generation；
+- workspace write 依据 path/effect domain 建冲突边；
+-外部幂等写需要 reservation key；
+-非幂等写默认串行并需 Approval；
+- Interactive/Barrier 阻断同批后续执行。
+
+不应复制 JavaScript Promise 分批器，而应把工具批次编译成临时 Taskflow subflow：自动建立冲突边、并发读、串行写、按原 tool-call 顺序组装结果，并观测 critical path、queue time 和 blocked-on-approval。
+
+流式提前执行只有在 tool name/schema 输入完整、Policy/Approval 完成、取消策略明确时允许。流中的后续文本不能修改已签发输入。
+
+## 11. 升级方向八：权限、Sandbox 与 Approval 统一
+
+Claude Code 的 Bash 字符串分析是产品折中，不应成为 C++ 框架的安全根基。Agent Framework 应坚持：
+
+-Policy/Approval 决定是否允许；
+-Sandbox 决定实际上能做什么；
+-Effect Journal 决定做过什么以及是否确定；
+-Oracle 决定结果是否满足验收。
+
+Deny precedence 应固定为：Platform hard deny > Organization deny > Task Contract deny > Ask requirement > Scoped allow > production default deny。
+
+为了减少反复询问，审批应绑定 action set，而不是永远逐调用询问：绑定参数范围、workspace revision、最大 effect count、有效期和风险等级；参数变化、scope 扩张或风险升级自动生成新 request。
+
+## 12. 升级方向九：动态工具、Skills 与 MCP 渐进披露
+
+工具数量增长会增加 Prompt、选择错误率、权限面和缓存失效率。应把 Skills L1/L2、ToolBus 与 MCP refresh 统一为 Capability Discovery。
+
+Capability Catalog 只保存 capability id、search hint、effect/risk、permission、schema digest、source、health 和 generation。首轮只暴露核心工具、always-load 工具和 Capability Search；命中后 pin generation，再加载完整 schema、Prompt 与 Policy。
+
+状态必须分开：
+
+```text
+Discovered → Resolved → Verified → Granted → Loaded → Invoked
+```
+
+动态 MCP refresh 只能在 Turn 边界发生，避免同一模型请求内工具定义漂移。
+
+## 13. 升级方向十：用户输入中断与后台通知
+
+用户在工具运行时的新输入需要分类：`InterruptAndReplace`、`AppendToCurrentTurn`、`QueueNextTurn`、`ControlAction`、`StatusQuery`。
+
+工具声明中断行为：
+
+- cancel：立即取消并丢弃未提交结果；
+- block：继续执行，新输入排队；
+- reconcile：取消后查询外部 effect；
+- non-interruptible：运行到安全 checkpoint。
+
+后台任务完成不应靠主 Agent 高频轮询。Notification Queue 在 Turn 边界或显式 wait 时注入，携带 task/agent/run identity，具备 idempotency，并严格按父 Agent 路由。通知只是 observation，不是 completion evidence；Slash command 不能作为普通模型文本静默注入。
+
+## 14. 升级方向十一：快速路径与专业路径分级
+
+所有请求走完整 Harness 会导致简单问答过重；所有请求走 AgentLoop 又缺乏验收。应选择类型化 profile：
+
+| Profile | 用途 | 必需控制 |
+|---|---|---|
+| Conversation | 无副作用问答 | Conversation Store、budget、model-turn outcome |
+| ReadOnlyAnalysis | 仓库/数据分析 | citations、只读 sandbox、轻量 contract |
+| ArtifactDelivery | 文档/文件交付 |路径、digest、内容 oracle、Closure |
+| CodeChange |代码修改 | Approval、diff、build/test、remediation |
+| ExternalAction |消息、部署、远程变更 | accountable approval、effect reconciliation |
+| Professional |科研/安全/生产验收 |完整 Cognition、Memory、Assurance、Judge |
+
+发现副作用只能升级 profile；删除 mandatory criterion 或 profile 降级必须经过 Policy/必要 HITL；生产入口缺少 profile 时 fail closed。
+
+## 15. 升级方向十二：Operations 与开发者体验
+
+四端 UI/API 应从相同 `OperationsSnapshot` 投影 Conversation/Turn、profile、model stop、Harness stage、approval、tool queue、criteria coverage、artifact/evidence、closure authority、budget/cost 和可用动作。
+
+面向用户可以归并为 Thinking、Waiting for permission、Running tools、Verifying、Needs input、Blocked externally、Completed and verified、Stopped with limitations、Manual review，但必须允许展开查看 reason、authority、receipt 和未满足 criteria。
+
+建议提供 redacted diagnostic bundle：manifest revisions、event sequence、context projection summary、tool/approval/effect receipts、closure decision、trace 与 SLO；不包含 secret 和私有 chain-of-thought。
+
+## 16. 不应照搬 Claude Code 的设计
+
+1. **不复制巨型 query loop**：显式状态值得学习，但应用状态、UI、遥测和策略应拆成状态机与 ports。
+2. **不把 Tool 变成万能接口**：Capability、Execution Adapter、Policy Metadata、Presentation Adapter 应分离。
+3. **不依赖 shell parser 提供强安全**：字符串分类只用于 UX，强边界依赖 sandbox 和 credential isolation。
+4. **不让 feature flag 无审计改变生产语义**：影响权限、完成、证据的 flag 必须 pin 到 deployment manifest。
+5. **不以 transcript 代替 durable workflow**：对话可恢复不等于 effect 可恢复。
+6. **不保存私有 chain-of-thought**：保存结构化理由、证据、假设、计划和决策摘要。
+
+## 17. 分阶段实施路线图
+
+以下工作位于 GPC/GPW 之上。
+
+### AF-CC0：契约冻结
+
+冻结 Conversation、Turn、RuntimeEvent、ToolContract、ContextProjection 和 CompactBoundary schema。未知 version fail closed；model-turn 与 task-terminal 在类型系统中不可互换；所有 profile/feature revision 进入 deployment manifest。
+
+### AF-CC1：ConversationEngine 最小闭环
+
+CLI 与 SDK 先共享 start/continue/interrupt/resume 和 ConversationStore。要求连续 100 Turn 不丢链、取消传播正确、新输入五类路由、legacy 输出始终 unverified、重启恢复到一致 boundary。
+
+### AF-CC2：Tool Lifecycle Kernel
+
+Local/MCP/Skill/A2A/Artifact tools 统一进入生命周期。验证 Hook 改写后重新校验、deny precedence、未知 effect 拒绝、幂等不重复、unknown effect ManualReview、大结果 CAS 外置。
+
+### AF-CC3：Context Projection/Compact Boundary
+
+组合对话压缩与 Memory Governance。要求 Contract/Policy/Citation 不丢失、compact 前后恢复等价、reactive compact 有界、summary failure 有确定性 fallback、长会话 RSS/token 成本下降。
+
+### AF-CC4：三链持久化与恢复
+
+Conversation、Workflow Event、Effect 链独立关联。对所有 durable 写点做 crash injection，确保无 orphan、无 effect 重放、digest 漂移转 ManualReview。
+
+### AF-CC5：子 Agent Capability Isolation
+
+ChildTask/A2A/Skill 子运行时使用能力交集和独立 transcript。父授权不泄漏、子 Agent 无法扩权、父取消传播、子自报完成不能关闭父任务、远端证据本地复验。
+
+### AF-CC6：Streaming 与安全调度
+
+用 Taskflow subflow 构建工具批次。PureRead 并发应获得可量化延迟收益；冲突写永不并发；结果顺序符合 provider 协议；stream abort 不遗留未协调 effect；critical path 可观测。
+
+### AF-CC7：统一 Experience/Operations
+
+CLI/Web/TUI/ImGui/SDK 消费同一事件与 snapshot。相同 Run 状态一致，真实 ApprovalStore 驱动动作，断线重连不回退，用户始终能区分 candidate answer 与 verified completion。
+
+### AF-CC8：质量、故障与生产认证
+
+把新交互运行时纳入 unit、contract、integration、recovery、adversarial、performance 和 live-production 七层测试。真实 provider/MCP/IdP/KMS/Sandbox 证据必须由现有 Live Certification 签发，不能 skip-as-pass。
+
+## 18. 定量退出门槛
+
+### 正确性与安全
+
+| 指标 | 门槛 |
+|---|---:|
+| False verified completion | 0 |
+| 未授权 effect | 0 |
+| 已确认 effect 重放 | 0 |
+| Conversation parent-chain orphan | 0 |
+| compact 后 mandatory citation 丢失 | 0 |
+| 子 Agent 权限扩张 | 0 |
+|远端自报 completed 直接关闭本地任务 | 0 |
+
+### 收敛效率
+
+| 指标 | 目标 |
+|---|---:|
+|无信息增益自由 Turn | ≤1 |
+|平均修复轮数 | ≤1.5 |
+|每关闭一个 criterion 的 token/tool 成本 |持续下降 |
+|可并发只读工具 critical-path 降幅 | ≥25% 基线目标 |
+| Conversation profile 额外 Harness 延迟 | 近零 |
+
+### 可恢复性与体验
+
+| 指标 | 门槛 |
+|---|---:|
+| durable boundary crash 恢复率 | 100% mandatory matrix |
+| unknown effect 自动误判成功 | 0 |
+|重复 notification 造成重复动作 | 0 |
+| Store digest 漂移静默继续 | 0 |
+|未验证回答显示 verified badge | 0 |
+|四端 Operations 状态不一致 | 0 |
+
+## 19. 优先级建议
+
+1. 先完成当前 GPW，使所有生产入口只接受 Closure 权威；
+2. 实施 AF-CC0/1，建立 Conversation/Turn 层；
+3. 实施 AF-CC2，统一 Tool Lifecycle；
+4. 实施 AF-CC3/4，解决长会话和三链恢复；
+5. 实施 AF-CC5/6，强化多 Agent 与低延迟调度；
+6. 实施 AF-CC7/8，形成产品一致性和真实认证。
+
+在 AF-CC4 关闭前，建议冻结新增 provider adapter、新 Store 类型、无法进入统一生命周期的工具系统、平行 demo runtime，以及只有 fixture 没有 production wiring 的控制面。
+
+## 20. 最终目标
+
+升级后的 Agent Framework 不应被描述为“C++ 版 Claude Code”，而应定位为：
+
+> 一个具有 Claude Code 级交互式执行能力、Taskflow 级并行调度能力，以及强于普通 coding agent 的确定性验收、durable recovery、专业 Assurance 和生产认证能力的 Agent Operating Runtime。
+
+最终主路径：
+
+```text
+User / SDK / A2A
+  → ConversationEngine
+  → ContextProjection
+  → Cognitive Turn
+  → Tool Lifecycle Kernel
+  → Taskflow/Sandbox Execution
+  → Artifact/Effect/Evidence Receipts
+  → ProductionTaskRuntime
+  → Assurance / Minimal Remediation / Reverification
+  → TaskClosureController
+  → Verified Operations Projection
+```
+
+该架构明确回答四个通常被混淆的问题：模型是否结束本轮表达；工具是否被安全、正确、幂等执行；会话是否能跨压缩、崩溃和分支继续；任务是否由强证据证明完成。
+
+Claude Code 提供了前三项的大量成熟产品经验；Agent Framework 已为第四项建立了难得的确定性基础。真正有价值的升级不是扩大功能清单，而是通过 Conversation、Tool、Context、Event 与 Closure 五个权威边界，把现有能力收敛成一条低延迟、不可绕过、可恢复且可验证的生产路径。

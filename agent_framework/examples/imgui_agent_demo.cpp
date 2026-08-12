@@ -363,6 +363,7 @@ int main(int argc, char** argv) {
                                       env_truthy("AGENT_CLI_SKIP_CURSOR_MCP"));
         options.verbose = verbose || env_truthy("AGENT_TEST_AGENT_LOOP_DEBUG");
         runtime = example::build_live_runtime(options);
+        example::require_direct_demo_execution(runtime);
     } catch (const std::exception& e) {
         std::cerr << "[imgui_agent_demo] LLM init: " << e.what() << "\n";
         return 1;

@@ -229,6 +229,15 @@ struct ExecutionOptions {
     bool input_already_processed = false;
 };
 
+enum class ExecutionTrustProfile { Demo, Test, Production };
+
+struct ExecutionResult;
+struct ProductionClosureBinding {
+    std::string dependency_manifest_digest;
+    std::string composition_manifest_digest;
+    std::function<json(const ExecutionResult&)> evaluate;
+};
+
 enum class TierBFailureMode { FallbackTierA, Reject };
 
 struct InputPolicyConfig {
@@ -258,6 +267,8 @@ struct ExecutionRequest {
     ExecutionEventSink event_sink;
     InputPolicyConfig input_policy;
     ExecutionOptions options;
+    ExecutionTrustProfile trust_profile{ExecutionTrustProfile::Demo};
+    std::optional<ProductionClosureBinding> production_closure;
 };
 
 enum class ExecutionTerminalStatus { Completed, Failed, Cancelled, DeadlineExceeded, Conflict };

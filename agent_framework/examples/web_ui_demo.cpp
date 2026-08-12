@@ -277,6 +277,7 @@ int main(int argc, char** argv) {
         options.import_cursor_mcp = import_cursor_mcp;
         options.verbose = verbose || env_truthy("AGENT_TEST_AGENT_LOOP_DEBUG");
         runtime = example::build_live_runtime(options);
+        example::require_direct_demo_execution(runtime);
     } catch (const std::exception& e) {
         std::cerr << "[web_ui_demo] LLM init: " << e.what() << "\n";
         return 1;

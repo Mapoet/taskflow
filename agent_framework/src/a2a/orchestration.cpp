@@ -16,6 +16,15 @@
 namespace agent_framework {
 namespace a2a {
 
+bool accept_remote_completion(const RemoteCompletionVerification& v, std::string* reason) {
+    if(!v.remote_reported_completed) { if(reason)*reason="remote_not_completed"; return false; }
+    if(!v.production) return true;
+    if(!v.local_artifact_verified) { if(reason)*reason="local_artifact_verification_required"; return false; }
+    if(!v.local_evidence_verified) { if(reason)*reason="local_evidence_verification_required"; return false; }
+    if(v.local_receipt_digest.empty()) { if(reason)*reason="local_closure_receipt_required"; return false; }
+    return true;
+}
+
 std::optional<std::string> PeerSessionBook::get(const std::string& peer_id) const {
     std::lock_guard<std::mutex> lock(mutex_);
     auto it = by_peer_.find(peer_id);

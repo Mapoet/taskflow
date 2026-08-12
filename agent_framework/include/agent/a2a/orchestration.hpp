@@ -74,6 +74,16 @@ json run_remote_task_and_wait(
     const json& metadata,
     const A2aRemoteTaskOptions& opts);
 
+/** Remote terminal status is only a candidate; production accepts it after local evidence verification. */
+struct RemoteCompletionVerification {
+    bool production{true};
+    bool remote_reported_completed{false};
+    bool local_artifact_verified{false};
+    bool local_evidence_verified{false};
+    std::string local_receipt_digest;
+};
+bool accept_remote_completion(const RemoteCompletionVerification&, std::string* reason = nullptr);
+
 bool agent_card_has_streaming(const AgentCard& card);
 
 void register_a2a_orchestrator_tools(
