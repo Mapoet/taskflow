@@ -17,10 +17,11 @@
 - production composition 只接受 `WorkflowHarnessStagePort`，以 `WorkflowAdapterKind + HarnessStage + implementation revision + configuration digest` 形成 capability manifest；历史 callback/manifest wrapper 无法进入生产组合。
 - Cognition、Memory、Assurance、Remediation、Reverification、Judge 被声明为 LLM-driven stage，必须返回完整 `LLMInvocationManifest`；缺失或 telemetry 导出失败均进入 `ManualReview`。
 - `TelemetryLLMInvocationObserver` 统一输出 GenAI span 与 duration/token/cache/cost metrics，并关联 provider/model/profile/prompt/route/calibration/fallback、harness stage、trace/span 和 memory pins。
+- `CognitionWorkflowAdapter`、`MemoryWorkflowAdapter`、`AssuranceWorkflowAdapter`（含独立 Reverification 模式）、`RemediationWorkflowAdapter` 和 `JudgeWorkflowAdapter` 已直接调用对应真实 workflow class；`ProductionWorkflowInputAssembler` 提供强类型领域输入边界，adapter 校验 Harness pin，并从 durable `LLMRuntimeStore` 反查成功 invocation manifest，不能信任 workflow 自报的摘要。
 
 ## 未关闭边界
 
-- 类型化 adapter ABI 和不可伪装 callback 门禁已完成；Cognition、Memory、Professional Assurance、Remediation、Judge 等具体 workflow 的领域输入 provider/Store assembler 仍需逐一绑定，不能把测试实现作为 Live 证据。
+- 六类 workflow adapter 与强类型 assembler ABI 已完成；部署 composition 仍需把 assembler 绑定到项目自己的 Intake/Plan/Acceptance/Artifact/Eval Store，且必须通过 Live provider calibration，不能把 callback assembler 或离线 fixture 作为 Live 证据。
 - Run/Harness saga journal 已具备，但尚未由 Harness runtime 在每个 stage checkpoint 自动写入，故仍不能声称统一事实源。
 - 真实 IdP/JWT/OIDC verifier、session rotation、KMS signer、四端交互仍未关闭。
 - production hybrid memory retrieval、真实 domain/security/metric oracle、OTLP mTLS、nightly expert eval 仍开放。

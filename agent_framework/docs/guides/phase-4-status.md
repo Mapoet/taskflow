@@ -29,9 +29,9 @@
 
 截至 2026-08-12，v1 工程实现成熟度为 **76–80%**，v2 工程实现成熟度为 **82–86%**；Phase 4 整体生产认证成熟度为 **58–64%**。这些区间是按工作包 DoD 加权后的审计判断，不是代码覆盖率。前两项反映大量控制面和本地 durable 实现已经落地，后一项刻意扣除了 scripted RoleRuntime、deterministic UI snapshot、单机 SQLite、多连接模拟及 `executed=false` Live 报告。
 
-当前已证明的最高层次是：共享且版本化的契约；LLM Role Runtime 及规划、记忆、验收、修复、Judge 工作流；durable Harness；RunStore 原子 checkpoint/event/effect/memory/interruption；审批治理；Bubblewrap deny-all sandbox；credential broker；W3C trace、OTLP spool 与 SLO；Eval campaign；SQLite/PostgreSQL distributed control；四端同源 operations projection。P4-PC0 又增加了 11 阶段 fail-closed production composition 和 adapter capability manifest；P4-PC2 增加 Run/Harness 跨库 saga journal、双侧 revision/digest pin、重启恢复及漂移人工复核。当前离线 Phase 4 门禁为 **64/64**。
+当前已证明的最高层次是：共享且版本化的契约；LLM Role Runtime 及规划、记忆、验收、修复、Judge 工作流；durable Harness；RunStore 原子 checkpoint/event/effect/memory/interruption；审批治理；Bubblewrap deny-all sandbox；credential broker；W3C trace、OTLP spool 与 SLO；Eval campaign；SQLite/PostgreSQL distributed control；四端同源 operations projection。P4-PC0 又增加了 11 阶段 fail-closed production composition 和 adapter capability manifest；P4-PC2 增加 Run/Harness 跨库 saga journal、双侧 revision/digest pin、重启恢复及漂移人工复核；P4-PC3 增加六类 concrete workflow adapter、强类型输入 assembler、Harness pin 校验和 durable invocation manifest 反查。当前离线 Phase 4 门禁为 **65/65**。
 
-P4-PC3 起 production composition 只接受 `WorkflowHarnessStagePort`：adapter 必须给出强类型 kind/stage、实现 revision、配置 digest，并绑定强制 LLM invocation observer；普通 callback 和历史 `ManifestHarnessStagePort` 即使自报 manifest 也会被拒绝。但该门禁仍只证明接线类型和可观测性契约，**不等于真实 provider 已认证**。各领域 workflow 的输入装配、修复后新产物回填与复验、Approval/Run 跨 Store 协调、真实 IdP/KMS/provider 校准、外部 Live matrix，以及已暂缓的多节点 PostgreSQL/ObjectStore/Agent chaos 均保持开放。
+P4-PC3 起 production composition 只接受 `WorkflowHarnessStagePort`：adapter 必须给出强类型 kind/stage、实现 revision、配置 digest，并绑定强制 LLM invocation observer；普通 callback 和历史 `ManifestHarnessStagePort` 即使自报 manifest 也会被拒绝。Cognition、Memory、Professional Assurance、Remediation、Reverification、Judge 已有直接调用真实 workflow class 的 concrete adapter、强类型输入 assembler 边界、Harness digest pin 校验及 durable LLM manifest 反查。但该门禁仍只证明接线类型和可观测性契约，**不等于部署已提供项目 Store assembler 或真实 provider 已认证**。修复后新产物回填、Approval/Run 跨 Store 协调、真实 IdP/KMS/provider 校准、外部 Live matrix，以及已暂缓的多节点 PostgreSQL/ObjectStore/Agent chaos 均保持开放。
 
 | 基线 / 证据轴 | 当前值 | 已证明边界 | 仍未证明边界 |
 |---|---:|---|---|

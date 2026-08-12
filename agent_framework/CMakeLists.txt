@@ -311,6 +311,9 @@ endif()
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/harness/workflow_adapter.cpp)
     list(APPEND AGENT_SOURCES src/harness/workflow_adapter.cpp)
 endif()
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/harness/production_workflow_adapters.cpp)
+    list(APPEND AGENT_SOURCES src/harness/production_workflow_adapters.cpp)
+endif()
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/execution/artifact_executor.cpp)
     list(APPEND AGENT_SOURCES src/execution/artifact_executor.cpp)
 endif()
@@ -1687,6 +1690,15 @@ if(BUILD_TESTING)
         set_tests_properties(phase4_run_harness_saga PROPERTIES
             LABELS "phase4-harness;phase4-durable;phase4-integration;phase4-offline;offline"
             RUN_SERIAL TRUE)
+    endif()
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_phase4_production_workflow_adapters.cpp)
+        add_executable(test_phase4_production_workflow_adapters
+            tests/test_phase4_production_workflow_adapters.cpp)
+        target_link_libraries(test_phase4_production_workflow_adapters PRIVATE agent_framework)
+        add_test(NAME phase4_production_workflow_adapters
+                 COMMAND test_phase4_production_workflow_adapters)
+        set_tests_properties(phase4_production_workflow_adapters PROPERTIES
+            LABELS "phase4-harness;phase4-llm-runtime;phase4-integration;phase4-offline;offline")
     endif()
     if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_phase4_live_distributed.cpp)
         add_executable(test_phase4_live_distributed tests/test_phase4_live_distributed.cpp)
