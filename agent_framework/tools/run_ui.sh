@@ -23,7 +23,7 @@ Options:
   --ui NAME                tui, imgui, or web (default: tui)
   --build-dir PATH         CMake build directory (default: build-ui)
   --build-type TYPE        Release or Debug (default: Release)
-  --fs-root PATH           Filesystem jail root (default: this repository)
+  --fs-root PATH           Filesystem jail root (default: agent_framework/tools)
   --skills-root PATH       Installed/read-only Skill root (default: ~/.codex/skills)
   --skill-authoring-root PATH  Writable root for /skills create
   --no-skills              Disable Skill discovery and management
@@ -80,8 +80,8 @@ UI="${AGENT_UI:-tui}"
 BUILD_DIR="${AGENT_UI_BUILD_DIR:-${AGENT_TUI_BUILD_DIR:-${REPO_ROOT}/build-ui}}"
 BUILD_TYPE="${AGENT_UI_BUILD_TYPE:-${AGENT_TUI_BUILD_TYPE:-Release}}"
 BUILD_JOBS="${AGENT_UI_BUILD_JOBS:-${AGENT_TUI_BUILD_JOBS:-8}}"
-# Workspace FS jail defaults to this repository (taskflow / agent_framework tree).
-FS_ROOT="${AGENT_FS_ROOT:-${REPO_ROOT}}"
+# Workspace FS jail defaults to this script directory (agent_framework/tools).
+FS_ROOT="${AGENT_FS_ROOT:-${SCRIPT_DIR}}"
 PROVIDER="${AGENT_LLM_PROVIDER:-openai}"
 MODEL="${AGENT_LLM_MODEL:-}"
 PROMPT=""

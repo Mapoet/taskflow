@@ -51,6 +51,28 @@ int main()
         assert(events.size() == 3 && events.back().sequence == 3);
         assert(!engine.start_turn(r).error.empty());
         assert(engine.classify_input("/status") == InputDisposition::StatusQuery);
+
+        ConversationEngine input_engine(store, [](const TurnRequest &, const TurnCheckpoint &) {
+            ModelTurnOutcome outcome; outcome.reason = ModelTurnStopReason::ToolRequested;
+            outcome.tool_receipt_refs = {"pending-tool"}; return outcome;
+        });
+        TurnRequest input_turn{{"tenant", "input-routing"}, "turn-input", "start",
+                               TaskExecutionProfile::Conversation, 10};
+        assert(input_engine.start_turn(input_turn).error.empty());
+        input_turn.input = "additional context";
+        assert(input_engine.submit_user_input(input_turn, InputDisposition::AppendToCurrentTurn));
+        assert(store.inputs(input_turn.identity, InputState::Consumed).size() == 1);
+        input_turn.input = "next task";
+        assert(input_engine.submit_user_input(input_turn, InputDisposition::QueueNextTurn));
+        input_turn.input = "replacement task";
+        assert(input_engine.submit_user_input(input_turn, InputDisposition::InterruptAndReplace));
+        auto queued_inputs = store.inputs(input_turn.identity, InputState::Queued);
+        assert(queued_inputs.size() == 2);
+        assert(queued_inputs[0].disposition == InputDisposition::QueueNextTurn);
+        assert(queued_inputs[1].disposition == InputDisposition::InterruptAndReplace);
+        auto interrupted = store.load_turn(input_turn.identity, input_turn.turn_id);
+        assert(interrupted && interrupted->phase == TurnPhase::Interrupted);
+        assert(store.messages(input_turn.identity).size() == 2);
     }
     {
         SQLiteConversationStore reopened(path.string());
@@ -58,6 +80,7 @@ int main()
         assert(m.size() == 3);
         auto c = reopened.load_turn({"tenant", "conversation"}, "turn-1");
         assert(c && c->phase == TurnPhase::Completed);
+        assert(reopened.inputs({"tenant", "input-routing"}, InputState::Queued).size() == 2);
     }
     std::filesystem::remove(path, ec);
     ModelTurnOutcome invalid;
@@ -80,6 +103,16 @@ int main()
     auto turn = GraphTurnAdapter::from_execution(execution);
     assert(turn.reason == ModelTurnStopReason::EndTurn);
     assert(!turn.task_completion_verified && turn.candidate_answer == "candidate");
+    agent_framework::WorkflowResult workflow{};
+    workflow.success = false;
+    workflow.outputs = {{"final_answer", "candidate failure"}};
+    workflow.error_message = "provider unavailable";
+    auto workflow_turn = GraphTurnAdapter::from_workflow(workflow);
+    assert(workflow_turn.reason == ModelTurnStopReason::ProviderError);
+    assert(!workflow_turn.task_completion_verified && workflow_turn.candidate_answer == "candidate failure");
+    workflow.success = true; workflow.error_message.reset(); workflow.exit_code = 4;
+    workflow.outputs = {{"model_stop_reason", "guard_stopped"}};
+    assert(GraphTurnAdapter::from_workflow(workflow).reason == ModelTurnStopReason::GuardStopped);
     auto long_path = std::filesystem::temp_directory_path() /
         ("conversation-100-" + std::to_string(agent_framework::internal::current_process_id()) + ".sqlite3");
     std::filesystem::remove(long_path, ec);

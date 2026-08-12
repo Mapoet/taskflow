@@ -159,7 +159,8 @@ int run_graph_ui(tf::Executor& executor,
                  const AgentWorkflowDeps& deps,
                  const std::shared_ptr<internal::AgentThreadState>& state,
                  UIManager& ui,
-                 const std::shared_ptr<TaskControl>& control) {
+                 const std::shared_ptr<TaskControl>& control,
+                 const example::LiveRuntime& runtime) {
     GraphExecutor gx;
     ReactCliRunRequest req;
     req.config = cfg;
@@ -187,13 +188,20 @@ int run_graph_ui(tf::Executor& executor,
         std::clog << example::skill_event_json(event).dump() << '\n';
     };
     try {
-        WorkflowResult wr = gx.run_react_cli_sync(executor, req);
-        if (!wr.success) {
+        WorkflowResult wr{};
+        auto turn = example::run_conversation_turn(runtime, "web_ui_demo",
+            state->initial_user_prompt,
+            [&] { wr = gx.run_react_cli_sync(executor, req); return wr; },
+            [&ui](const conversation::RuntimeEventEnvelope& event) {
+                ui.dispatch_message("runtime_event", conversation::encode(event));
+            });
+        if (!turn.error.empty() || turn.outcome.reason != conversation::ModelTurnStopReason::EndTurn) {
             if (control && control->is_cancel_requested()) {
                 ui.dispatch_message("run_cancelled", json{{"message", "Run cancelled by user"}});
                 return 0;
             }
-            ui.dispatch_error(wr.error_message.value_or("run_react_cli_sync failed"));
+            ui.dispatch_error(!turn.error.empty() ? turn.error :
+                wr.error_message.value_or(turn.outcome.candidate_answer));
             return wr.exit_code != 0 ? wr.exit_code : 1;
         }
     } catch (const std::exception& e) {
@@ -376,7 +384,7 @@ int main(int argc, char** argv) {
             return;
         }
         apply_processed_to_agent_state(std::move(proc), ectx, *state);
-        (void)run_graph_ui(*executor, cfg, deps, state, ui, control);
+        (void)run_graph_ui(*executor, cfg, deps, state, ui, control, runtime);
         {
             std::lock_guard<std::mutex> lock(g_control_mutex);
             if (g_active_control == control) g_active_control.reset();

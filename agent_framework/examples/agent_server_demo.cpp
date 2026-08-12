@@ -158,6 +158,13 @@ int main(int argc, char** argv) {
     server.register_agent_card(card);
     server.set_execution_profile(example::to_execution_profile(runtime));
     server.set_input_preprocess_toolbus(runtime.toolbus);
+    {
+        const char* configured = std::getenv("AGENT_CONVERSATION_DB");
+        const std::string conversation_db = configured && *configured
+            ? configured : "agent-server-conversations.sqlite3";
+        server.set_conversation_store(
+            std::make_shared<conversation::SQLiteConversationStore>(conversation_db));
+    }
     if(session == "sqlite") {
         if(session_db.empty()) {
             const char* configured = std::getenv("AGENT_SESSION_DB");

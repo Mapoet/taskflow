@@ -74,7 +74,7 @@ namespace agent_framework::conversation
         started.event_type = "turn_started";
         started.timestamp = stamp();
         started.payload = {{"profile", name(r.profile)}};
-        ConversationCommit initial{c, 0, {m}, {started}};
+        ConversationCommit initial{c, 0, {m}, {started}, {}};
         if (!store_.commit(initial, &err))
             return {c, {}, err};
         c = initial.checkpoint;
@@ -145,7 +145,7 @@ namespace agent_framework::conversation
         stopped.event_type = "model_stop";
         stopped.timestamp = stamp();
         stopped.payload = {{"reason", name(o.reason)}, {"task_completion_verified", false}};
-        ConversationCommit terminal{c, expected, std::move(pending_messages), {stopped}};
+        ConversationCommit terminal{c, expected, std::move(pending_messages), {stopped}, {}};
         if (!store_.commit(terminal, &err))
             return {c, o, err};
         c = terminal.checkpoint;
@@ -165,7 +165,19 @@ namespace agent_framework::conversation
         auto expected = c->revision;
         if (!TurnStateMachine::transition(*c, TurnPhase::Interrupted, TurnContinuationReason::None, e))
             return false;
-        return store_.commit_turn(*c, expected, e);
+        RuntimeEventEnvelope interrupted;
+        interrupted.turn_id = std::string(id);
+        interrupted.run_id = std::string(id);
+        interrupted.durability = EventDurability::Durable;
+        interrupted.visibility = EventVisibility::User;
+        interrupted.event_type = "turn_interrupted";
+        interrupted.timestamp = stamp();
+        ConversationCommit commit{*c, expected, {}, {interrupted}, {}};
+        if (!store_.commit(commit, e))
+            return false;
+        if (sink_)
+            sink_(commit.durable_events.front());
+        return true;
     }
     InputDisposition ConversationEngine::classify_input(std::string_view v) const
     {
@@ -181,8 +193,6 @@ namespace agent_framework::conversation
     }
     bool ConversationEngine::submit_user_input(const TurnRequest &r, InputDisposition d, std::string *e)
     {
-        if (d == InputDisposition::ControlAction)
-            return interrupt_turn(r.identity, r.turn_id, e);
         if (d == InputDisposition::StatusQuery)
             return true;
         auto c = store_.load_turn(r.identity, r.turn_id);
@@ -192,16 +202,55 @@ namespace agent_framework::conversation
                 *e = "turn_not_found";
             return false;
         }
+        const auto expected = c->revision;
+        if (d == InputDisposition::ControlAction || d == InputDisposition::InterruptAndReplace)
+        {
+            if (!TurnStateMachine::transition(*c, TurnPhase::Interrupted,
+                                              TurnContinuationReason::None, e))
+                return false;
+        }
+        else
+        {
+            ++c->revision;
+            c->continuation = TurnContinuationReason::QueuedUserInput;
+        }
         auto prior = store_.messages(r.identity);
-        ConversationMessage m;
-        m.identity = r.identity;
-        m.message_id = r.turn_id + ":input:" + std::to_string(prior.size() + 1);
-        m.parent_id = prior.empty() ? "" : prior.back().message_id;
-        m.turn_id = r.turn_id;
-        m.role = "user";
-        m.content = r.input;
-        m.created_at = stamp();
-        m.sequence = prior.size() + 1;
-        return store_.append_message(m, e);
+        ConversationInput input;
+        input.identity = r.identity;
+        input.input_id = r.turn_id + ":input:" + std::to_string(expected + 1);
+        input.target_turn_id = r.turn_id;
+        input.content = r.input;
+        input.created_at = stamp();
+        input.disposition = d;
+        input.state = d == InputDisposition::AppendToCurrentTurn
+            ? InputState::Consumed : InputState::Queued;
+
+        std::vector<ConversationMessage> messages;
+        if (d == InputDisposition::AppendToCurrentTurn)
+        {
+            ConversationMessage message;
+            message.identity = r.identity;
+            message.message_id = input.input_id + ":message";
+            message.parent_id = prior.empty() ? "" : prior.back().message_id;
+            message.turn_id = r.turn_id;
+            message.role = "user";
+            message.content = r.input;
+            message.created_at = input.created_at;
+            messages.push_back(std::move(message));
+        }
+        RuntimeEventEnvelope event;
+        event.turn_id = r.turn_id;
+        event.run_id = r.turn_id;
+        event.durability = EventDurability::Durable;
+        event.visibility = EventVisibility::Operations;
+        event.event_type = "user_input_queued";
+        event.timestamp = input.created_at;
+        event.payload = {{"disposition", name(d)}, {"state", name(input.state)}};
+        ConversationCommit commit{*c, expected, std::move(messages), {event}, {input}};
+        if (!store_.commit(commit, e))
+            return false;
+        if (sink_)
+            sink_(commit.durable_events.front());
+        return true;
     }
 }

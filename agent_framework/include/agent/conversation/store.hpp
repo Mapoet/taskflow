@@ -10,6 +10,7 @@ namespace agent_framework::conversation
         std::uint64_t expected_turn_revision{0};
         std::vector<ConversationMessage> messages;
         std::vector<RuntimeEventEnvelope> durable_events;
+        std::vector<ConversationInput> inputs;
     };
 
     class ConversationStore
@@ -30,6 +31,8 @@ namespace agent_framework::conversation
         virtual std::optional<CompactBoundaryRecord> latest_boundary(
             const ConversationIdentity &) = 0;
         virtual bool commit(ConversationCommit &, std::string * = nullptr) = 0;
+        virtual std::vector<ConversationInput> inputs(const ConversationIdentity &,
+                                                      InputState) = 0;
     };
 
     class SQLiteConversationStore final : public ConversationStore
@@ -48,6 +51,7 @@ namespace agent_framework::conversation
         bool append_boundary(CompactBoundaryRecord, std::string *) override;
         std::optional<CompactBoundaryRecord> latest_boundary(const ConversationIdentity &) override;
         bool commit(ConversationCommit &, std::string * = nullptr) override;
+        std::vector<ConversationInput> inputs(const ConversationIdentity &, InputState) override;
 
     private:
         void *db_{nullptr};

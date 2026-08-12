@@ -71,6 +71,12 @@ namespace agent_framework::conversation
         Operations,
         Audit
     };
+    enum class InputState
+    {
+        Queued,
+        Consumed,
+        Cancelled
+    };
 
     struct ConversationIdentity
     {
@@ -89,6 +95,15 @@ namespace agent_framework::conversation
         std::string turn_id, input;
         TaskExecutionProfile profile{TaskExecutionProfile::Conversation};
         std::uint64_t max_iterations{10}, max_input_tokens{0}, max_output_tokens{0};
+    };
+    struct ConversationInput
+    {
+        ConversationIdentity identity;
+        std::string input_id, target_turn_id, content, created_at;
+        InputDisposition disposition{InputDisposition::AppendToCurrentTurn};
+        InputState state{InputState::Queued};
+        std::uint64_t sequence{0};
+        std::string digest;
     };
     struct TurnCheckpoint
     {
@@ -146,7 +161,10 @@ namespace agent_framework::conversation
     std::string_view name(TurnPhase);
     std::string_view name(TurnContinuationReason);
     std::string_view name(ModelTurnStopReason);
+    std::string_view name(InputDisposition);
+    std::string_view name(InputState);
     nlohmann::json encode(const ConversationMessage &);
+    nlohmann::json encode(const ConversationInput &);
     nlohmann::json encode(const TurnCheckpoint &);
     nlohmann::json encode(const RuntimeEventEnvelope &);
     nlohmann::json encode(const ContextProjectionManifest &);

@@ -151,7 +151,8 @@ int run_graph_ui(tf::Executor& executor,
                  const std::shared_ptr<internal::AgentThreadState>& state,
                  UIManager& ui,
                  const std::shared_ptr<TaskControl>& control,
-                 const std::shared_ptr<UiPresentationModel>& presentation) {
+                 const std::shared_ptr<UiPresentationModel>& presentation,
+                 const example::LiveRuntime& runtime) {
     GraphExecutor gx;
     ReactCliRunRequest req;
     req.config = cfg;
@@ -175,13 +176,17 @@ int run_graph_ui(tf::Executor& executor,
         std::clog << example::skill_event_json(event).dump() << '\n';
     };
     try {
-        WorkflowResult wr = gx.run_react_cli_sync(executor, req);
-        if (!wr.success) {
+        WorkflowResult wr{};
+        auto turn = example::run_conversation_turn(runtime, "tui_agent_demo",
+            state->initial_user_prompt,
+            [&] { wr = gx.run_react_cli_sync(executor, req); return wr; });
+        if (!turn.error.empty() || turn.outcome.reason != conversation::ModelTurnStopReason::EndTurn) {
             if (control && control->is_cancel_requested()) {
                 if (presentation) presentation->cancel();
                 return 0;
             }
-            ui.dispatch_error(wr.error_message.value_or("run_react_cli_sync failed"));
+            ui.dispatch_error(!turn.error.empty() ? turn.error :
+                wr.error_message.value_or(turn.outcome.candidate_answer));
             return wr.exit_code != 0 ? wr.exit_code : 1;
         }
     } catch (const std::exception& e) {
@@ -358,7 +363,7 @@ int main(int argc, char** argv) {
             if (!active.empty()) state->active_skill_id = active;
         }
         apply_processed_to_agent_state(std::move(proc), ectx, *state);
-        (void)run_graph_ui(executor, cfg, deps, state, ui, control, presentation);
+        (void)run_graph_ui(executor, cfg, deps, state, ui, control, presentation, runtime);
         {
             std::lock_guard<std::mutex> lock(control_mutex);
             if (active_control == control) active_control.reset();

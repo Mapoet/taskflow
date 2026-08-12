@@ -32,7 +32,7 @@ Claude Code 的弱点是 Turn 结束容易成为事实上的任务结束；Agent
 | 工作包 | 状态 | 当前实现证据 | 仍需关闭的生产缺口 |
 |---|---:|---|---|
 | AF-CC0 契约冻结 | `[~]` | Conversation/Turn、`RuntimeEventEnvelope`、ContextProjection、CompactBoundary、六档 `TaskExecutionProfile` 已类型化；`ModelTurnOutcome` 不可签发 verified | 缺统一 `ToolContract`；影响权限、工具和上下文的全部 revision 尚未完整 pin 到 deployment/invocation manifest |
-| AF-CC1 ConversationEngine | `[~]` | start/continue/interrupt/resume、Turn CAS、SQLite WAL/FULL Store、append-only parent/digest 消息链、重启恢复和 100 Turn 测试已完成 | 五个 demo 的模型执行仍走 `run_react_cli_sync`；SDK/AgentServer/A2A 尚未统一接入；存储提交跨表非原子，跨连接序列分配未线性化；输入五类仅部分实现 |
+| AF-CC1 ConversationEngine | `[~]` | start/continue/interrupt/resume、Turn CAS、SQLite WAL/FULL Store、append-only parent/digest 消息链、原子 Turn boundary、跨连接线性化 sequence、durable input inbox、重启恢复和 100 Turn 测试已完成；四个交互 demo 与 AgentServer/A2A 服务执行边界已接入 | GraphExecutor 仍作为受控 TurnExecutor adapter；queued input 消费/新 Turn 创建、SDK replay API、正式事件订阅和真实进程 crash matrix 尚缺 |
 | AF-CC2 Tool Lifecycle | `[△]` | ToolBus、schema、Approval、Sandbox、Effect Journal、MCP、Skill policy 与 observer 已分别存在 | 缺不可绕过的版本化 Tool Contract、固定执行管线、改写后重验、统一 retention/CAS 与 reconciliation |
 | AF-CC3 Context/Compact | `[~]` | projection/boundary schema、mandatory contract/policy/citation 保留校验和 boundary 持久化已完成 | 尚未驱动真实模型调用；缺自动 compact、CAS 大结果外置、确定性 fallback 和恢复等价性测试 |
 | AF-CC4 三链持久化 | `[~]` | Conversation、Run/Harness、Effect 已有独立 Store 和 digest | 缺跨链 correlation/atomic boundary、全 durable 写点 crash injection、deterministic replay/time-travel 和 orphan reconciliation |
@@ -43,12 +43,12 @@ Claude Code 的弱点是 Turn 结束容易成为事实上的任务结束；Agent
 
 ### 0.2 当前已确认的 Conversation 实现风险
 
-1. Turn 初始 checkpoint、user message 与 `turn_started` event 分次写入；assistant message、终态 checkpoint 与 `model_stop` 也分次写入，进程在中间崩溃会留下不可恢复的半提交状态。
-2. durable event 先读取 `MAX(sequence)` 再插入，两个 Store/进程可以获得相同 sequence；进程内 mutex 不能证明跨进程线性化。
-3. message parent 校验与 insert 不是同一 `BEGIN IMMEDIATE` 事务；双连接并发 append 只能依赖唯一键冲突，不能稳定给出链冲突语义。
-4. `QueueNextTurn`、`AppendToCurrentTurn` 与 `InterruptAndReplace` 当前最终都主要表现为 append，缺队列、替换、取消传播与消费状态。
-5. 事件输出只有构造时 sink 和 Store 查询，尚无正式 subscribe/replay cursor、背压、断线续传协议。
-6. ContextProjection/CompactBoundary 当前是契约和 Store 能力，尚未接入模型 invocation；GraphTurnAdapter 已去除完成权威，但尚未成为默认生产路径。
+1. `[x]` Turn 初始/终止 checkpoint、message 与 durable event 已统一进入 `ConversationCommit`；半提交窗口已在当前 SQLite Store 边界关闭。
+2. `[x]` message/event/input sequence 与 parent 校验已移入 `BEGIN IMMEDIATE`，双连接竞争测试证明同一 parent 只有一个 writer 成功。
+3. `[x]` Append/QueueNext/InterruptAndReplace 已使用 durable input inbox 区分；Append 才进入当前消息链，QueueNext/Replace 重启后仍为 queued，Replace 同事务中断当前 Turn。
+4. `[~]` queued input 尚缺“消费并创建下一 Turn”的 CAS 操作；取消传播仍未连接正在运行的 provider/tool executor。
+5. `[ ]` 事件输出只有构造时 sink 和 Store 查询，尚无正式 subscribe/replay cursor、背压、断线续传协议。
+6. `[ ]` ContextProjection/CompactBoundary 当前是契约和 Store 能力，尚未接入模型 invocation；GraphTurnAdapter 已去除完成权威，但尚未成为默认生产路径。
 
 ### 0.3 AF-CC1R 行动进度
 
@@ -59,9 +59,30 @@ Claude Code 的弱点是 Turn 结束容易成为事实上的任务结束；Agent
 - ConversationEngine 的 `turn_started` 与 `model_stop` durable boundary 已改用原子 commit，不再采用 checkpoint/message/event 三次独立提交；
 - 双 SQLite 连接竞争同一 parent 时只允许一个 writer 成功，失败 writer 不留下 Turn、message 或 event；
 - parent mismatch 故障注入验证整个 batch 回滚；
+- 第二批新增 durable `conversation_inputs` inbox；Append、QueueNext、InterruptAndReplace、ControlAction 不再共享同一 append 语义；interrupt checkpoint/event 也进入原子 commit；
+- queued replacement/next-turn input 经 Store 重启仍可恢复，且不会污染当前模型消息链；
 - 回归证据：`phase4_conversation_runtime` PASS，Phase 4 offline 74/74 PASS，Phase 3 22/22 PASS。
 
-仍未关闭的 AF-CC1R 范围：运行中用户输入 append、interrupt checkpoint 与未来 tool/effect reference 尚未全部纳入同类事务 API；需要继续增加真实进程 crash injection、busy/timeout、磁盘故障和 schema migration 测试。因此 AF-CC1 总状态保持 `[~]`，不能提升为 `[x]`。
+仍未关闭的 AF-CC1R 范围：未来 tool/effect reference 尚未纳入同类事务 API；需要继续增加真实进程 crash injection、busy/timeout、磁盘故障和 schema migration 测试。AF-CC1W 的真实入口迁移也未完成，因此 AF-CC1 总状态保持 `[~]`，不能提升为 `[x]`。
+
+### 0.4 AF-CC1W 行动进度
+
+2026-08-12 已开始入口迁移的共同适配层：
+
+- `GraphTurnAdapter` 已支持把既有 `WorkflowResult` 映射为类型化 `ModelTurnOutcome`；
+- success、provider failure、guard stop 均保持 `task_completion_verified=false`，错误文本只能作为 candidate/diagnostic；
+- 该 adapter 是 `run_react_cli_sync` 与 ConversationEngine 之间的受控兼容边界，不是新的完成权威。
+
+本批已完成：
+
+- CLI/Web/TUI/ImGui 四个交互 demo 均通过公共 `run_conversation_turn` 进入 SQLite ConversationStore/ConversationEngine；`run_react_cli_sync` 只存在于受控 callback 后；
+- 公共 composition 统一读取 `AGENT_CONVERSATION_DB`、`AGENT_TENANT_ID`、`AGENT_CONVERSATION_ID`，并生成单调不重复 Turn identity；
+- Web 将 typed `RuntimeEventEnvelope` 投影为 `runtime_event`，其余端保持现有流式 UI sink；
+- AgentServer 在真实 `execute_sync` boundary 接入可注入 ConversationStore，A2A task ID 映射为 Turn ID、session ID 映射为 conversation ID；
+- `agent_server_demo` 默认启用独立 durable conversation DB；生产 task 是否 COMPLETED 仍由原有 closure/verified authority 决定，Conversation outcome 不得越权；
+- 四个交互 demo 与 agent_server_demo 均构建通过；AgentServer/A2A 针对测试 5/5、Phase 4 offline 74/74、Phase 3 22/22 PASS。
+
+尚未完成：SDK 尚缺 durable event replay/subscription API；AgentServer runtime event 尚未完整复用现有 SSE cursor/重连协议；queued input 尚缺跨 Turn 消费。当前可以认定服务端执行入口已迁移，但 AF-CC1 仍不能标记 `[x]`。
 
 ## 1. 证据边界
 

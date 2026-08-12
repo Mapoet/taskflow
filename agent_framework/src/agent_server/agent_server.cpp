@@ -20,6 +20,8 @@
 #include <agent/core/types.hpp>
 #include <agent/agent/execution_context.hpp>
 #include <agent/agent/user_input_preprocessor.hpp>
+#include <agent/conversation/conversation_engine.hpp>
+#include <agent/conversation/graph_turn_adapter.hpp>
 #include <workflow/nodeflow.hpp>
 
 #include <taskflow/taskflow.hpp>
@@ -422,10 +424,34 @@ void AgentServer::run_agent_task_on_executor(const std::string& task_id,
                 }
             };
             fut = std::async(std::launch::async,
-                [this, request = std::move(request), snap = std::move(snap),
+                [this, request = std::move(request), snap = std::move(snap), task_id,
                  trust_profile = profile.trust_profile]() mutable {
                     AgentTask done = std::move(snap);
-                    ExecutionResult r = graph_executor_->execute_sync(*process_executor_, std::move(request));
+                    ExecutionResult r;
+                    if (conversation_store_) {
+                        conversation::TurnRequest turn_request;
+                        turn_request.identity = conversation::ConversationIdentity{
+                            "a2a", done.session_id.value_or(task_id)};
+                        turn_request.turn_id = task_id;
+                        turn_request.input = request.session ? request.session->initial_user_prompt : std::string{};
+                        turn_request.profile = trust_profile == ExecutionTrustProfile::Production
+                            ? conversation::TaskExecutionProfile::Professional
+                            : conversation::TaskExecutionProfile::Conversation;
+                        turn_request.max_iterations = static_cast<std::uint64_t>(
+                            std::max(1, request.config.max_iterations));
+                        conversation::ConversationEngine engine(
+                            *conversation_store_,
+                            [this, &request, &r](const conversation::TurnRequest&,
+                                                 const conversation::TurnCheckpoint&) mutable {
+                                r = graph_executor_->execute_sync(*process_executor_, std::move(request));
+                                return conversation::GraphTurnAdapter::from_execution(r);
+                            });
+                        auto turn = engine.start_turn(turn_request);
+                        if (!turn.error.empty() && !r.error)
+                            r.error = turn.error;
+                    } else {
+                        r = graph_executor_->execute_sync(*process_executor_, std::move(request));
+                    }
                     const bool verified = r.outputs.value("task_completion_verified", false);
                     const bool accepted = r.success &&
                         (trust_profile != ExecutionTrustProfile::Production || verified);
@@ -623,6 +649,11 @@ void AgentServer::set_graph_executor(std::shared_ptr<GraphExecutor> executor) {
 
 void AgentServer::set_session_store(std::shared_ptr<SessionStore> store) {
     session_store_ = std::move(store);
+}
+
+void AgentServer::set_conversation_store(
+    std::shared_ptr<conversation::ConversationStore> store) {
+    conversation_store_ = std::move(store);
 }
 
 void AgentServer::set_authentication_validator(

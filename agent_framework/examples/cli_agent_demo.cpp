@@ -161,7 +161,8 @@ int run_graph_once(tf::Executor& executor,
                    const AgentConfig& cfg,
                    const AgentWorkflowDeps& deps,
                    const std::shared_ptr<internal::AgentThreadState>& state,
-                   CLIHandler& cli) {
+                   CLIHandler& cli,
+                   const example::LiveRuntime& runtime) {
     GraphExecutor gx;
     ReactCliRunRequest req;
     req.config = cfg;
@@ -178,10 +179,14 @@ int run_graph_once(tf::Executor& executor,
         std::clog << example::skill_event_json(event).dump() << '\n';
     };
     try {
-        WorkflowResult wr = gx.run_react_cli_sync(executor, req);
-        if (!wr.success) {
-            cli.handle_error(wr.error_message.value_or("run_react_cli_sync failed"));
-            return wr.exit_code != 0 ? wr.exit_code : 1;
+        WorkflowResult graph_result{};
+        auto turn = example::run_conversation_turn(
+            runtime, "cli_agent_demo", state->initial_user_prompt,
+            [&] { graph_result = gx.run_react_cli_sync(executor, req); return graph_result; });
+        if (!turn.error.empty() || turn.outcome.reason != conversation::ModelTurnStopReason::EndTurn) {
+            cli.handle_error(!turn.error.empty() ? turn.error :
+                graph_result.error_message.value_or(turn.outcome.candidate_answer));
+            return graph_result.exit_code != 0 ? graph_result.exit_code : 1;
         }
     } catch (const std::exception& e) {
         cli.handle_error(std::string("run_react_cli_sync: ") + e.what());
@@ -314,7 +319,7 @@ int main(int argc, char** argv) {
         std::clog << "[cli_agent_demo] running agent loop (streaming to stdout; "
                      "wait up to AGENT_HTTP_TIMEOUT_SEC)...\n"
                   << std::flush;
-        return run_graph_once(executor, cfg, deps, state, cli);
+        return run_graph_once(executor, cfg, deps, state, cli, runtime);
     };
 
     if (!prompt_arg.empty()) {

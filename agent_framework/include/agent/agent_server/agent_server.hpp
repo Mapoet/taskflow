@@ -44,6 +44,7 @@ class SseServerChannel;
 namespace a2a {
 class DispatchTable;
 }
+namespace conversation { class ConversationStore; }
 
 using json = nlohmann::json;
 
@@ -97,6 +98,7 @@ public:
     void set_execution_profile(AgentExecutionProfile profile);
     void set_graph_executor(std::shared_ptr<GraphExecutor> executor);
     void set_session_store(std::shared_ptr<SessionStore> store);
+    void set_conversation_store(std::shared_ptr<conversation::ConversationStore> store);
 
     /**
      * @brief 设置附加认证验证器（在内置 AuthGate 通过后与关系 AND）
@@ -150,6 +152,7 @@ private:
     std::optional<AgentExecutionProfile> execution_profile_;
     std::shared_ptr<GraphExecutor> graph_executor_;
     std::shared_ptr<SessionStore> session_store_;
+    std::shared_ptr<conversation::ConversationStore> conversation_store_;
 
     std::unique_ptr<internal::TaskDispatchQueue> task_queue_;
     std::vector<std::thread> dispatch_workers_;

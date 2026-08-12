@@ -60,6 +60,7 @@ namespace agent_framework::conversation
         internal::sqlite::exec(db, "CREATE TABLE IF NOT EXISTS conversation_turns(tenant TEXT,conversation TEXT,turn_id TEXT,revision INTEGER,iteration INTEGER,phase TEXT,continuation TEXT,last_message_id TEXT,boundary_digest TEXT,digest TEXT,PRIMARY KEY(tenant,conversation,turn_id))");
         internal::sqlite::exec(db, "CREATE TABLE IF NOT EXISTS conversation_events(tenant TEXT,conversation TEXT,sequence INTEGER,event_json TEXT,digest TEXT,PRIMARY KEY(tenant,conversation,sequence),UNIQUE(tenant,conversation,event_json))");
         internal::sqlite::exec(db, "CREATE TABLE IF NOT EXISTS conversation_boundaries(tenant TEXT,conversation TEXT,revision INTEGER,boundary_json TEXT,digest TEXT,PRIMARY KEY(tenant,conversation,revision))");
+        internal::sqlite::exec(db, "CREATE TABLE IF NOT EXISTS conversation_inputs(tenant TEXT,conversation TEXT,sequence INTEGER,input_id TEXT,target_turn_id TEXT,disposition TEXT,state TEXT,input_json TEXT,digest TEXT,PRIMARY KEY(tenant,conversation,sequence),UNIQUE(tenant,conversation,input_id))");
     }
     SQLiteConversationStore::~SQLiteConversationStore()
     {
@@ -413,6 +414,32 @@ namespace agent_framework::conversation
                     throw std::runtime_error(sqlite3_errmsg(db));
             }
 
+            Statement input_tail(db, "SELECT COALESCE(MAX(sequence),0) FROM conversation_inputs WHERE tenant=? AND conversation=?");
+            bind_id(input_tail.get(), identity);
+            std::uint64_t input_sequence = internal::sqlite::step(input_tail.get()) == SQLITE_ROW
+                ? internal::sqlite::column_uint64(input_tail.get(), 0) : 0;
+            for (auto &input : batch.inputs)
+            {
+                if (input.identity.tenant_id != identity.tenant_id ||
+                    input.identity.conversation_id != identity.conversation_id ||
+                    input.input_id.empty() || input.content.empty())
+                    throw std::runtime_error("conversation input identity required");
+                input.sequence = ++input_sequence;
+                const auto json = encode(input);
+                input.digest = digest(json);
+                Statement insert(db, "INSERT INTO conversation_inputs VALUES(?,?,?,?,?,?,?,?,?)");
+                bind_id(insert.get(), identity);
+                internal::sqlite::bind_uint64(insert.get(), 3, input.sequence);
+                internal::sqlite::bind_text(insert.get(), 4, input.input_id);
+                internal::sqlite::bind_text(insert.get(), 5, input.target_turn_id);
+                internal::sqlite::bind_text(insert.get(), 6, name(input.disposition));
+                internal::sqlite::bind_text(insert.get(), 7, name(input.state));
+                internal::sqlite::bind_text(insert.get(), 8, json.dump());
+                internal::sqlite::bind_text(insert.get(), 9, input.digest);
+                if (internal::sqlite::step(insert.get()) != SQLITE_DONE)
+                    throw std::runtime_error(sqlite3_errmsg(db));
+            }
+
             const auto checkpoint_digest = digest(encode(batch.checkpoint));
             Statement turn(db, "INSERT INTO conversation_turns VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(tenant,conversation,turn_id) DO UPDATE SET revision=excluded.revision,iteration=excluded.iteration,phase=excluded.phase,continuation=excluded.continuation,last_message_id=excluded.last_message_id,boundary_digest=excluded.boundary_digest,digest=excluded.digest");
             bind_id(turn.get(), identity);
@@ -435,5 +462,43 @@ namespace agent_framework::conversation
                 *e = failure.what();
             return false;
         }
+    }
+    std::vector<ConversationInput> SQLiteConversationStore::inputs(
+        const ConversationIdentity &identity, InputState state)
+    {
+        std::lock_guard l(mutex_);
+        auto *db = internal::sqlite::database(db_);
+        Statement query(db, "SELECT input_json,digest FROM conversation_inputs WHERE tenant=? AND conversation=? AND state=? ORDER BY sequence");
+        bind_id(query.get(), identity);
+        internal::sqlite::bind_text(query.get(), 3, name(state));
+        std::vector<ConversationInput> result;
+        while (internal::sqlite::step(query.get()) == SQLITE_ROW)
+        {
+            try
+            {
+                auto json = nlohmann::json::parse(internal::sqlite::column_text(query.get(), 0));
+                if (digest(json) != internal::sqlite::column_text(query.get(), 1))
+                    return {};
+                ConversationInput input;
+                input.identity = identity;
+                input.input_id = json.at("input_id");
+                input.target_turn_id = json.at("target_turn_id");
+                input.content = json.at("content");
+                input.created_at = json.at("created_at");
+                input.sequence = json.at("sequence");
+                const auto disposition = json.at("disposition").get<std::string>();
+                for (int i = 0; i < 5; ++i)
+                    if (name(static_cast<InputDisposition>(i)) == disposition)
+                        input.disposition = static_cast<InputDisposition>(i);
+                input.state = state;
+                input.digest = internal::sqlite::column_text(query.get(), 1);
+                result.push_back(std::move(input));
+            }
+            catch (...)
+            {
+                return {};
+            }
+        }
+        return result;
     }
 }

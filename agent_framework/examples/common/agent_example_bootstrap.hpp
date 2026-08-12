@@ -11,8 +11,12 @@
 #include <agent/toolbus/toolbus.hpp>
 #include <agent/toolbus/web_tools.hpp>
 #include <agent/conversation/production_bridge.hpp>
+#include <agent/conversation/conversation_engine.hpp>
+#include <agent/conversation/graph_turn_adapter.hpp>
 
 #include <algorithm>
+#include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <cstdlib>
 #include <filesystem>
@@ -85,6 +89,43 @@ struct LiveRuntime {
         conversation::TaskExecutionProfile::Conversation};
     BootstrapResult bootstrap;
 };
+
+using GraphTurnCallback = std::function<WorkflowResult()>;
+
+inline conversation::TurnResult run_conversation_turn(
+    const LiveRuntime& runtime, std::string_view agent_name, std::string input,
+    GraphTurnCallback graph, conversation::RuntimeEventSink event_sink = {}) {
+    if(!graph) throw std::invalid_argument("conversation graph callback required");
+    const char* configured_db = std::getenv("AGENT_CONVERSATION_DB");
+    std::filesystem::path database = configured_db && *configured_db
+        ? std::filesystem::path(configured_db)
+        : std::filesystem::path(".agent-framework") /
+              (std::string(agent_name) + "-conversation.sqlite3");
+    const char* configured_tenant = std::getenv("AGENT_TENANT_ID");
+    const char* configured_conversation = std::getenv("AGENT_CONVERSATION_ID");
+    conversation::ConversationIdentity identity{
+        configured_tenant && *configured_tenant ? configured_tenant : "local",
+        configured_conversation && *configured_conversation
+            ? configured_conversation : std::string(agent_name)};
+    static std::atomic<std::uint64_t> serial{0};
+    const auto now = std::chrono::duration_cast<std::chrono::microseconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
+    conversation::TurnRequest request{
+        identity,
+        std::string(agent_name) + ":" + std::to_string(now) + ":" +
+            std::to_string(serial.fetch_add(1, std::memory_order_relaxed)),
+        std::move(input), runtime.task_profile,
+        static_cast<std::uint64_t>(std::max(1, runtime.config.max_iterations))};
+    conversation::SQLiteConversationStore store(database.string());
+    conversation::ConversationEngine engine(
+        store,
+        [callback = std::move(graph)](const conversation::TurnRequest&,
+                                      const conversation::TurnCheckpoint&) mutable {
+            return conversation::GraphTurnAdapter::from_workflow(callback());
+        },
+        std::move(event_sink));
+    return engine.start_turn(request);
+}
 
 inline ExecutionTrustProfile execution_trust_profile_from_env() {
     const char* raw = std::getenv("AGENT_EXECUTION_PROFILE");
