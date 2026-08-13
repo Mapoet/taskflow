@@ -22,6 +22,7 @@ ProductionDependencyReport validate_production_dependencies(
     require(d.plan_node_executor_registry, "plan_node_executor_registry");
     require(d.long_task_workflow, "long_task_workflow");
     require(d.long_task_timer_worker, "long_task_timer_worker");
+    require(d.incremental_result_store, "incremental_result_store");
     require(d.role_runtime != nullptr, "role_runtime"); require(d.telemetry != nullptr, "telemetry");
     require(d.approval_store, "approval_store"); require(d.sandbox_provider, "sandbox_provider");
     require(d.artifact_executor, "artifact_executor"); require(d.oracle_registry, "oracle_registry");

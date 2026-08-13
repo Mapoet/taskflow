@@ -14,6 +14,7 @@
 
 namespace agent_framework::tool_runtime
 {
+    class IncrementalResultViewAssembler;
     enum class LongTaskState
     {
         Created,
@@ -278,12 +279,15 @@ namespace agent_framework::tool_runtime
     class RoleRuntimeLongTaskModel final : public LongTaskCognitionModel
     {
     public:
-        RoleRuntimeLongTaskModel(std::shared_ptr<llm_runtime::RoleRuntime>, LongTaskRoleBinding);
+        RoleRuntimeLongTaskModel(std::shared_ptr<llm_runtime::RoleRuntime>, LongTaskRoleBinding,
+                                 InvocationStore* = nullptr, IncrementalResultViewAssembler* = nullptr);
         LongTaskDecision invoke(const LongTaskCheckpoint &, const planning::ExecutionPlan &, const ObservationBatch &) override;
 
     private:
         std::shared_ptr<llm_runtime::RoleRuntime> runtime_;
         LongTaskRoleBinding binding_;
+        InvocationStore* invocations_{nullptr};
+        IncrementalResultViewAssembler* results_{nullptr};
     };
 
     struct LongTaskStepResult

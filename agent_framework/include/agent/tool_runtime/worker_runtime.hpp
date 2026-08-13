@@ -2,6 +2,7 @@
 #include "agent/tool_runtime/store.hpp"
 #include "agent/distributed/durable_queue.hpp"
 #include "agent/tool_runtime/execution_adapter.hpp"
+#include "agent/tool_runtime/incremental_result_store.hpp"
 namespace agent_framework::tool_runtime
 {
     struct WorkerIdentity
@@ -27,6 +28,8 @@ namespace agent_framework::tool_runtime
             const nlohmann::json &, std::string *error = nullptr);
         ExecutionObservation observe(ClaimedInvocation &, ExecutionAdapter &,
             const ExecutionHandle &, std::string *error = nullptr);
+        bool persist_observation(ClaimedInvocation&, ExecutionObservation&, IncrementalResultStore&,
+            IncrementalStreamKind, std::string_view idempotency_key, std::string* error = nullptr);
         std::optional<ExecutionHandle> recover(ClaimedInvocation &, const ExecutionAdapterRegistry &,
             const nlohmann::json &, std::string *error = nullptr);
 

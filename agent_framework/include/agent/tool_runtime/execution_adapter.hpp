@@ -38,6 +38,7 @@ struct ExecutionObservation
     nlohmann::json result=nlohmann::json::object();
     std::string result_digest, checkpoint_ref, error_code;
     bool effect_known{false}, information_gain{false};
+    std::optional<PartialResultRef> incremental_result;
 };
 struct CancellationResult { bool accepted{false}, terminal{false}; std::string diagnostic; };
 struct ReconciliationResult { ExecutionObservation observation; bool safe_to_retry{false}; };

@@ -1,4 +1,5 @@
 #include "agent/tool_runtime/long_task_workflow.hpp"
+#include "agent/tool_runtime/incremental_result_store.hpp"
 #include "agent/internal/platform_io.hpp"
 #include "agent/internal/sqlite_utils.hpp"
 #include <algorithm>
@@ -516,7 +517,7 @@ namespace agent_framework::tool_runtime
     {return runs_.schedule_timer({"long-task:"+c.workflow_id+":"+std::to_string(c.revision)+":"+std::to_string(due),c.metadata.identity.run_id,due,{{"kind","long_task_wake"},{"workflow_id",c.workflow_id},{"workflow_revision",c.revision},{"fencing_token",c.fencing_token},{"reason",std::move(reason)}},{},0,false});}
     std::size_t LongTaskTimerWorker::run_due(std::int64_t now,std::size_t limit)
     {std::size_t completed=0;for(const auto &timer:runs_.claim_due_timers(now,owner_,lease_ms_,limit)){if(timer.payload.value("kind","")!="long_task_wake")continue;auto step=workflow_.step(timer.payload.value("workflow_id",""),now);if(step.error.empty()&&step.checkpoint.revision==timer.payload.value("workflow_revision",0ull)+1&&step.checkpoint.fencing_token==timer.payload.value("fencing_token",0ull)){dispatcher_.dispatch(step);if(runs_.complete_timer(timer.timer_id,owner_))++completed;}}return completed;}
-    RoleRuntimeLongTaskModel::RoleRuntimeLongTaskModel(std::shared_ptr<llm_runtime::RoleRuntime> r, LongTaskRoleBinding b) : runtime_(std::move(r)), binding_(std::move(b)) {}
+    RoleRuntimeLongTaskModel::RoleRuntimeLongTaskModel(std::shared_ptr<llm_runtime::RoleRuntime> r, LongTaskRoleBinding b, InvocationStore* i, IncrementalResultViewAssembler* v) : runtime_(std::move(r)), binding_(std::move(b)), invocations_(i), results_(v) {}
     LongTaskDecision RoleRuntimeLongTaskModel::invoke(const LongTaskCheckpoint &c, const planning::ExecutionPlan &p, const ObservationBatch &b)
     {
         llm_runtime::RoleInvocationRequest r;
@@ -526,7 +527,9 @@ namespace agent_framework::tool_runtime
         r.profile_revision = binding_.profile_revision;
         r.memory_view = {binding_.memory_snapshot_id, "replan", binding_.memory_view_digest};
         r.granted_capabilities = binding_.capabilities;
-        r.prompt_variables = {{"workflow", encode(c).dump()}, {"plan", planning::encode(p).dump()}, {"observations", json{{"trigger", name(b.trigger)}, {"digest", b.digest}}.dump()}};
+        json observation_view={{"trigger",name(b.trigger)},{"digest",b.digest}};
+        if(invocations_&&results_){std::vector<PartialResultRef> refs;for(const auto& e:b.events){auto partials=invocations_->partial_results(e.invocation_id);refs.insert(refs.end(),partials.begin(),partials.end());}observation_view["incremental_results"]=results_->assemble(c.metadata.identity.tenant_id,refs);}
+        r.prompt_variables = {{"workflow", encode(c).dump()}, {"plan", planning::encode(p).dump()}, {"observations", observation_view.dump()}};
         auto x = runtime_->invoke(std::move(r));
         LongTaskDecision d;
         d.manifest = x.manifest;

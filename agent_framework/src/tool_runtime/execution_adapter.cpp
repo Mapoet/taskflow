@@ -77,5 +77,5 @@ namespace agent_framework::tool_runtime
     }
     ExecutionObservation CallbackExecutionAdapter::query(const ExecutionHandle &h) { return query_(h); }
     CancellationResult CallbackExecutionAdapter::cancel(const ExecutionHandle &h) { return cancel_ ? cancel_(h) : CancellationResult{false, false, "cancel unsupported"}; }
-    ReconciliationResult CallbackExecutionAdapter::reconcile(const ExecutionRequest &r, const ExecutionHandle &h) { return reconcile_ ? reconcile_(r, h) : ReconciliationResult{{ObservationState::Unknown, {}, {}, {}, "reconcile_unsupported", false, false}, false}; }
+    ReconciliationResult CallbackExecutionAdapter::reconcile(const ExecutionRequest &r, const ExecutionHandle &h) { return reconcile_ ? reconcile_(r, h) : ReconciliationResult{{ObservationState::Unknown, {}, {}, {}, "reconcile_unsupported", false, false, {}}, false}; }
 }

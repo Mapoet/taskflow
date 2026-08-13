@@ -20,6 +20,7 @@
 #include "agent/telemetry/runtime.hpp"
 #include "agent/ui/store_backed_operations.hpp"
 #include "agent/tool_runtime/long_task_workflow.hpp"
+#include "agent/tool_runtime/incremental_result_store.hpp"
 
 namespace agent_framework::harness {
 
@@ -36,6 +37,7 @@ struct ProductionCompositionDependencies {
     tool_runtime::PlanNodeExecutorRegistry* plan_node_executor_registry{nullptr};
     tool_runtime::LongTaskWorkflow* long_task_workflow{nullptr};
     tool_runtime::LongTaskTimerWorker* long_task_timer_worker{nullptr};
+    tool_runtime::IncrementalResultStore* incremental_result_store{nullptr};
     std::shared_ptr<llm_runtime::LLMRuntimeStore> llm_store;
     std::shared_ptr<llm_runtime::RoleRuntime> role_runtime;
     std::shared_ptr<telemetry::TelemetryRuntime> telemetry;

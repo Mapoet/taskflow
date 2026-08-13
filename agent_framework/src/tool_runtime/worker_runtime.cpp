@@ -207,6 +207,19 @@ namespace agent_framework::tool_runtime
             advance(c.invocation, InvocationState::Progressing, "invocation_adapter_progress", h.fencing_token, {{"checkpoint_ref", observation.checkpoint_ref}});
         return observation;
     }
+    bool LeaseWorkerRuntime::persist_observation(ClaimedInvocation& c,ExecutionObservation& o,IncrementalResultStore& streams,IncrementalStreamKind kind,std::string_view key,std::string* error)
+    {
+        if(key.empty()){if(error)*error="incremental observation idempotency key required";return false;}
+        const auto tenant=c.invocation.metadata.identity.tenant_id;
+        const auto stream=c.invocation.invocation_id+":"+std::string(name(kind));
+        IncrementalOpenRequest request{tenant,stream,c.invocation.metadata.identity.run_id,c.invocation.invocation_id,std::to_string(c.invocation.attempt),"application/json",kind};
+        auto opened=streams.open(request);if(!opened){if(error)*error=opened.error;return false;}
+        auto appended=streams.append({tenant,stream,std::string(key),o.result.dump(),opened.manifest.revision});
+        if(!appended){if(error)*error=appended.error;return false;}
+        auto ref=partial_result_ref(appended.manifest,o.information_gain);o.incremental_result=ref;
+        auto prior=c.invocation.revision;c.invocation.revision++;InvocationEvent event;event.event_type="invocation_incremental_result";event.fencing_token=c.queue_lease.fencing_token;event.information_gain=o.information_gain;event.payload={{"uri",ref.uri},{"manifest_digest",ref.digest},{"size",ref.size}};
+        auto committed=store_.commit({c.invocation,prior,std::move(event),{},ref,{}});if(!committed){c.invocation.revision=prior;if(error)*error=committed.error;return false;}return true;
+    }
     std::optional<ExecutionHandle> LeaseWorkerRuntime::recover(ClaimedInvocation &c, const ExecutionAdapterRegistry &registry, const nlohmann::json &input, std::string *error)
     {
         auto a = registry.find(c.invocation.adapter_id, c.invocation.adapter_revision, c.invocation.adapter_generation);
