@@ -23,7 +23,7 @@ Claude Code 在另一组问题上更成熟：会话级运行时、单轮 Agent �
 1. **Turn Loop**：完成一次模型—工具—观察循环，追求低延迟、流式反馈和上下文连续性；
 2. **Task Closure Loop**：跨多个 Turn、阶段和进程推进 AcceptanceContract，追求证据闭合、可恢复执行和可信终态。
 
-Claude Code 的弱点是 Turn 结束容易成为事实上的任务结束；Agent Framework 已用 GPC 的 `TaskClosureController` 解决了这一问题。CTR0–CTR10 及后续 closure 已建立轻量、类型化、事件驱动的 `ConversationEngine`，并完成 SQLite 原子边界、durable inbox、统一 Event Subscription/Replay、shared-Store 跨进程 fan-out，以及内容寻址的 event retention/archive/compaction。当前中心任务已转为运行中取消传播、ContextProjection 真实调用及统一 Tool Lifecycle。`ProductionTaskRuntime` 与 `TaskClosureController` 继续独占任务终态权威。
+Claude Code 的弱点是 Turn 结束容易成为事实上的任务结束；Agent Framework 已用 GPC 的 `TaskClosureController` 解决了这一问题。CTR0–CTR10 及后续 closure 已建立轻量、类型化、事件驱动的 `ConversationEngine`，并完成 SQLite 原子边界、durable inbox、统一 Event Subscription/Replay、shared-Store 跨进程 fan-out，以及内容寻址的 event retention/archive/compaction。当前中心任务已转为 Long-running Tool Workflow：让 LLM 能在数分钟至数小时的复杂工作中持续启动、观察、等待、重规划、恢复和验收工具执行，而不是仅拥有返回 `future<json>` 的异步调用接口。`ProductionTaskRuntime` 与 `TaskClosureController` 继续独占任务终态权威。
 
 ### 0.1 2026-08-13 技术缺口状态
 
@@ -40,6 +40,7 @@ Claude Code 的弱点是 Turn 结束容易成为事实上的任务结束；Agent
 | AF-CC6 Streaming/安全调度 | `[△]` | 已有同轮只读工具并行、A2A submit 并行和 Taskflow 执行基础 | 缺 effect/concurrency taxonomy、冲突 DAG、流式提前调度、abort 后 effect 协调和 critical-path 证据 |
 | AF-CC7 Experience/Operations | `[~]` | 五个 LiveRuntime demo 共享 bootstrap/profile；CLI/Web/TUI/ImGui 经公共 Conversation adapter；AgentServer/A2A 接入 ConversationStore；SDK 已有 typed runtime-event callback、cursor 与断线 replay；Operations 明确 candidate/verified | 各端尚未完全统一为同一 Operations snapshot/action contract；Approval 动作、取消、后台通知与跨进程续传仍有入口差异 |
 | AF-CC8 质量/Live | `[~]` | Phase 4 offline 74/74、Phase 3 22/22、A2A 4/4、五 demo 构建通过；已有 Role Live Certification、production bundle/signature/attestation/approval/runner 与 fail-closed negative/restart 测试 | 认证框架存在不等于生产环境已认证；真实 provider/MCP/IdP/KMS/Sandbox 证据与 mandatory live matrix 尚未关闭，不能以 fixture/offline pass 替代 |
+| AF-CC-LTW 长时复杂工具工作流 | `[△]` | Cognition/Plan budget、Harness checkpoint/resume/remediation、Durable Run effect reconciliation、Queue lease/renew/fencing、Worker heartbeat、ToolBus async/cancellation callback、Effect WAL/idempotency、Sandbox limits、Conversation durable event 均已存在 | 尚无统一 durable invocation、progress/checkpoint 协议、wait-observe-replan LLM workflow、跨 adapter 强制取消、增量结果外置、进程重启重新附着和数小时 soak 认证；现状不能声称已具备生产级长时自主工作能力 |
 
 ### 0.2 当前已确认的 Conversation 实现风险
 
@@ -104,6 +105,39 @@ Claude Code 的弱点是 Turn 结束容易成为事实上的任务结束；Agent
 后续完成 shared-Store 跨进程 fan-out：subscription 在本地队列为空时按 cursor 有界拉取 Store，本地 publish 保持低延迟；两条路径按 sequence 有序去重，并以 `CursorExpired`、`IntegrityFailure`、`Overflow` fail closed。双 SQLite Store 及真实 `fork` 子进程写入测试已证明独立进程提交可被父订阅者读取。该模式适合共享 SQLite/WAL 的单机多进程；大规模多节点仍建议以 PostgreSQL LISTEN/NOTIFY 或消息总线替换轮询唤醒，但无需改变 SSE/SDK cursor 协议。
 
 2026-08-13 进一步完成 CES-RAC0–RAC7：`conversation_event_streams` 将 head、retention floor、revision 和 archive chain head 持久化，事件序号不再依赖热表 `MAX(sequence)`；旧数据库由现存事件一次性回填，之后 head 即使热表删空也不回退。归档以确定性 v1 manifest 和连续 event range 写入内容寻址 ObjectStore，并通过 `prepared → upload → read-back verify → transactional prune` Saga 推进；上传失败保留 prepared payload，可在重启或再次调用时幂等恢复。数据库仅在对象 digest、manifest、事件 digest、sequence 连续性均验证通过后，原子删除热事件、推进 floor、提交 archive record。测试覆盖 dry-run、分批归档链、上传失败恢复、全量 prune 后 sequence 继续单调、旧 cursor 过期和归档回读校验。
+
+### 0.6 长时间调用工具完成复杂工作的能力审计
+
+这里必须区分三个不同成熟度，避免把“异步”误写成“可长期自主执行”：
+
+| 能力层级 | 当前状态 | 判定 |
+|---|---:|---|
+| 异步调用一个工具 | `[x]` | ToolBus 返回 `future<json>`；只读工具和 A2A submit 可有界并行；Local/MCP/Skill 可接收协作式取消回调 |
+| 持久恢复一个工具 effect | `[~]` | Tool Effect Journal 能记录 started/completed/committed、幂等键和 reconciliation policy；Durable Run 能识别 Prepared/Unknown effect；但 invocation 的进度、owner、lease、输出 cursor 和重新附着尚未统一 |
+| LLM 长期驱动复杂工作 | `[△]` | Cognition、Harness、Remediation 和 Task Closure 可分阶段推理与验收，但尚无一个默认主路径让 LLM 在长工具运行期间执行 wait/observe/replan、消费部分结果、并行推进无依赖节点并在重启后继续 |
+
+已存在的可复用基础如下：
+
+- Cognition/Planning 已建模 critical path 以及 wall-time、token、tool-call、cost budget，并可持久化多阶段 LLM checkpoint；
+- Harness/ProductionTaskRuntime 支持阶段 checkpoint、resume、remediation、reverification、progress ledger 和 bounded no-progress；
+- Durable Queue 已实现 claim/renew、lease expiry、fencing token、retry/dead-letter、worker generation/heartbeat 和 tenant quota；
+- ToolBus 已实现 schema、authorization、hook 改写后重新 authorization/schema validation、异步执行、有界只读并行及 `ToolCallControl`；
+- Tool Effect Journal 已实现 durable WAL、idempotency key、Started/Completed/Committed/ManualReview/Failed/Cancelled 和恢复分类；
+- Bubblewrap Sandbox 已实施 wall-time、CPU、memory、output 和 workspace 限额；MCP、Skill subprocess、LLM stream 各有部分取消路径；
+- Conversation EventStream 已能持久 replay、跨进程 pull-through、归档和恢复，适合作为 invocation 低频 durable progress 的统一投影层。
+
+仍缺的不是另一个工具函数，而是统一 Long-running Tool Invocation Kernel：
+
+1. **durable invocation identity**：缺少统一 `invocation_id`、contract revision、owner、lease/fencing、attempt、deadline、budget、checkpoint ref、progress cursor、artifact/effect refs 与 terminal receipt；
+2. **可恢复执行权威**：`future<json>` 只属于当前进程，进程退出后无法查询、重新附着或安全接管正在运行的 Local/MCP/HTTP invocation；
+3. **完整状态机**：`ToolExecutionPhase` 目前只有 Started/Completed，无法表达 Queued、Leased、Running、Heartbeat、PartialResult、Checkpointed、Cancelling、Retrying、Reconciling、Orphaned 和 ManualReview；
+4. **wait-observe-replan**：Agent 当前通常阻塞等待单个 future，缺少释放 Turn、事件唤醒、LLM 诊断进展、修改计划、推进其他 ready node 和恢复等待的 workflow；
+5. **统一取消升级**：`ToolCallControl` 是协作式检查，未轮询的工具不会及时停止；Sandbox 主要依靠 timeout 后 SIGKILL，尚未统一 graceful cancel、grace period、强制 kill、MCP cancel、HTTP abort、A2A/ChildTask cancel 与 effect reconciliation；
+6. **增量结果治理**：stdout、日志、partial artifacts、checkpoint 和大型 result 仍缺 ObjectStore-backed 分片、digest、cursor、retention 与 backpressure；
+7. **跨 Store 原子关联**：Conversation、Run/Harness、Queue、Effect Journal 各有持久化，但没有 invocation coordinator 将其绑定为同一恢复事实；
+8. **长时认证证据**：尚未验证数小时 soak、主进程/worker/MCP 重启、lease 接管、网络闪断、迟到 completion、重复通知、取消竞态、部分对象损坏和动态预算调整。
+
+因此当前准确口径是：框架已经具备构建长期复杂工作流的多数控制面原语，但生产主路径仍是“短生命周期工具调用 + 阶段级 durable workflow”，尚不是“durable long-running tool workflow”。
 
 ## 1. 证据边界
 
@@ -502,6 +536,39 @@ Discovered → Resolved → Verified → Granted → Loaded → Invoked
 
 后台任务完成不应靠主 Agent 高频轮询。Notification Queue 在 Turn 边界或显式 wait 时注入，携带 task/agent/run identity，具备 idempotency，并严格按父 Agent 路由。通知只是 observation，不是 completion evidence；Slash command 不能作为普通模型文本静默注入。
 
+### 长时工具的等待、观察与重规划
+
+复杂工作不能通过让一个 C++ future 阻塞数小时来实现，也不能让 LLM 每隔数秒查询一次状态。目标执行模型应为：
+
+```text
+Plan ready node
+  → reserve effect / create durable invocation
+  → enqueue + lease + start adapter
+  → persist progress/checkpoint/partial artifact
+  → release current Turn
+  → event/notification wakes orchestration
+  → deterministic progress gate
+       ├─ routine heartbeat: update state, no LLM
+       ├─ useful partial result: project bounded observation to LLM
+       ├─ anomaly/stall: LLM diagnose and revise plan
+       ├─ approval/clarification: durable interruption
+       └─ terminal receipt: verify effect/artifact and unblock dependents
+```
+
+LLM 介入必须由事件语义和信息增益驱动：新证据、异常、预算偏差、依赖变化、验收失败或显式决策点才触发 cognition/replanning。普通 heartbeat、重复百分比和未变化日志由确定性控制器聚合，避免 token 浪费和“轮询即思考”的伪自主性。
+
+每个长时 invocation 至少需要以下状态：
+
+```text
+Created → Admitted → Queued → Leased → Running
+  → Progressing / Checkpointed / AwaitingInput / AwaitingApproval
+  → Cancelling / Retrying / Reconciling
+  → CompletedCandidate / Failed / Cancelled / Orphaned / ManualReview
+  → EffectCommitted / Verified
+```
+
+`CompletedCandidate` 只表示 adapter 返回结果；只有 effect receipt、artifact digest 和强 oracle 均闭合后，才允许进入 `EffectCommitted/Verified`，并由 Task Closure 判断任务级完成。
+
 ## 14. 升级方向十一：快速路径与专业路径分级
 
 所有请求走完整 Harness 会导致简单问答过重；所有请求走 AgentLoop 又缺乏验收。应选择类型化 profile：
@@ -544,7 +611,7 @@ Discovered → Resolved → Verified → Granted → Loaded → Invoked
 
 ### AF-CC1：ConversationEngine 生产闭环 `[~]`
 
-事务化 Turn boundary、跨连接 sequence/parent linearizability、durable inbox/FIFO 跨 Turn 消费、subscribe/replay、SDK typed cursor、100 Turn 消息链、重启恢复和入口适配已完成。下一退出条件是：跨进程 fan-out、retention/archive、运行中取消传播、Conversation ContextProjection 驱动真实 invocation，以及 crash/busy/disk/schema-migration mandatory matrix。
+事务化 Turn boundary、跨连接 sequence/parent linearizability、durable inbox/FIFO 跨 Turn 消费、subscribe/replay、shared-Store 跨进程 fan-out、retention/archive/compaction、SDK typed cursor、100 Turn 消息链、重启恢复和入口适配已完成。下一退出条件是：通过 LTW8 完成运行中取消传播，让 Conversation ContextProjection 驱动真实 invocation，以及关闭 crash/busy/disk/schema-migration mandatory matrix。
 
 ### AF-CC2：Tool Lifecycle Kernel `[△]`
 
@@ -573,6 +640,23 @@ ChildTask/A2A/Skill 子运行时使用能力交集和独立 transcript。父授�
 ### AF-CC8：质量、故障与生产认证 `[~]`
 
 把新交互运行时纳入 unit、contract、integration、recovery、adversarial、performance 和 live-production 七层测试。真实 provider/MCP/IdP/KMS/Sandbox 证据必须由现有 Live Certification 签发，不能 skip-as-pass。
+
+### AF-CC-LTW：Long-running Tool Workflow `[△]`
+
+该工作包是当前复杂任务自主执行能力的主线，按依赖顺序实施：
+
+1. **LTW0 — 契约与不变量**：冻结 `LongRunningToolInvocation`、`InvocationEvent`、`ProgressCheckpoint`、`PartialResultRef`、`InvocationReceipt` schema；明确 invocation terminal 与 task terminal 不可互换；未知 effect、丢失 fencing 或 revision 漂移一律 fail closed。
+2. **LTW1 — Durable Invocation Store**：实现 SQLite production baseline，保存 CAS revision、状态、attempt、owner、lease/fencing、deadline/budget、input digest、tool/deployment generation、progress cursor、checkpoint、artifact/effect refs 和 append-only event；支持按 conversation/run/tool 查询。
+3. **LTW2 — Lease Worker Runtime**：将 Durable Queue/Worker Registry 组合为默认 invocation scheduler，提供 claim、周期 renew、heartbeat、expired takeover、tenant quota、retry/dead-letter；旧 owner 的迟到写入必须被 fencing 拒绝。
+4. **LTW3 — Progress/Streaming Protocol**：把 Tool phase 扩展为 queued/leased/running/progress/checkpoint/partial/cancelling/retrying/reconciling/terminal；高频数据聚合为 ephemeral，checkpoint、effect、partial artifact 与 terminal receipt durable；支持 cursor replay、backpressure 和 retention。
+5. **LTW4 — Typed Execution Adapters**：分别实现 Local process、Bubblewrap、MCP、HTTP/remote API、A2A/ChildTask adapter；每种 adapter 明确 attach/query/cancel/checkpoint/result/side-effect reconciliation 能力，不支持 resume 的 adapter 必须声明 restart policy。
+6. **LTW5 — Effect/Artifact Commit Coordination**：统一 Invocation Store、Tool Effect Journal、ObjectStore 和 Run/Harness correlation；输入先 reservation，输出先 digest/verify，再 commit effect；Prepared/Unknown/迟到/重复 completion 均走 reconciliation，非幂等 effect 永不自动重放。
+7. **LTW6 — LLM wait-observe-replan Workflow**：新增事件驱动 Agent workflow；Turn 可在工具运行时 durable wait，Routine heartbeat 不调用 LLM；部分结果、stall、异常、预算偏差和依赖变化触发 bounded cognition/plan revision；ready DAG 节点可继续执行。
+8. **LTW7 — Incremental Result/ObjectStore**：日志、stdout/stderr、partial result、checkpoint 和 artifact 采用内容寻址分片与 manifest；LLM 只接收 bounded preview 和读取引用；实现去重、完整性验证、retention、归档和 redaction。
+9. **LTW8 — Cancellation/Deadline Closure**：将 Conversation Interrupt、用户 cancel、Harness/Run deadline 贯通到 scheduler、provider、tool、sandbox、MCP、HTTP、A2A 和 child task；执行 cooperative cancel → grace period → force terminate → reconcile，并持久化 cancel request/ack/kill/effect 状态证据。
+10. **LTW9 — Recovery/Soak Certification**：覆盖进程/worker/MCP 重启、lease takeover、网络分区、失联后恢复、重复/迟到 completion、对象损坏、取消竞态、磁盘满、busy timeout 和 schema migration；完成至少数小时 soak 与真实 provider/tool Live Certification。
+
+建议初期只以 SQLite + 本机多进程作为 correctness baseline；跨主机扩展复用同一 invocation/event contract，替换为 PostgreSQL queue/notification 或消息总线。不要在单机恢复、fencing 和 effect reconciliation 尚未闭环前引入新的分布式执行后端。
 
 ## 18. 定量退出门槛
 
@@ -609,22 +693,38 @@ ChildTask/A2A/Skill 子运行时使用能力交集和独立 transcript。父授�
 |未验证回答显示 verified badge | 0 |
 |四端 Operations 状态不一致 | 0 |
 
+### Long-running Tool Workflow
+
+| 指标 | 门槛 |
+|---|---:|
+| invocation durable transition CAS 冲突静默覆盖 | 0 |
+| lease 丢失后旧 worker 提交成功 | 0 |
+| 非幂等 unknown effect 自动重放 | 0 |
+| restart 后不可分类 invocation | 0 |
+| cancelled invocation 继续产生未协调 effect | 0 |
+| partial artifact digest/sequence 缺口静默接受 | 0 |
+| routine heartbeat 触发 LLM 调用 | 0 |
+| 无信息增益 progress 导致 plan revision | 0 |
+| supported adapter 的 cancel/deadline 传播覆盖率 | 100% mandatory matrix |
+| durable invocation crash 恢复/接管率 | 100% mandatory matrix |
+| 数小时 soak 中 event sequence、fencing、effect 重复错误 | 0 |
+
 ## 19. 优先级建议
 
-已完成且不应重复规划：ConversationStore 原子 Turn boundary、跨连接 sequence/parent linearizability、durable inbox 与 queued input 跨 Turn 消费、四端/Server 入口适配、单进程 Event Subscription/Replay、SDK typed cursor。
+已完成且不应重复规划：ConversationStore 原子 Turn boundary、跨连接 sequence/parent linearizability、durable inbox 与 queued input 跨 Turn 消费、四端/Server 入口适配、统一 Event Subscription/Replay、shared-Store 跨进程 fan-out、内容寻址 event retention/archive/compaction、SDK typed cursor。
 
 当前最短技术缺口依赖顺序：
 
-1. **AF-CC1 cancellation**：将 `InterruptAndReplace`、用户取消和上游 deadline 传播到正在运行的 provider stream、tool executor、sandbox process 与 child task，并持久化终止证据；
-2. **AF-CC1 cancellation**：把 Interrupt/Replace/ControlAction 连接到正在运行的 provider、ToolBus、Sandbox 与 effect reconciliation；
-3. **AF-CC3**：让不可变 ContextProjectionManifest 驱动真实模型 invocation，复用但不混淆既有 Memory Compaction，补齐 Conversation compact、CAS 大结果外置和恢复等价；
-4. **AF-CC2**：冻结 ToolContract 并统一 Local/MCP/Skill/A2A/Artifact Tool Lifecycle，禁止旁路；
-5. **AF-CC4**：把 Conversation 纳入 Run/Harness/Effect correlation 与 CrossStore coordination，执行真实进程 crash matrix、deterministic replay 和 orphan reconciliation；
-6. **AF-CC5/6**：实现子 Agent capability intersection、独立 transcript、父取消传播与 effect-aware Taskflow 调度；
-7. **AF-CC7/8**：统一 Operations snapshot/action contract，并完成真实 provider/MCP/IdP/KMS/Sandbox mandatory Live Certification；
-8. **规模化增强**：需要跨主机部署时，以 PostgreSQL notification/消息总线替换 shared SQLite polling 唤醒，保持现有 sequence/cursor/replay 契约。
+1. **AF-CC-LTW0–LTW3**：先冻结 durable invocation contract，完成 Invocation Store、lease/fencing worker 和 progress/checkpoint/event 协议；否则长时执行仍只是不可恢复的进程内 future；
+2. **AF-CC-LTW4–LTW5**：实现 typed adapters，并把 invocation、effect、artifact 与 Run/Harness 关联；非幂等 unknown effect 必须进入 reconciliation/ManualReview；
+3. **AF-CC-LTW6**：实现 LLM 驱动但非 LLM 轮询的 wait-observe-replan workflow，使复杂任务能够在工具运行期间释放 Turn、接收事件、并行推进和基于新证据修订计划；
+4. **AF-CC-LTW7–LTW8**：完成增量结果 ObjectStore、backpressure、retention，以及 provider/tool/sandbox/MCP/A2A/child task 的 deadline/cancel/kill/reconcile 闭环；
+5. **AF-CC3**：让不可变 ContextProjectionManifest 驱动真实模型 invocation，并把 long-running partial result 以 bounded projection 纳入上下文；
+6. **AF-CC-LTW9/AF-CC8**：执行真实 crash/takeover/network/cancel/late-result/soak mandatory matrix 和 Live Certification；
+7. **AF-CC2/4/5/6/7**：在 LTW 内同步收敛 ToolContract、CrossStore coordination、子 Agent capability intersection、effect-aware Taskflow 调度和 Operations 展示；
+8. **规模化增强**：单机 durable correctness 通过后，再以 PostgreSQL notification/消息总线替换 shared SQLite polling/queue backend，保持 invocation sequence、fencing、cursor 和 receipt 契约。
 
-在 AF-CC1R/AF-CC4 关闭前，冻结新增 provider adapter、新 Store 类型、无法进入统一生命周期的工具系统、平行 demo runtime，以及只有 fixture 没有 production wiring 的控制面。
+在 LTW0–LTW5 和 AF-CC4 关闭前，冻结无法声明 attach/cancel/reconcile 语义的新 provider adapter、新 Store 类型、绕过 Invocation/Effect 生命周期的工具系统、平行 demo runtime，以及只有 fixture 没有 production wiring 的控制面。
 
 ## 20. 最终目标
 
