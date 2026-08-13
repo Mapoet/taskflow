@@ -64,6 +64,7 @@
       <div class="conversation-header">
         <div><span class="eyebrow">ACTIVE SESSION</span><h1 id="conversation-title">Scientific workspace</h1></div>
         <div class="workspace-tabs" role="tablist" aria-label="Workspace view">
+          <span class="workspace-tab selected" id="execution-path" aria-label="Execution path">HARNESS</span>
           <button class="workspace-tab selected" id="conversation-tab" role="tab" aria-selected="true" aria-controls="conversation-view" type="button">Conversation</button>
           <button class="workspace-tab" id="operations-tab" role="tab" aria-selected="false" aria-controls="operations-view" type="button">Operations <span id="operations-badge">—</span></button>
           <button class="quiet-button" id="clear-button" type="button">Clear view</button>
@@ -87,7 +88,7 @@
             <article><span>Criteria / progress</span><b id="ops-criteria">0 / 0</b><small id="ops-progress">delta 0 · stagnant 0</small></article>
             <article><span>Live certification</span><b id="ops-live">Unknown</b><small id="ops-blocker">No blocker</small></article>
           </div>
-          <section class="ops-section"><div class="ops-section-head"><div><span class="eyebrow">PLAN / EVIDENCE</span><h2>Execution stages</h2></div><span id="ops-summary" class="ops-note"></span></div><div class="stage-grid" id="ops-stages"></div></section>
+          <section class="ops-section"><div class="ops-section-head"><div><span class="eyebrow">PLAN / EVIDENCE</span><h2>Execution stages</h2></div><div><span id="ops-summary" class="ops-note"></span><span id="ops-updated" class="ops-note" aria-label="Snapshot updated time"></span></div></div><div class="stage-grid" id="ops-stages"></div></section>
           <div class="ops-split">
             <section class="ops-section"><div class="ops-section-head"><div><span class="eyebrow">MEMORY</span><h2>Selected context</h2></div><span class="ops-note">content hidden</span></div><div class="ops-table-wrap"><table><thead><tr><th>Scope / source</th><th>Authority</th><th>Freshness</th><th>Decision</th></tr></thead><tbody id="ops-memory"></tbody></table></div></section>
             <section class="ops-section"><div class="ops-section-head"><div><span class="eyebrow">ASSURANCE</span><h2>Five-layer gate</h2></div><span class="ops-note">oracle precedence</span></div><div class="assurance-list" id="ops-assurance"></div></section>

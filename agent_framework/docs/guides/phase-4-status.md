@@ -189,6 +189,46 @@ AgentServer 使用有界进程内 FIFO、worker threads、内存 active task map
 5. 每次实施后更新 source/test/evidence、最后验证日期和 plan revision。
 6. 外部依赖不可用不等于通过；应记录 `[!]` 或 `inconclusive`。
 
+### 14.1 P4-UIOC 实时 Operations 接入（2026-08-13）
+
+- 新增 `LiveOperationsProjection`：将四个交互 Demo 的真实 `ToolExecutionEvent`
+  转为 display-safe Invocation 与单调 `tool_lifecycle` revision；先写
+  `SQLiteOperationsSnapshotStore`，再向 UI 发布，并支持重启续接 revision。
+- Web 通过 canonical `phase4_operations` SSE 自动刷新；CLI/TUI/ImGui 分别通过
+  `CLIHandler`/`UiPresentationModel` 消费同一投影。页面启动时先拉取 canonical
+  snapshot，再由 SSE 接续，消除了首次连接和重连期间的陈旧 r0 视图。
+- 参数、结果、凭证和隐藏推理不进入 Operations；测试覆盖 started/completed/failure、
+  digest、重启重放、同秒连续写入排序和敏感内容排除。
+- 证据：`phase4-offline` 81 项中 79 项在受限沙箱直接通过；两个需要本地临时端口的
+  remote queue/mTLS 测试在允许 loopback 后 2/2 通过。四个交互 Demo 均完成编译；
+  `test_web_ui_static.sh` 通过；真实 Web 运行截图确认 r3、8/9、阶段/记忆/Assurance
+  与最新 tool observation timestamp 正确呈现。
+- 口径边界：这关闭了 `Tool Lifecycle → durable Operations → UI` 的实时可见性缺口，
+  但 Demo 的模型执行仍经 Conversation adapter 内的兼容 `run_react_cli_sync`；尚未完成
+  `ProductionAgentRuntime` 对完整 Harness composition 的默认、不可绕过接管，因此不能
+  宣称所有 planning/memory/assurance/judge 模块已在每个真实 Demo Turn 中执行。
+
+### 14.2 P4-HSR Harness-supported 主路径（2026-08-13）
+
+- `HarnessSupportedTurnRuntime` 已成为 ConversationEngine 的执行路由边界：Harness ready
+  时始终选择 Harness；production 缺 Harness 必须 fail-closed；Professional、CodeChange、
+  ArtifactDelivery 和 ExternalAction 禁止 legacy fallback。
+- 四个交互 Demo 默认经 `HarnessTurnAdapter → Phase4HarnessRuntime`。原
+  `run_react_cli_sync` 被限制在 Harness 的 Execution stage 内，不再掌握 Turn lifecycle、
+  durable checkpoint 或 completion authority。相同 Turn 重启恢复 completed checkpoint，
+  不会重复模型/工具执行。
+- `AGENT_LEGACY_REACT_FALLBACK=1` 仅允许非 production 的 Conversation/ReadOnlyAnalysis
+  兼容模式，且结果被强制 `task_completion_verified=false`；Harness 运行失败不会触发
+  事后 fallback。Production 必须注入由 `DefaultProductionCompositionBuilder` 构建的
+  executor，交互式 adapter 不可用于 production。
+- UI 现在显式显示 `HARNESS` 或 `UNVERIFIED FALLBACK`。真实 Web 截图确认 Harness 标识
+  与 canonical Operations 同时可见。
+- 新增 `harness_supported_runtime`、`harness_turn_adapter` 与
+  `harness_supported_demo_boundary` 门禁；当前 `phase4-offline` 为 **84/84 PASS**。
+- 证据边界：交互 Demo 的 Harness stage adapter 为非生产 composition，Cognition/Memory/
+  Assurance/Judge 提供 durable 控制面与 completion gate，但完整 LLM 多角色 workflow、
+  ApprovalStore、Sandbox/Oracle、CSAC 等生产依赖仍只允许通过 production builder 注入。
+
 ## 15. 2026-08-09 首轮纵向实现增量证据
 
 第 3–12 节刻意保留为实施前基线，不能再被解读为当前源码不存在相应类型。当前新增能力及证据如下：

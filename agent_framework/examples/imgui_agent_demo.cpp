@@ -2,7 +2,8 @@
  * @file imgui_agent_demo.cpp
  * @brief WP2.U Track I：GLFW + OpenGL3 + Dear ImGui + 同 cli图路径（UIManager 队列）
  *
- * 主线程：GLFW/ImGui + drain StreamMessage；工作线程：run_react_cli_sync。
+ * 主线程：GLFW/ImGui + drain StreamMessage；工作线程：Harness-supported Turn，
+ * ReAct 仅作为受控 Execution-stage adapter。
  * 构建：-DAGENT_BUILD_IMGUI=ON。Dear ImGui：优先 `3rd-party/imgui` 子模块，否则 FetchContent。
  * ImPlot / ImPlot3D：可选 `3rd-party/implot`、`3rd-party/implot3d` 子模块（见仓库 .gitmodules）。
  */
@@ -371,7 +372,7 @@ int main(int argc, char** argv) {
                                       env_truthy("AGENT_CLI_SKIP_CURSOR_MCP"));
         options.verbose = verbose || env_truthy("AGENT_TEST_AGENT_LOOP_DEBUG");
         runtime = example::build_live_runtime(options);
-        example::require_direct_demo_execution(runtime);
+        example::require_harness_supported_execution(runtime);
     } catch (const std::exception& e) {
         std::cerr << "[imgui_agent_demo] LLM init: " << e.what() << "\n";
         return 1;

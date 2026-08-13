@@ -297,7 +297,9 @@ if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/conversation/types.cpp)
         src/conversation/event_stream.cpp
         src/conversation/context_projection.cpp
         src/conversation/graph_turn_adapter.cpp
-        src/conversation/production_bridge.cpp)
+        src/conversation/production_bridge.cpp
+        src/conversation/harness_supported_runtime.cpp
+        src/conversation/harness_turn_adapter.cpp)
 endif()
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/run/state_machine.cpp)
     list(APPEND AGENT_SOURCES src/run/state_machine.cpp)
@@ -2054,6 +2056,28 @@ if(BUILD_TESTING)
             LABELS "phase4-operations;phase4-ui-v2;phase4-integration;phase4-durable;phase4-offline;offline"
             RUN_SERIAL TRUE)
     endif()
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_harness_supported_runtime.cpp)
+        add_executable(test_harness_supported_runtime
+            tests/test_harness_supported_runtime.cpp)
+        target_link_libraries(test_harness_supported_runtime PRIVATE agent_framework)
+        add_test(NAME harness_supported_runtime COMMAND test_harness_supported_runtime)
+        set_tests_properties(harness_supported_runtime PROPERTIES
+            LABELS "phase4-harness;phase4-conversation;phase4-integration;phase4-offline;offline")
+    endif()
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_harness_turn_adapter.cpp)
+        add_executable(test_harness_turn_adapter tests/test_harness_turn_adapter.cpp)
+        target_link_libraries(test_harness_turn_adapter PRIVATE agent_framework)
+        add_test(NAME harness_turn_adapter COMMAND test_harness_turn_adapter)
+        set_tests_properties(harness_turn_adapter PROPERTIES
+            LABELS "phase4-harness;phase4-conversation;phase4-integration;phase4-durable;phase4-offline;offline"
+            RUN_SERIAL TRUE)
+    endif()
+    add_test(NAME harness_supported_demo_boundary
+        COMMAND ${CMAKE_COMMAND}
+            -DAGENT_FRAMEWORK_SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/check_harness_supported_demo_boundary.cmake.in)
+    set_tests_properties(harness_supported_demo_boundary PROPERTIES
+        LABELS "phase4-harness;phase4-contract;phase4-offline;offline")
     if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_vectorstore_wp31.cpp)
         add_executable(test_vectorstore_wp31 tests/test_vectorstore_wp31.cpp)
         target_link_libraries(test_vectorstore_wp31 PRIVATE agent_framework)

@@ -726,6 +726,25 @@ ChildTask/A2A/Skill 子运行时使用能力交集和独立 transcript。父授�
 
 在 LTW0–LTW5 和 AF-CC4 关闭前，冻结无法声明 attach/cancel/reconcile 语义的新 provider adapter、新 Store 类型、绕过 Invocation/Effect 生命周期的工具系统、平行 demo runtime，以及只有 fixture 没有 production wiring 的控制面。
 
+### 19.1 2026-08-13 UI/Operations 闭环增量
+
+`LiveOperationsProjection` 已把实时 ToolExecutionEvent 接入 durable Operations snapshot，
+并统一发布到 CLI、TUI、ImGui 与 Web；Web 启动回补 canonical snapshot 后由 SSE 接续，
+已修复“工具活动变化但 Observation Snapshot 不更新”及首次连接显示陈旧 r0 的问题。
+这属于可见性/投影闭环，不等于 Production Harness 默认接管：兼容 GraphExecutor callback
+仍是 Demo 模型执行边界，下一优先级仍是统一 `ProductionAgentRuntime`，将 Conversation、
+Tool Lifecycle、Harness 和 TaskClosure 绑定为不可绕过的单一生产主路径。
+
+### 19.2 2026-08-13 Harness-supported Turn 主路径
+
+四个交互 Demo 已默认进入 `HarnessSupportedTurnRuntime → HarnessTurnAdapter →
+Phase4HarnessRuntime`。ReAct callback 只在 Execution stage 内运行，不能决定 verified
+closure；checkpoint、resume 和 completion gate 均由 Harness 掌握。Production 缺少完整
+builder-backed executor 时 fail-closed，且不会因 Harness 失败自动降级。显式 legacy 模式
+只允许非生产 Conversation/ReadOnlyAnalysis，并永久标记 unverified。UI 已显示 HARNESS /
+UNVERIFIED FALLBACK。当前仍需区分“交互式 harness-supported composition”和包含真实多角色
+LLM、Approval、Sandbox/Oracle、CSAC 的完整 production composition，后者仍是生产认证前提。
+
 ## 20. 最终目标
 
 升级后的 Agent Framework 不应被描述为“C++ 版 Claude Code”，而应定位为：

@@ -288,7 +288,7 @@ int main(int argc, char** argv) {
         options.import_cursor_mcp = import_cursor_mcp;
         options.verbose = verbose || env_truthy("AGENT_TEST_AGENT_LOOP_DEBUG");
         runtime = example::build_live_runtime(options);
-        example::require_direct_demo_execution(runtime);
+        example::require_harness_supported_execution(runtime);
     } catch (const std::exception& e) {
         std::cerr << "[web_ui_demo] LLM init: " << e.what() << "\n";
         return 1;
@@ -412,7 +412,9 @@ int main(int argc, char** argv) {
         ui.dispatch_message("runtime", json{{"session", "orbital-analysis"},
                                             {"provider", provider_env && *provider_env ? provider_env : "OpenAI"},
                                             {"model", cfg.model_config.model_name.empty() ? "provider default" : cfg.model_config.model_name},
-                                            {"connection", connection}});
+                                            {"connection", connection},
+                                            {"execution_path", runtime.harness_ready
+                                                ? "harness" : "fail_closed"}});
         const auto skills = example::skill_ui_status(deps.skills);
         ui.dispatch_message("skills_status", json{{"enabled", skills.enabled},
                                                    {"count", skills.count},

@@ -253,7 +253,8 @@
     $("ops-closure").textContent = snapshot.task_completion_verified ? "VERIFIED" : "UNVERIFIED";
     $("ops-closure").dataset.state = snapshot.task_completion_verified ? "passed" : "warning";
     $("ops-authority").textContent = text(snapshot.task_closure_state || "running") + " · authority: " + text(snapshot.completion_authority || "none");
-    $("ops-updated").textContent = text(snapshot.updated_at || "—");
+    const updated = $("ops-updated");
+    if (updated) updated.textContent = text(snapshot.updated_at || "—");
     $("ops-revision").textContent = "r" + Number(snapshot.plan_revision || 0);
     $("ops-run").textContent = text(snapshot.run_id || "—");
     $("ops-criteria").textContent = Number(snapshot.criteria_closed || 0) + " / " + Number(snapshot.criteria_total || 0);
@@ -338,6 +339,10 @@
       $("provider-name").textContent = text(payload.provider || "OpenAI");
       $("model-name").textContent = text(payload.model || "provider default");
       setConnection(text(payload.connection || "Connected"), "connected");
+      const executionPath = $("execution-path");
+      const path = text(payload.execution_path || "harness");
+      executionPath.textContent = path === "legacy_react_fallback" ? "UNVERIFIED FALLBACK" : path.toUpperCase();
+      executionPath.dataset.state = path === "legacy_react_fallback" ? "warning" : "passed";
     } else if (type === "skills_status") {
       const enabled = payload.enabled === true;
       $("skills-state").textContent = enabled ? "READY" : "DISABLED";
@@ -348,6 +353,10 @@
       $("skills-active").textContent = text(payload.active || "-");
       $("skills-root").textContent = enabled ? text(payload.root || "Unknown root") : "Skills disabled";
       $("skills-health").dataset.state = enabled && Number(payload.errors || 0) ? "error" : enabled ? "ready" : "off";
+    } else if (type === "runtime_event" && payload.event_type === "turn_execution_path_selected") {
+      const path = text((payload.payload || {}).path || "fail_closed");
+      $("execution-path").textContent = path === "legacy_react_fallback" ? "UNVERIFIED FALLBACK" : path.toUpperCase();
+      $("execution-path").dataset.state = path === "harness" ? "passed" : "warning";
     } else if (type === "phase4_operations") renderOperations(payload);
     else if (type === "user_turn" || type === "demo_user") {
       addTurn("user", payload.content || payload.prompt || "", false); setBusy(true);
@@ -379,14 +388,23 @@
       finishAssistant(); setBusy(false); setRunState("failed"); setStatus("Run failed");
     } else if (o.kind === "aux") handleAux(o);
   }
+  function loadOperationsSnapshot() {
+    return fetch("/ui/operations/snapshot").then(function (response) {
+      if (!response.ok) throw new Error("operations snapshot HTTP " + response.status);
+      return response.json();
+    }).then(renderOperations);
+  }
   if (!screenshotMode) {
+    loadOperationsSnapshot().catch(function () {
+      setStatus("Operations snapshot unavailable; waiting for event stream…");
+    });
     const es = new EventSource("/ui/sse?session=default");
     es.onopen = function () { setConnection("Connected", "connected"); setStatus("Event stream connected"); };
     es.onerror = function () { setConnection("Reconnecting", "error"); setStatus("Event stream interrupted; reconnecting…"); };
     es.onmessage = handleServerEvent;
   } else {
-    fetch("/ui/operations/snapshot").then(function (response) { return response.json(); })
-      .then(function (snapshot) { renderOperations(snapshot); setConnection("Snapshot", "connected"); setStatus("Deterministic screenshot state loaded"); });
+    loadOperationsSnapshot()
+      .then(function () { setConnection("Snapshot", "connected"); setStatus("Deterministic screenshot state loaded"); });
   }
 
   async function submitPrompt(prompt) {

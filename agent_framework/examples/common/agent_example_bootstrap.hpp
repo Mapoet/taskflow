@@ -13,6 +13,9 @@
 #include <agent/conversation/production_bridge.hpp>
 #include <agent/conversation/conversation_engine.hpp>
 #include <agent/conversation/graph_turn_adapter.hpp>
+#include <agent/conversation/harness_supported_runtime.hpp>
+#include <agent/conversation/harness_turn_adapter.hpp>
+#include <agent/harness/store.hpp>
 
 #include <algorithm>
 #include <atomic>
@@ -88,6 +91,9 @@ struct LiveRuntime {
     conversation::TaskExecutionProfile task_profile{
         conversation::TaskExecutionProfile::Conversation};
     BootstrapResult bootstrap;
+    conversation::HarnessSupportedTurnRuntime::Executor harness_turn_executor;
+    bool harness_ready{false};
+    bool explicit_legacy_fallback{false};
 };
 
 using GraphTurnCallback = std::function<WorkflowResult()>;
@@ -95,7 +101,11 @@ using GraphTurnCallback = std::function<WorkflowResult()>;
 inline conversation::TurnResult run_conversation_turn(
     const LiveRuntime& runtime, std::string_view agent_name, std::string input,
     GraphTurnCallback graph, conversation::RuntimeEventSink event_sink = {}) {
-    if(!graph) throw std::invalid_argument("conversation graph callback required");
+    if(!runtime.harness_ready && !runtime.explicit_legacy_fallback)
+        throw std::runtime_error(
+            "harness_unavailable_and_fallback_not_explicit: set AGENT_LEGACY_REACT_FALLBACK=1 "
+            "only for non-production compatibility");
+    if(!graph) throw std::invalid_argument("model/tool execution callback required");
     const char* configured_db = std::getenv("AGENT_CONVERSATION_DB");
     std::filesystem::path database = configured_db && *configured_db
         ? std::filesystem::path(configured_db)
@@ -117,13 +127,42 @@ inline conversation::TurnResult run_conversation_turn(
         std::move(input), runtime.task_profile,
         static_cast<std::uint64_t>(std::max(1, runtime.config.max_iterations))};
     conversation::SQLiteConversationStore store(database.string());
+    auto event_forwarder = event_sink;
+    auto harness_executor = runtime.harness_turn_executor;
+    std::shared_ptr<harness::SQLiteHarnessStore> interactive_harness_store;
+    std::shared_ptr<conversation::HarnessTurnAdapter> interactive_harness;
+    if(runtime.harness_ready && !harness_executor) {
+        if(runtime.trust_profile == ExecutionTrustProfile::Production)
+            throw std::runtime_error("production_harness_executor_not_injected");
+        const char* configured_harness_db = std::getenv("AGENT_HARNESS_DB");
+        const auto harness_database = configured_harness_db && *configured_harness_db
+            ? std::filesystem::path(configured_harness_db)
+            : std::filesystem::path(".agent-framework") /
+                  (std::string(agent_name) + "-harness.sqlite3");
+        interactive_harness_store = std::make_shared<harness::SQLiteHarnessStore>(
+            harness_database.string());
+        interactive_harness = std::make_shared<conversation::HarnessTurnAdapter>(
+            *interactive_harness_store,
+            [callback = graph](const auto&) mutable {
+                return conversation::GraphTurnAdapter::from_workflow(callback());
+            });
+        harness_executor = [interactive_harness](const auto& request) {
+            return interactive_harness->execute(request);
+        };
+    }
+    conversation::HarnessSupportedTurnRuntime supported(
+        {runtime.trust_profile == ExecutionTrustProfile::Production,
+         runtime.harness_ready, runtime.explicit_legacy_fallback},
+        std::move(harness_executor),
+        [callback = std::move(graph)](const auto&) mutable {
+            return conversation::GraphTurnAdapter::from_workflow(callback());
+        }, event_forwarder);
     conversation::ConversationEngine engine(
         store,
-        [callback = std::move(graph)](const conversation::TurnRequest&,
-                                      const conversation::TurnCheckpoint&) mutable {
-            return conversation::GraphTurnAdapter::from_workflow(callback());
-        },
-        std::move(event_sink));
+        [&supported](const conversation::TurnRequest& request,
+                     const conversation::TurnCheckpoint& checkpoint) {
+            return supported.execute(request, checkpoint);
+        }, std::move(event_sink));
     return engine.start_turn(request);
 }
 
@@ -147,11 +186,12 @@ inline conversation::TaskExecutionProfile task_execution_profile_from_env() {
     return *parsed;
 }
 
-inline void require_direct_demo_execution(const LiveRuntime& runtime) {
-    if(runtime.trust_profile == ExecutionTrustProfile::Production)
+inline void require_harness_supported_execution(const LiveRuntime& runtime) {
+    if(runtime.trust_profile == ExecutionTrustProfile::Production &&
+       (!runtime.harness_ready || !runtime.harness_turn_executor))
         throw std::runtime_error(
-            "production_direct_react_execution_forbidden: use the production harness "
-            "and TaskClosureController binding");
+            "production_harness_executor_required: inject a DefaultProductionCompositionBuilder "
+            "backed executor");
 }
 
 inline void set_environment_override(const char* key, const std::string& value) {
@@ -343,6 +383,13 @@ inline LiveRuntime build_live_runtime(const LiveRuntimeOptions& options) {
     LiveRuntime runtime;
     runtime.trust_profile = execution_trust_profile_from_env();
     runtime.task_profile = task_execution_profile_from_env();
+    runtime.explicit_legacy_fallback = env_truthy("AGENT_LEGACY_REACT_FALLBACK");
+    if(runtime.trust_profile == ExecutionTrustProfile::Production &&
+       runtime.explicit_legacy_fallback)
+        throw std::runtime_error("production_legacy_react_fallback_forbidden");
+    // Interactive deployments are harness-supported by default. Production remains fail-closed
+    // until a DefaultProductionCompositionBuilder-backed executor is injected by deployment.
+    runtime.harness_ready = runtime.trust_profile != ExecutionTrustProfile::Production;
     runtime.llm = std::make_shared<LLMClient>(LLMClient::from_env());
     runtime.llm->set_prompt_renderer(std::make_shared<PromptRenderer>());
     if(const char* strategy = std::getenv("AGENT_MEMORY_COMPACTOR");

@@ -1,0 +1,19 @@
+set(DEMO_FILES
+  "${AGENT_FRAMEWORK_SOURCE_DIR}/examples/cli_agent_demo.cpp"
+  "${AGENT_FRAMEWORK_SOURCE_DIR}/examples/tui_agent_demo.cpp"
+  "${AGENT_FRAMEWORK_SOURCE_DIR}/examples/imgui_agent_demo.cpp"
+  "${AGENT_FRAMEWORK_SOURCE_DIR}/examples/web_ui_demo.cpp")
+foreach(FILE IN LISTS DEMO_FILES)
+  file(READ "${FILE}" CONTENT)
+  string(REGEX MATCHALL "run_react_cli_sync" MATCHES "${CONTENT}")
+  list(LENGTH MATCHES COUNT)
+  if(COUNT LESS 1 OR COUNT GREATER 2)
+    message(FATAL_ERROR "${FILE}: expected one compatibility call plus optional diagnostic label, got ${COUNT}")
+  endif()
+  if(NOT CONTENT MATCHES "run_conversation_turn")
+    message(FATAL_ERROR "${FILE}: conversation/harness entry is missing")
+  endif()
+  if(NOT CONTENT MATCHES "require_harness_supported_execution")
+    message(FATAL_ERROR "${FILE}: harness-supported startup gate is missing")
+  endif()
+endforeach()
