@@ -2,6 +2,8 @@
 #include <mutex>
 #include "agent/conversation/types.hpp"
 
+namespace agent_framework::distributed { class ObjectStore; }
+
 namespace agent_framework::conversation
 {
     struct ConversationCommit
@@ -11,6 +13,28 @@ namespace agent_framework::conversation
         std::vector<ConversationMessage> messages;
         std::vector<RuntimeEventEnvelope> durable_events;
         std::vector<ConversationInput> inputs;
+    };
+
+    struct EventRetentionPolicy
+    {
+        std::size_t keep_last_events{1000};
+        std::size_t maximum_archive_events{1000};
+        bool dry_run{false};
+    };
+
+    struct EventArchiveRecord
+    {
+        ConversationIdentity identity;
+        std::string archive_id, state, object_digest, media_type;
+        std::uint64_t first_sequence{0}, last_sequence{0}, event_count{0}, object_size{0};
+        std::string first_event_digest, last_event_digest, previous_archive_digest;
+    };
+
+    struct EventCompactionResult
+    {
+        bool ok{false}, changed{false}, dry_run{false};
+        std::uint64_t first_sequence{0}, last_sequence{0}, event_count{0};
+        std::string archive_id, object_digest, error;
     };
 
     class ConversationStore
@@ -25,9 +49,18 @@ namespace agent_framework::conversation
                                                         std::string_view turn_id) = 0;
         virtual bool append_event(RuntimeEventEnvelope, std::string * = nullptr) = 0;
         virtual std::vector<RuntimeEventEnvelope> events(const ConversationIdentity &,
-                                                         std::uint64_t after = 0) = 0;
+                                                         std::uint64_t after = 0,
+                                                         std::size_t limit = 0) = 0;
         virtual std::uint64_t last_event_sequence(const ConversationIdentity &) = 0;
         virtual std::uint64_t event_retention_floor(const ConversationIdentity &) = 0;
+        virtual EventCompactionResult compact_events(
+            const ConversationIdentity &, const EventRetentionPolicy &,
+            distributed::ObjectStore &) = 0;
+        virtual std::vector<EventArchiveRecord> event_archives(
+            const ConversationIdentity &) = 0;
+        virtual bool verify_event_archive(const EventArchiveRecord &,
+                                          distributed::ObjectStore &,
+                                          std::string * = nullptr) = 0;
         virtual bool append_boundary(CompactBoundaryRecord, std::string * = nullptr) = 0;
         virtual std::optional<CompactBoundaryRecord> latest_boundary(
             const ConversationIdentity &) = 0;
@@ -49,9 +82,16 @@ namespace agent_framework::conversation
         std::optional<TurnCheckpoint> load_turn(const ConversationIdentity &, std::string_view) override;
         bool append_event(RuntimeEventEnvelope, std::string *) override;
         std::vector<RuntimeEventEnvelope> events(
-            const ConversationIdentity &, std::uint64_t after = 0) override;
+            const ConversationIdentity &, std::uint64_t after = 0,
+            std::size_t limit = 0) override;
         std::uint64_t last_event_sequence(const ConversationIdentity &) override;
         std::uint64_t event_retention_floor(const ConversationIdentity &) override;
+        EventCompactionResult compact_events(const ConversationIdentity &,
+                                             const EventRetentionPolicy &,
+                                             distributed::ObjectStore &) override;
+        std::vector<EventArchiveRecord> event_archives(const ConversationIdentity &) override;
+        bool verify_event_archive(const EventArchiveRecord &, distributed::ObjectStore &,
+                                  std::string * = nullptr) override;
         bool append_boundary(CompactBoundaryRecord, std::string *) override;
         std::optional<CompactBoundaryRecord> latest_boundary(const ConversationIdentity &) override;
         bool commit(ConversationCommit &, std::string * = nullptr) override;

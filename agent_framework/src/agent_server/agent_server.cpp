@@ -653,6 +653,7 @@ void AgentServer::set_session_store(std::shared_ptr<SessionStore> store) {
 
 void AgentServer::set_conversation_store(
     std::shared_ptr<conversation::ConversationStore> store) {
+    if (conversation_events_) conversation_events_->close_all();
     conversation_store_ = std::move(store);
     conversation_events_ = conversation_store_
         ? std::make_shared<conversation::EventStreamHub>(*conversation_store_)
@@ -1325,7 +1326,10 @@ void AgentServer::attach_task_stream(const std::string& task_id, httplib::Respon
                     last_ping = std::chrono::steady_clock::now();
                     return true;
                 }
-                if (read == conversation::SubscriptionRead::Overflow)
+                if (read == conversation::SubscriptionRead::Overflow ||
+                    read == conversation::SubscriptionRead::CursorExpired ||
+                    read == conversation::SubscriptionRead::IntegrityFailure ||
+                    read == conversation::SubscriptionRead::Closed)
                     return false;
             }
             using PR = internal::SseServerChannel::PopResult;

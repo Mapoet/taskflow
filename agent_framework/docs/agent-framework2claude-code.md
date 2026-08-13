@@ -2,7 +2,7 @@
 
 **文档性质**：架构审计、目标架构与实施蓝图
 
-**基线日期**：2026-08-12
+**基线日期**：2026-08-13
 
 **Agent Framework 基线**：`/home/Mapoet/projects/taskflow/agent_framework` 当前 Phase 4、GPC、GPW 与 CTR 事实状态
 
@@ -23,23 +23,23 @@ Claude Code 在另一组问题上更成熟：会话级运行时、单轮 Agent �
 1. **Turn Loop**：完成一次模型—工具—观察循环，追求低延迟、流式反馈和上下文连续性；
 2. **Task Closure Loop**：跨多个 Turn、阶段和进程推进 AcceptanceContract，追求证据闭合、可恢复执行和可信终态。
 
-Claude Code 的弱点是 Turn 结束容易成为事实上的任务结束；Agent Framework 已用 GPC 的 `TaskClosureController` 解决了这一问题。CTR0–CTR10 已建立轻量、类型化、事件驱动的 `ConversationEngine` 最小内核。当前中心任务不再是“新增 ConversationEngine”，而是修复其跨进程持久化原子性，并将它接入 CLI、Web、TUI、ImGui、SDK、AgentServer 和 A2A 的真实执行主路径，再以统一 Tool Lifecycle 消除能力旁路。`ProductionTaskRuntime` 与 `TaskClosureController` 继续独占任务终态权威。
+Claude Code 的弱点是 Turn 结束容易成为事实上的任务结束；Agent Framework 已用 GPC 的 `TaskClosureController` 解决了这一问题。CTR0–CTR10 及后续 closure 已建立轻量、类型化、事件驱动的 `ConversationEngine`，并完成 SQLite 原子边界、durable inbox、统一 Event Subscription/Replay、shared-Store 跨进程 fan-out，以及内容寻址的 event retention/archive/compaction。当前中心任务已转为运行中取消传播、ContextProjection 真实调用及统一 Tool Lifecycle。`ProductionTaskRuntime` 与 `TaskClosureController` 继续独占任务终态权威。
 
-### 0.1 2026-08-12 技术缺口状态
+### 0.1 2026-08-13 技术缺口状态
 
 状态口径：`[x]` 已闭环且有测试证据；`[~]` 核心契约已实现但生产主路径未闭环；`[△]` 已有分散能力但尚未统一；`[ ]` 尚未实现。
 
 | 工作包 | 状态 | 当前实现证据 | 仍需关闭的生产缺口 |
 |---|---:|---|---|
-| AF-CC0 契约冻结 | `[~]` | Conversation/Turn、`RuntimeEventEnvelope`、ContextProjection、CompactBoundary、六档 `TaskExecutionProfile` 已类型化；`ModelTurnOutcome` 不可签发 verified | 缺统一 `ToolContract`；影响权限、工具和上下文的全部 revision 尚未完整 pin 到 deployment/invocation manifest |
-| AF-CC1 ConversationEngine | `[~]` | start/continue/interrupt/resume、Turn CAS、SQLite WAL/FULL Store、append-only parent/digest 消息链、原子 Turn boundary、跨连接线性化 sequence、durable input inbox、queued input 原子消费/确定性新 Turn、Store-backed Event Subscription/Replay、retention floor/`cursor_expired` 契约、SDK typed runtime-event callback 与独立 cursor、重启恢复和 100 Turn 测试已完成；四个交互 demo 与 AgentServer/A2A 服务执行边界已接入 | GraphExecutor 仍作为受控 TurnExecutor adapter；跨进程 fan-out、实际 retention/compaction 策略、运行中 provider/tool 取消传播和真实进程 crash matrix 尚缺 |
+| AF-CC0 契约冻结 | `[~]` | Conversation/Turn、`RuntimeEventEnvelope`、ContextProjection、CompactBoundary、六档 `TaskExecutionProfile` 已类型化；`ModelTurnOutcome` 不可签发 verified；queued input pin profile 与 iteration/token budgets | 缺统一版本化 `ToolContract`；权限、工具 generation、Memory/Skill/Prompt/Profile 与 deployment revision 尚未完整 pin 到每次 invocation manifest |
+| AF-CC1 ConversationEngine | `[~]` | start/continue/interrupt/resume、Turn CAS、SQLite WAL/FULL Store、append-only parent/digest 消息链、原子 Turn boundary、跨连接线性化 sequence、durable input inbox、queued input 原子 FIFO 消费/确定性新 Turn/profile-budget 恢复、Store-backed Event Subscription/Replay、shared-Store 跨进程 pull-through fan-out、持久化单调 head/floor、内容寻址 archive、可恢复 Saga、安全 compaction、真实 `cursor_expired`、SDK typed callback/独立 cursor、重启恢复与 100 Turn 测试已完成；四个交互 demo、AgentServer/A2A 已接入受控执行边界 | 运行中 provider/tool 取消传播、Conversation ContextProjection 驱动真实 invocation 与更完整进程 crash/busy/disk matrix 尚缺；大规模多节点仍需 PostgreSQL notification/消息总线增强 |
 | AF-CC2 Tool Lifecycle | `[△]` | ToolBus、schema、Approval、Sandbox、Effect Journal、MCP、Skill policy 与 observer 已分别存在 | 缺不可绕过的版本化 Tool Contract、固定执行管线、改写后重验、统一 retention/CAS 与 reconciliation |
-| AF-CC3 Context/Compact | `[~]` | projection/boundary schema、mandatory contract/policy/citation 保留校验和 boundary 持久化已完成 | 尚未驱动真实模型调用；缺自动 compact、CAS 大结果外置、确定性 fallback 和恢复等价性测试 |
-| AF-CC4 三链持久化 | `[~]` | Conversation、Run/Harness、Effect 已有独立 Store 和 digest | 缺跨链 correlation/atomic boundary、全 durable 写点 crash injection、deterministic replay/time-travel 和 orphan reconciliation |
+| AF-CC3 Context/Compact | `[~]` | Conversation projection/boundary schema、mandatory contract/policy/citation 保留校验和 boundary 持久化已完成；既有 Agent memory compaction 已有自动/manual trigger、隔离 compaction LLM、fallback/cancel/timeout 测试 | Memory compaction 不等于 Conversation compact；ContextProjection 尚未驱动真实模型 invocation，缺 Conversation 自动 compact、CAS 大结果外置、确定性 fallback 与恢复等价性 |
+| AF-CC4 三链持久化 | `[~]` | Conversation、Run/Harness、Effect 均有独立 Store/digest；已有 Run-Harness saga、CrossStoreCoordinationJournal、Effect reconciliation 与 restart 测试 | Conversation 尚未纳入统一 correlation/coordination boundary；缺全 durable 写点 crash injection、deterministic replay/time-travel 和 orphan reconciliation |
 | AF-CC5 子 Agent 隔离 | `[△]` | ChildTask/A2A 已禁止远端或子任务自报完成直接关闭父任务 | capability intersection、独立 transcript namespace、父取消传播、远端证据本地强复验仍未形成统一内核 |
 | AF-CC6 Streaming/安全调度 | `[△]` | 已有同轮只读工具并行、A2A submit 并行和 Taskflow 执行基础 | 缺 effect/concurrency taxonomy、冲突 DAG、流式提前调度、abort 后 effect 协调和 critical-path 证据 |
-| AF-CC7 Experience/Operations | `[△]` | 五个 LiveRuntime demo 共享 bootstrap 与 `AGENT_TASK_PROFILE`；已有 Operations projection 和 candidate/verified 区分 | UI/CLI/SDK 尚未统一消费 ConversationEngine/RuntimeEventEnvelope；Approval 与断线续传动作仍有入口差异 |
-| AF-CC8 质量/Live | `[~]` | CTR10 基线为 Phase 4 offline 74/74、Phase 3 22/22，五个 demo 可构建 | 真实 provider/MCP/IdP/KMS/Sandbox 的 Live Certification 尚未关闭，不能以 offline pass 替代 |
+| AF-CC7 Experience/Operations | `[~]` | 五个 LiveRuntime demo 共享 bootstrap/profile；CLI/Web/TUI/ImGui 经公共 Conversation adapter；AgentServer/A2A 接入 ConversationStore；SDK 已有 typed runtime-event callback、cursor 与断线 replay；Operations 明确 candidate/verified | 各端尚未完全统一为同一 Operations snapshot/action contract；Approval 动作、取消、后台通知与跨进程续传仍有入口差异 |
+| AF-CC8 质量/Live | `[~]` | Phase 4 offline 74/74、Phase 3 22/22、A2A 4/4、五 demo 构建通过；已有 Role Live Certification、production bundle/signature/attestation/approval/runner 与 fail-closed negative/restart 测试 | 认证框架存在不等于生产环境已认证；真实 provider/MCP/IdP/KMS/Sandbox 证据与 mandatory live matrix 尚未关闭，不能以 fixture/offline pass 替代 |
 
 ### 0.2 当前已确认的 Conversation 实现风险
 
@@ -47,8 +47,8 @@ Claude Code 的弱点是 Turn 结束容易成为事实上的任务结束；Agent
 2. `[x]` message/event/input sequence 与 parent 校验已移入 `BEGIN IMMEDIATE`，双连接竞争测试证明同一 parent 只有一个 writer 成功。
 3. `[x]` Append/QueueNext/InterruptAndReplace 已使用 durable input inbox 区分；Append 才进入当前消息链，QueueNext/Replace 重启后仍为 queued，Replace 同事务中断当前 Turn。
 4. `[~]` queued input 已实现 FIFO 原子 claim/consume、确定性下一 Turn、重启恢复、双连接竞争隔离与有界 drain；取消传播仍未连接正在运行的 provider/tool executor。
-5. `[~]` 已实现 durable sequence cursor、Store replay、live fan-out、慢订阅者隔离、retention floor/`cursor_expired`、AgentServer SSE `Last-Event-ID` 续传和 SDK typed callback；尚缺跨进程通知与实际保留期/compaction 执行策略。
-6. `[ ]` ContextProjection/CompactBoundary 当前是契约和 Store 能力，尚未接入模型 invocation；GraphTurnAdapter 已去除完成权威，但尚未成为默认生产路径。
+5. `[x]` 已实现 durable sequence cursor、Store replay、本地低延迟 publish、shared-Store 跨进程 pull-through fan-out、慢订阅者隔离、持久化单调 head/floor、内容寻址归档链、失败后幂等恢复、安全 compaction、真实 `cursor_expired`、AgentServer SSE `Last-Event-ID` 续传和 SDK typed callback；大规模多节点通知仍可增强。
+6. `[~]` ContextProjection/CompactBoundary 当前是契约和 Store 能力，尚未接入模型 invocation；GraphTurnAdapter 已去除完成权威并成为现有入口的受控兼容边界，但 `AgentLoopNode` 尚未原生采用 TurnStateMachine/ContextProjection。
 
 ### 0.3 AF-CC1R 行动进度
 
@@ -63,7 +63,7 @@ Claude Code 的弱点是 Turn 结束容易成为事实上的任务结束；Agent
 - queued replacement/next-turn input 经 Store 重启仍可恢复，且不会污染当前模型消息链；
 - 回归证据：`phase4_conversation_runtime` PASS，Phase 4 offline 74/74 PASS，Phase 3 22/22 PASS。
 
-仍未关闭的 AF-CC1R 范围：未来 tool/effect reference 尚未纳入同类事务 API；需要继续增加真实进程 crash injection、busy/timeout、磁盘故障和 schema migration 测试。AF-CC1W 的真实入口迁移也未完成，因此 AF-CC1 总状态保持 `[~]`，不能提升为 `[x]`。
+仍未关闭的 AF-CC1R 范围：未来 tool/effect reference 尚未纳入同类事务 API；需要继续增加真实进程 crash injection、busy/timeout、磁盘故障和 schema migration 测试。AF-CC1W 的入口迁移、跨进程事件交付及 retention/archive/compaction 已闭环，但原生模型上下文和取消传播仍未完成，因此 AF-CC1 总状态保持 `[~]`，不能提升为 `[x]`。
 
 ### 0.4 AF-CC1W 行动进度
 
@@ -78,11 +78,13 @@ Claude Code 的弱点是 Turn 结束容易成为事实上的任务结束；Agent
 - CLI/Web/TUI/ImGui 四个交互 demo 均通过公共 `run_conversation_turn` 进入 SQLite ConversationStore/ConversationEngine；`run_react_cli_sync` 只存在于受控 callback 后；
 - 公共 composition 统一读取 `AGENT_CONVERSATION_DB`、`AGENT_TENANT_ID`、`AGENT_CONVERSATION_ID`，并生成单调不重复 Turn identity；
 - Web 将 typed `RuntimeEventEnvelope` 投影为 `runtime_event`，其余端保持现有流式 UI sink；
-- AgentServer 在真实 `execute_sync` boundary 接入可注入 ConversationStore，A2A task ID 映射为 Turn ID、session ID 映射为 conversation ID；
+- AgentServer 在真实 `execute_sync` boundary 接入可注入 ConversationStore，A2A task ID 映射为 Turn ID、session ID 映射为 conversation ID；SDK 已暴露 typed runtime event callback 与独立 cursor；
 - `agent_server_demo` 默认启用独立 durable conversation DB；生产 task 是否 COMPLETED 仍由原有 closure/verified authority 决定，Conversation outcome 不得越权；
-- 四个交互 demo 与 agent_server_demo 均构建通过；AgentServer/A2A 针对测试 5/5、Phase 4 offline 74/74、Phase 3 22/22 PASS。
+- 四个交互 demo 与 agent_server_demo 均构建通过；A2A 4/4、Phase 4 offline 74/74、Phase 3 22/22 PASS。
 
-尚未完成：跨进程 live fan-out、实际 event retention/compaction 策略、运行中 provider/tool 取消传播与真实进程 crash matrix。SDK typed `RuntimeEventEnvelope` callback、独立 runtime cursor、Store retention floor 以及 queued input 跨 Turn 原子消费均已完成。当前可以认定服务端执行入口、单进程 durable replay 和 inbox 恢复路径已迁移，但 AF-CC1 仍不能标记 `[x]`。
+后续补充完成：durable queued input 已实现 FIFO 原子 claim/consume、确定性新 Turn、profile 与 iteration/token budgets 恢复、双 SQLite 实例竞争隔离、有界 drain 和重启幂等；input 状态、Turn、用户消息与 `user_input_claimed`/`user_input_consumed`/`turn_created_from_queued_input`/`turn_started` 在同一事务提交。
+
+尚未完成：运行中 provider/tool 取消传播与完整真实进程 crash/busy/disk matrix。SDK typed `RuntimeEventEnvelope` callback、独立 runtime cursor、持久化 retention floor、内容寻址归档、安全 compaction、queued input 跨 Turn 原子消费和 shared SQLite Store 跨进程 fan-out 均已完成。当前可以认定服务端执行入口、durable replay、shared-Store fan-out、retention/archive 和 inbox 恢复路径已迁移，但 AF-CC1 仍不能标记 `[x]`。
 
 ### 0.5 统一 Event Subscription/Replay 行动进度
 
@@ -99,7 +101,9 @@ Claude Code 的弱点是 Turn 结束容易成为事实上的任务结束；Agent
 - `ConversationStore::event_retention_floor` 公开当前最早可 replay sequence；hub 对已淘汰 cursor 返回 `cursor_expired`，与 cursor 超前、完整性失败明确区分；
 - 覆盖 live 顺序、cursor resume、重启 replay、容量拒绝、慢消费者 overflow 与 invalid cursor；针对测试 6/6、Phase 4 offline 74/74、Phase 3 22/22、五 demo 构建全部 PASS。
 
-剩余边界：当前 hub 是单进程 fan-out；多 AgentServer 节点需数据库通知/消息总线或轮询唤醒。Store 已提供 retention floor 和 `cursor_expired` 协议，但尚未实施事件淘汰、归档及 compaction 策略，因此当前 floor 通常为首条事件 sequence。
+后续完成 shared-Store 跨进程 fan-out：subscription 在本地队列为空时按 cursor 有界拉取 Store，本地 publish 保持低延迟；两条路径按 sequence 有序去重，并以 `CursorExpired`、`IntegrityFailure`、`Overflow` fail closed。双 SQLite Store 及真实 `fork` 子进程写入测试已证明独立进程提交可被父订阅者读取。该模式适合共享 SQLite/WAL 的单机多进程；大规模多节点仍建议以 PostgreSQL LISTEN/NOTIFY 或消息总线替换轮询唤醒，但无需改变 SSE/SDK cursor 协议。
+
+2026-08-13 进一步完成 CES-RAC0–RAC7：`conversation_event_streams` 将 head、retention floor、revision 和 archive chain head 持久化，事件序号不再依赖热表 `MAX(sequence)`；旧数据库由现存事件一次性回填，之后 head 即使热表删空也不回退。归档以确定性 v1 manifest 和连续 event range 写入内容寻址 ObjectStore，并通过 `prepared → upload → read-back verify → transactional prune` Saga 推进；上传失败保留 prepared payload，可在重启或再次调用时幂等恢复。数据库仅在对象 digest、manifest、事件 digest、sequence 连续性均验证通过后，原子删除热事件、推进 floor、提交 archive record。测试覆盖 dry-run、分批归档链、上传失败恢复、全量 prune 后 sequence 继续单调、旧 cursor 过期和归档回读校验。
 
 ## 1. 证据边界
 
@@ -205,7 +209,7 @@ L0 Governance and Operations Plane
 
 ### L6：会话层
 
-该层已形成最小骨架，但仍是最需要生产化的层。它对应 Claude Code 的 `QueryEngine + queryLoop`，并已拆成 ConversationEngine、TurnStateMachine、Store 和策略对象。下一步负责补齐事务恢复、真实入口接线、流式订阅、输入中断语义和模型上下文投影。
+该层已从最小骨架推进到单进程 durable conversation runtime：ConversationEngine、TurnStateMachine、Store、durable inbox、统一 event replay/live subscription 和入口适配已形成。下一步集中补齐跨进程事件通知、retention/archival、运行中取消传播和模型 ContextProjection，而不是重复建设入口与输入队列。
 
 ### L5：认知层
 
@@ -286,10 +290,11 @@ Model stop 至少包括：`EndTurn`、`ToolRequested`、`GuardStopped`、`Provid
 - `[x]` 已新增 `include/agent/conversation/` 与 `src/conversation/`，形成 types/store/state-machine/engine/context/bridge/adapter；
 - `[x]` 已建立 SQLite ConversationStore、Turn CAS、parent/digest chain、durable event 与 compact boundary；
 - `[x]` legacy Graph execution 经 `GraphTurnAdapter` 后只能产生 unverified model outcome；
-- `[~]` 五个 demo 已共享 LiveRuntime/profile bootstrap，但实际模型调用仍直达 `run_react_cli_sync`；
+- `[x]` 五个 demo 已共享 LiveRuntime/profile bootstrap；四个交互 demo 经公共 Conversation adapter，legacy `run_react_cli_sync` 位于受控 TurnExecutor callback 后；
 - `[ ]` 让 `AgentLoopNode` 适配 TurnStateMachine 并逐步瘦身；
-- `[ ]` CLI/Web/TUI/ImGui/SDK/AgentServer/A2A 只依赖 Conversation API；
-- `[ ]` 正式实现 event subscribe/replay、输入队列、取消传播和 compact 驱动。
+- `[~]` CLI/Web/TUI/ImGui、SDK、AgentServer/A2A 已接入 Conversation execution/event boundary，但尚未全部只依赖一个原生 Conversation API；
+- `[x]` durable input inbox、跨 Turn FIFO 消费、event subscribe/replay、SDK cursor 和断线续传已实现；
+- `[ ]` 跨进程 event fan-out、provider/tool cancellation propagation、Conversation retention/compact 与真实 ContextProjection invocation 尚未实现。
 
 ## 5. 升级方向二：Tool Lifecycle Kernel
 
@@ -355,7 +360,7 @@ Hook 不能绕过 policy；修改输入后必须重新 validation 和 policy。�
 
 ### 原因
 
-Claude Code 能同时服务 REPL、print、SDK 和远程模式，关键是持续产生结构化事件。Agent Framework 已有 SSE、UI queue、Audit 和 Operations projection，但缺少覆盖整个 Turn 生命周期的统一协议。
+Claude Code 能同时服务 REPL、print、SDK 和远程模式，关键是持续产生结构化事件。Agent Framework 现已建立 `RuntimeEventEnvelope`、durable sequence cursor、Store replay、进程内 live fan-out、SSE `Last-Event-ID` 和 SDK typed callback；剩余问题是扩大事件覆盖面、跨进程通知和 retention/archival，而不是重新定义基本订阅协议。
 
 ```cpp
 struct RuntimeEventEnvelope {
@@ -539,7 +544,7 @@ Discovered → Resolved → Verified → Granted → Loaded → Invoked
 
 ### AF-CC1：ConversationEngine 生产闭环 `[~]`
 
-最小骨架、100 Turn 消息链、重启恢复和 legacy-unverified 已完成。下一退出条件是：事务化 Turn boundary、跨连接 sequence/parent linearizability、五类输入真实语义、subscribe/replay，以及 CLI/SDK/Server/A2A 共享 start/continue/interrupt/resume 和 ConversationStore。
+事务化 Turn boundary、跨连接 sequence/parent linearizability、durable inbox/FIFO 跨 Turn 消费、subscribe/replay、SDK typed cursor、100 Turn 消息链、重启恢复和入口适配已完成。下一退出条件是：跨进程 fan-out、retention/archive、运行中取消传播、Conversation ContextProjection 驱动真实 invocation，以及 crash/busy/disk/schema-migration mandatory matrix。
 
 ### AF-CC2：Tool Lifecycle Kernel `[△]`
 
@@ -547,11 +552,11 @@ Local/MCP/Skill/A2A/Artifact tools 统一进入生命周期。验证 Hook 改写
 
 ### AF-CC3：Context Projection/Compact Boundary `[~]`
 
-组合对话压缩与 Memory Governance。要求 Contract/Policy/Citation 不丢失、compact 前后恢复等价、reactive compact 有界、summary failure 有确定性 fallback、长会话 RSS/token 成本下降。
+既有 Memory Compaction 已覆盖自动/manual trigger、隔离 compaction LLM 和 fallback/cancel/timeout；本工作包剩余目标是把这些机制收敛到 Conversation ContextProjection/CompactBoundary，要求 Contract/Policy/Citation 不丢失、compact 前后恢复等价、reactive compact 有界、summary failure 有确定性 fallback、长会话 RSS/token 成本下降。
 
 ### AF-CC4：三链持久化与恢复 `[~]`
 
-Conversation、Workflow Event、Effect 链独立关联。对所有 durable 写点做 crash injection，确保无 orphan、无 effect 重放、digest 漂移转 ManualReview。
+Conversation、Workflow Event、Effect 链已有独立 Store，Run-Harness saga、CrossStoreCoordinationJournal 与 Effect reconciliation 已存在。剩余是把 Conversation 纳入 correlation/coordination，并对所有 durable 写点做 crash injection，确保无 orphan、无 effect 重放、digest 漂移转 ManualReview。
 
 ### AF-CC5：子 Agent Capability Isolation `[△]`
 
@@ -561,9 +566,9 @@ ChildTask/A2A/Skill 子运行时使用能力交集和独立 transcript。父授�
 
 用 Taskflow subflow 构建工具批次。PureRead 并发应获得可量化延迟收益；冲突写永不并发；结果顺序符合 provider 协议；stream abort 不遗留未协调 effect；critical path 可观测。
 
-### AF-CC7：统一 Experience/Operations `[△]`
+### AF-CC7：统一 Experience/Operations `[~]`
 
-CLI/Web/TUI/ImGui/SDK 消费同一事件与 snapshot。相同 Run 状态一致，真实 ApprovalStore 驱动动作，断线重连不回退，用户始终能区分 candidate answer 与 verified completion。
+四个交互 demo 已经公共 Conversation adapter，SDK/AgentServer/A2A 已消费 typed runtime event 与 cursor，candidate/verified 区分已存在。剩余退出条件是所有端统一 Operations snapshot/action contract、真实 ApprovalStore 动作、取消/后台通知一致且跨进程断线重连不回退。
 
 ### AF-CC8：质量、故障与生产认证 `[~]`
 
@@ -606,12 +611,18 @@ CLI/Web/TUI/ImGui/SDK 消费同一事件与 snapshot。相同 Run 状态一致�
 
 ## 19. 优先级建议
 
-1. **AF-CC1R**：先事务化 ConversationStore，使用数据库内 sequence 分配和 CAS/`BEGIN IMMEDIATE` 关闭跨连接竞争，并增加双连接、回滚和 crash-window 测试；
-2. **AF-CC1W**：五个 demo、SDK、AgentServer、A2A 迁移到 ConversationEngine；`run_react_cli_sync` 只能位于受控 TurnExecutor adapter 后；
-3. **AF-CC2**：冻结 ToolContract 并统一 Local/MCP/Skill/A2A/Artifact Tool Lifecycle，禁止旁路；
-4. **AF-CC3/4**：ContextProjection 驱动真实模型 invocation，补齐 compact、CAS、大结果治理、三链 correlation 与 crash injection；
-5. **AF-CC5/6**：实现子 Agent capability intersection、独立 transcript 与 effect-aware Taskflow 调度；
-6. **AF-CC7/8**：统一事件订阅、Operations 动作和真实 provider/MCP/IdP/KMS/Sandbox Live Certification。
+已完成且不应重复规划：ConversationStore 原子 Turn boundary、跨连接 sequence/parent linearizability、durable inbox 与 queued input 跨 Turn 消费、四端/Server 入口适配、单进程 Event Subscription/Replay、SDK typed cursor。
+
+当前最短技术缺口依赖顺序：
+
+1. **AF-CC1 cancellation**：将 `InterruptAndReplace`、用户取消和上游 deadline 传播到正在运行的 provider stream、tool executor、sandbox process 与 child task，并持久化终止证据；
+2. **AF-CC1 cancellation**：把 Interrupt/Replace/ControlAction 连接到正在运行的 provider、ToolBus、Sandbox 与 effect reconciliation；
+3. **AF-CC3**：让不可变 ContextProjectionManifest 驱动真实模型 invocation，复用但不混淆既有 Memory Compaction，补齐 Conversation compact、CAS 大结果外置和恢复等价；
+4. **AF-CC2**：冻结 ToolContract 并统一 Local/MCP/Skill/A2A/Artifact Tool Lifecycle，禁止旁路；
+5. **AF-CC4**：把 Conversation 纳入 Run/Harness/Effect correlation 与 CrossStore coordination，执行真实进程 crash matrix、deterministic replay 和 orphan reconciliation；
+6. **AF-CC5/6**：实现子 Agent capability intersection、独立 transcript、父取消传播与 effect-aware Taskflow 调度；
+7. **AF-CC7/8**：统一 Operations snapshot/action contract，并完成真实 provider/MCP/IdP/KMS/Sandbox mandatory Live Certification；
+8. **规模化增强**：需要跨主机部署时，以 PostgreSQL notification/消息总线替换 shared SQLite polling 唤醒，保持现有 sequence/cursor/replay 契约。
 
 在 AF-CC1R/AF-CC4 关闭前，冻结新增 provider adapter、新 Store 类型、无法进入统一生命周期的工具系统、平行 demo runtime，以及只有 fixture 没有 production wiring 的控制面。
 

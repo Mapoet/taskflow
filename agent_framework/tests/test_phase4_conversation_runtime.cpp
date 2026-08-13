@@ -3,11 +3,36 @@
 #include <agent/conversation/context_projection.hpp>
 #include <agent/conversation/graph_turn_adapter.hpp>
 #include <agent/internal/platform_io.hpp>
+#include <agent/distributed/object_store.hpp>
 #include "phase4_harness_test_support.hpp"
 #include <cassert>
 #include <filesystem>
 #include <thread>
+#ifndef _WIN32
+#include <sys/wait.h>
+#include <unistd.h>
+#endif
 using namespace agent_framework::conversation;
+namespace {
+class FailOnceObjectStore final : public agent_framework::distributed::ObjectStore {
+public:
+    explicit FailOnceObjectStore(agent_framework::distributed::ObjectStore &delegate)
+        : delegate_(delegate) {}
+    std::optional<agent_framework::distributed::ObjectRef> put(
+        std::string_view tenant, std::string_view bytes, std::string_view media,
+        std::string_view expected, std::string *error) override {
+        if (fail_) { fail_ = false; if (error) *error = "injected upload failure"; return std::nullopt; }
+        return delegate_.put(tenant, bytes, media, expected, error);
+    }
+    std::optional<std::string> get(const agent_framework::distributed::ObjectRef &ref,
+                                   std::string *error) const override {
+        return delegate_.get(ref, error);
+    }
+private:
+    agent_framework::distributed::ObjectStore &delegate_;
+    bool fail_{true};
+};
+}
 int main()
 {
     auto path = std::filesystem::temp_directory_path() / ("conversation-" + std::to_string(agent_framework::internal::current_process_id()) + ".sqlite3");
@@ -244,6 +269,88 @@ int main()
     auto stream_path = std::filesystem::temp_directory_path() /
         ("conversation-stream-" + std::to_string(agent_framework::internal::current_process_id()) + ".sqlite3");
     std::filesystem::remove(stream_path, ec);
+
+    auto multiprocess_path = std::filesystem::temp_directory_path() /
+        ("conversation-multiprocess-" +
+         std::to_string(agent_framework::internal::current_process_id()) + ".sqlite3");
+    std::filesystem::remove(multiprocess_path, ec);
+    {
+        SQLiteConversationStore reader_store(multiprocess_path.string());
+        SQLiteConversationStore writer_store(multiprocess_path.string());
+        EventStreamHub reader_hub(reader_store);
+        EventStreamHub writer_hub(writer_store);
+        ConversationIdentity identity{"tenant", "multiprocess-events"};
+        auto remote = reader_hub.subscribe(identity, 0, 8);
+        assert(remote.subscription && remote.error.empty());
+        ConversationEngine writer(writer_store,
+            [](const TurnRequest &, const TurnCheckpoint &) {
+                ModelTurnOutcome outcome; outcome.reason = ModelTurnStopReason::EndTurn;
+                outcome.candidate_answer = "remote"; return outcome;
+            }, {}, &writer_hub);
+        TurnRequest request{identity, "remote-turn", "remote input",
+                            TaskExecutionProfile::Conversation, 2};
+        assert(writer.start_turn(request).error.empty());
+        RuntimeEventEnvelope event;
+        assert(remote.subscription->next(event, std::chrono::milliseconds(500)) ==
+               SubscriptionRead::Event && event.sequence == 1);
+        assert(remote.subscription->next(event, std::chrono::milliseconds(500)) ==
+               SubscriptionRead::Event && event.sequence == 2);
+        assert(remote.subscription->next(event, std::chrono::milliseconds(20)) ==
+               SubscriptionRead::Timeout);
+
+        auto mixed = reader_hub.subscribe(identity, 2, 8);
+        assert(mixed.subscription);
+        TurnRequest mixed_request{identity, "mixed-turn", "mixed input",
+                                  TaskExecutionProfile::Conversation, 2};
+        ConversationEngine local_writer(reader_store,
+            [](const TurnRequest &, const TurnCheckpoint &) {
+                ModelTurnOutcome outcome; outcome.reason = ModelTurnStopReason::EndTurn;
+                outcome.candidate_answer = "mixed"; return outcome;
+            }, {}, &reader_hub);
+        assert(local_writer.start_turn(mixed_request).error.empty());
+        assert(mixed.subscription->next(event, std::chrono::milliseconds(100)) ==
+               SubscriptionRead::Event && event.sequence == 3);
+        assert(mixed.subscription->next(event, std::chrono::milliseconds(100)) ==
+               SubscriptionRead::Event && event.sequence == 4);
+        assert(mixed.subscription->next(event, std::chrono::milliseconds(20)) ==
+               SubscriptionRead::Timeout);
+
+#ifndef _WIN32
+        auto child_subscription = reader_hub.subscribe(identity, 4, 8);
+        assert(child_subscription.subscription);
+        const auto child = ::fork();
+        assert(child >= 0);
+        if (child == 0)
+        {
+            try
+            {
+                SQLiteConversationStore child_store(multiprocess_path.string());
+                ConversationEngine child_writer(child_store,
+                    [](const TurnRequest &, const TurnCheckpoint &) {
+                        ModelTurnOutcome outcome; outcome.reason = ModelTurnStopReason::EndTurn;
+                        outcome.candidate_answer = "child"; return outcome;
+                    });
+                TurnRequest child_request{identity, "child-turn", "child input",
+                                          TaskExecutionProfile::Conversation, 2};
+                ::_exit(child_writer.start_turn(child_request).error.empty() ? 0 : 2);
+            }
+            catch (...) { ::_exit(3); }
+        }
+        int child_status = 0;
+        assert(::waitpid(child, &child_status, 0) == child);
+        assert(WIFEXITED(child_status) && WEXITSTATUS(child_status) == 0);
+        assert(child_subscription.subscription->next(event, std::chrono::milliseconds(500)) ==
+               SubscriptionRead::Event && event.sequence == 5);
+        assert(child_subscription.subscription->next(event, std::chrono::milliseconds(500)) ==
+               SubscriptionRead::Event && event.sequence == 6);
+#endif
+        auto closing = reader_hub.subscribe(identity, reader_store.last_event_sequence(identity), 8);
+        assert(closing.subscription);
+        reader_hub.close_all();
+        assert(closing.subscription->next(event, std::chrono::milliseconds(20)) ==
+               SubscriptionRead::Closed);
+    }
+    std::filesystem::remove(multiprocess_path, ec);
     {
         SQLiteConversationStore stream_store(stream_path.string());
         EventStreamHub hub(stream_store);
@@ -294,6 +401,50 @@ int main()
                SubscriptionRead::Event && event.sequence == 3);
         assert(replay.subscription->next(event, std::chrono::milliseconds(20)) ==
                SubscriptionRead::Event && event.sequence == 4);
+
+        const auto object_path = std::filesystem::temp_directory_path() /
+            ("conversation-event-objects-" +
+             std::to_string(agent_framework::internal::current_process_id()));
+        std::filesystem::remove_all(object_path, ec);
+        agent_framework::distributed::FilesystemObjectStore objects(object_path);
+        EventRetentionPolicy dry_policy{0, 2, true};
+        auto dry = reopened.compact_events({"tenant", "event-stream"}, dry_policy, objects);
+        assert(dry.ok && dry.changed && dry.dry_run && dry.first_sequence == 1 &&
+               dry.last_sequence == 2 && reopened.event_retention_floor({"tenant", "event-stream"}) == 1);
+        EventRetentionPolicy policy{0, 2, false};
+        FailOnceObjectStore fail_once(objects);
+        auto failed_archive = reopened.compact_events({"tenant", "event-stream"}, policy, fail_once);
+        assert(!failed_archive.ok && reopened.events({"tenant", "event-stream"}).size() == 4 &&
+               reopened.event_retention_floor({"tenant", "event-stream"}) == 1);
+        auto prepared = reopened.event_archives({"tenant", "event-stream"});
+        assert(prepared.size() == 1 && prepared[0].state == "prepared");
+        auto first_archive = reopened.compact_events({"tenant", "event-stream"}, policy, objects);
+        assert(first_archive.ok && first_archive.changed && first_archive.first_sequence == 1 &&
+               first_archive.last_sequence == 2 && reopened.last_event_sequence({"tenant", "event-stream"}) == 4 &&
+               reopened.event_retention_floor({"tenant", "event-stream"}) == 3);
+        auto expired = hub.subscribe({"tenant", "event-stream"}, 0, 8);
+        assert(!expired.subscription && expired.error == "cursor_expired");
+        auto second_archive = reopened.compact_events({"tenant", "event-stream"}, policy, objects);
+        assert(second_archive.ok && second_archive.changed && second_archive.first_sequence == 3 &&
+               second_archive.last_sequence == 4 && reopened.events({"tenant", "event-stream"}).empty() &&
+               reopened.last_event_sequence({"tenant", "event-stream"}) == 4 &&
+               reopened.event_retention_floor({"tenant", "event-stream"}) == 5);
+        auto archives = reopened.event_archives({"tenant", "event-stream"});
+        assert(archives.size() == 2 && archives[0].state == "pruned" &&
+               archives[1].previous_archive_digest == archives[0].object_digest);
+        std::string archive_error;
+        assert(reopened.verify_event_archive(archives[0], objects, &archive_error));
+
+        RuntimeEventEnvelope after_prune;
+        after_prune.tenant_id = "tenant"; after_prune.conversation_id = "event-stream";
+        after_prune.turn_id = "post-prune"; after_prune.run_id = "post-prune";
+        after_prune.event_id = "post-prune:5"; after_prune.sequence = 5;
+        after_prune.durability = EventDurability::Durable; after_prune.event_type = "post_prune";
+        after_prune.timestamp = "now";
+        assert(reopened.append_event(after_prune, nullptr));
+        assert(reopened.last_event_sequence({"tenant", "event-stream"}) == 5 &&
+               reopened.event_retention_floor({"tenant", "event-stream"}) == 5);
+        std::filesystem::remove_all(object_path, ec);
     }
     std::filesystem::remove(stream_path, ec);
 
