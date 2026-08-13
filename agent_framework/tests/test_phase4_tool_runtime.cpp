@@ -1,6 +1,8 @@
 #include <agent/tool_runtime/worker_runtime.hpp>
 #include <agent/tool_runtime/state_machine.hpp>
 #include <agent/tool_runtime/progress_protocol.hpp>
+#include <agent/tool_runtime/event_stream.hpp>
+#include <agent/distributed/object_store.hpp>
 #include <agent/internal/platform_io.hpp>
 #include <cassert>
 #include <filesystem>
@@ -52,6 +54,13 @@ int main()
     assert(claimed && claimed->invocation.state == InvocationState::Running && claimed->queue_lease.fencing_token == 1);
     auto active = store.load("inv-1");
     assert(active && active->revision == 5);
+    SQLiteInvocationStore reader(path);
+    InvocationEventStreamHub remote_hub(reader);
+    auto remote = remote_hub.subscribe("inv-1", reader.event_head("inv-1"), 8);
+    assert(remote.subscription && remote.head_sequence == 4);
+    InvocationEventStreamHub hub(store);
+    auto slow = hub.subscribe("inv-1", store.event_head("inv-1"), 1);
+    assert(slow.subscription);
     ProgressCheckpoint progress{1, 0.5, "half", "cas://checkpoint", "sha256:checkpoint", "now", true};
     auto next = *active;
     next.revision++;
@@ -64,6 +73,9 @@ int main()
     event.information_gain = true;
     PartialResultRef partial{1, "log", "cas://partial", "sha256:partial", "text/plain", 12, true};
     assert(store.commit({next, active->revision, event, progress, partial, {}}));
+    InvocationEvent delivered;
+    assert(remote.subscription->next(delivered, std::chrono::milliseconds(500)) ==
+           InvocationSubscriptionRead::Event && delivered.sequence == 5);
     assert(store.latest_progress("inv-1")->sequence == 1 && store.partial_results("inv-1").size() == 1);
     assert(store.verify_history("inv-1").valid);
     auto durable_events = store.events("inv-1");
@@ -91,7 +103,31 @@ int main()
         assert(reopened.load("inv-1")->state == InvocationState::CompletedCandidate);
         assert(reopened.events("inv-1").size() == 6);
         assert(reopened.verify_history("inv-1").valid);
+        auto scoped = reopened.query({"tenant", "conversation", "run", "call", 10});
+        assert(scoped.size() == 1 && scoped.front().invocation_id == "inv-1");
+        assert(reopened.events("inv-1", 0, 2).size() == 2);
     }
+    auto published = store.events("inv-1", 4, 2);
+    assert(published.size() == 2);
+    hub.publish(published[0]);
+    hub.publish(published[1]);
+    assert(slow.subscription->next(delivered, std::chrono::milliseconds(0)) ==
+           InvocationSubscriptionRead::Event);
+    assert(slow.subscription->next(delivered, std::chrono::milliseconds(0)) ==
+           InvocationSubscriptionRead::Overflow);
+
+    agent_framework::distributed::FilesystemObjectStore objects(base / "objects");
+    auto retained = store.apply_retention("inv-1", {2, 0, false}, objects);
+    assert(retained.applied && retained.events == 4 && !retained.archive_digest.empty());
+    assert(store.event_head("inv-1") == 6 && store.event_retention_floor("inv-1") == 5);
+    assert(store.events("inv-1").size() == 2 && store.verify_history("inv-1").valid);
+    assert(store.latest_progress("inv-1") && store.partial_results("inv-1").size() == 1);
+    auto expired = hub.subscribe("inv-1", 0, 8);
+    assert(!expired.subscription && expired.error == "cursor_expired");
+    auto retained_replay = hub.subscribe("inv-1", 4, 8);
+    assert(retained_replay.subscription && retained_replay.head_sequence == 6);
+    assert(retained_replay.subscription->next(delivered, std::chrono::milliseconds(0)) ==
+           InvocationSubscriptionRead::Event && delivered.sequence == 5);
     auto takeover_path=(base/"takeover.sqlite3").string();
     SQLiteInvocationStore takeover_store(takeover_path);
     agent_framework::distributed::SQLiteDurableQueue takeover_queue(takeover_path);

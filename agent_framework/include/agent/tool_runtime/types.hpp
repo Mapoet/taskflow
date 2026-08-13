@@ -90,6 +90,8 @@ namespace agent_framework::tool_runtime
         InvocationLease lease;
         std::uint64_t progress_sequence{0};
         std::string checkpoint_ref, checkpoint_digest, created_at, updated_at;
+        std::string adapter_id, adapter_revision, adapter_generation, external_operation_id;
+        std::string adapter_restart_policy;
         bool idempotent{false};
     };
 

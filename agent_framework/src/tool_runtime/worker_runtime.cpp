@@ -63,15 +63,18 @@ namespace agent_framework::tool_runtime
         }
         if (v->lease.fencing_token != 0 && lease->fencing_token > v->lease.fencing_token &&
             (v->state == InvocationState::Leased || v->state == InvocationState::Running ||
-             v->state == InvocationState::Progressing || v->state == InvocationState::Checkpointed)) {
+             v->state == InvocationState::Progressing || v->state == InvocationState::Checkpointed))
+        {
             v->lease = {worker_.worker_id, worker_.instance_id, worker_.generation,
                         lease->fencing_token, now + lease_ms_};
             auto orphaned = advance(*v, InvocationState::Orphaned, "invocation_orphaned",
                                     lease->fencing_token,
                                     {{"takeover", true}, {"fencing_token", lease->fencing_token}});
             if (!orphaned || !advance(*v, InvocationState::Queued, "invocation_requeued_after_takeover",
-                                      lease->fencing_token)) {
-                if (error) *error = orphaned ? "takeover requeue failed" : orphaned.error;
+                                      lease->fencing_token))
+            {
+                if (error)
+                    *error = orphaned ? "takeover requeue failed" : orphaned.error;
                 return {};
             }
         }
@@ -153,5 +156,81 @@ namespace agent_framework::tool_runtime
             return false;
         }
         return true;
+    }
+    namespace
+    {
+        std::string restart_name(RestartPolicy p)
+        {
+            switch (p)
+            {
+            case RestartPolicy::Attach:
+                return "attach";
+            case RestartPolicy::RestartFromCheckpoint:
+                return "restart_from_checkpoint";
+            case RestartPolicy::RestartFromInput:
+                return "restart_from_input";
+            default:
+                return "manual_review";
+            }
+        }
+    }
+    std::optional<ExecutionHandle> LeaseWorkerRuntime::start(ClaimedInvocation &c, ExecutionAdapter &a, const nlohmann::json &input, std::string *error)
+    {
+        ExecutionRequest request{c.invocation, input, c.invocation.invocation_id, c.invocation.checkpoint_ref, c.queue_lease.fencing_token};
+        auto handle = a.start(request, error);
+        if (!handle)
+            return {};
+        c.invocation.adapter_id = a.id();
+        c.invocation.adapter_revision = a.revision();
+        c.invocation.adapter_generation = a.deployment_generation();
+        c.invocation.external_operation_id = handle->external_id;
+        c.invocation.adapter_restart_policy = restart_name(a.restart_policy());
+        auto saved = advance(c.invocation, InvocationState::Progressing, "invocation_adapter_started", c.queue_lease.fencing_token, {{"adapter_id", a.id()}, {"adapter_revision", a.revision()}, {"adapter_generation", a.deployment_generation()}, {"external_operation_id", handle->external_id}, {"restart_policy", c.invocation.adapter_restart_policy}});
+        if (!saved)
+        {
+            if (error)
+                *error = saved.error;
+            return {};
+        }
+        return handle;
+    }
+    ExecutionObservation LeaseWorkerRuntime::observe(ClaimedInvocation &c, ExecutionAdapter &a, const ExecutionHandle &h, std::string *error)
+    {
+        if (h.fencing_token != c.queue_lease.fencing_token)
+        {
+            if (error)
+                *error = "stale adapter handle fencing token";
+            return {ObservationState::Unknown, {}, {}, {}, "stale_fencing_token", false, false};
+        }
+        auto observation = a.query(h);
+        if (observation.state == ObservationState::Progress && c.invocation.state != InvocationState::Progressing)
+            advance(c.invocation, InvocationState::Progressing, "invocation_adapter_progress", h.fencing_token, {{"checkpoint_ref", observation.checkpoint_ref}});
+        return observation;
+    }
+    std::optional<ExecutionHandle> LeaseWorkerRuntime::recover(ClaimedInvocation &c, const ExecutionAdapterRegistry &registry, const nlohmann::json &input, std::string *error)
+    {
+        auto a = registry.find(c.invocation.adapter_id, c.invocation.adapter_revision, c.invocation.adapter_generation);
+        if (!a)
+        {
+            if (error)
+                *error = "pinned adapter unavailable";
+            return {};
+        }
+        ExecutionRequest request{c.invocation, input, c.invocation.invocation_id, c.invocation.external_operation_id, c.queue_lease.fencing_token};
+        if (a->restart_policy() == RestartPolicy::Attach)
+            return a->attach(request, error);
+        if (a->restart_policy() == RestartPolicy::RestartFromCheckpoint || a->restart_policy() == RestartPolicy::RestartFromInput)
+        {
+            if (!c.invocation.idempotent)
+            {
+                if (error)
+                    *error = "non-idempotent invocation cannot restart";
+                return {};
+            }
+            return a->start(request, error);
+        }
+        if (error)
+            *error = "adapter recovery requires manual review";
+        return {};
     }
 }

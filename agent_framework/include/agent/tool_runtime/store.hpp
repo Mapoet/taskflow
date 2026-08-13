@@ -1,8 +1,26 @@
 #pragma once
 #include <mutex>
+#include "agent/distributed/object_store.hpp"
 #include "agent/tool_runtime/types.hpp"
 namespace agent_framework::tool_runtime
 {
+    struct InvocationQuery
+    {
+        std::string tenant_id, conversation_id, run_id, tool_call_id;
+        std::size_t limit{100};
+    };
+    struct InvocationRetentionPolicy
+    {
+        std::uint64_t maximum_events{0};
+        std::uint64_t minimum_age_ms{0};
+        bool dry_run{false};
+    };
+    struct InvocationRetentionResult
+    {
+        bool applied{false};
+        std::uint64_t first_sequence{0}, last_sequence{0}, events{0};
+        std::string archive_digest, error;
+    };
     struct StoreResult
     {
         InvocationStoreStatus status{InvocationStoreStatus::Error};
@@ -33,7 +51,14 @@ namespace agent_framework::tool_runtime
         virtual std::optional<LongRunningToolInvocation> load(std::string_view) = 0;
         virtual StoreResult commit(InvocationCommit) = 0;
         virtual std::vector<LongRunningToolInvocation> recoverable(std::size_t) = 0;
-        virtual std::vector<InvocationEvent> events(std::string_view, std::uint64_t = 0) = 0;
+        virtual std::vector<InvocationEvent> events(std::string_view, std::uint64_t = 0,
+                                                    std::size_t = 0) = 0;
+        virtual std::uint64_t event_head(std::string_view) = 0;
+        virtual std::uint64_t event_retention_floor(std::string_view) = 0;
+        virtual std::vector<LongRunningToolInvocation> query(const InvocationQuery &) = 0;
+        virtual InvocationRetentionResult apply_retention(
+            std::string_view, const InvocationRetentionPolicy &,
+            distributed::ObjectStore &) = 0;
         virtual std::vector<PartialResultRef> partial_results(std::string_view) = 0;
         virtual std::optional<ProgressCheckpoint> latest_progress(std::string_view) = 0;
         virtual HistoryVerification verify_history(std::string_view) = 0;
@@ -47,12 +72,19 @@ namespace agent_framework::tool_runtime
         std::optional<LongRunningToolInvocation> load(std::string_view) override;
         StoreResult commit(InvocationCommit) override;
         std::vector<LongRunningToolInvocation> recoverable(std::size_t) override;
-        std::vector<InvocationEvent> events(std::string_view, std::uint64_t = 0) override;
+        std::vector<InvocationEvent> events(std::string_view, std::uint64_t = 0,
+                                            std::size_t = 0) override;
+        std::uint64_t event_head(std::string_view) override;
+        std::uint64_t event_retention_floor(std::string_view) override;
+        std::vector<LongRunningToolInvocation> query(const InvocationQuery &) override;
+        InvocationRetentionResult apply_retention(std::string_view,
+            const InvocationRetentionPolicy &, distributed::ObjectStore &) override;
         std::vector<PartialResultRef> partial_results(std::string_view) override;
         std::optional<ProgressCheckpoint> latest_progress(std::string_view) override;
         HistoryVerification verify_history(std::string_view) override;
 
     private:
+        void migrate();
         void *db_{nullptr};
         std::mutex mutex_;
     };
