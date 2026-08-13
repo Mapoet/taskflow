@@ -85,6 +85,36 @@ struct OperationsSourceRevision {
     std::string digest;
 };
 
+struct OperationsAgentTemplate {
+    std::string template_id;
+    std::uint64_t template_revision{0};
+    std::string template_digest;
+    std::string invocation_id;
+    std::string business_mode;
+    std::string hosting_mode;
+    std::string plan_id;
+    std::uint64_t plan_revision{0};
+    std::string plan_digest;
+    std::string session_id;
+    std::string session_digest;
+    std::string registry_generation;
+    std::string deployment_generation;
+    std::string completion_authority;
+    std::string completion_reason;
+};
+
+struct OperationsSkillNode {
+    std::string node_id;
+    std::string skill_id;
+    std::string skill_version;
+    std::string runner;
+    std::string role;
+    std::string state;
+    std::string output_digest;
+    std::vector<std::string> evidence_refs;
+    std::vector<std::string> artifact_refs;
+};
+
 /**
  * Canonical, display-safe Phase 4 control-plane projection.
  *
@@ -121,6 +151,8 @@ struct Phase4OperationsSnapshot {
     std::vector<OperationsAssuranceLayer> assurance;
     std::vector<OperationsHitlRequest> hitl;
     std::vector<OperationsSourceRevision> source_revisions;
+    std::vector<OperationsAgentTemplate> agent_templates;
+    std::vector<OperationsSkillNode> skill_nodes;
 };
 
 class Phase4OperationsProjection {

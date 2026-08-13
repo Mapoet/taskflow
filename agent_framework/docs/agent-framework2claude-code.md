@@ -41,6 +41,7 @@ Claude Code 的弱点是 Turn 结束容易成为事实上的任务结束；Agent
 | AF-CC7 Experience/Operations | `[~]` | 五个 LiveRuntime demo 共享 bootstrap/profile；CLI/Web/TUI/ImGui 经公共 Conversation adapter；AgentServer/A2A 接入 ConversationStore；SDK 已有 typed runtime-event callback、cursor 与断线 replay；Operations 明确 candidate/verified | 各端尚未完全统一为同一 Operations snapshot/action contract；Approval 动作、取消、后台通知与跨进程续传仍有入口差异 |
 | AF-CC8 质量/Live | `[~]` | Phase 4 offline 77/77、Phase 3 22/22、A2A 4/4、五 demo 构建通过；已有 Role Live Certification、production bundle/signature/attestation/approval/runner 与 fail-closed negative/restart 测试 | 认证框架存在不等于生产环境已认证；真实 provider/MCP/IdP/KMS/Sandbox 证据与 mandatory live matrix 尚未关闭，不能以 fixture/offline pass 替代 |
 | AF-CC-LTW 长时复杂工具工作流 | `[~]` | LTW0–LTW8 已完成；LTW9 已实现 mandatory recovery contract、no-skip evidence-level gate、crash/fencing/cancel/corruption/busy/schema 场景、确定性 soak runner 与机器可读证据摘要 | LTW9 本地 offline/process correctness 已闭环；真实 provider-live 断线/重连认证与数小时 soak 尚未实际执行，认证状态保持 NotCertified，现状仍不能声称已具备生产级长时自主工作能力 |
+| AF-AT AgentTemplate 综合协作运行时 | `[~]` | AT0–AT9 已落地 versioned Template/Plan/Session/Invocation、SQLite registry、四类 PlanProvider、deterministic validator、8 类 Runner SPI、DAG compiler、统一 AgentRuntime、WorkflowNode/Subflow、replan CAS、TaskClosure completion authority 和 canonical Operations 投影；专项 8/8、相关 UI 12/12 与 Web 实机截图通过 | 主链已形成但完整 production certification 尚缺：具体 MCP/ChildAgent/A2A/durable runner 后端绑定、Conversation 默认入口迁移、真实 provider/live 与 crash/restart soak；故不能仅凭 callback/offline 证据标记 `[x]` |
 
 ### 0.2 当前已确认的 Conversation 实现风险
 

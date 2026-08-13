@@ -188,6 +188,11 @@ h1 { font-size: 19px; } h2 { font-size: 16px; }
 .ops-section th, .ops-section td { padding: 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
 .ops-section td { white-space: pre-line; }
 .ops-section td small { display: block; margin-top: 4px; color: var(--muted); }
+.agent-runtime-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 10px; margin-bottom: 12px; }
+.agent-runtime-card { padding: 14px; border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--line)); border-radius: 10px; background: linear-gradient(145deg, color-mix(in srgb, var(--accent) 8%, var(--surface)), var(--surface)); }
+.agent-runtime-card p { margin: 9px 0 7px; color: var(--text); font-size: 12px; }
+.agent-runtime-card small, .ops-note-inline { color: var(--muted); font-size: 11px; line-height: 1.5; }
+.runtime-mode { color: var(--accent); font-size: 10px; font-weight: 650; letter-spacing: .04em; text-transform: uppercase; }
 .assurance-list { display: grid; }
 .assurance-row { display: flex; justify-content: space-between; gap: 14px; padding: 11px 0; border-bottom: 1px solid var(--line); }
 .hitl-card { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 22px; align-items: center; padding: 14px; border: 1px solid rgba(232,179,91,.45); border-radius: 6px; background: rgba(232,179,91,.055); }

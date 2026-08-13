@@ -274,6 +274,25 @@
       body.append(head, meta, summary); card.append(order, body); stages.append(card);
     });
 
+    const agents = $("ops-agents"); agents.replaceChildren();
+    (snapshot.agent_templates || []).forEach(function (agent) {
+      const card = document.createElement("article"); card.className = "agent-runtime-card";
+      const head = document.createElement("div"); head.className = "stage-head";
+      const title = document.createElement("b"); title.textContent = text(agent.template_id) + " · r" + Number(agent.template_revision || 0);
+      const mode = document.createElement("span"); mode.className = "runtime-mode"; mode.textContent = text(agent.business_mode) + " / " + text(agent.hosting_mode);
+      head.append(title, mode);
+      const plan = document.createElement("p"); plan.textContent = "Plan " + text(agent.plan_id) + " · r" + Number(agent.plan_revision || 0) + " · session " + text(agent.session_id);
+      const pins = document.createElement("small"); pins.textContent = "registry " + text(agent.registry_generation || "—") + " · deployment " + text(agent.deployment_generation || "—") + " · closure " + text(agent.completion_authority || "none") + ": " + text(agent.completion_reason || "pending");
+      card.append(head, plan, pins); agents.append(card);
+    });
+    if (!(snapshot.agent_templates || []).length) { const empty = document.createElement("p"); empty.className = "ops-note-inline"; empty.textContent = "No AgentTemplate invocation attached to this snapshot."; agents.append(empty); }
+    const skillNodes = $("ops-skill-nodes"); skillNodes.replaceChildren();
+    (snapshot.skill_nodes || []).forEach(function (node) {
+      const row = document.createElement("tr");
+      const identity = document.createElement("div"); const name = document.createElement("b"); name.textContent = text(node.node_id); const role = document.createElement("small"); role.textContent = text(node.role); identity.append(name, role);
+      cell(row, identity); cell(row, text(node.skill_id) + "\n" + text(node.skill_version)); cell(row, node.runner); cell(row, statusNode(node.state)); cell(row, (node.evidence_refs || []).length + " evidence · " + (node.artifact_refs || []).length + " artifacts"); skillNodes.append(row);
+    });
+
     const memory = $("ops-memory"); memory.replaceChildren();
     (snapshot.memory || []).forEach(function (item) {
       const row = document.createElement("tr"); const source = document.createElement("div");

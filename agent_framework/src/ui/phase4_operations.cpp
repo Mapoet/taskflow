@@ -160,6 +160,12 @@ namespace agent_framework
         for (const auto &v : s.source_revisions)
             out["source_revisions"].push_back(json{{"store", v.store}, {"object_id", v.object_id},
                 {"revision", v.revision}, {"digest", v.digest}});
+        out["agent_templates"] = json::array();
+        for (const auto &v : s.agent_templates)
+            out["agent_templates"].push_back(json{{"template_id",v.template_id},{"template_revision",v.template_revision},{"template_digest",v.template_digest},{"invocation_id",v.invocation_id},{"business_mode",v.business_mode},{"hosting_mode",v.hosting_mode},{"plan_id",v.plan_id},{"plan_revision",v.plan_revision},{"plan_digest",v.plan_digest},{"session_id",v.session_id},{"session_digest",v.session_digest},{"registry_generation",v.registry_generation},{"deployment_generation",v.deployment_generation},{"completion_authority",v.completion_authority},{"completion_reason",v.completion_reason}});
+        out["skill_nodes"] = json::array();
+        for (const auto &v : s.skill_nodes)
+            out["skill_nodes"].push_back(json{{"node_id",v.node_id},{"skill_id",v.skill_id},{"skill_version",v.skill_version},{"runner",v.runner},{"role",v.role},{"state",v.state},{"output_digest",v.output_digest},{"evidence_refs",v.evidence_refs},{"artifact_refs",v.artifact_refs}});
         return out;
     }
 
@@ -239,6 +245,10 @@ namespace agent_framework
         OperationsSourceRevision x; x.store = bounded(v, "store", true);
         x.object_id = bounded(v, "object_id", true); x.revision = v.value("revision", std::uint64_t{0});
         x.digest = bounded(v, "digest", true); return x; });
+        s.agent_templates = objects<OperationsAgentTemplate>(root,"agent_templates",[](const json&v){
+        OperationsAgentTemplate x;x.template_id=bounded(v,"template_id",true);x.template_revision=v.value("template_revision",std::uint64_t{0});x.template_digest=bounded(v,"template_digest");x.invocation_id=bounded(v,"invocation_id",true);x.business_mode=bounded(v,"business_mode");x.hosting_mode=bounded(v,"hosting_mode");x.plan_id=bounded(v,"plan_id");x.plan_revision=v.value("plan_revision",std::uint64_t{0});x.plan_digest=bounded(v,"plan_digest");x.session_id=bounded(v,"session_id");x.session_digest=bounded(v,"session_digest");x.registry_generation=bounded(v,"registry_generation");x.deployment_generation=bounded(v,"deployment_generation");x.completion_authority=bounded(v,"completion_authority");x.completion_reason=bounded(v,"completion_reason");return x;});
+        s.skill_nodes = objects<OperationsSkillNode>(root,"skill_nodes",[](const json&v){
+        OperationsSkillNode x;x.node_id=bounded(v,"node_id",true);x.skill_id=bounded(v,"skill_id");x.skill_version=bounded(v,"skill_version");x.runner=bounded(v,"runner");x.role=bounded(v,"role");x.state=bounded(v,"state");x.output_digest=bounded(v,"output_digest");x.evidence_refs=strings(v,"evidence_refs");x.artifact_refs=strings(v,"artifact_refs");return x;});
         require_unique_ids(s.stages, "stages");
         require_unique_ids(s.evidence, "evidence");
         require_unique_ids(s.memory, "memory");
@@ -279,6 +289,14 @@ namespace agent_framework
         for (const auto &request : s.hitl)
             out << "  [HITL " << status_name(request.status) << "] " << request.kind << " · "
                 << clipped(request.summary, width > 28 ? width - 28 : width) << '\n';
+        for(const auto& agent:s.agent_templates)
+            out << "  [AGENT] " << agent.template_id << "@r" << agent.template_revision
+                << " · " << agent.business_mode << '/' << agent.hosting_mode << " · plan="
+                << agent.plan_id << "@r" << agent.plan_revision << " · closure="
+                << agent.completion_authority << ':' << agent.completion_reason << '\n';
+        for(const auto& node:s.skill_nodes)
+            out << "    [SKILL " << node.state << "] " << node.node_id << " · "
+                << node.skill_id << '@' << node.skill_version << " · " << node.runner << '\n';
         return out.str();
     }
 
@@ -331,6 +349,8 @@ namespace agent_framework
                        {"comprehensive", "Comprehensive", OperationsStatus::Warning, "architecture rules", "architecture-verifier", {"F-ARCH-07"}},
                        {"metrics", "Metrics", OperationsStatus::Passed, "benchmark", "judge", {}}};
         s.hitl = {{"HITL-19", "manual_review", OperationsStatus::Pending, "Review recovery boundary and accept or request remediation", "release-arbiter", "2026-08-10T18:00+08:00", {"approve", "request_remediation", "reject"}}};
+        s.agent_templates = {{"scientific-research-agent", 3, "sha256:template-demo", "INV-AGENT-42", "hybrid", "conversation", "research-plan", 3, "sha256:plan-demo", "SESSION-42", "sha256:session-demo", "17", "production-2026.08", "task_closure_controller", "architecture_finding_open"}};
+        s.skill_nodes = {{"investigate", "web-research", "2.1.0", "mcp", "worker", "succeeded", "sha256:investigation", {"EV-REQ-1"}, {"ART-SEARCH-1"}}, {"verify", "architecture-verifier", "1.4.2", "child_agent", "verifier", "succeeded", "sha256:verification", {"EV-ARCH-7"}, {}}};
         return s;
     }
 
