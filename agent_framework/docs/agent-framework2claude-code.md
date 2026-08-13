@@ -40,7 +40,7 @@ Claude Code 的弱点是 Turn 结束容易成为事实上的任务结束；Agent
 | AF-CC6 Streaming/安全调度 | `[△]` | 已有同轮只读工具并行、A2A submit 并行和 Taskflow 执行基础 | 缺 effect/concurrency taxonomy、冲突 DAG、流式提前调度、abort 后 effect 协调和 critical-path 证据 |
 | AF-CC7 Experience/Operations | `[~]` | 五个 LiveRuntime demo 共享 bootstrap/profile；CLI/Web/TUI/ImGui 经公共 Conversation adapter；AgentServer/A2A 接入 ConversationStore；SDK 已有 typed runtime-event callback、cursor 与断线 replay；Operations 明确 candidate/verified | 各端尚未完全统一为同一 Operations snapshot/action contract；Approval 动作、取消、后台通知与跨进程续传仍有入口差异 |
 | AF-CC8 质量/Live | `[~]` | Phase 4 offline 74/74、Phase 3 22/22、A2A 4/4、五 demo 构建通过；已有 Role Live Certification、production bundle/signature/attestation/approval/runner 与 fail-closed negative/restart 测试 | 认证框架存在不等于生产环境已认证；真实 provider/MCP/IdP/KMS/Sandbox 证据与 mandatory live matrix 尚未关闭，不能以 fixture/offline pass 替代 |
-| AF-CC-LTW 长时复杂工具工作流 | `[△]` | Cognition/Plan budget、Harness checkpoint/resume/remediation、Durable Run effect reconciliation、Queue lease/renew/fencing、Worker heartbeat、ToolBus async/cancellation callback、Effect WAL/idempotency、Sandbox limits、Conversation durable event 均已存在 | 尚无统一 durable invocation、progress/checkpoint 协议、wait-observe-replan LLM workflow、跨 adapter 强制取消、增量结果外置、进程重启重新附着和数小时 soak 认证；现状不能声称已具备生产级长时自主工作能力 |
+| AF-CC-LTW 长时复杂工具工作流 | `[~]` | LTW0–LTW3 已实现版本化 durable invocation、严格状态机、SQLite CAS/event digest chain、progress/checkpoint/partial/receipt 原子提交、Queue lease/Worker heartbeat、takeover fencing、旧 worker 拒绝、progress runtime-event 投影和 information-gain gate | LTW4–LTW9 typed adapters、Effect/Artifact coordination、LLM wait-observe-replan、增量 ObjectStore、跨 adapter 取消及长时 soak 尚缺；现状仍不能声称已具备生产级长时自主工作能力 |
 
 ### 0.2 当前已确认的 Conversation 实现风险
 
@@ -641,14 +641,14 @@ ChildTask/A2A/Skill 子运行时使用能力交集和独立 transcript。父授�
 
 把新交互运行时纳入 unit、contract、integration、recovery、adversarial、performance 和 live-production 七层测试。真实 provider/MCP/IdP/KMS/Sandbox 证据必须由现有 Live Certification 签发，不能 skip-as-pass。
 
-### AF-CC-LTW：Long-running Tool Workflow `[△]`
+### AF-CC-LTW：Long-running Tool Workflow `[~]`
 
 该工作包是当前复杂任务自主执行能力的主线，按依赖顺序实施：
 
-1. **LTW0 — 契约与不变量**：冻结 `LongRunningToolInvocation`、`InvocationEvent`、`ProgressCheckpoint`、`PartialResultRef`、`InvocationReceipt` schema；明确 invocation terminal 与 task terminal 不可互换；未知 effect、丢失 fencing 或 revision 漂移一律 fail closed。
-2. **LTW1 — Durable Invocation Store**：实现 SQLite production baseline，保存 CAS revision、状态、attempt、owner、lease/fencing、deadline/budget、input digest、tool/deployment generation、progress cursor、checkpoint、artifact/effect refs 和 append-only event；支持按 conversation/run/tool 查询。
-3. **LTW2 — Lease Worker Runtime**：将 Durable Queue/Worker Registry 组合为默认 invocation scheduler，提供 claim、周期 renew、heartbeat、expired takeover、tenant quota、retry/dead-letter；旧 owner 的迟到写入必须被 fencing 拒绝。
-4. **LTW3 — Progress/Streaming Protocol**：把 Tool phase 扩展为 queued/leased/running/progress/checkpoint/partial/cancelling/retrying/reconciling/terminal；高频数据聚合为 ephemeral，checkpoint、effect、partial artifact 与 terminal receipt durable；支持 cursor replay、backpressure 和 retention。
+1. **LTW0 — 契约与不变量 `[x]`**：冻结 `LongRunningToolInvocation`、`InvocationEvent`、`ProgressCheckpoint`、`PartialResultRef`、`InvocationReceipt` schema；明确 invocation terminal 与 task terminal 不可互换；未知 effect、丢失 fencing 或 revision 漂移一律 fail closed。
+2. **LTW1 — Durable Invocation Store `[x]`**：实现 SQLite production baseline，保存 CAS revision、状态、attempt、owner、lease/fencing、deadline/budget、input digest、tool/deployment generation、progress cursor、checkpoint、artifact/effect refs 和 append-only event；支持按 conversation/run/tool 查询。
+3. **LTW2 — Lease Worker Runtime `[x]`**：将 Durable Queue/Worker Registry 组合为默认 invocation scheduler，提供 claim、周期 renew、heartbeat、expired takeover、tenant quota、retry/dead-letter；旧 owner 的迟到写入必须被 fencing 拒绝。
+4. **LTW3 — Progress/Streaming Protocol `[~]`**：已完成 invocation durable event cursor/replay、checkpoint/partial-result 引用、Conversation runtime-event 投影，以及 heartbeat/information-gain 分类；独立 live subscription、慢消费者 backpressure 和 invocation retention 仍需在 LTW7 前关闭。
 5. **LTW4 — Typed Execution Adapters**：分别实现 Local process、Bubblewrap、MCP、HTTP/remote API、A2A/ChildTask adapter；每种 adapter 明确 attach/query/cancel/checkpoint/result/side-effect reconciliation 能力，不支持 resume 的 adapter 必须声明 restart policy。
 6. **LTW5 — Effect/Artifact Commit Coordination**：统一 Invocation Store、Tool Effect Journal、ObjectStore 和 Run/Harness correlation；输入先 reservation，输出先 digest/verify，再 commit effect；Prepared/Unknown/迟到/重复 completion 均走 reconciliation，非幂等 effect 永不自动重放。
 7. **LTW6 — LLM wait-observe-replan Workflow**：新增事件驱动 Agent workflow；Turn 可在工具运行时 durable wait，Routine heartbeat 不调用 LLM；部分结果、stall、异常、预算偏差和依赖变化触发 bounded cognition/plan revision；ready DAG 节点可继续执行。
