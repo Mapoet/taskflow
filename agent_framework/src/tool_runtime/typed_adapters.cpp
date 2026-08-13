@@ -85,6 +85,39 @@ namespace agent_framework::tool_runtime
         return launch(r, [this, r](auto c)
                       {ToolCallControl control;control.cancellation_requested=[c]{return c->load();};auto value=bus_->call_tool(r.invocation.tool_name,r.input,control).get();const bool cancelled=value.value("code","")=="cancelled";const bool failed=value.contains("error")&&!cancelled;auto state=cancelled?ObservationState::Cancelled:failed?ObservationState::Failed:ObservationState::CompletedCandidate;return ExecutionObservation{state,value,digest(value),{},failed?value.value("code","tool_failed"):"",!failed,!failed}; }, e);
     }
+    NetworkToolExecutionAdapter::NetworkToolExecutionAdapter(std::shared_ptr<ToolBus> bus,
+        std::string tool,std::string revision,std::string generation)
+        :bus_(std::move(bus)),tool_name_(std::move(tool)),id_(tool_name_=="Wget"?"network-wget":"network-curl"),
+         revision_(std::move(revision)),generation_(std::move(generation))
+    {
+        if(!bus_||(tool_name_!="Wget"&&tool_name_!="Curl"))throw std::invalid_argument("Curl or Wget ToolBus adapter required");
+    }
+    std::optional<ExecutionHandle> NetworkToolExecutionAdapter::start(const ExecutionRequest&r,std::string*e)
+    {
+        if(r.invocation.tool_name!=tool_name_){if(e)*e="invocation tool does not match network adapter";return {};}
+        if(tool_name_=="Wget" && !r.input.value("resume",false)) {
+            if(e)*e="durable Wget requires resume=true";return {};
+        }
+        return launch(r,[this,r](auto cancelled){
+            ToolCallControl control;control.cancellation_requested=[cancelled]{return cancelled->load();};
+            auto value=bus_->call_tool(tool_name_,r.input,control).get();
+            if(cancelled->load())return ExecutionObservation{ObservationState::Cancelled,{}, {},r.input.value("output_path","")+".part","cancelled",false,true};
+            const bool failed=value.contains("error");
+            const bool uncertain=tool_name_=="Curl"&&!r.invocation.idempotent&&failed;
+            return ExecutionObservation{failed?ObservationState::Failed:ObservationState::CompletedCandidate,
+                value,digest(value),tool_name_=="Wget"?r.input.value("output_path","")+".part":"",
+                uncertain?"remote_effect_unknown":failed?"network_tool_failed":"",!uncertain,!failed};
+        },e);
+    }
+    ReconciliationResult NetworkToolExecutionAdapter::reconcile(const ExecutionRequest&r,const ExecutionHandle&h)
+    {
+        auto observed=query(h);
+        if(observed.state!=ObservationState::Unknown)return {observed,false};
+        const bool safe=tool_name_=="Wget"&&r.invocation.idempotent&&r.input.value("resume",false);
+        observed.error_code=safe?"download_checkpoint_restart_required":"remote_effect_unknown";
+        observed.effect_known=safe;
+        return {observed,safe};
+    }
     BubblewrapExecutionAdapter::BubblewrapExecutionAdapter(std::shared_ptr<sandbox::SandboxProvider> p, sandbox::SandboxSpec s, std::string r, std::string g) : provider_(std::move(p)), spec_(std::move(s)), revision_(std::move(r)), generation_(std::move(g))
     {
         if (!provider_)

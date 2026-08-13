@@ -81,6 +81,7 @@ public:
     bool emit_span(SpanRecord span, std::string* error = nullptr);
     bool emit_metric(MetricResult metric, std::string* error = nullptr);
     bool emit_log(LogRecord log, std::string* error = nullptr);
+    bool allows_attribute(std::string_view key) const;
     std::uint64_t dropped() const noexcept { return dropped_.load(std::memory_order_relaxed); }
 private:
     bool attributes_safe(const std::map<std::string, std::string>& attributes,

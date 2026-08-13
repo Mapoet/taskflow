@@ -37,6 +37,9 @@ struct SkillServices {
     /** `AGENT_SKILLS_DIR` 未设置或为空则返回 nullptr */
     static std::shared_ptr<SkillServices> from_env();
 
+    /** Discover project/user portable Skill roots for Agents, Claude, Cursor and Codex. */
+    static std::shared_ptr<SkillServices> from_default_skill_roots();
+
     /**
      * @brief 合并扫描 Cursor 默认技能目录（存在的才会加入）：
      *        `$HOME/.cursor/skills`、`$HOME/.cursor/skills-cursor`（Windows：`%USERPROFILE%`）。

@@ -5,9 +5,11 @@
 #include <agent/prompt_renderer/prompt_renderer.hpp>
 #include <agent/skills/skill_runtime.hpp>
 #include <agent/skills/skill_services.hpp>
+#include <agent/skills/skill_script_tool.hpp>
 #include <agent/toolbus/draw_tools.hpp>
 #include <agent/toolbus/expr_tools.hpp>
 #include <agent/toolbus/fs_tools.hpp>
+#include <agent/toolbus/process_tools.hpp>
 #include <agent/toolbus/toolbus.hpp>
 #include <agent/toolbus/web_tools.hpp>
 #include <agent/conversation/production_bridge.hpp>
@@ -16,6 +18,7 @@
 #include <agent/conversation/harness_supported_runtime.hpp>
 #include <agent/conversation/harness_turn_adapter.hpp>
 #include <agent/harness/store.hpp>
+#include <agent/agent_template/runner.hpp>
 
 #include <algorithm>
 #include <atomic>
@@ -85,6 +88,7 @@ struct LiveRuntime {
     std::shared_ptr<LLMClient> memory_compaction_llm;
     std::shared_ptr<ToolBus> toolbus;
     std::shared_ptr<SkillServices> skills;
+    std::shared_ptr<agent_template::SkillRunnerRegistry> skill_runners;
     AgentConfig config;
     InputPolicyConfig input_policy;
     ExecutionTrustProfile trust_profile{ExecutionTrustProfile::Demo};
@@ -94,6 +98,7 @@ struct LiveRuntime {
     conversation::HarnessSupportedTurnRuntime::Executor harness_turn_executor;
     bool harness_ready{false};
     bool explicit_legacy_fallback{false};
+    nlohmann::json composition_report = nlohmann::json::object();
 };
 
 using GraphTurnCallback = std::function<WorkflowResult()>;
@@ -278,7 +283,7 @@ inline std::shared_ptr<SkillServices> discover_skill_services(const BootstrapOpt
     }
     if(const char* configured = std::getenv("AGENT_SKILLS_DIR"); configured && *configured)
         return SkillServices::from_env();
-    return options.use_cursor_skill_roots ? SkillServices::from_cursor_default_skill_roots()
+    return options.use_cursor_skill_roots ? SkillServices::from_default_skill_roots()
                                           : nullptr;
 }
 
@@ -425,13 +430,23 @@ inline LiveRuntime build_live_runtime(const LiveRuntimeOptions& options) {
     runtime.skills = runtime.bootstrap.skills;
     if(runtime.skills && runtime.skills->manager)
         runtime.skills->manager->attach_toolbus(runtime.toolbus);
+    if(runtime.skills) register_skill_discovery_tool(*runtime.toolbus,runtime.skills);
 
     runtime.toolbus->ensure_default_tools_registered([&] {
         register_builtin_fs_tools_if_configured(*runtime.toolbus);
+        register_builtin_process_tools_if_configured(*runtime.toolbus);
         register_builtin_web_tools_if_configured(*runtime.toolbus);
         register_builtin_expr_tools_if_configured(*runtime.toolbus);
         register_builtin_draw_tools_if_configured(*runtime.toolbus);
     });
+    runtime.skill_runners = agent_template::build_production_toolbus_runners(runtime.toolbus);
+    runtime.composition_report={{"profile",runtime.trust_profile==ExecutionTrustProfile::Production?"production":runtime.trust_profile==ExecutionTrustProfile::Test?"test":"demo"},
+        {"toolbus",true},{"skills",runtime.skills!=nullptr},{"runner_local",bool(runtime.skill_runners->resolve(agent_template::SkillRunnerKind::LocalCapability))},
+        {"runner_process",bool(runtime.skill_runners->resolve(agent_template::SkillRunnerKind::SandboxedProcess))},{"runner_cli",bool(runtime.skill_runners->resolve(agent_template::SkillRunnerKind::Cli))},
+        {"runner_mcp",bool(runtime.skill_runners->resolve(agent_template::SkillRunnerKind::Mcp))},{"runner_child",bool(runtime.skill_runners->resolve(agent_template::SkillRunnerKind::ChildAgent))},
+        {"runner_nested",bool(runtime.skill_runners->resolve(agent_template::SkillRunnerKind::NestedWorkflow))},{"runner_approval",bool(runtime.skill_runners->resolve(agent_template::SkillRunnerKind::HumanApproval))},
+        {"harness_ready",runtime.harness_ready},{"legacy_fallback",runtime.explicit_legacy_fallback}};
+    runtime.composition_report["production_ready"]=runtime.trust_profile==ExecutionTrustProfile::Production&&runtime.harness_ready&&runtime.harness_turn_executor&&runtime.composition_report["runner_child"].get<bool>()&&runtime.composition_report["runner_nested"].get<bool>()&&runtime.composition_report["runner_approval"].get<bool>();
     runtime.config.name = options.agent_name;
     runtime.config.system_prompt = live_system_prompt(runtime.bootstrap.mcp_services > 0,
                                                       runtime.skills != nullptr);

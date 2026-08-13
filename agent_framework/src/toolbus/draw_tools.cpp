@@ -901,7 +901,7 @@ void register_draw_tools_impl(ToolBus& bus) {
 
     {
         ToolMeta meta;
-        meta.name = "draw_render";
+        meta.name = "RenderChart";
         meta.description =
             "Rasterize a whitelisted template_id with canvas_ity, return PNG as png_base64. "
             "Argument shape matches docs/guides/builtin-draw-tools.md (section draw_* 参数形状); "
@@ -912,13 +912,13 @@ void register_draw_tools_impl(ToolBus& bus) {
         meta.schema = schema_draw_render;
         meta.side_effect = ToolSideEffect::ReadOnly;
         bus.register_local_tool(
-            "draw_render", [cfg](const json& args) { return invoke_draw_render(args, cfg); }, meta);
+            "RenderChart", [cfg](const json& args) { return invoke_draw_render(args, cfg); }, meta);
     }
     {
         ToolMeta meta;
-        meta.name = "draw_export";
+        meta.name = "ExportChart";
         meta.description =
-            "Same as draw_render but writes PNG under AGENT_FS_ROOT. Requires relative_path and "
+            "Same as RenderChart but writes PNG under AGENT_FS_ROOT. Requires relative_path and "
             "confirm_overwrite when replacing an existing file.";
         json schema_export = schema_draw_render;
         schema_export["properties"]["relative_path"] = json{{"type", "string"}};
@@ -936,20 +936,22 @@ void register_draw_tools_impl(ToolBus& bus) {
         meta.schema = std::move(schema_export);
         meta.side_effect = ToolSideEffect::Write;
         bus.register_local_tool(
-            "draw_export", [cfg](const json& args) { return invoke_draw_export(args, cfg); }, meta);
+            "ExportChart", [cfg](const json& args) { return invoke_draw_export(args, cfg); }, meta);
     }
 }
 
 } // namespace
 
 void register_builtin_draw_tools_if_configured(ToolBus& bus) {
-    if (bus.get_tool_info("draw_render").has_value()) {
+    if (bus.get_tool_info("RenderChart").has_value()) {
         return;
     }
     if (!draw_register_enabled()) {
         return;
     }
     register_draw_tools_impl(bus);
+    bus.register_tool_alias("draw_render", "RenderChart");
+    bus.register_tool_alias("draw_export", "ExportChart");
 }
 
 } // namespace agent_framework

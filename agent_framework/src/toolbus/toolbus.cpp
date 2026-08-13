@@ -78,12 +78,32 @@ const std::optional<std::unordered_set<std::string>>& allowlist() {
     return g_allowlist_cache;
 }
 
+std::string portable_builtin_name(std::string_view raw) {
+    static const std::map<std::string_view, std::string_view> aliases = {
+        {"fs_read","Read"},{"fs_write","Write"},{"fs_replace","Edit"},
+        {"fs_search","Glob"},{"fs_grep","Grep"},{"web_fetch","WebFetch"},
+        {"fs_list_dir","LS"},{"cat","Cat"},{"ls","LS"},{"sed","Sed"},
+        {"fs_mkdir","Mkdir"},{"mkdir","Mkdir"},{"fs_touch","Touch"},{"touch","Touch"},
+        {"fs_delete","Remove"},{"rm","Remove"},{"remove","Remove"},
+        {"web_search","WebSearch"},{"expr_eval","Calculate"},
+        {"expr_validate","ValidateExpression"},{"expr_batch_eval","BatchCalculate"},
+        {"draw_render","RenderChart"},{"draw_export","ExportChart"},
+        {"python3","Python"},{"Python3","Python"}
+        ,{"bash","Bash"},{"curl","Curl"},{"wget","Wget"},{"cmake","CMake"},{"make","Make"}
+    };
+    if (const auto it = aliases.find(raw); it != aliases.end()) return std::string(it->second);
+    return std::string(raw);
+}
+
 bool is_tool_allowed(const std::string& name) {
     const auto& al = allowlist();
     if (!al.has_value()) {
         return true;
     }
-    return al->count(name) != 0U;
+    const auto normalized = portable_builtin_name(name);
+    return std::any_of(al->begin(), al->end(), [&](const std::string& allowed) {
+        return portable_builtin_name(allowed) == normalized;
+    });
 }
 
 bool env_hook_throw_abort() {
@@ -265,18 +285,47 @@ MCPStdioFraming parse_stdio_framing(const json& server) {
 
 std::shared_ptr<ToolInterface> ToolBus::find_tool(const std::string& name) const {
     std::lock_guard<std::mutex> lock(tools_mutex_);
-    auto it = tools_.find(name);
+    std::string resolved = name;
+    if (const auto alias = aliases_.find(name); alias != aliases_.end()) resolved = alias->second;
+    auto it = tools_.find(resolved);
     if (it == tools_.end()) {
         return nullptr;
     }
     return it->second;
 }
 
+void ToolBus::register_tool_alias(const std::string& alias, const std::string& canonical_name) {
+    register_tool_alias({alias,canonical_name,"AT-V2","next-major"});
+}
+void ToolBus::register_tool_alias(const ToolAliasInfo& info) {
+    const auto&alias=info.alias;const auto&canonical_name=info.canonical_name;
+    if (alias.empty() || canonical_name.empty() || alias == canonical_name) {
+        throw std::invalid_argument("register_tool_alias: invalid alias");
+    }
+    std::lock_guard<std::mutex> lock(tools_mutex_);
+    if (tools_.count(alias) || aliases_.count(alias)) {
+        throw std::invalid_argument("register_tool_alias: name already registered: " + alias);
+    }
+    if (!tools_.count(canonical_name)) {
+        throw std::invalid_argument("register_tool_alias: unknown canonical tool: " + canonical_name);
+    }
+    aliases_.emplace(alias, canonical_name);
+    alias_metadata_.emplace(alias,info);
+}
+
+std::optional<ToolBus::ToolAliasInfo> ToolBus::alias_info(std::string_view alias) const {std::lock_guard<std::mutex>lock(tools_mutex_);auto it=alias_metadata_.find(std::string(alias));return it==alias_metadata_.end()?std::nullopt:std::optional<ToolAliasInfo>(it->second);}
+
+std::string ToolBus::resolve_tool_name(std::string_view requested_name) const {
+    std::lock_guard<std::mutex> lock(tools_mutex_);
+    const std::string requested(requested_name);
+    if (const auto alias = aliases_.find(requested); alias != aliases_.end()) return alias->second;
+    return requested;
+}
+
 void ToolBus::register_local_tool(const std::string& name,
                                   std::function<json(const json&)> func, const ToolMeta& meta) {
     load_allowlist_once();
-    const auto& al = allowlist();
-    if (al.has_value() && al->count(name) == 0U) {
+    if (!is_tool_allowed(name)) {
         throw std::invalid_argument("tool name not in AGENT_TOOL_ALLOWLIST: " + name);
     }
     std::lock_guard<std::mutex> lock(tools_mutex_);
@@ -291,8 +340,7 @@ void ToolBus::register_cancellable_local_tool(
     std::function<json(const json&, const ToolCallControl&)> func,
     const ToolMeta& meta) {
     load_allowlist_once();
-    const auto& al = allowlist();
-    if (al.has_value() && al->count(name) == 0U) {
+    if (!is_tool_allowed(name)) {
         throw std::invalid_argument("tool name not in AGENT_TOOL_ALLOWLIST: " + name);
     }
     std::lock_guard<std::mutex> lock(tools_mutex_);
@@ -305,7 +353,6 @@ void ToolBus::register_cancellable_local_tool(
 void ToolBus::register_local_tools_atomic(
     std::vector<AtomicLocalToolRegistration> registrations) {
     load_allowlist_once();
-    const auto& al = allowlist();
     std::unordered_set<std::string> incoming;
     for (const auto& registration : registrations) {
         if (registration.name.empty() || !registration.function) {
@@ -315,7 +362,7 @@ void ToolBus::register_local_tools_atomic(
             throw std::invalid_argument("skill_capability_conflict: duplicate incoming tool: " +
                                         registration.name);
         }
-        if (al.has_value() && al->count(registration.name) == 0U) {
+        if (!is_tool_allowed(registration.name)) {
             throw std::invalid_argument("tool name not in AGENT_TOOL_ALLOWLIST: " +
                                         registration.name);
         }
@@ -338,7 +385,13 @@ void ToolBus::register_local_tools_atomic(
 void ToolBus::unregister_tools(const std::vector<std::string>& names) noexcept {
     try {
         std::lock_guard<std::mutex> lock(tools_mutex_);
-        for (const auto& name : names) tools_.erase(name);
+        for (const auto& name : names) {
+            tools_.erase(name);
+            aliases_.erase(name);
+            for (auto it = aliases_.begin(); it != aliases_.end();) {
+                if (it->second == name) it = aliases_.erase(it); else ++it;
+            }
+        }
     } catch (...) {
         // Lifecycle cleanup must not throw from destructors.
     }
@@ -474,22 +527,29 @@ std::future<json> ToolBus::call_tool(const std::string& name, const json& argume
         return make_ready_json_future(json{{"error", "tool call cancelled"}, {"code", "cancelled"}});
     }
     load_allowlist_once();
-    auto tool = find_tool(name);
+    const std::string resolved_name = resolve_tool_name(name);
+    if(const auto migration=alias_info(name)) {
+        const char* strict=std::getenv("AGENT_REJECT_LEGACY_TOOL_ALIASES");
+        if(strict&&std::string(strict)!="0"&&std::string(strict)!="false")
+            return make_ready_json_future(json{{"error","legacy tool alias rejected"},{"code","legacy_tool_alias_rejected"},{"details",{{"requested_name",name},{"canonical_name",resolved_name},{"deprecated_since",migration->deprecated_since},{"removal_target",migration->removal_target},{"permission_expanded",false}}}});
+        if(control.migration_diagnostic)control.migration_diagnostic({{"code","legacy_tool_alias_used"},{"requested_name",name},{"canonical_name",resolved_name},{"deprecated_since",migration->deprecated_since},{"removal_target",migration->removal_target},{"permission_expanded",false}});
+    }
+    auto tool = find_tool(resolved_name);
     if (tool == nullptr) {
         return make_ready_json_future(json{{"error", "unknown tool: " + name},
                                             {"code", "unknown_tool"},
                                             {"details", json{{"name", name}}}});
     }
-    if (!is_tool_allowed(name)) {
+    if (!is_tool_allowed(name) && !is_tool_allowed(resolved_name)) {
         return make_ready_json_future(json{{"error", "tool not allowed by AGENT_TOOL_ALLOWLIST"},
                                             {"code", "tool_not_allowed"},
                                             {"details", json{{"name", name}}}});
     }
-    ToolMeta tm = tool->get_tool_meta(name);
+    ToolMeta tm = tool->get_tool_meta(resolved_name);
     const auto authorize = [&](const json& candidate) -> std::optional<json> {
         if (!control.authorization) return std::nullopt;
         try {
-            return control.authorization(name, candidate, tm);
+            return control.authorization(resolved_name, candidate, tm);
         } catch (const std::exception& error) {
             return json{{"error", "tool authorization failed"},
                         {"code", "skill_permission_denied"},
@@ -514,7 +574,7 @@ std::future<json> ToolBus::call_tool(const std::string& name, const json& argume
 
     json current = arguments;
     if (!hooks_copy.empty()) {
-        if (auto hook_err = run_tool_call_hooks(name, current, hooks_copy)) {
+        if (auto hook_err = run_tool_call_hooks(resolved_name, current, hooks_copy)) {
             return make_ready_json_future(std::move(*hook_err));
         }
     }
@@ -530,7 +590,7 @@ std::future<json> ToolBus::call_tool(const std::string& name, const json& argume
     if (!validate_tool_arguments(schema, current, err)) {
         return make_ready_json_future(std::move(err));
     }
-    return tool->call_cancellable(name, current, control);
+    return tool->call_cancellable(resolved_name, current, control);
 }
 
 std::vector<ToolMeta> ToolBus::export_as_llm_tools(
@@ -549,19 +609,21 @@ std::vector<ToolMeta> ToolBus::export_as_llm_tools(
 }
 
 ToolMeta ToolBus::get_tool_meta(const std::string& name) const {
-    auto tool = find_tool(name);
+    const std::string resolved = resolve_tool_name(name);
+    auto tool = find_tool(resolved);
     if (tool == nullptr) {
         return ToolMeta{};
     }
-    return tool->get_tool_meta(name);
+    return tool->get_tool_meta(resolved);
 }
 
 std::optional<ToolInfo> ToolBus::get_tool_info(const std::string& name) const {
-    auto tool = find_tool(name);
+    const std::string resolved = resolve_tool_name(name);
+    auto tool = find_tool(resolved);
     if (tool == nullptr) {
         return std::nullopt;
     }
-    return tool->get_tool_info(name);
+    return tool->get_tool_info(resolved);
 }
 
 std::vector<std::string> ToolBus::list_all_tools() const {

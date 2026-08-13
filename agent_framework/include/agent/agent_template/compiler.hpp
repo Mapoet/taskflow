@@ -7,6 +7,9 @@ namespace agent_framework::agent_template
     struct CompiledExecutionResult
     {
         bool ok{false};
+        bool suspended{false};
+        std::string checkpoint_ref;
+        nlohmann::json resume_snapshot = nlohmann::json::object();
         std::map<std::string, nlohmann::json> node_outputs;
         std::vector<SkillRunnerReceipt> receipts;
         std::vector<RunnerEvent> events;
@@ -18,7 +21,7 @@ namespace agent_framework::agent_template
     {
     public:
         explicit SkillWorkflowCompiler(std::shared_ptr<SkillRunnerRegistry> runners) : runners_(std::move(runners)) {}
-        CompiledExecutionResult execute(const SkillCollaborationPlan &, const AgentTemplateInvocation &, const ActiveSkillSession &, const nlohmann::json &, std::shared_ptr<std::atomic_bool> cancel = {}) const;
+        CompiledExecutionResult execute(const SkillCollaborationPlan &, const AgentTemplateInvocation &, const ActiveSkillSession &, const nlohmann::json &, std::shared_ptr<std::atomic_bool> cancel = {}, const nlohmann::json &resume_snapshot = {}) const;
 
     private:
         std::shared_ptr<SkillRunnerRegistry> runners_;

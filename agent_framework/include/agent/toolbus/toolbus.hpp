@@ -34,6 +34,8 @@ struct ToolCallControl {
         authorization;
     std::shared_ptr<const SkillInvocationContext> skill_context;
     std::string active_skill_id;
+    /** Receives display-safe compatibility metadata when a legacy alias is used. */
+    std::function<void(const json&)> migration_diagnostic;
     bool should_stop() const noexcept {
         if (!cancellation_requested) return false;
         try { return cancellation_requested(); } catch (...) { return true; }
@@ -285,6 +287,16 @@ public:
     /** Remove exactly the supplied tools. Missing names are ignored. */
     void unregister_tools(const std::vector<std::string>& names) noexcept;
 
+    /**
+     * Register a non-advertised compatibility spelling for an existing tool.  Resolution happens
+     * before allowlist, authorization, hooks and schema validation, so aliases cannot bypass policy.
+     */
+    void register_tool_alias(const std::string& alias, const std::string& canonical_name);
+    struct ToolAliasInfo {std::string alias,canonical_name,deprecated_since,removal_target;};
+    void register_tool_alias(const ToolAliasInfo& info);
+    std::optional<ToolAliasInfo> alias_info(std::string_view alias) const;
+    std::string resolve_tool_name(std::string_view requested_name) const;
+
     /** Run default-tool registration exactly once per ToolBus, including under concurrent graph builds. */
     void ensure_default_tools_registered(const std::function<void()>& registrar);
 
@@ -397,6 +409,8 @@ private:
     friend struct detail::ToolBusCallHookTestPeer;
 
     std::map<std::string, std::shared_ptr<ToolInterface>> tools_;
+    std::map<std::string, std::string> aliases_;
+    std::map<std::string, ToolAliasInfo> alias_metadata_;
     mutable std::mutex tools_mutex_;
     std::map<std::string, std::shared_ptr<MCPClient>> mcp_clients_;
     std::vector<ToolCallHook> hooks_;

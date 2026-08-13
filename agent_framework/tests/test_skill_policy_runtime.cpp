@@ -58,6 +58,20 @@ void test_policy(const fs::path& package) {
     assert(!policy.authorize_secret("other-token").allowed);
 }
 
+void test_portable_tool_aliases() {
+    SkillPermissionSet requested;
+    requested.tools = {"Read", "Python"};
+    SkillPermissionGrant granted;
+    granted.tools = {"fs_read", "python3"};
+    SkillPolicyEngine policy(requested, granted);
+    assert(policy.authorize_tool("Read").allowed);
+    assert(policy.authorize_tool("fs_read").allowed);
+    assert(policy.authorize_tool("Python").allowed);
+    assert(policy.authorize_tool("python3").allowed);
+    assert(!policy.authorize_tool("Write").allowed);
+    assert(policy.authorize_tool("fs_read").target == "Read");
+}
+
 void test_generic_schema_paths() {
     const auto schema = nlohmann::json::parse(R"({
       "type":"object",
@@ -235,6 +249,7 @@ int main() {
     fs::create_directories(package / "data");
     fs::create_directories(package / "output");
     test_policy(package);
+    test_portable_tool_aliases();
     test_generic_schema_paths();
     test_runtime(base, package);
     test_toolbus_request_authorization();

@@ -11,6 +11,7 @@
 #include <cstdlib>
 #include <ctime>
 #include <optional>
+#include <set>
 #include <string_view>
 #include <arpa/inet.h>
 #include <netdb.h>
@@ -590,10 +591,20 @@ json web_tool_error(const std::string& code, const std::string& message) {
     return e;
 }
 
-WebHttpResult web_http_get(const std::string& url_in, const WebHttpConfig& cfg,
-                           const std::map<std::string, std::string>& extra_headers) {
+bool web_http_sensitive_header(std::string_view name) {
+    std::string lower(name);
+    std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c){return static_cast<char>(std::tolower(c));});
+    static const std::set<std::string> denied{"authorization","proxy-authorization","cookie","set-cookie","host"};
+    return denied.count(lower) != 0;
+}
+
+WebHttpResult web_http_request(const WebHttpRequest& request, const WebHttpConfig& cfg) {
     WebHttpResult out;
-    std::string current = url_in;
+    std::string current = request.url;
+    std::string method = request.method;
+    std::transform(method.begin(),method.end(),method.begin(),[](unsigned char c){return static_cast<char>(std::toupper(c));});
+    static const std::set<std::string> methods{"GET","HEAD","POST","PUT","PATCH","DELETE","OPTIONS"};
+    if (!methods.count(method)) { out.error_code="method_disallowed"; return out; }
     int redirects = 0;
     while (true) {
         std::string ec;
@@ -609,21 +620,22 @@ WebHttpResult web_http_get(const std::string& url_in, const WebHttpConfig& cfg,
 
         httplib::Headers headers;
         headers.emplace("User-Agent", cfg.user_agent);
-        for (const auto& kv : extra_headers) {
+        for (const auto& kv : request.headers) {
             headers.emplace(kv.first, kv.second);
-        }
-        if (!web_http_extra_headers_has_cookie(extra_headers)) {
-            const std::string ck = env_str("AGENT_WEB_HTTP_COOKIE", "");
-            if (!ck.empty()) {
-                headers.emplace("Cookie", ck);
-            }
         }
 
         std::string body;
         bool truncated = false;
-        auto on_data = [&body, &truncated, maxb = cfg.max_body_bytes](const char* data,
+        auto on_data = [&body, &truncated, &request, maxb = cfg.max_body_bytes](const char* data,
                                                                       std::size_t len) -> bool {
+            if(request.cancellation_requested && request.cancellation_requested()) {
+                return false;
+            }
             if (len == 0) {
+                return true;
+            }
+            if(request.response_sink) {
+                if(!request.response_sink(std::string_view(data,len))) return false;
                 return true;
             }
             const std::size_t room = maxb > body.size() ? (maxb - body.size()) : 0U;
@@ -650,19 +662,28 @@ WebHttpResult web_http_get(const std::string& url_in, const WebHttpConfig& cfg,
             apply_client_timeouts(cli, cfg.timeout_ms);
             cli.set_follow_location(false);
             apply_upstream_proxy_to_httplib_client(cli);
-            res_opt = cli.Get(pu->path_and_query.c_str(), headers, on_data);
+            if(method=="GET") res_opt=cli.Get(pu->path_and_query.c_str(),headers,on_data);
+            else if(method=="HEAD") res_opt=cli.Head(pu->path_and_query.c_str(),headers);
+            else { httplib::Request req; req.method=method; req.path=pu->path_and_query; req.headers=headers;
+                req.body=request.body; if(!request.content_type.empty()) req.set_header("Content-Type",request.content_type);
+                res_opt=cli.send(req); }
 #endif
         } else {
             httplib::Client cli(pu->host, pu->port);
             apply_client_timeouts(cli, cfg.timeout_ms);
             cli.set_follow_location(false);
             apply_upstream_proxy_to_httplib_client(cli);
-            res_opt = cli.Get(pu->path_and_query.c_str(), headers, on_data);
+            if(method=="GET") res_opt=cli.Get(pu->path_and_query.c_str(),headers,on_data);
+            else if(method=="HEAD") res_opt=cli.Head(pu->path_and_query.c_str(),headers);
+            else { httplib::Request req; req.method=method; req.path=pu->path_and_query; req.headers=headers;
+                req.body=request.body; if(!request.content_type.empty()) req.set_header("Content-Type",request.content_type);
+                res_opt=cli.send(req); }
         }
         httplib::Result res = std::move(*res_opt);
 
         if (!res) {
-            out.error_code = "timeout";
+            out.error_code = request.cancellation_requested && request.cancellation_requested()
+                                 ? "cancelled" : "timeout";
             return out;
         }
 
@@ -672,11 +693,15 @@ WebHttpResult web_http_get(const std::string& url_in, const WebHttpConfig& cfg,
         if (!ct.empty()) {
             out.content_type = ct;
         }
-        out.body = std::move(body);
+        out.body = method=="GET" ? std::move(body) : res->body.substr(0,cfg.max_body_bytes);
+        if(method!="GET" && res->body.size()>cfg.max_body_bytes) truncated=true;
         out.truncated = truncated;
+        out.redirects = redirects;
+        for(const auto& header:res->headers) out.headers.emplace(header.first,header.second);
 
         if (res->status == 301 || res->status == 302 || res->status == 303 || res->status == 307 ||
             res->status == 308) {
+            if (!request.follow_redirects) return out;
             if (++redirects > cfg.max_redirects) {
                 out.error_code = "too_many_redirects";
                 out.body.clear();
@@ -695,6 +720,13 @@ WebHttpResult web_http_get(const std::string& url_in, const WebHttpConfig& cfg,
                 out.body.clear();
                 return out;
             }
+            const auto before=parse_url_components(current), after=parse_url_components(next);
+            if(before && after && (before->host!=after->host || before->port!=after->port)) {
+                for(auto it=request.headers.begin();it!=request.headers.end();++it) {
+                    if(web_http_sensitive_header(it->first)) { out.error_code="credential_redirect_refused"; return out; }
+                }
+            }
+            if(res->status==303 || ((res->status==301 || res->status==302) && method=="POST")) method="GET";
             current = std::move(next);
             out = WebHttpResult{};
             continue;
@@ -707,6 +739,16 @@ WebHttpResult web_http_get(const std::string& url_in, const WebHttpConfig& cfg,
         }
         return out;
     }
+}
+
+WebHttpResult web_http_get(const std::string& url, const WebHttpConfig& cfg,
+                           const std::map<std::string, std::string>& extra_headers) {
+    WebHttpRequest request; request.url=url; request.headers=extra_headers;
+    if (!web_http_extra_headers_has_cookie(extra_headers)) {
+        const std::string cookie=env_str("AGENT_WEB_HTTP_COOKIE","");
+        if(!cookie.empty()) request.headers.emplace("Cookie",cookie);
+    }
+    return web_http_request(request,cfg);
 }
 
 } // namespace agent_framework

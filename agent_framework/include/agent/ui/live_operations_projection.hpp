@@ -6,6 +6,8 @@
 #include <string>
 
 #include "agent/toolbus/toolbus.hpp"
+#include "agent/tool_runtime/types.hpp"
+#include "agent/tool_runtime/event_stream.hpp"
 #include "agent/ui/store_backed_operations.hpp"
 
 namespace agent_framework {
@@ -35,6 +37,11 @@ public:
                              Publisher publisher = {});
 
     void observe_tool(const ToolExecutionEvent& event);
+    void observe_invocation(const tool_runtime::InvocationEvent& event);
+    /** Drain replay/live events from the canonical subscription until timeout or terminal status. */
+    std::size_t consume_invocations(tool_runtime::InvocationEventSubscription& subscription,
+                                    std::chrono::milliseconds timeout,
+                                    std::size_t limit = 256);
     Phase4OperationsSnapshot snapshot() const;
 
 private:

@@ -48,7 +48,7 @@ bool log_web_debug() {
 } // namespace
 
 void register_builtin_web_tools_if_configured(ToolBus& bus) {
-    if (bus.get_tool_info("web_search").has_value()) {
+    if (bus.get_tool_info("WebSearch").has_value()) {
         return;
     }
     if (!web_register_enabled()) {
@@ -65,7 +65,7 @@ void register_builtin_web_tools_if_configured(ToolBus& bus) {
 #else
     {
         ToolMeta meta;
-        meta.name = "web_search";
+        meta.name = "WebSearch";
         meta.description =
             "Search via configurable SearXNG (default) or DuckDuckGo, then safely fetch and extract "
             "each result page. Provider fallback is explicit and disabled by default.";
@@ -86,11 +86,11 @@ void register_builtin_web_tools_if_configured(ToolBus& bus) {
         meta.permission_targets.push_back(
             {ToolMeta::PermissionTargetKind::Network, {}, {}, "configured search provider and result URLs"});
         bus.register_local_tool(
-            "web_search", [](const json& args) { return web_search(args); }, meta);
+            "WebSearch", [](const json& args) { return web_search(args); }, meta);
     }
     {
         ToolMeta meta;
-        meta.name = "web_fetch";
+        meta.name = "WebFetch";
         meta.description =
             "HTTP(S) GET a single URL with SSRF checks; returns json/text/html or binary hex preview. "
             "Respects AGENT_WEB_ALLOW_HOSTS / deny-private-IP policy.";
@@ -109,7 +109,7 @@ void register_builtin_web_tools_if_configured(ToolBus& bus) {
         meta.permission_targets.push_back(
             {ToolMeta::PermissionTargetKind::Network, "url", {}, {}});
         bus.register_local_tool(
-            "web_fetch", [](const json& args) { return web_fetch_invoke(args); }, meta);
+            "WebFetch", [](const json& args) { return web_fetch_invoke(args); }, meta);
     }
     {
         ToolMeta meta;
@@ -154,6 +154,11 @@ void register_builtin_web_tools_if_configured(ToolBus& bus) {
             "web_fetch_archive", [](const json& args) { return web_fetch_archive_invoke(args); },
             meta);
     }
+#endif
+
+#ifdef CPPHTTPLIB_OPENSSL_SUPPORT
+    bus.register_tool_alias("web_search", "WebSearch");
+    bus.register_tool_alias("web_fetch", "WebFetch");
 #endif
 }
 

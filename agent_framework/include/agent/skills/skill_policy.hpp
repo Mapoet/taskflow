@@ -10,6 +10,9 @@
 
 namespace agent_framework {
 
+/** Normalize common/legacy Skill tool spellings to the portable public tool identity. */
+std::string portable_tool_name(std::string_view name);
+
 enum class SkillPermissionKind {
     Tool,
     Network,

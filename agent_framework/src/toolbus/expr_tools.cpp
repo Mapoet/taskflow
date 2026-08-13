@@ -613,7 +613,7 @@ void register_expr_tools_impl(ToolBus& bus) {
 
     {
         ToolMeta meta;
-        meta.name = "expr_eval";
+        meta.name = "Calculate";
         meta.description =
             "Evaluate an ExprTk program (IEEE double). "
             "Arguments: expression (required); optional variables (mutable scalars), vectors (name -> "
@@ -625,11 +625,11 @@ void register_expr_tools_impl(ToolBus& bus) {
         meta.schema = expr_eval_tool_schema(cfg);
         meta.side_effect = ToolSideEffect::ReadOnly;
         bus.register_local_tool(
-            "expr_eval", [cfg](const json& args) { return expr_eval_invoke(args, cfg); }, meta);
+            "Calculate", [cfg](const json& args) { return expr_eval_invoke(args, cfg); }, meta);
     }
     {
         ToolMeta meta;
-        meta.name = "expr_validate";
+        meta.name = "ValidateExpression";
         meta.description =
             "Parse-only: compile the ExprTk program with the same variables/vectors/constants bindings "
             "as expr_eval, but do not run value(). Returns ok, variables/functions/assignments symbol "
@@ -638,11 +638,11 @@ void register_expr_tools_impl(ToolBus& bus) {
         meta.schema = expr_validate_tool_schema(cfg);
         meta.side_effect = ToolSideEffect::ReadOnly;
         bus.register_local_tool(
-            "expr_validate", [cfg](const json& args) { return expr_validate_invoke(args, cfg); }, meta);
+            "ValidateExpression", [cfg](const json& args) { return expr_validate_invoke(args, cfg); }, meta);
     }
     {
         ToolMeta meta;
-        meta.name = "expr_batch_eval";
+        meta.name = "BatchCalculate";
         meta.description =
             "Compile expression once, then call expression.value() once per rows[] entry. "
             "Scalar set: union of every key appearing in top-level variables and in any rows[i].variables "
@@ -654,7 +654,7 @@ void register_expr_tools_impl(ToolBus& bus) {
         meta.schema = expr_batch_eval_tool_schema(cfg);
         meta.side_effect = ToolSideEffect::ReadOnly;
         bus.register_local_tool(
-            "expr_batch_eval", [cfg](const json& args) { return expr_batch_eval_invoke(args, cfg); },
+            "BatchCalculate", [cfg](const json& args) { return expr_batch_eval_invoke(args, cfg); },
             meta);
     }
 }
@@ -665,13 +665,16 @@ void register_expr_tools_impl(ToolBus& bus) {
 
 void register_builtin_expr_tools_if_configured(ToolBus& bus) {
 #if defined(AGENT_HAVE_EXPRTK) && AGENT_HAVE_EXPRTK
-    if (bus.get_tool_info("expr_eval").has_value()) {
+    if (bus.get_tool_info("Calculate").has_value()) {
         return;
     }
     if (!expr_register_enabled()) {
         return;
     }
     register_expr_tools_impl(bus);
+    bus.register_tool_alias("expr_eval", "Calculate");
+    bus.register_tool_alias("expr_validate", "ValidateExpression");
+    bus.register_tool_alias("expr_batch_eval", "BatchCalculate");
 #else
     (void)bus;
 #endif

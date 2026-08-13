@@ -21,6 +21,7 @@ namespace {
 using json = nlohmann::json;
 using agent_framework::ToolBus;
 using agent_framework::ToolMeta;
+using agent_framework::ToolCallControl;
 using agent_framework::JsonSchemaRootMeta;
 using agent_framework::extract_json_schema_root_meta;
 using agent_framework::validate_tool_arguments;
@@ -221,6 +222,51 @@ void test_export_order() {
     assert(names[1] == "zed");
 }
 
+void test_canonical_alias_is_hidden_and_policy_sees_canonical_identity() {
+    ToolBus bus;
+    ToolMeta meta;
+    meta.name = "Read";
+    meta.schema = json{{"type", "object"},
+                       {"properties", {{"path", {{"type", "string"}}}}},
+                       {"required", {"path"}}};
+    bus.register_local_tool("Read", [](const json& value) { return value; }, meta);
+    bus.register_tool_alias("fs_read", "Read");
+    auto alias=bus.alias_info("fs_read");assert(alias&&alias->canonical_name=="Read"&&!alias->deprecated_since.empty());
+
+    assert(bus.resolve_tool_name("fs_read") == "Read");
+    assert(bus.get_tool_meta("fs_read").name == "Read");
+    const auto exported = bus.export_as_llm_tools();
+    assert(exported.size() == 1U && exported.front().name == "Read");
+    const auto names = bus.list_all_tools();
+    assert(names.size() == 1U && names.front() == "Read");
+
+    std::string authorized_name;
+    agent_framework::ToolCallControl control;
+    control.authorization = [&](const std::string& name, const json&, const ToolMeta& seen) {
+        authorized_name = name;
+        assert(seen.name == "Read");
+        return std::optional<json>{};
+    };
+    const auto result = bus.call_tool("fs_read", json{{"path", "README.md"}}, control).get();
+    assert(result.at("path") == "README.md");
+    assert(authorized_name == "Read");
+
+    bool duplicate_rejected = false;
+    try { bus.register_tool_alias("fs_read", "Read"); }
+    catch (const std::invalid_argument&) { duplicate_rejected = true; }
+    assert(duplicate_rejected);
+    bool missing_rejected = false;
+    try { bus.register_tool_alias("old", "Missing"); }
+    catch (const std::invalid_argument&) { missing_rejected = true; }
+    assert(missing_rejected);
+}
+
+void test_alias_migration_diagnostic_and_strict_mode(){ToolBus bus;ToolMeta m;m.name="Read";m.schema={{"type","object"}};bus.register_local_tool("Read",[](const json&){return json{{"ok",true}};},m);bus.register_tool_alias({"fs_read","Read","v2","v3"});json diagnostic;ToolCallControl control;control.migration_diagnostic=[&](const json&value){diagnostic=value;};assert(bus.call_tool("fs_read",json::object(),control).get().value("ok",false));assert(diagnostic.at("canonical_name")=="Read"&&!diagnostic.at("permission_expanded").get<bool>());
+#if !defined(_WIN32)
+setenv("AGENT_REJECT_LEGACY_TOOL_ALIASES","1",1);auto denied=bus.call_tool("fs_read",json::object()).get();unsetenv("AGENT_REJECT_LEGACY_TOOL_ALIASES");assert(denied.at("code")=="legacy_tool_alias_rejected");
+#endif
+}
+
 void test_local_tool_name_mismatch_future() {
     agent_framework::LocalTool t(
         "ok", [](const json& j) { return j; },
@@ -255,6 +301,8 @@ int run_core_tests() {
     test_duplicate_register_throws();
     test_register_mcp_throws();
     test_export_order();
+    test_canonical_alias_is_hidden_and_policy_sees_canonical_identity();
+    test_alias_migration_diagnostic_and_strict_mode();
     test_local_tool_name_mismatch_future();
     test_get_tool_info();
     std::cout << "test_toolbus_wp2: all core tests passed\n";

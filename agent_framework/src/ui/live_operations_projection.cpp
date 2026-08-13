@@ -116,4 +116,67 @@ Phase4OperationsSnapshot LiveOperationsProjection::snapshot() const {
     return snapshot_;
 }
 
+void LiveOperationsProjection::observe_invocation(const tool_runtime::InvocationEvent& event) {
+    if(event.invocation_id.empty() || event.sequence == 0 ||
+       event.durability != tool_runtime::InvocationEventDurability::Durable) return;
+    Phase4OperationsSnapshot published;
+    Publisher publisher;
+    {
+        std::lock_guard lock(mutex_);
+        auto source = std::find_if(snapshot_.source_revisions.begin(), snapshot_.source_revisions.end(),
+            [](const auto& item) { return item.store == "tool_invocation_events"; });
+        if(source != snapshot_.source_revisions.end() && event.sequence <= source->revision) return;
+        auto invocation = std::find_if(snapshot_.invocations.begin(), snapshot_.invocations.end(),
+            [&](const auto& item) { return item.id == event.invocation_id; });
+        const auto tool_name = event.payload.value("tool_name", std::string("durable-tool"));
+        if(invocation == snapshot_.invocations.end()) {
+            snapshot_.invocations.push_back({event.invocation_id, "tool", tool_name, "", "",
+                "durable-tool-observation", "none", 0, 0, 0.0, 0, OperationsStatus::Running});
+            invocation = std::prev(snapshot_.invocations.end());
+        }
+        invocation->provider = tool_name;
+        const auto& type = event.event_type;
+        if(type.find("failed") != std::string::npos || type.find("orphan") != std::string::npos)
+            invocation->status = OperationsStatus::Failed;
+        else if(type.find("completed") != std::string::npos || type.find("verified") != std::string::npos ||
+                type.find("effect_committed") != std::string::npos)
+            invocation->status = OperationsStatus::Passed;
+        else if(type.find("manual_review") != std::string::npos || type.find("unknown_effect") != std::string::npos)
+            invocation->status = OperationsStatus::Warning;
+        else invocation->status = OperationsStatus::Running;
+        snapshot_.updated_at = event.created_at.empty() ? timestamp() : event.created_at;
+        snapshot_.overall_status = invocation->status == OperationsStatus::Failed ? OperationsStatus::Warning
+                                  : invocation->status == OperationsStatus::Passed ? OperationsStatus::Passed
+                                                                                  : invocation->status;
+        snapshot_.summary = "Tool lifecycle synchronized: " + type;
+        if(event.payload.contains("fraction"))
+            snapshot_.summary += " (" + std::to_string(event.payload.at("fraction").get<double>() * 100.0) + "%)";
+        OperationsSourceRevision next{"tool_invocation_events", event.invocation_id, event.sequence, event.event_digest};
+        if(source == snapshot_.source_revisions.end()) snapshot_.source_revisions.push_back(next); else *source = next;
+        snapshot_.snapshot_id = digest(snapshot_);
+        if(store_) {
+            std::string error;
+            if(!store_->save(snapshot_, &error))
+                throw std::runtime_error("cannot persist durable operations snapshot: " + error);
+        }
+        published = snapshot_;
+        publisher = publisher_;
+    }
+    if(publisher) publisher(published);
+}
+
+std::size_t LiveOperationsProjection::consume_invocations(
+    tool_runtime::InvocationEventSubscription& subscription, std::chrono::milliseconds timeout,
+    std::size_t limit) {
+    std::size_t consumed = 0;
+    while(consumed < limit) {
+        tool_runtime::InvocationEvent event;
+        const auto status = subscription.next(event, consumed == 0 ? timeout : std::chrono::milliseconds(0));
+        if(status != tool_runtime::InvocationSubscriptionRead::Event) break;
+        observe_invocation(event);
+        ++consumed;
+    }
+    return consumed;
+}
+
 }  // namespace agent_framework

@@ -2,6 +2,7 @@
 #include <agent/tool_runtime/commit_coordinator.hpp>
 #include <agent/tool_runtime/worker_runtime.hpp>
 #include <agent/internal/platform_io.hpp>
+#include <agent/toolbus/process_tools.hpp>
 #include <cassert>
 #include <filesystem>
 #include <thread>
@@ -84,6 +85,13 @@ int main()
         std::this_thread::sleep_for(std::chrono::milliseconds(2));
     }
     assert(obs.state == ObservationState::CompletedCandidate && obs.result.at("ok"));
+    auto curl_adapter=std::make_shared<NetworkToolExecutionAdapter>(bus,"Curl","v1","g1");
+    auto wget_adapter=std::make_shared<NetworkToolExecutionAdapter>(bus,"Wget","v1","g1");
+    assert(production.register_adapter(curl_adapter));assert(production.register_adapter(wget_adapter));
+    assert(curl_adapter->restart_policy()==RestartPolicy::ManualReview);
+    assert(wget_adapter->restart_policy()==RestartPolicy::RestartFromCheckpoint);
+    auto mismatch=req;mismatch.invocation.tool_name="Curl";mismatch.invocation.idempotent=false;
+    assert(!wget_adapter->start(mismatch,&error));
     std::map<std::string, ExecutionObservation> remote;
     auto http = std::make_shared<HTTPExecutionAdapter>("http", "v1", "g1", [&](const ExecutionRequest &, std::string *)
                                                        {remote["op"]={ObservationState::Running};return std::optional<std::string>{"op"}; }, [&](std::string_view id)

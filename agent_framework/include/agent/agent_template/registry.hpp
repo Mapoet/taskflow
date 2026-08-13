@@ -39,6 +39,7 @@ namespace agent_framework::agent_template
         std::uint64_t store_revision{0};
         std::string updated_at;
     };
+    struct StoredExecutionCheckpoint {std::string tenant_id,invocation_id;std::uint64_t revision{0};nlohmann::json snapshot=nlohmann::json::object();std::string digest,updated_at;};
 
     class AgentTemplateRegistry
     {
@@ -55,6 +56,9 @@ namespace agent_framework::agent_template
                                                  std::uint64_t expected_store_revision) = 0;
         virtual std::optional<StoredInvocation> load_invocation(
             std::string_view tenant_id, std::string_view invocation_id) = 0;
+        virtual RegistryResult save_execution_checkpoint(const StoredExecutionCheckpoint&,std::uint64_t expected_revision)=0;
+        virtual std::optional<StoredExecutionCheckpoint> load_execution_checkpoint(std::string_view tenant_id,std::string_view invocation_id)=0;
+        virtual RegistryResult clear_execution_checkpoint(std::string_view tenant_id,std::string_view invocation_id,std::uint64_t expected_revision)=0;
     };
 
     struct SQLiteRegistryOptions
@@ -83,6 +87,9 @@ namespace agent_framework::agent_template
                                          std::uint64_t expected_store_revision) override;
         std::optional<StoredInvocation> load_invocation(
             std::string_view tenant_id, std::string_view invocation_id) override;
+        RegistryResult save_execution_checkpoint(const StoredExecutionCheckpoint&,std::uint64_t) override;
+        std::optional<StoredExecutionCheckpoint> load_execution_checkpoint(std::string_view,std::string_view) override;
+        RegistryResult clear_execution_checkpoint(std::string_view,std::string_view,std::uint64_t) override;
 
     private:
         void migrate();

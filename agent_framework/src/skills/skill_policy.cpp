@@ -2,9 +2,27 @@
 
 #include <algorithm>
 #include <cctype>
+#include <map>
 #include <system_error>
 
 namespace agent_framework {
+
+std::string portable_tool_name(std::string_view raw) {
+    static const std::map<std::string_view, std::string_view> aliases = {
+        {"fs_read","Read"},{"fs_write","Write"},{"fs_replace","Edit"},
+        {"fs_search","Glob"},{"fs_grep","Grep"},{"web_fetch","WebFetch"},
+        {"fs_list_dir","LS"},{"cat","Cat"},{"ls","LS"},{"sed","Sed"},
+        {"fs_mkdir","Mkdir"},{"mkdir","Mkdir"},{"fs_touch","Touch"},{"touch","Touch"},
+        {"fs_delete","Remove"},{"rm","Remove"},{"remove","Remove"},
+        {"web_search","WebSearch"},{"expr_eval","Calculate"},
+        {"expr_validate","ValidateExpression"},{"expr_batch_eval","BatchCalculate"},
+        {"draw_render","RenderChart"},{"draw_export","ExportChart"},
+        {"python3","Python"},{"Python3","Python"}
+        ,{"bash","Bash"},{"curl","Curl"},{"wget","Wget"},{"cmake","CMake"},{"make","Make"}
+    };
+    if (const auto it = aliases.find(raw); it != aliases.end()) return std::string(it->second);
+    return std::string(raw);
+}
 
 bool skill_permissions_empty(const SkillPermissionSet& permissions) noexcept {
     return permissions.tools.empty() && permissions.network.empty() &&
@@ -19,8 +37,9 @@ SkillPermissionSet skill_permissions_effective(const SkillPermissionSet& manifes
 namespace {
 
 bool exact_or_all(const std::vector<std::string>& values, std::string_view target) {
+    const auto normalized_target = portable_tool_name(target);
     return std::any_of(values.begin(), values.end(), [&](const std::string& value) {
-        return value == "*" || value == target;
+        return value == "*" || portable_tool_name(value) == normalized_target;
     });
 }
 
@@ -102,7 +121,7 @@ SkillPolicyEngine::SkillPolicyEngine(SkillPermissionSet requested, SkillPermissi
 
 SkillPolicyDecision SkillPolicyEngine::authorize_tool(std::string_view name) const {
     const bool allowed = exact_or_all(requested_.tools, name) && exact_or_all(granted_.tools, name);
-    return decision(allowed, SkillPermissionKind::Tool, "invoke", std::string(name),
+    return decision(allowed, SkillPermissionKind::Tool, "invoke", portable_tool_name(name),
                     allowed ? "manifest request intersects task grant"
                             : "tool is not present in both manifest permissions and task grants");
 }

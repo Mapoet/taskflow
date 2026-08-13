@@ -12,6 +12,8 @@
 
 #include <cstdint>
 #include <map>
+#include <functional>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -68,7 +70,28 @@ struct WebHttpResult {
     /** 空表示成功 */
     std::string error_code;
     int error_http_status = 0;
+    std::map<std::string, std::string> headers;
+    int redirects = 0;
 };
+
+struct WebHttpRequest {
+    std::string url;
+    std::string method{"GET"};
+    std::map<std::string, std::string> headers;
+    std::string body;
+    std::string content_type;
+    bool follow_redirects{true};
+    /** Optional streaming response sink. Returning false aborts transport. */
+    std::function<bool(std::string_view)> response_sink;
+    /** Cooperative cancellation checked for every received response chunk. */
+    std::function<bool()> cancellation_requested;
+};
+
+/** Execute a policy-checked HTTP request. Sensitive headers must be injected by a trusted caller. */
+WebHttpResult web_http_request(const WebHttpRequest& request, const WebHttpConfig& cfg);
+
+/** Header names that cannot be supplied by untrusted tool arguments. */
+bool web_http_sensitive_header(std::string_view name);
 
 /**
  * @brief 对绝对 URL 执行 GET：每跳重定向后重新做 SSRF 校验；body 流式截断于 max_body_bytes。

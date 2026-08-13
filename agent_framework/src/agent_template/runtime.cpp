@@ -171,6 +171,11 @@ AgentRunResult AgentRuntime::run(const TemplateRef& ref, const nlohmann::json& i
     out.execution = SkillWorkflowCompiler(runners_).execute(plan, invocation, *built.session,
                                                              input, options.cancel);
     if (!out.execution.ok) {
+        if(out.execution.suspended) {
+            auto saved=templates_->save_execution_checkpoint(
+                {options.metadata.identity.tenant_id,invocation.invocation_id,0,out.execution.resume_snapshot,"",""},0);
+            if(!saved.ok()){out.error_code="checkpoint_persist_failed";out.error_message=saved.message;return out;}
+        }
         out.error_code = out.execution.error_code;
         out.error_message = out.execution.error_message;
         return out;
@@ -190,6 +195,26 @@ AgentRunResult AgentRuntime::run(const TemplateRef& ref, const nlohmann::json& i
     }
     out.ok = true;
     return out;
+}
+
+AgentRunResult AgentRuntime::resume(std::string_view tenant,std::string_view invocation_id,
+                                    std::shared_ptr<std::atomic_bool> cancel) const {
+    AgentRunResult out;if(!templates_||!runners_){out.error_code="runtime_dependency_missing";return out;}
+    auto stored=templates_->load_invocation(tenant,invocation_id);auto checkpoint=templates_->load_execution_checkpoint(tenant,invocation_id);
+    if(!stored||!checkpoint){out.error_code="resume_checkpoint_not_found";return out;}
+    std::vector<contracts::ContractIssue> issues;
+    auto plan=decode_collaboration_plan(checkpoint->snapshot.at("plan"),{},&issues);
+    auto session=decode_active_skill_session(checkpoint->snapshot.at("session"),{},&issues);
+    if(!plan||!session){out.error_code="resume_checkpoint_contract_invalid";out.issues=std::move(issues);return out;}
+    out.plan=*plan;out.session=*session;out.invocation=stored->invocation;
+    out.execution=SkillWorkflowCompiler(runners_).execute(*plan,stored->invocation,*session,checkpoint->snapshot.at("input"),std::move(cancel),checkpoint->snapshot);
+    if(out.execution.suspended){auto saved=templates_->save_execution_checkpoint({std::string(tenant),std::string(invocation_id),checkpoint->revision,out.execution.resume_snapshot,"",""},checkpoint->revision);if(!saved.ok()){out.error_code="checkpoint_persist_failed";out.error_message=saved.message;return out;}}
+    if(!out.execution.ok){out.error_code=out.execution.error_code;out.error_message=out.execution.error_message;return out;}
+    if(!completion_authority_){out.error_code="completion_authority_unavailable";return out;}
+    out.completion=completion_authority_->evaluate({stored->invocation,*plan,*session,out.execution.receipts,out.execution.output});
+    if(!out.completion->accepted){out.error_code="completion_rejected";out.error_message=out.completion->reason_code;return out;}
+    auto cleared=templates_->clear_execution_checkpoint(tenant,invocation_id,checkpoint->revision);if(!cleared.ok()){out.error_code="checkpoint_clear_failed";out.error_message=cleared.message;return out;}
+    out.ok=true;return out;
 }
 
 std::pair<std::shared_ptr<workflow::AnyNode>, tf::Task> AgentTemplateNode::create(

@@ -413,7 +413,17 @@
       return response.json();
     }).then(renderOperations);
   }
+  function loadBootstrapSnapshot() {
+    return fetch("/ui/bootstrap", { cache: "no-store" }).then(function (response) {
+      if (!response.ok) throw new Error("bootstrap HTTP " + response.status);
+      return response.json();
+    }).then(function (snapshot) {
+      handleAux({ type: "runtime", payload: snapshot.runtime || {} });
+      handleAux({ type: "skills_status", payload: snapshot.skills_status || {} });
+    });
+  }
   if (!screenshotMode) {
+    loadBootstrapSnapshot().catch(function () { setStatus("Bootstrap snapshot unavailable; waiting for event stream…"); });
     loadOperationsSnapshot().catch(function () {
       setStatus("Operations snapshot unavailable; waiting for event stream…");
     });

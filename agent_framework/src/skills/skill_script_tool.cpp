@@ -11,6 +11,7 @@
 #include <cctype>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <map>
 #include <string>
 #include <thread>
@@ -519,6 +520,59 @@ void register_skill_script_tool(ToolBus& bus, const std::shared_ptr<SkillService
             },
             process_meta("run_skill_cli", "Run a declared Skill CLI program in a networkless sandbox."));
     }
+}
+
+void register_skill_discovery_tool(ToolBus& bus,const std::shared_ptr<SkillServices>& services) {
+    if(!services||!services->registry||bus.get_tool_info("Skill"))return;
+    ToolMeta meta;meta.name="Skill";
+    meta.description="Discover indexed Skills, load one SKILL.md progressively, or read a declared package resource.";
+    meta.schema=json::parse(R"({"type":"object","properties":{"action":{"type":"string","enum":["list","search","load","read_resource"]},"query":{"type":"string"},"skill_id":{"type":"string"},"resource_id":{"type":"string"},"offset":{"type":"integer","minimum":0},"max_bytes":{"type":"integer","minimum":1,"maximum":262144}},"required":["action"]})");
+    meta.side_effect=ToolSideEffect::ReadOnly;
+    bus.register_local_tool("Skill",[services](const json&args){
+        const auto action=args.at("action").get<std::string>();const auto snapshot=services->registry->snapshot();
+        if(action=="list"||action=="search") {
+            const auto query=args.value("query","");json entries=json::array();
+            for(const auto&e:snapshot.entries()) {
+                std::string hay=e.id+" "+e.name+" "+e.description;for(const auto&t:e.tags)hay+=" "+t;
+                if(action=="search"&&!query.empty()&&hay.find(query)==std::string::npos)continue;
+                entries.push_back({{"id",e.id},{"name",e.name},{"description",e.description},{"version",e.version},
+                    {"source",e.source_uri.empty()?e.file_path.parent_path().string():e.source_uri},
+                    {"package_digest",e.package_digest},{"allowed_tools",e.allowed_tools},
+                    {"resources",e.resource_digests.size()}});
+            }
+            return json{{"generation",snapshot.generation()},{"entries",std::move(entries)}};
+        }
+        if(!args.contains("skill_id"))return tool_error("validation_failed","skill_id is required");
+        const auto id=args.at("skill_id").get<std::string>();const auto entry=snapshot.get(id);const auto manifest=snapshot.get_manifest(id);
+        if(!entry||!manifest)return tool_error("validation_failed","unknown skill_id");
+        const auto max=args.value("max_bytes",65536U);const auto offset=args.value("offset",0U);
+        if(action=="load") {
+            std::error_code ec;const auto base=std::filesystem::weakly_canonical(entry->script_jail.value_or(entry->file_path.parent_path()),ec);
+            const auto target=std::filesystem::weakly_canonical(entry->file_path,ec);
+            if(ec||target.parent_path()!=base||std::filesystem::is_symlink(std::filesystem::symlink_status(target,ec)))
+                return tool_error("skill_resource_jail_escape","SKILL.md is outside pinned package jail");
+            std::ifstream in(target,std::ios::binary);if(!in)return tool_error("skill_resource_read_failed","SKILL.md unavailable");
+            const auto size=std::filesystem::file_size(target,ec);const auto start=std::min<std::uint64_t>(offset,size);
+            in.seekg(static_cast<std::streamoff>(start));std::string content(std::min<std::uint64_t>(max,size-start),'\0');in.read(content.data(),content.size());
+            return json{{"skill_id",id},{"version",manifest->version},{"package_digest",entry->package_digest},
+                {"manifest",skill_manifest_to_json(*manifest)},{"content",std::move(content)},{"offset",start},
+                {"bytes",std::min<std::uint64_t>(max,size-start)},{"truncated",start+max<size}};
+        }
+        if(action=="read_resource") {
+            if(!args.contains("resource_id"))return tool_error("validation_failed","resource_id is required");
+            if(!services->resource_access)return tool_error("skill_resource_unavailable","resource access service unavailable");
+            SkillResourceOpenOptions options;options.offset=offset;options.max_bytes=max;
+            auto opened=services->resource_access->open_snapshot(*entry,manifest,args.at("resource_id").get<std::string>(),options);
+            if(!opened.ok)return json{{"error",opened.error}};
+            auto read=services->resource_access->read(*opened.handle);
+            if(!read.ok)return json{{"error",read.error}};
+            return json{{"skill_id",id},{"resource_id",args.at("resource_id")},{"content",std::move(read.bytes)},
+                {"offset",opened.handle->view_offset},{"bytes",opened.handle->view_size},
+                {"truncated",opened.handle->view_offset+opened.handle->view_size<opened.handle->size},
+                {"resource_digest",opened.handle->resource_digest}};
+        }
+        return tool_error("validation_failed","unsupported action");
+    },meta);
 }
 
 } // namespace agent_framework

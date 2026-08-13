@@ -8,6 +8,8 @@
 #include <agent/skills/skill_loader.hpp>
 #include <agent/skills/skill_registry.hpp>
 #include <agent/skills/skill_services.hpp>
+#include <agent/skills/skill_script_tool.hpp>
+#include <agent/toolbus/toolbus.hpp>
 
 #include <cassert>
 #include <cstdlib>
@@ -131,6 +133,20 @@ int main() {
         assert(tiny.has_value());
         assert(tiny->size() <= 4U);
     }
+    {
+        auto services=std::make_shared<SkillServices>();
+        services->registry=std::make_shared<SkillRegistry>(base);
+        services->registry->scan_or_reload();
+        services->loader=std::make_shared<SkillLoader>(*services->registry);
+        services->resource_access=std::make_shared<SkillResourceAccess>();
+        ToolBus bus;register_skill_discovery_tool(bus,services);
+        auto listed=bus.call_tool("Skill",{{"action","list"}}).get();
+        assert(listed.at("entries").size()==1);
+        auto loaded=bus.call_tool("Skill",{{"action","load"},{"skill_id","route"},{"max_bytes",8}}).get();
+        assert(loaded.at("content").get<std::string>().size()==8&&loaded.at("truncated"));
+        const auto exported=bus.export_as_llm_tools();
+        assert(std::any_of(exported.begin(),exported.end(),[](const ToolMeta&m){return m.name=="Skill";}));
+    }
     fs::remove_all(base / "route", ec);
 
     // --- UTF-8 truncation remains JSON-safe in loader and injected L1 catalog ---
@@ -240,6 +256,35 @@ int main() {
     }
     fs::remove_all(base / "r1", ec);
     fs::remove_all(base / "r2", ec);
+
+    // --- portable default roots: project roots precede user roots deterministically ---
+    const fs::path portable_workspace = base / "workspace";
+    const fs::path portable_home = base / "home";
+    fs::create_directories(portable_workspace / ".agents" / "skills" / "shared");
+    fs::create_directories(portable_workspace / ".claude" / "skills" / "claude-only");
+    fs::create_directories(portable_workspace / ".cursor" / "skills" / "cursor-only");
+    fs::create_directories(portable_home / ".codex" / "skills" / "shared");
+    write_file(portable_workspace / ".agents" / "skills" / "shared" / "SKILL.md",
+               "---\nname: shared\ndescription: project winner\n---\nproject\n");
+    write_file(portable_workspace / ".claude" / "skills" / "claude-only" / "SKILL.md",
+               "---\nname: claude-only\n---\nclaude\n");
+    write_file(portable_workspace / ".cursor" / "skills" / "cursor-only" / "SKILL.md",
+               "---\nname: cursor-only\ndescription: Unmodified Cursor portable fixture\n---\nUse Read and Bash without rewriting this file.\n");
+    write_file(portable_home / ".codex" / "skills" / "shared" / "SKILL.md",
+               "---\nname: shared\ndescription: user loser\n---\nuser\n");
+    (void)::setenv("AGENT_FS_ROOT", portable_workspace.c_str(), 1);
+    (void)::setenv("HOME", portable_home.c_str(), 1);
+    {
+        const auto services = SkillServices::from_default_skill_roots();
+        assert(services && services->registry);
+        assert(services->registry->get("claude-only").has_value());
+        assert(services->registry->get("cursor-only").has_value());
+        const auto shared = services->registry->get("shared");
+        assert(shared && shared->description == "project winner");
+        assert(services->registry->roots().front() ==
+               portable_workspace / ".agents" / "skills");
+    }
+    (void)::unsetenv("AGENT_FS_ROOT");
 
     // --- router off ---
     fs::create_directories(base / "off");

@@ -54,6 +54,8 @@ public:
     AgentRunResult run(const TemplateRef& template_ref,
                        const nlohmann::json& input,
                        AgentRunOptions options = {}) const;
+    AgentRunResult resume(std::string_view tenant_id,std::string_view invocation_id,
+                          std::shared_ptr<std::atomic_bool> cancel = {}) const;
 
 private:
     std::shared_ptr<SkillPlanProvider> provider_for(AgentBusinessMode mode) const;

@@ -62,6 +62,11 @@ int main()
         invocation.context_projection_ref = "cas://context";
         assert(registry.update_invocation(invocation, 1).revision == 2);
         assert(registry.update_invocation(invocation, 1).status == RegistryStatus::RevisionConflict);
+        StoredExecutionCheckpoint checkpoint{"tenant","inv-1",0,{{"state","waiting"}},"",""};
+        assert(registry.save_execution_checkpoint(checkpoint,0).revision==1);
+        checkpoint.snapshot["state"]="approved";
+        assert(registry.save_execution_checkpoint(checkpoint,1).revision==2);
+        assert(registry.save_execution_checkpoint(checkpoint,1).status==RegistryStatus::RevisionConflict);
     }
     {
         SQLiteAgentTemplateRegistry restarted(path.string());
@@ -71,6 +76,11 @@ int main()
         assert(invocation && invocation->store_revision == 2);
         assert(invocation->invocation.template_ref.revision == 1);
         assert(invocation->invocation.deployment_generation == "deploy-1");
+        auto checkpoint=restarted.load_execution_checkpoint("tenant","inv-1");
+        assert(checkpoint&&checkpoint->revision==2&&checkpoint->snapshot.at("state")=="approved");
+        assert(restarted.clear_execution_checkpoint("tenant","inv-1",1).status==RegistryStatus::RevisionConflict);
+        assert(restarted.clear_execution_checkpoint("tenant","inv-1",2).ok());
+        assert(!restarted.load_execution_checkpoint("tenant","inv-1"));
         auto incomplete = invocation->invocation;
         incomplete.invocation_id = "inv-bad";
         incomplete.plan_digest.clear();

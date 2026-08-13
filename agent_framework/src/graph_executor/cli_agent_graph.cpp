@@ -11,6 +11,7 @@
 #include <agent/toolbus/draw_tools.hpp>
 #include <agent/toolbus/expr_tools.hpp>
 #include <agent/toolbus/fs_tools.hpp>
+#include <agent/toolbus/process_tools.hpp>
 #include <agent/toolbus/news_sources_tool.hpp>
 #include <agent/toolbus/web_tools.hpp>
 #include <agent/skills/skill_script_tool.hpp>
@@ -42,10 +43,12 @@ void build_cli_agent_graph_impl(workflow::GraphBuilder& builder,
     }
 
     if (deps.skills) {
+        register_skill_discovery_tool(*deps.toolbus, deps.skills);
         register_skill_script_tool(*deps.toolbus, deps.skills);
     }
     deps.toolbus->ensure_default_tools_registered([&] {
         register_builtin_fs_tools_if_configured(*deps.toolbus);
+        register_builtin_process_tools_if_configured(*deps.toolbus);
         register_builtin_web_tools_if_configured(*deps.toolbus);
         register_web_configured_source_if_configured(*deps.toolbus);
         register_builtin_expr_tools_if_configured(*deps.toolbus);

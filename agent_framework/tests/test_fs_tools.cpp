@@ -7,6 +7,7 @@
 #include <agent/toolbus/toolbus.hpp>
 
 #include <cassert>
+#include <algorithm>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -59,11 +60,49 @@ int main() {
 
     assert(bus.get_tool_info("fs_read").has_value());
     assert(bus.get_tool_info("fs_replace").has_value());
+    assert(bus.get_tool_info("Read").has_value());
+    assert(bus.get_tool_info("Edit").has_value());
+    const auto exported = bus.export_as_llm_tools();
+    const auto has_export = [&](std::string_view name) {
+        return std::any_of(exported.begin(), exported.end(),
+                           [&](const ToolMeta& meta) { return meta.name == name; });
+    };
+    assert(has_export("Read") && has_export("Write") && has_export("Edit"));
+    assert(has_export("Glob") && has_export("Grep") && has_export("LS"));
+    assert(has_export("Cat") && has_export("Sed"));
+    assert(has_export("Mkdir") && has_export("Touch") && has_export("Remove"));
+    assert(!has_export("fs_read") && !has_export("fs_replace"));
+    assert(!has_export("fs_mkdir") && !has_export("fs_delete"));
 
     {
-        json r = bus.call_tool("fs_read", json{{"path", "hello.txt"}}).get();
+        json r = bus.call_tool("Read", json{{"path", "hello.txt"}}).get();
         assert(r.contains("content"));
         assert(r["content"].get<std::string>().find("hello") != std::string::npos);
+    }
+
+    {
+        json r = bus.call_tool("Cat", json{{"path", "hello.txt"}}).get();
+        assert(r.at("content").get<std::string>().find("hello") != std::string::npos);
+        assert(r.contains("revision"));
+        const auto revision = r.at("revision").get<std::string>();
+        const auto slice = bus.call_tool("Read", json{{"path", "hello.txt"},
+                                                       {"offset", 0}, {"limit", 5}}).get();
+        assert(slice.at("content") == "hello" && slice.at("truncated") == true);
+        r = bus.call_tool("LS", json{{"path", "."}, {"depth", 1}}).get();
+        assert(r.contains("entries"));
+        r = bus.call_tool("Sed", json{{"path", "hello.txt"}, {"pattern", "hello"},
+                                      {"replacement", "HELLO"}}).get();
+        assert(r.value("dry_run", false));
+        r = bus.call_tool("Sed", json{{"path", "hello.txt"}, {"pattern", "hello"},
+                                      {"replacement", "hello"}, {"write", true},
+                                      {"confirm_write", true},
+                                      {"expected_revision", "sha256:stale"}}).get();
+        assert(r.at("error").at("code") == "revision_conflict");
+        r = bus.call_tool("Sed", json{{"path", "hello.txt"}, {"pattern", "hello"},
+                                      {"replacement", "hello"}, {"write", true},
+                                      {"confirm_write", true},
+                                      {"expected_revision", revision}}).get();
+        assert(r.value("replaced", false) && r.contains("revision"));
     }
 
     {
@@ -141,25 +180,31 @@ int main() {
     }
 
     {
-        json r = bus.call_tool("fs_mkdir", json{{"path", "d1"}, {"parents", true}}).get();
-        assert(r.contains("created"));
+        json r = bus.call_tool("Mkdir", json{{"path", "d1/nested"}, {"parents", true}}).get();
+        assert(r.value("created", false));
+        r = bus.call_tool("Touch", json{{"path", "d1/nested/touched.txt"}}).get();
+        assert(r.value("touched", false) && r.value("created", false));
     }
 
     {
         write_file(root / "sub" / "keep.txt", "k");
-        json r = bus.call_tool("fs_delete", json{{"path", "sub"}, {"confirm", true}}).get();
+        json r = bus.call_tool("Remove", json{{"path", "sub"}, {"confirm_remove", true}}).get();
         assert(r.contains("error"));
         assert(r["error"]["code"] == "directory_not_empty");
     }
 
     {
-        json r = bus.call_tool("fs_delete", json{{"path", "new.txt"}, {"confirm", false}}).get();
+        json r = bus.call_tool("Remove", json{{"path", "new.txt"}, {"confirm_remove", false}}).get();
         assert(r.contains("error") && r["error"]["code"] == "confirm_required");
     }
 
     {
-        json r = bus.call_tool("fs_delete", json{{"path", "new.txt"}, {"confirm", true}}).get();
-        assert(r.contains("deleted"));
+        json r = bus.call_tool("Remove", json{{"path", "new.txt"}, {"confirm_remove", true}}).get();
+        assert(r.value("removed", false));
+        r = bus.call_tool("Remove", json{{"path", "."}, {"recursive", true}, {"confirm_remove", true}}).get();
+        assert(r.at("error").at("code") == "root_remove_refused");
+        r = bus.call_tool("Remove", json{{"path", "d1"}, {"recursive", true}, {"confirm_remove", true}}).get();
+        assert(r.value("removed", false));
     }
 
     (void)::unsetenv("AGENT_FS_ROOT");

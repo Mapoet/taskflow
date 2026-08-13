@@ -2,6 +2,7 @@
 #include <agent/tool_runtime/state_machine.hpp>
 #include <agent/tool_runtime/progress_protocol.hpp>
 #include <agent/tool_runtime/event_stream.hpp>
+#include <agent/ui/live_operations_projection.hpp>
 #include <agent/distributed/object_store.hpp>
 #include <agent/internal/platform_io.hpp>
 #include <cassert>
@@ -73,6 +74,13 @@ int main()
     event.information_gain = true;
     PartialResultRef partial{1, "log", "cas://partial", "sha256:partial", "text/plain", 12, true};
     assert(store.commit({next, active->revision, event, progress, partial, {}}));
+    auto ui_subscription = remote_hub.subscribe("inv-1", 4, 8);
+    assert(ui_subscription.subscription);
+    agent_framework::LiveOperationsProjection ui_projection(
+        agent_framework::LiveOperationsIdentity{"tenant", "run", "task"});
+    assert(ui_projection.consume_invocations(*ui_subscription.subscription,
+        std::chrono::milliseconds(500)) == 1);
+    assert(ui_projection.snapshot().summary.find("50.000000%") != std::string::npos);
     InvocationEvent delivered;
     assert(remote.subscription->next(delivered, std::chrono::milliseconds(500)) ==
            InvocationSubscriptionRead::Event && delivered.sequence == 5);

@@ -96,19 +96,24 @@ std::shared_ptr<SkillServices> SkillServices::from_env() {
 }
 
 std::shared_ptr<SkillServices> SkillServices::from_cursor_default_skill_roots() {
+    return from_default_skill_roots();
+}
+
+std::shared_ptr<SkillServices> SkillServices::from_default_skill_roots() {
     const std::filesystem::path home = user_home_directory();
-    if (home.empty()) {
-        return nullptr;
-    }
     std::vector<std::filesystem::path> roots;
     std::error_code ec;
-    const std::filesystem::path a = home / ".cursor" / "skills";
-    const std::filesystem::path b = home / ".cursor" / "skills-cursor";
-    if (std::filesystem::is_directory(a, ec)) {
-        roots.push_back(a);
-    }
-    if (std::filesystem::is_directory(b, ec)) {
-        roots.push_back(b);
+    const auto workspace = workspace_root_from_env();
+    const std::vector<std::filesystem::path> candidates = {
+        workspace / ".agents" / "skills", workspace / ".claude" / "skills",
+        workspace / ".cursor" / "skills", workspace / ".codex" / "skills",
+        home / ".agents" / "skills", home / ".claude" / "skills",
+        home / ".cursor" / "skills", home / ".cursor" / "skills-cursor",
+        home / ".codex" / "skills"};
+    for (const auto& candidate : candidates) {
+        ec.clear();
+        if (!candidate.empty() && std::filesystem::is_directory(candidate, ec) &&
+            std::find(roots.begin(), roots.end(), candidate) == roots.end()) roots.push_back(candidate);
     }
     if (roots.empty()) {
         const auto authoring = authoring_root_from_env();
@@ -126,7 +131,7 @@ std::shared_ptr<SkillServices> SkillServices::from_cursor_default_skill_roots() 
         svc->registry = std::move(reg);
         svc->loader = std::move(loader);
         svc->runtime = std::make_shared<SkillRuntime>(svc->registry, svc->loader);
-        const auto cache = wire_resource_services(svc, home / ".cursor");
+        const auto cache = wire_resource_services(svc, home.empty() ? workspace : home / ".cache" / "agent-framework");
         svc->manager = std::make_shared<SkillManager>(svc->registry, svc->loader, svc->runtime,
                                                       authoring);
         svc->resources = std::make_shared<SessionResourceContext>(

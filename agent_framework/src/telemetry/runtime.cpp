@@ -42,6 +42,10 @@ TelemetryRuntime::TelemetryRuntime(std::shared_ptr<TelemetrySink> sink, Telemetr
     : sink_(std::move(sink)), policy_(std::move(policy)) {
     if(!sink_) throw std::invalid_argument("telemetry sink is required");
 }
+bool TelemetryRuntime::allows_attribute(std::string_view key) const {
+    return std::find(policy_.allowed_attribute_keys.begin(), policy_.allowed_attribute_keys.end(), key) !=
+           policy_.allowed_attribute_keys.end();
+}
 
 bool TelemetryRuntime::attributes_safe(
     const std::map<std::string, std::string>& attributes, std::string* error) const {

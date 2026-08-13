@@ -100,14 +100,16 @@ namespace agent_framework::agent_template
             if (sqlite::step(q.get()) == SQLITE_ROW)
                 version = sqlite::column_int(q.get(), 0);
         }
-        if (version > 1)
+        if (version > 2)
             throw std::runtime_error("agent template registry schema is newer than binary");
         if (version == 0)
         {
             sqlite::exec(db, "CREATE TABLE agent_templates(tenant_id TEXT NOT NULL,template_id TEXT NOT NULL,revision INTEGER NOT NULL,digest TEXT NOT NULL,document_json TEXT NOT NULL,created_at TEXT NOT NULL DEFAULT(strftime('%Y-%m-%dT%H:%M:%fZ','now')),PRIMARY KEY(tenant_id,template_id,revision))");
             sqlite::exec(db, "CREATE TABLE agent_template_invocations(tenant_id TEXT NOT NULL,invocation_id TEXT NOT NULL,store_revision INTEGER NOT NULL,digest TEXT NOT NULL,document_json TEXT NOT NULL,updated_at TEXT NOT NULL DEFAULT(strftime('%Y-%m-%dT%H:%M:%fZ','now')),PRIMARY KEY(tenant_id,invocation_id))");
             sqlite::exec(db, "INSERT INTO agent_template_schema VALUES(1,strftime('%Y-%m-%dT%H:%M:%fZ','now'))");
+            version=1;
         }
+        if(version==1){sqlite::exec(db,"CREATE TABLE agent_template_execution_checkpoints(tenant_id TEXT NOT NULL,invocation_id TEXT NOT NULL,revision INTEGER NOT NULL,digest TEXT NOT NULL,snapshot_json TEXT NOT NULL,updated_at TEXT NOT NULL DEFAULT(strftime('%Y-%m-%dT%H:%M:%fZ','now')),PRIMARY KEY(tenant_id,invocation_id))");sqlite::exec(db,"INSERT INTO agent_template_schema VALUES(2,strftime('%Y-%m-%dT%H:%M:%fZ','now'))");}
         tx.commit();
     }
 
@@ -218,4 +220,12 @@ namespace agent_framework::agent_template
             throw std::runtime_error("stored invocation is corrupt");
         return StoredInvocation{std::move(*v), sqlite::column_uint64(q.get(), 0), sqlite::column_text(q.get(), 2)};
     }
+    RegistryResult SQLiteAgentTemplateRegistry::save_execution_checkpoint(const StoredExecutionCheckpoint&v,std::uint64_t expected){
+        if(v.tenant_id.empty()||v.invocation_id.empty()||!v.snapshot.is_object())return {RegistryStatus::Invalid,0,{},"checkpoint identity and object required"};
+        auto snapshot=v.snapshot;const auto digest=contracts::canonical_digest(snapshot).value_or("");if(digest.empty())return {RegistryStatus::Invalid,0,{},"checkpoint digest unavailable"};
+        std::lock_guard lock(mutex_);auto*db=sqlite::database(db_);
+        if(expected==0){sqlite::Statement s(db,"INSERT INTO agent_template_execution_checkpoints(tenant_id,invocation_id,revision,digest,snapshot_json) VALUES(?,?,?,?,?)");sqlite::bind_text(s.get(),1,v.tenant_id);sqlite::bind_text(s.get(),2,v.invocation_id);sqlite::bind_uint64(s.get(),3,1);sqlite::bind_text(s.get(),4,digest);sqlite::bind_text(s.get(),5,contracts::canonical_json(snapshot));const auto code=sqlite::step(s.get());if(code==SQLITE_CONSTRAINT)return {RegistryStatus::RevisionConflict,0,{},"checkpoint exists"};if(code!=SQLITE_DONE)return failure(db,code);return {RegistryStatus::Committed,1,digest,{}};}
+        sqlite::Statement s(db,"UPDATE agent_template_execution_checkpoints SET revision=revision+1,digest=?,snapshot_json=?,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE tenant_id=? AND invocation_id=? AND revision=?");sqlite::bind_text(s.get(),1,digest);sqlite::bind_text(s.get(),2,contracts::canonical_json(snapshot));sqlite::bind_text(s.get(),3,v.tenant_id);sqlite::bind_text(s.get(),4,v.invocation_id);sqlite::bind_uint64(s.get(),5,expected);const auto code=sqlite::step(s.get());if(code!=SQLITE_DONE)return failure(db,code);if(sqlite::changes(db)!=1)return {RegistryStatus::RevisionConflict,expected,{},"checkpoint CAS conflict"};return {RegistryStatus::Committed,expected+1,digest,{}};}
+    std::optional<StoredExecutionCheckpoint> SQLiteAgentTemplateRegistry::load_execution_checkpoint(std::string_view tenant,std::string_view id){std::lock_guard lock(mutex_);sqlite::Statement q(sqlite::database(db_),"SELECT revision,digest,snapshot_json,updated_at FROM agent_template_execution_checkpoints WHERE tenant_id=? AND invocation_id=?");sqlite::bind_text(q.get(),1,tenant);sqlite::bind_text(q.get(),2,id);if(sqlite::step(q.get())!=SQLITE_ROW)return {};auto snapshot=json::parse(sqlite::column_text(q.get(),2));const auto digest=sqlite::column_text(q.get(),1);if(contracts::canonical_digest(snapshot).value_or("")!=digest)throw std::runtime_error("stored execution checkpoint digest mismatch");return StoredExecutionCheckpoint{std::string(tenant),std::string(id),sqlite::column_uint64(q.get(),0),std::move(snapshot),digest,sqlite::column_text(q.get(),3)};}
+    RegistryResult SQLiteAgentTemplateRegistry::clear_execution_checkpoint(std::string_view tenant,std::string_view id,std::uint64_t expected){std::lock_guard lock(mutex_);auto*db=sqlite::database(db_);sqlite::Statement s(db,"DELETE FROM agent_template_execution_checkpoints WHERE tenant_id=? AND invocation_id=? AND revision=?");sqlite::bind_text(s.get(),1,tenant);sqlite::bind_text(s.get(),2,id);sqlite::bind_uint64(s.get(),3,expected);const auto code=sqlite::step(s.get());if(code!=SQLITE_DONE)return failure(db,code);if(sqlite::changes(db)!=1)return {RegistryStatus::RevisionConflict,expected,{},"checkpoint CAS conflict"};return {RegistryStatus::Committed,expected+1,{}, {}};}
 } // namespace agent_framework::agent_template

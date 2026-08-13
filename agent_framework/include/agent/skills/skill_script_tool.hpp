@@ -15,6 +15,8 @@ namespace agent_framework {
  * **幂等**：同一 `ToolBus` 上已注册 `run_skill_script` 时直接返回（便于 REPL 每行重建图）。
  */
 void register_skill_script_tool(ToolBus& bus, const std::shared_ptr<SkillServices>& services);
+/** Canonical progressive-disclosure Skill discovery/read tool. */
+void register_skill_discovery_tool(ToolBus& bus, const std::shared_ptr<SkillServices>& services);
 
 } // namespace agent_framework
 

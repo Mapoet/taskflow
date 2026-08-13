@@ -624,6 +624,14 @@ int main(int argc, char** argv) {
         res.set_content(Phase4OperationsProjection::to_json(*operations).dump(),
                         "application/json");
     });
+    svr.Get("/ui/bootstrap", [&](const httplib::Request&, httplib::Response& res) {
+        const auto skills=example::skill_ui_status(deps.skills);
+        const char* provider=std::getenv("AGENT_LLM_PROVIDER");
+        res.set_header("Cache-Control","no-store");
+        res.set_content(json{{"runtime",{{"session","orbital-analysis"},{"provider",provider&&*provider?provider:"OpenAI"},{"model",cfg.model_config.model_name.empty()?"provider default":cfg.model_config.model_name},{"connection","Core tools ready"},{"execution_path",runtime.harness_ready?"harness":"fail_closed"}}},
+            {"skills_status",{{"enabled",skills.enabled},{"count",skills.count},{"generation",skills.generation},{"diagnostics",skills.diagnostics},{"errors",skills.errors},{"root",skills.root},{"active",skills.active}}},
+            {"composition",runtime.composition_report}}.dump(),"application/json");
+    });
 
     svr.Get("/ui/sse", [web_h, &emit_bootstrap](const httplib::Request& req, httplib::Response& res) {
         std::string session = req.get_param_value("session");

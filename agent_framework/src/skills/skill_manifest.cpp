@@ -388,7 +388,13 @@ SkillManifestParseResult parse_skill_manifest_yaml(const std::string& yaml) {
             json values = root[key].is_array() ? root[key] : json::array({root[key]});
             for (const auto& value : values) m.resources.push_back(descriptor(value, kind));
         }
-        if (root.contains("allowed-tools")) m.permissions.tools = strings(root["allowed-tools"]);
+    }
+    if (root.contains("allowed-tools")) {
+        const auto portable = strings(root["allowed-tools"]);
+        for (const auto& name : portable) {
+            if (std::find(m.permissions.tools.begin(), m.permissions.tools.end(), name) ==
+                m.permissions.tools.end()) m.permissions.tools.push_back(name);
+        }
     }
     const std::unordered_set<std::string> known = {
         "api-version","api_version","kind","name","id","version","description","license",

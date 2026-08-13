@@ -6,6 +6,7 @@
 #include <agent/toolbus/fs_sandbox.hpp>
 #include <agent/toolbus/fs_tools.hpp>
 #include <agent/context_budget/context_budget.hpp>
+#include <agent/contracts/contract.hpp>
 #include <agent/internal/platform_io.hpp>
 
 #include <algorithm>
@@ -20,6 +21,19 @@ namespace agent_framework {
 namespace fs = std::filesystem;
 
 namespace {
+
+std::string content_revision(std::string_view content) {
+    return contracts::embedded_digest(json{{"content", content}}).value_or("");
+}
+
+std::optional<json> revision_conflict(const json& args, std::string_view current) {
+    if (!args.contains("expected_revision")) return std::nullopt;
+    if (!args.at("expected_revision").is_string() ||
+        args.at("expected_revision").get<std::string>() != current) {
+        return fs_tool_error("revision_conflict", "file changed since it was read");
+    }
+    return std::nullopt;
+}
 
 bool utf8_validate(std::string_view s) {
     std::size_t i = 0;
@@ -219,7 +233,14 @@ struct FsToolsState {
         if (!utf8_validate(content)) {
             return fs_tool_error("invalid_utf8", "file is not valid UTF-8; use mode binary_preview");
         }
-        return json{{"content", content}};
+        std::size_t offset = j.value("offset", 0U);
+        if (offset > content.size()) offset = content.size();
+        std::size_t limit = j.value("limit", content.size() - offset);
+        limit = std::min(limit, content.size() - offset);
+        return json{{"content", content.substr(offset, limit)},
+                    {"offset", offset}, {"bytes", limit},
+                    {"truncated", offset + limit < content.size()},
+                    {"revision", content_revision(content)}};
     }
 
     json do_write(const json& j) const {
@@ -242,6 +263,9 @@ struct FsToolsState {
                 return fs_tool_error("confirm_required",
                                      "file exists; set confirm_overwrite true to replace");
             }
+            std::ifstream current_in(path->string(), std::ios::binary);
+            const std::string current((std::istreambuf_iterator<char>(current_in)), {});
+            if (auto conflict = revision_conflict(j, content_revision(current))) return *conflict;
         }
         if (fs::exists(*path, ec) && fs::is_directory(*path, ec)) {
             return fs_tool_error("is_directory", "cannot write to a directory path");
@@ -268,7 +292,7 @@ struct FsToolsState {
             fs::remove(tmp, ec);
             return fs_tool_error("rename_failed", ec.message());
         }
-        return json{{"written", true}};
+        return json{{"written", true}, {"revision", content_revision(content)}};
     }
 
     json do_list_dir(const json& j) const {
@@ -349,56 +373,81 @@ struct FsToolsState {
         if (!path) {
             return err;
         }
-        const bool parents =
-            j.contains("parents") && j["parents"].is_boolean() && j["parents"].get<bool>();
+        const bool parents = j.value("parents", false);
+        const bool exist_ok = j.value("exist_ok", false);
         std::error_code ec;
+        if (fs::exists(*path, ec)) {
+            if (!fs::is_directory(*path, ec)) return fs_tool_error("path_exists", "path exists and is not a directory");
+            if (!exist_ok) return fs_tool_error("already_exists", path_str);
+            return json{{"created", false}, {"path", fs::relative(*path, cfg.root, ec).generic_string()}};
+        }
+        bool created = false;
         if (parents) {
-            fs::create_directories(*path, ec);
+            created = fs::create_directories(*path, ec);
         } else {
-            fs::create_directory(*path, ec);
+            created = fs::create_directory(*path, ec);
         }
         if (ec) {
             return fs_tool_error("mkdir_failed", ec.message());
         }
-        return json{{"created", true}};
+        return json{{"created", created}, {"path", fs::relative(*path, cfg.root, ec).generic_string()}};
     }
 
-    json do_delete(const json& j) const {
+    json do_touch(const json& j) const {
         json err = json::object();
-        const bool confirm = j.contains("confirm") && j["confirm"].is_boolean() && j["confirm"].get<bool>();
-        if (!confirm) {
-            return fs_tool_error("confirm_required", "confirm must be true");
-        }
         const std::string path_str = j.at("path").get<std::string>();
         std::optional<fs::path> path = fs_resolve_under_root(path_str, cfg.root, err);
-        if (!path) {
-            return err;
-        }
-        if (j.contains("expected_type") && j["expected_type"].is_string()) {
-            const std::string et = j["expected_type"].get<std::string>();
-            std::error_code ec;
-            if (et == "file" && !fs::is_regular_file(*path, ec)) {
-                return fs_tool_error("type_mismatch", "expected file");
-            }
-            if (et == "dir" && !fs::is_directory(*path, ec)) {
-                return fs_tool_error("type_mismatch", "expected dir");
-            }
-        }
+        if (!path) return err;
         std::error_code ec;
+        const bool exists = fs::exists(*path, ec);
+        if (exists && !fs::is_regular_file(*path, ec)) return fs_tool_error("not_a_file", path_str);
+        if (!exists && !j.value("create", true)) return fs_tool_error("not_found", path_str);
+        if (!exists && !fs::exists(path->parent_path(), ec)) return fs_tool_error("parent_missing", "parent directory does not exist");
+        std::string content;
+        if (exists) {
+            std::ifstream in(path->string(), std::ios::binary);
+            content.assign(std::istreambuf_iterator<char>(in), {});
+            if (auto conflict = revision_conflict(j, content_revision(content))) return *conflict;
+        } else {
+            std::ofstream out(path->string(), std::ios::binary);
+            if (!out) return fs_tool_error("touch_failed", "cannot create file");
+        }
+        if (j.value("update_mtime", true)) {
+            fs::last_write_time(*path, fs::file_time_type::clock::now(), ec);
+            if (ec) return fs_tool_error("touch_failed", ec.message());
+        }
+        return json{{"touched", true}, {"created", !exists}, {"revision", content_revision(content)}};
+    }
+
+    json do_remove(const json& j) const {
+        json err = json::object();
+        if (!j.value("confirm_remove", false))
+            return fs_tool_error("confirm_required", "confirm_remove must be true");
+        const std::string path_str = j.at("path").get<std::string>();
+        const fs::path raw = fs::path(path_str).is_absolute() ? fs::path(path_str) : cfg.root / path_str;
+        std::error_code ec;
+        if (fs::is_symlink(fs::symlink_status(raw, ec)))
+            return fs_tool_error("symlink_refused", "Remove refuses symbolic links");
+        std::optional<fs::path> path = fs_resolve_under_root(path_str, cfg.root, err);
+        if (!path) return err;
+        if (fs::equivalent(*path, cfg.root, ec))
+            return fs_tool_error("root_remove_refused", "cannot remove AGENT_FS_ROOT");
         if (fs::is_regular_file(*path, ec)) {
+            std::ifstream in(path->string(), std::ios::binary);
+            const std::string content((std::istreambuf_iterator<char>(in)), {});
+            if (auto conflict = revision_conflict(j, content_revision(content))) return *conflict;
             if (!fs::remove(*path, ec)) {
-                return fs_tool_error("delete_failed", ec.message());
+                return fs_tool_error("remove_failed", ec.message());
             }
-            return json{{"deleted", true}};
+            return json{{"removed", true}, {"count", 1}};
         }
         if (fs::is_directory(*path, ec)) {
-            if (fs::is_empty(*path, ec)) {
-                if (!fs::remove(*path, ec)) {
-                    return fs_tool_error("delete_failed", ec.message());
-                }
-                return json{{"deleted", true}};
-            }
-            return fs_tool_error("directory_not_empty", "only empty directories can be deleted");
+            if (!fs::is_empty(*path, ec) && !j.value("recursive", false))
+                return fs_tool_error("directory_not_empty", "recursive=true is required");
+            const auto count = j.value("recursive", false) ? fs::remove_all(*path, ec)
+                                                             : (fs::remove(*path, ec) ? 1U : 0U);
+            if (ec || count == 0) return fs_tool_error("remove_failed", ec.message());
+            return json{{"removed", true}, {"count", count}};
         }
         return fs_tool_error("not_found", path_str);
     }
@@ -631,6 +680,7 @@ struct FsToolsState {
         if (!utf8_validate(content)) {
             return fs_tool_error("invalid_utf8", "file must be UTF-8 text for fs_replace");
         }
+        if (auto conflict = revision_conflict(j, content_revision(content))) return *conflict;
         if (old_s.empty()) {
             return fs_tool_error("invalid_old_string", "old_string must be non-empty");
         }
@@ -698,7 +748,8 @@ struct FsToolsState {
             fs::remove(tmp, ec);
             return fs_tool_error("rename_failed", ec.message());
         }
-        return json{{"replaced", true}, {"match_count", positions.size()}};
+        return json{{"replaced", true}, {"match_count", positions.size()},
+                    {"revision", content_revision(out_content)}};
     }
 };
 
@@ -707,7 +758,7 @@ static void register_fs_tools_impl(ToolBus& bus, const FsSandboxConfig& cfg) {
 
     {
         ToolMeta meta;
-        meta.name = "fs_read";
+        meta.name = "Read";
         meta.description =
             "Read a file under AGENT_FS_ROOT. mode utf8 (default) or binary_preview (hex).";
         meta.schema = json::parse(R"({
@@ -715,7 +766,9 @@ static void register_fs_tools_impl(ToolBus& bus, const FsSandboxConfig& cfg) {
             "properties": {
                 "path": {"type": "string"},
                 "max_bytes": {"type": "integer"},
-                "mode": {"type": "string"}
+                "mode": {"type": "string"},
+                "offset": {"type": "integer", "minimum": 0},
+                "limit": {"type": "integer", "minimum": 0}
             },
             "required": ["path"]
         })");
@@ -723,13 +776,13 @@ static void register_fs_tools_impl(ToolBus& bus, const FsSandboxConfig& cfg) {
         meta.permission_targets.push_back(
             {ToolMeta::PermissionTargetKind::FilesystemRead, "path", cfg.root.string(), {}});
         bus.register_local_tool(
-            "fs_read",
+            "Read",
             [state](const json& j) { return state->do_read(j); },
             meta);
     }
     {
         ToolMeta meta;
-        meta.name = "fs_write";
+        meta.name = "Write";
         meta.description = "Write content to a file atomically under AGENT_FS_ROOT. confirm_overwrite "
                            "required if file exists.";
         meta.schema = json::parse(R"({
@@ -737,7 +790,8 @@ static void register_fs_tools_impl(ToolBus& bus, const FsSandboxConfig& cfg) {
             "properties": {
                 "path": {"type": "string"},
                 "content": {"type": "string"},
-                "confirm_overwrite": {"type": "boolean"}
+                "confirm_overwrite": {"type": "boolean"},
+                "expected_revision": {"type": "string"}
             },
             "required": ["path", "content"]
         })");
@@ -745,13 +799,13 @@ static void register_fs_tools_impl(ToolBus& bus, const FsSandboxConfig& cfg) {
         meta.permission_targets.push_back(
             {ToolMeta::PermissionTargetKind::FilesystemWrite, "path", cfg.root.string(), {}});
         bus.register_local_tool(
-            "fs_write",
+            "Write",
             [state](const json& j) { return state->do_write(j); },
             meta);
     }
     {
         ToolMeta meta;
-        meta.name = "fs_list_dir";
+        meta.name = "LS";
         meta.description = "List directory entries under AGENT_FS_ROOT (recursive up to depth).";
         meta.schema = json::parse(R"({
             "type": "object",
@@ -766,19 +820,35 @@ static void register_fs_tools_impl(ToolBus& bus, const FsSandboxConfig& cfg) {
         meta.permission_targets.push_back(
             {ToolMeta::PermissionTargetKind::FilesystemRead, "path", cfg.root.string(), {}});
         bus.register_local_tool(
-            "fs_list_dir",
+            "LS",
             [state](const json& j) { return state->do_list_dir(j); },
             meta);
     }
     {
         ToolMeta meta;
-        meta.name = "fs_mkdir";
+        meta.name = "Cat";
+        meta.description = "Read one UTF-8 file inside the workspace jail (portable cat profile).";
+        meta.schema = json::parse(R"({
+            "type":"object",
+            "properties":{"path":{"type":"string"},"max_bytes":{"type":"integer"},
+                          "mode":{"type":"string"}},
+            "required":["path"]
+        })");
+        meta.side_effect = ToolSideEffect::ReadOnly;
+        meta.permission_targets.push_back(
+            {ToolMeta::PermissionTargetKind::FilesystemRead, "path", cfg.root.string(), {}});
+        bus.register_local_tool("Cat", [state](const json& j) { return state->do_read(j); }, meta);
+    }
+    {
+        ToolMeta meta;
+        meta.name = "Mkdir";
         meta.description = "Create directory under AGENT_FS_ROOT. parents=true for mkdir -p.";
         meta.schema = json::parse(R"({
             "type": "object",
             "properties": {
                 "path": {"type": "string"},
-                "parents": {"type": "boolean"}
+                "parents": {"type": "boolean"},
+                "exist_ok": {"type": "boolean"}
             },
             "required": ["path"]
         })");
@@ -786,35 +856,52 @@ static void register_fs_tools_impl(ToolBus& bus, const FsSandboxConfig& cfg) {
         meta.permission_targets.push_back(
             {ToolMeta::PermissionTargetKind::FilesystemWrite, "path", cfg.root.string(), {}});
         bus.register_local_tool(
-            "fs_mkdir",
+            "Mkdir",
             [state](const json& j) { return state->do_mkdir(j); },
             meta);
     }
     {
         ToolMeta meta;
-        meta.name = "fs_delete";
-        meta.description =
-            "Delete file or empty directory under AGENT_FS_ROOT. confirm must be true.";
+        meta.name = "Touch";
+        meta.description = "Create a file or update its timestamp inside AGENT_FS_ROOT.";
         meta.schema = json::parse(R"({
             "type": "object",
             "properties": {
                 "path": {"type": "string"},
-                "confirm": {"type": "boolean"},
-                "expected_type": {"type": "string"}
+                "create": {"type": "boolean"},
+                "update_mtime": {"type": "boolean"},
+                "expected_revision": {"type": "string"}
             },
-            "required": ["path", "confirm"]
+            "required": ["path"]
         })");
         meta.side_effect = ToolSideEffect::Write;
         meta.permission_targets.push_back(
             {ToolMeta::PermissionTargetKind::FilesystemWrite, "path", cfg.root.string(), {}});
         bus.register_local_tool(
-            "fs_delete",
-            [state](const json& j) { return state->do_delete(j); },
+            "Touch",
+            [state](const json& j) { return state->do_touch(j); },
             meta);
     }
     {
         ToolMeta meta;
-        meta.name = "fs_search";
+        meta.name = "Remove";
+        meta.description = "Remove a file or directory inside AGENT_FS_ROOT with explicit confirmation.";
+        meta.schema = json::parse(R"({
+            "type":"object",
+            "properties":{"path":{"type":"string"},"recursive":{"type":"boolean"},
+                          "confirm_remove":{"type":"boolean"},"expected_revision":{"type":"string"}},
+            "required":["path","confirm_remove"]
+        })");
+        meta.side_effect = ToolSideEffect::Write;
+        meta.permission_targets.push_back(
+            {ToolMeta::PermissionTargetKind::FilesystemWrite, "path", cfg.root.string(), {}});
+        bus.register_local_tool(
+            "Remove", [state](const json& j) { return state->do_remove(j); },
+            meta);
+    }
+    {
+        ToolMeta meta;
+        meta.name = "Glob";
         meta.description =
             "Find files matching glob pattern (relative to root). Optional exclude_glob.";
         meta.schema = json::parse(R"({
@@ -830,13 +917,13 @@ static void register_fs_tools_impl(ToolBus& bus, const FsSandboxConfig& cfg) {
         meta.permission_targets.push_back(
             {ToolMeta::PermissionTargetKind::FilesystemRead, {}, cfg.root.string(), cfg.root.string()});
         bus.register_local_tool(
-            "fs_search",
+            "Glob",
             [state](const json& j) { return state->do_search(j); },
             meta);
     }
     {
         ToolMeta meta;
-        meta.name = "fs_grep";
+        meta.name = "Grep";
         meta.description = "Search file contents with regex (UTF-8 lines; skips invalid UTF-8 lines).";
         meta.schema = json::parse(R"({
             "type": "object",
@@ -854,13 +941,13 @@ static void register_fs_tools_impl(ToolBus& bus, const FsSandboxConfig& cfg) {
         meta.permission_targets.push_back(
             {ToolMeta::PermissionTargetKind::FilesystemRead, "root_path", cfg.root.string(), {}});
         bus.register_local_tool(
-            "fs_grep",
+            "Grep",
             [state](const json& j) { return state->do_grep(j); },
             meta);
     }
     {
         ToolMeta meta;
-        meta.name = "fs_replace";
+        meta.name = "Edit";
         meta.description =
             "Replace old_string with new_string in a UTF-8 file. dry_run default true; set "
             "confirm_write true when dry_run false.";
@@ -872,7 +959,8 @@ static void register_fs_tools_impl(ToolBus& bus, const FsSandboxConfig& cfg) {
                 "new_string": {"type": "string"},
                 "replace_all": {"type": "boolean"},
                 "dry_run": {"type": "boolean"},
-                "confirm_write": {"type": "boolean"}
+                "confirm_write": {"type": "boolean"},
+                "expected_revision": {"type": "string"}
             },
             "required": ["path", "old_string", "new_string"]
         })");
@@ -880,14 +968,42 @@ static void register_fs_tools_impl(ToolBus& bus, const FsSandboxConfig& cfg) {
         meta.permission_targets.push_back(
             {ToolMeta::PermissionTargetKind::FilesystemWrite, "path", cfg.root.string(), {}});
         bus.register_local_tool(
-            "fs_replace",
+            "Edit",
             [state](const json& j) { return state->do_replace(j); },
             meta);
+    }
+    {
+        ToolMeta meta;
+        meta.name = "Sed";
+        meta.description =
+            "Safely replace literal text in one UTF-8 workspace file. Preview is the default; "
+            "write=true requires confirm_write=true.";
+        meta.schema = json::parse(R"({
+            "type":"object",
+            "properties":{"path":{"type":"string"},"pattern":{"type":"string"},
+                          "replacement":{"type":"string"},"global":{"type":"boolean"},
+                          "write":{"type":"boolean"},"confirm_write":{"type":"boolean"},
+                          "expected_revision":{"type":"string"}},
+            "required":["path","pattern","replacement"]
+        })");
+        meta.side_effect = ToolSideEffect::Write;
+        meta.permission_targets.push_back(
+            {ToolMeta::PermissionTargetKind::FilesystemWrite, "path", cfg.root.string(), {}});
+        bus.register_local_tool("Sed", [state](const json& j) {
+            json adapted{{"path",j.at("path")},{"old_string",j.at("pattern")},
+                         {"new_string",j.at("replacement")},
+                         {"replace_all",j.value("global",false)},
+                         {"dry_run",!j.value("write",false)},
+                         {"confirm_write",j.value("confirm_write",false)}};
+            if (j.contains("expected_revision"))
+                adapted["expected_revision"] = j.at("expected_revision");
+            return state->do_replace(adapted);
+        }, meta);
     }
 }
 
 void register_builtin_fs_tools_if_configured(ToolBus& bus) {
-    if (bus.get_tool_info("fs_read").has_value()) {
+    if (bus.get_tool_info("Read").has_value()) {
         return;
     }
     std::optional<FsSandboxConfig> cfg = load_fs_sandbox_config_from_env();
@@ -895,6 +1011,15 @@ void register_builtin_fs_tools_if_configured(ToolBus& bus) {
         return;
     }
     register_fs_tools_impl(bus, *cfg);
+    bus.register_tool_alias("fs_read", "Read");
+    bus.register_tool_alias("fs_write", "Write");
+    bus.register_tool_alias("fs_list_dir", "LS");
+    bus.register_tool_alias("fs_search", "Glob");
+    bus.register_tool_alias("fs_grep", "Grep");
+    bus.register_tool_alias("fs_replace", "Edit");
+    bus.register_tool_alias("fs_mkdir", "Mkdir");
+    bus.register_tool_alias("fs_touch", "Touch");
+    bus.register_tool_alias("fs_delete", "Remove");
 }
 
 } // namespace agent_framework

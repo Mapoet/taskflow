@@ -35,6 +35,25 @@ public:
 private:std::shared_ptr<ToolBus> bus_;std::string id_,revision_,generation_;ExecutionAdapterKind kind_;
 };
 
+/** Durable typed network adapter. Wget resumes from its .part/ETag checkpoint;
+ * Curl is fail-closed on process loss because a remote mutation may be uncertain. */
+class NetworkToolExecutionAdapter final:public AsyncExecutionAdapter
+{
+public:
+    NetworkToolExecutionAdapter(std::shared_ptr<ToolBus>,std::string tool_name,
+                                std::string revision,std::string generation);
+    std::string id()const override{return id_;}std::string revision()const override{return revision_;}
+    std::string deployment_generation()const override{return generation_;}
+    ExecutionAdapterKind kind()const noexcept override{return ExecutionAdapterKind::HTTP;}
+    AdapterOrigin origin()const noexcept override{return AdapterOrigin::Production;}
+    ExecutionAdapterCapabilities capabilities()const noexcept override{return {false,true,true,tool_name_=="Wget",true,true,true};}
+    RestartPolicy restart_policy()const noexcept override{return tool_name_=="Wget"?RestartPolicy::RestartFromCheckpoint:RestartPolicy::ManualReview;}
+    std::optional<ExecutionHandle> start(const ExecutionRequest&,std::string*)override;
+    ReconciliationResult reconcile(const ExecutionRequest&,const ExecutionHandle&)override;
+private:
+    std::shared_ptr<ToolBus> bus_;std::string tool_name_,id_,revision_,generation_;
+};
+
 class BubblewrapExecutionAdapter final:public AsyncExecutionAdapter
 {
 public:

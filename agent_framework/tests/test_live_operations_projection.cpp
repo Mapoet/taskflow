@@ -56,6 +56,17 @@ int main() {
     assert(after_restart.source_revisions.back().revision == 3);
     assert(after_restart.invocations.back().status == OperationsStatus::Failed);
     assert(after_restart.overall_status == OperationsStatus::Warning);
+    tool_runtime::InvocationEvent queued;
+    queued.invocation_id="durable-1";queued.event_type="queued";queued.sequence=1;
+    queued.payload={{"tool_name","Bash"}};queued.event_digest="sha256:q";queued.created_at="2026-08-14T00:00:00Z";
+    recovered.observe_invocation(queued);
+    auto progress=queued;progress.event_type="progress";progress.sequence=2;
+    progress.payload={{"tool_name","Bash"},{"fraction",0.5}};progress.event_digest="sha256:p";
+    recovered.observe_invocation(progress);recovered.observe_invocation(progress);
+    auto durable=recovered.snapshot();
+    assert(durable.invocations.back().id=="durable-1"&&durable.summary.find("50.000000%")!=std::string::npos);
+    auto durable_source=std::find_if(durable.source_revisions.begin(),durable.source_revisions.end(),[](const auto& x){return x.store=="tool_invocation_events";});
+    assert(durable_source!=durable.source_revisions.end()&&durable_source->revision==2);
     fs::remove_all(root, ec);
     return 0;
 }

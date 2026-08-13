@@ -78,6 +78,19 @@ bool TelemetryLLMInvocationObserver::observe(
         {"agent.invocation.manifest_digest",
          contracts::canonical_digest(llm_runtime::encode(manifest)).value_or("")}
     };
+    nlohmann::json attempts=nlohmann::json::array();
+    for(const auto& attempt:manifest.attempts) attempts.push_back({
+        {"sequence",attempt.sequence},{"candidate_id",attempt.candidate_id},
+        {"provider",attempt.provider},{"model",attempt.model},{"fallback",attempt.fallback},
+        {"failure_class",llm_runtime::failure_class_name(attempt.failure_class)},
+        {"error_code",attempt.error_code}});
+    const auto optional_attribute=[&](std::string key,std::string value){if(telemetry_.allows_attribute(key))span.attributes.emplace(std::move(key),std::move(value));};
+    optional_attribute("agent.route.selected_candidate",manifest.candidate_id);
+    optional_attribute("agent.route.attempts",attempts.dump());
+    optional_attribute("gen_ai.usage.source",manifest.usage.source);
+    optional_attribute("gen_ai.usage.unknown_reason",manifest.usage.unknown_reason);
+    optional_attribute("agent.input.digest",manifest.input_digest);
+    optional_attribute("agent.output.digest",manifest.output_digest);
     if(!telemetry_.emit_span(std::move(span), error)) return false;
     auto emit = [&](std::string name, double value, std::string unit) {
         telemetry::MetricResult metric;
