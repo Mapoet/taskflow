@@ -16,6 +16,12 @@ ProductionDependencyReport validate_production_dependencies(
     require(d.run_harness_saga, "run_harness_saga"); require(d.input_repository, "input_repository");
     require(d.cross_store_coordinator, "cross_store_coordinator");
     require(d.plan_store, "plan_store"); require(d.llm_store != nullptr, "llm_store");
+    require(d.long_task_store, "long_task_store");
+    require(d.invocation_store, "invocation_store");
+    require(d.plan_node_input_repository, "plan_node_input_repository");
+    require(d.plan_node_executor_registry, "plan_node_executor_registry");
+    require(d.long_task_workflow, "long_task_workflow");
+    require(d.long_task_timer_worker, "long_task_timer_worker");
     require(d.role_runtime != nullptr, "role_runtime"); require(d.telemetry != nullptr, "telemetry");
     require(d.approval_store, "approval_store"); require(d.sandbox_provider, "sandbox_provider");
     require(d.artifact_executor, "artifact_executor"); require(d.oracle_registry, "oracle_registry");
@@ -40,6 +46,9 @@ ProductionDependencyReport validate_production_dependencies(
     if(d.role_runtime && d.llm_store && d.role_runtime->store().get()!=d.llm_store.get())
         report.issues.push_back({"llm_store_identity_mismatch", "role_runtime",
             "RoleRuntime must use the declared durable LLM store"});
+    if(d.plan_node_executor_registry && !d.plan_node_executor_registry->production_ready())
+        report.issues.push_back({"plan_node_executor_registry_not_ready",
+            "plan_node_executor_registry", "at least one production-origin typed executor is required"});
     if(d.cross_store_coordinator) {
         const auto digest=d.cross_store_coordinator->capability_manifest_digest();
         if(digest.empty()) report.issues.push_back({"coordination_manifest_invalid",

@@ -4,6 +4,7 @@
 #include <string>
 
 #include "agent/harness/production_workflow_adapters.hpp"
+#include "agent/tool_runtime/long_task_workflow.hpp"
 
 namespace agent_framework::harness {
 
@@ -22,7 +23,8 @@ struct ProductionInputCommit {
 };
 
 class SQLiteProductionWorkflowInputRepository final
-    : public ProductionWorkflowInputRepository {
+    : public ProductionWorkflowInputRepository,
+      public tool_runtime::PlanNodeInputRepository {
 public:
     explicit SQLiteProductionWorkflowInputRepository(std::string path);
     ~SQLiteProductionWorkflowInputRepository() override;
@@ -47,6 +49,8 @@ public:
                                                std::uint64_t revision = 1);
     ProductionInputCommit put_evaluation_input(const JudgeWorkflowInput& value,
                                                std::uint64_t revision = 1);
+    ProductionInputCommit put_plan_node_descriptor(
+        const tool_runtime::PlanNodeExecutionDescriptor&, std::uint64_t revision = 1);
 
     std::optional<planning::TaskIntake> intake(const contracts::ContractIdentity&) override;
     std::optional<memory_v2::workflows::MemoryWorkflowInput> memory_input(
@@ -65,6 +69,9 @@ public:
         const contracts::ContractIdentity&, std::string_view artifact_digest) override;
     std::optional<JudgeWorkflowInput> evaluation_input(
         const contracts::ContractIdentity&) override;
+    std::optional<tool_runtime::PlanNodeExecutionDescriptor> descriptor(
+        const contracts::ContractIdentity&, std::string_view plan_digest,
+        std::string_view node_id) override;
 private:
     ProductionInputCommit put(std::string_view kind, const contracts::ContractIdentity& identity,
                               std::string_view lookup_digest, std::uint64_t revision,

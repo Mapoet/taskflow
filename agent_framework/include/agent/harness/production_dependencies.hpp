@@ -19,6 +19,7 @@
 #include "agent/sandbox/provider.hpp"
 #include "agent/telemetry/runtime.hpp"
 #include "agent/ui/store_backed_operations.hpp"
+#include "agent/tool_runtime/long_task_workflow.hpp"
 
 namespace agent_framework::harness {
 
@@ -29,6 +30,12 @@ struct ProductionCompositionDependencies {
     CrossStoreCoordinator* cross_store_coordinator{nullptr};
     ProductionWorkflowInputRepository* input_repository{nullptr};
     planning::PlanStore* plan_store{nullptr};
+    tool_runtime::LongTaskStore* long_task_store{nullptr};
+    tool_runtime::InvocationStore* invocation_store{nullptr};
+    tool_runtime::PlanNodeInputRepository* plan_node_input_repository{nullptr};
+    tool_runtime::PlanNodeExecutorRegistry* plan_node_executor_registry{nullptr};
+    tool_runtime::LongTaskWorkflow* long_task_workflow{nullptr};
+    tool_runtime::LongTaskTimerWorker* long_task_timer_worker{nullptr};
     std::shared_ptr<llm_runtime::LLMRuntimeStore> llm_store;
     std::shared_ptr<llm_runtime::RoleRuntime> role_runtime;
     std::shared_ptr<telemetry::TelemetryRuntime> telemetry;
