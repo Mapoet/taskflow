@@ -5,10 +5,10 @@
  * 实施契约（Milestone 1）摘要：
  * - AGENT_WEB_ENABLE 为真且编译启用 CPPHTTPLIB_OPENSSL_SUPPORT 时注册（HTTPS 工具链）。
  * - web_fetch：超体截断并 truncated；http 仅当 AGENT_WEB_ALLOW_HTTP。
- * - web_search：DuckDuckGo HTML，仅 *.duckduckgo.com 重定向。
+ * - web_search：默认 SearXNG JSON，可显式使用 DuckDuckGo；结果正文复用 web_fetch。
  */
 
-#include <agent/toolbus/web_search_ddg.hpp>
+#include <agent/toolbus/web_search.hpp>
 #include <agent/toolbus/web_tools.hpp>
 
 #include <cctype>
@@ -45,24 +45,6 @@ bool log_web_debug() {
     return s == "debug";
 }
 
-json web_search_invoke(const json& j) {
-    std::string q;
-    if (j.contains("query") && j["query"].is_string()) {
-        q = j["query"].get<std::string>();
-    }
-    int max_results = 10;
-    if (j.contains("max_results") && j["max_results"].is_number_integer()) {
-        max_results = j["max_results"].get<int>();
-    }
-    if (j.contains("site_filter") && j["site_filter"].is_string()) {
-        const std::string sf = j["site_filter"].get<std::string>();
-        if (!sf.empty()) {
-            q = "site:" + sf + " " + q;
-        }
-    }
-    return web_search_duckduckgo(q, max_results);
-}
-
 } // namespace
 
 void register_builtin_web_tools_if_configured(ToolBus& bus) {
@@ -85,22 +67,26 @@ void register_builtin_web_tools_if_configured(ToolBus& bus) {
         ToolMeta meta;
         meta.name = "web_search";
         meta.description =
-            "Search the web via DuckDuckGo HTML (html.duckduckgo.com). Returns title, url, snippet per "
-            "result; does not fetch full pages.";
+            "Search via configurable SearXNG (default) or DuckDuckGo, then safely fetch and extract "
+            "each result page. Provider fallback is explicit and disabled by default.";
         meta.schema = json::parse(R"({
             "type": "object",
             "properties": {
                 "query": {"type": "string"},
                 "max_results": {"type": "integer"},
-                "site_filter": {"type": "string"}
+                "site_filter": {"type": "string"},
+                "provider": {"type": "string", "enum": ["searxng", "duckduckgo"]},
+                "fetch_content": {"type": "boolean"},
+                "fetch_top_k": {"type": "integer"},
+                "content_max_bytes": {"type": "integer"}
             },
             "required": ["query"]
         })");
         meta.side_effect = ToolSideEffect::ReadOnly;
         meta.permission_targets.push_back(
-            {ToolMeta::PermissionTargetKind::Network, {}, {}, "https://html.duckduckgo.com"});
+            {ToolMeta::PermissionTargetKind::Network, {}, {}, "configured search provider and result URLs"});
         bus.register_local_tool(
-            "web_search", [](const json& args) { return web_search_invoke(args); }, meta);
+            "web_search", [](const json& args) { return web_search(args); }, meta);
     }
     {
         ToolMeta meta;

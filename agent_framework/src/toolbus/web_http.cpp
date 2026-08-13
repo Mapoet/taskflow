@@ -293,7 +293,7 @@ bool resolve_host_safe_for_ssrf(const std::string& host, const WebHttpConfig& cf
     if (!host_passes_allowlist(hlow, cfg.allow_hosts)) {
         return false;
     }
-    if (env_truthy(std::getenv("AGENT_WEB_TEST_ALLOW_LOOPBACK"))) {
+    if (cfg.allow_loopback || env_truthy(std::getenv("AGENT_WEB_TEST_ALLOW_LOOPBACK"))) {
         if (addrs_all_loopback(host)) {
             return true;
         }

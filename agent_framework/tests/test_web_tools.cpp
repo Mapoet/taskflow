@@ -10,6 +10,8 @@
 #include <agent/toolbus/fs_tools.hpp>
 #include <agent/toolbus/toolbus.hpp>
 #include <agent/toolbus/web_search_ddg.hpp>
+#include <agent/toolbus/web_search.hpp>
+#include <agent/toolbus/web_search_searxng.hpp>
 #include <agent/toolbus/web_tools.hpp>
 
 #include <cassert>
@@ -110,11 +112,11 @@ void run_live_ddg_search_samples(agent_framework::ToolBus& bus) {
         const char* tag;
         json args;
     } k_cases[] = {
-        {"q_xi_an", json{{"query", std::string("\xE8\xA5\xBF\xE5\xAE\x89", 6)}, {"max_results", 6}}},
-        {"en_taskflow", json{{"query", "taskflow cpp parallel"}, {"max_results", 6}}},
+        {"q_xi_an", json{{"query", std::string("\xE8\xA5\xBF\xE5\xAE\x89", 6)}, {"provider", "duckduckgo"}, {"fetch_content", false}, {"max_results", 6}}},
+        {"en_taskflow", json{{"query", "taskflow cpp parallel"}, {"provider", "duckduckgo"}, {"fetch_content", false}, {"max_results", 6}}},
         {"site_wikipedia_gnu",
-         json{{"query", "GNU"}, {"site_filter", "wikipedia.org"}, {"max_results", 4}}},
-        {"latin_short", json{{"query", "openstreetmap"}, {"max_results", 5}}},
+         json{{"query", "GNU"}, {"provider", "duckduckgo"}, {"fetch_content", false}, {"site_filter", "wikipedia.org"}, {"max_results", 4}}},
+        {"latin_short", json{{"query", "openstreetmap"}, {"provider", "duckduckgo"}, {"fetch_content", false}, {"max_results", 5}}},
     };
 
     for (const auto& c : k_cases) {
@@ -168,6 +170,22 @@ int main() {
         }
     }
 
+    const json searx_fixture = {
+        {"results", json::array({{{"title", "GNSS result"},
+                                   {"url", "https://example.com/gnss"},
+                                   {"content", "SearXNG snippet"}},
+                                  {{"title", "invalid"}, {"url", "file:///etc/passwd"}}})}};
+    const auto searx_hits = parse_searxng_json_results(searx_fixture, 10);
+    assert(searx_hits.size() == 1);
+    assert(searx_hits[0].snippet == "SearXNG snippet");
+
+    {
+        const json invalid = agent_framework::web_search(
+            json{{"query", "GNSS"}, {"provider", "not-a-provider"}});
+        assert(invalid.contains("error"));
+        assert(invalid["error"]["code"] == "search_provider_config_error");
+    }
+
     (void)::setenv("AGENT_WEB_ENABLE", "1", 1);
     (void)::setenv("AGENT_WEB_TEST_ALLOW_LOOPBACK", "1", 1);
     (void)::setenv("AGENT_WEB_ALLOW_HTTP", "1", 1);
@@ -179,8 +197,23 @@ int main() {
     srv.Get("/minimal.zip", [&](const httplib::Request&, httplib::Response& res) {
         res.set_content(zip_body, "application/zip");
     });
-    const int port = 8099;
-    std::thread th([&]() { srv.listen("127.0.0.1", port); });
+    int port = 0;
+    srv.Get("/search", [&](const httplib::Request& req, httplib::Response& res) {
+        assert(req.has_param("q"));
+        assert(req.get_param_value("format") == "json");
+        json body = {{"results",
+                      json::array({{{"title", "Local result"},
+                                    {"url", "http://127.0.0.1:" + std::to_string(port) + "/article"},
+                                    {"content", "Search snippet"}}})}};
+        res.set_content(body.dump(), "application/json");
+    });
+    srv.Get("/article", [&](const httplib::Request&, httplib::Response& res) {
+        res.set_content("<html><body><main>GNSS-R extracted article body</main></body></html>",
+                        "text/html; charset=utf-8");
+    });
+    port = srv.bind_to_any_port("127.0.0.1");
+    assert(port > 0);
+    std::thread th([&]() { srv.listen_after_bind(); });
     for (int i = 0; i < 50; ++i) {
         if (srv.is_running()) {
             break;
@@ -199,6 +232,28 @@ int main() {
 #else
     assert(bus.get_tool_info("web_search").has_value());
     assert(bus.get_tool_info("web_fetch").has_value());
+
+    {
+        const std::string endpoint = "http://127.0.0.1:" + std::to_string(port);
+        (void)::setenv("AGENT_WEB_SEARXNG_URL", endpoint.c_str(), 1);
+        (void)::setenv("AGENT_WEB_SEARCH_PROVIDER", "searxng", 1);
+        (void)::setenv("AGENT_WEB_SEARCH_FALLBACK", "none", 1);
+        json r = bus.call_tool("web_search",
+                               json{{"query", "GNSS-R"}, {"max_results", 2}})
+                     .get();
+        if (r.contains("error")) {
+            std::cerr << "searxng search err: " << r.dump() << "\n";
+        }
+        assert(!r.contains("error"));
+        assert(r["provider"] == "searxng");
+        assert(r["results"].size() == 1);
+        assert(r["results"][0]["content_status"] == "fetched");
+        assert(r["results"][0]["content"].get<std::string>().find("GNSS-R extracted") !=
+               std::string::npos);
+        assert(r["content_enrichment"]["attempted"] == 1);
+        assert(r["content_enrichment"]["succeeded"] == 1);
+        clog_tool_json_for_test("web_search (SearXNG + content)", r);
+    }
 
     {
         json r = bus.call_tool("web_fetch", json{{"url", "http://10.0.0.1:65530/foo"}, {"max_bytes", 1024}})

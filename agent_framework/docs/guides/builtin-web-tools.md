@@ -49,12 +49,27 @@
 
 ## 1. 网络资料搜索（`web_search`）
 
-本指南 **`web_search` 仅实现一种后端**：**[DuckDuckGo HTML](https://html.duckduckgo.com/html/)**（HTTPS、`/html/?q=`、解析结果页 HTML）。**不要求搜索 API Key**；合规、速率限制与页面结构稳定性由运维与实现共同承担（见 **§1.1**、**§1.4**）。
+> **当前实现口径（SearXNG 升级）**：默认后端已改为 SearXNG JSON API，根端点由
+> `AGENT_WEB_SEARXNG_URL` 配置（默认 `http://127.0.0.1:8080`）。调用参数 `provider`
+> 可选 `searxng` / `duckduckgo`；仅配置 `AGENT_WEB_SEARCH_FALLBACK=duckduckgo` 时显式
+> 降级，不做静默 fallback。部署和 JSON 格式配置见 [searxng.md](../searxng.md)。
+>
+> 默认对每个返回 URL 复用 `web_fetch` 提取正文，可用 `fetch_content=false` 关闭，或以
+> `fetch_top_k` 限制数量；`content_max_bytes` 默认 131072、硬上限 262144。每项返回
+> `content_status`、`content`、`content_type`、`content_url`、`content_truncated` 或
+> `content_error`。结果 URL 始终经过 SSRF/重定向检查；SearXNG API key 不会传播给结果站点。
+
+当前新增配置：`AGENT_WEB_SEARCH_PROVIDER=searxng`、`AGENT_WEB_SEARXNG_URL`、
+`AGENT_WEB_SEARXNG_API_KEY`、`AGENT_WEB_SEARXNG_API_KEY_HEADER=Authorization`、
+`AGENT_WEB_SEARCH_FALLBACK=none`、`AGENT_WEB_SEARCH_FETCH_CONTENT=1`。默认 loopback HTTP
+仅对 SearXNG 搜索端点放行，普通结果 URL 仍遵循 `AGENT_WEB_ALLOW_HTTP`。
+
+下述 DuckDuckGo 章节保留为可选 provider 的实现细节；它不再是唯一后端。
 
 ### 1.1 职责边界
 
-- **只做检索摘要**：返回 `title`、`url`、`snippet`（及必要时的 `rank`），**不**默认串联抓取每个结果的全文（避免流量与版权风险不可控）。
-- **固定出站目标**：仅连接 **`html.duckduckgo.com:443`**（及重定向链中 DuckDuckGo 可控跳转，仍须限次数与体积）。用户输入只进入 **query 字符串**（URL 编码后放入 `q=`），**不得**作为任意 host/path 拼接（防 SSRF）。
+- **统一返回与正文**：返回 `title`、`url`、`snippet`，默认串联受控正文提取；单项失败不会使搜索整体失败。
+- **Provider 边界**：SearXNG 只连接配置端点；DuckDuckGo 只连接其可信域。用户查询不得影响 host，结果 URL 另经 `web_fetch` SSRF 策略。
 
 **风险说明**：与完全任意的「网页 SERP 抓取」相比，固定单一主机可将攻击面缩小，但该集成仍依赖 **第三方 HTML 形态**，存在 **反爬/限流/DOM 改版** 导致解析失效或零结果；须在运维文档中说明使用场景，并配合 **§1.4** 的限流与监控。
 

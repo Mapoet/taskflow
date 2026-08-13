@@ -45,6 +45,8 @@ struct WebHttpConfig {
     std::size_t max_body_bytes = 2097152;
     std::string user_agent = "agent-framework-web-tools/1.0";
     bool allow_http = false;
+    /** 仅供受信任的固定服务端点（如默认本机 SearXNG）；普通 web_fetch 保持 false。 */
+    bool allow_loopback = false;
     /** 非空时：仅允许列表内主机名（仍须过 IP 黑名单） */
     std::vector<std::string> allow_hosts;
 };

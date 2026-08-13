@@ -166,6 +166,11 @@
 | `AGENT_WEB_TEST_ALLOW_LOOPBACK` | 测试允许环回 | 关闭 | — | `web_http.cpp` | Test | `each_tool_invoke` | 仅测试 | — |
 | `AGENT_WEB_SEARCH_MIN_INTERVAL_MS` | DDG 请求间隔 | `1000` | [builtin-web-tools.md](./builtin-web-tools.md) | `web_search_ddg.cpp` | Web, GlobalProcess | `each_tool_invoke` | **全局互斥间隔**（静态时间戳）；多 Agent 共享进程则 **共享限流** | **P1**：限流状态迁入 `ToolBus` 或按实例 |
 | `AGENT_WEB_SEARCH_TIMEOUT_MS` | 搜索阶段超时 | 继承 `AGENT_WEB_TIMEOUT_MS` | 同上 | `web_search_ddg.cpp` | Web | `each_tool_invoke` | 同上 | 同上 |
+| `AGENT_WEB_SEARCH_PROVIDER` | 默认搜索后端 | `searxng` | 同上 | `web_search.cpp` | Web | `each_tool_invoke` | 参数可覆盖 | 已实现 |
+| `AGENT_WEB_SEARXNG_URL` | SearXNG 根端点 | `http://127.0.0.1:8080` | 同上 | `web_search_searxng.cpp` | Web | `each_tool_invoke` | 本机 HTTP 专用放行 | 已实现 |
+| `AGENT_WEB_SEARXNG_API_KEY` / `AGENT_WEB_SEARXNG_API_KEY_HEADER` | SearXNG 反代鉴权 | 空 / `Authorization` | 同上 | `web_search_searxng.cpp` | Web | `each_tool_invoke` | 不传播给结果站点 | 已实现 |
+| `AGENT_WEB_SEARCH_FALLBACK` | 显式后端降级 | `none` | 同上 | `web_search.cpp` | Web | `each_tool_invoke` | 无静默 fallback | 已实现 |
+| `AGENT_WEB_SEARCH_FETCH_CONTENT` | 默认抓取结果正文 | `1` | 同上 | `web_search.cpp` | Web | `each_tool_invoke` | 单项失败隔离 | 已实现 |
 | `AGENT_WEB_DDG_MAX_BODY_BYTES` | DDG 体上限 | `1048576` | 同上 | `web_search_ddg.cpp` | Web | `each_tool_invoke` | 同上 | 同上 |
 | `AGENT_WEB_DDG_COOKIE` | 仅 DDG 的 Cookie | 空 | 同上 | `web_search_ddg.cpp` | Web | `each_tool_invoke` | 同上 | 同上 |
 | `AGENT_WEB_DDG_PAUSE_ON_CHALLENGE` | 人机验证暂停 | 关闭 | 同上 | `web_search_ddg.cpp` | Web | `each_tool_invoke` | 同上 | 同上 |
