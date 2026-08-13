@@ -2,6 +2,12 @@
 #include <stdexcept>
 namespace agent_framework::tool_runtime
 {
+CancellationResult ExecutionAdapter::escalate(const ExecutionHandle& handle, CancellationStage stage)
+{
+    if (stage == CancellationStage::Requested || stage == CancellationStage::Cooperative)
+        return cancel(handle);
+    return {false, false, "provider does not support forced cancellation", false, {}};
+}
     std::optional<ExecutionHandle> ExecutionAdapter::attach(const ExecutionRequest &, std::string *e)
     {
         if (e)

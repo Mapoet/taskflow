@@ -55,6 +55,18 @@ namespace agent_framework::tool_runtime
         it->second->cancel->store(true);
         return {true, false, "cooperative_cancel_requested"};
     }
+    CancellationResult AsyncExecutionAdapter::escalate(const ExecutionHandle &h, CancellationStage stage)
+    {
+        std::lock_guard l(operations_mutex_);
+        auto it = operations_.find(h.external_id);
+        if (it == operations_.end()) return {false, false, "operation_not_found", false, {}};
+        it->second->cancel->store(true);
+        if (it->second->terminal && it->second->terminal->state == ObservationState::Cancelled)
+            return {true, true, "cancel_observed", true, it->second->terminal->result_digest};
+        return {true, false, stage == CancellationStage::Kill ? "kill_requested; awaiting effect reconciliation" :
+                    stage == CancellationStage::Terminate ? "terminate_requested; awaiting effect reconciliation" :
+                    "cooperative_cancel_requested", false, {}};
+    }
     ReconciliationResult AsyncExecutionAdapter::reconcile(const ExecutionRequest &r, const ExecutionHandle &h)
     {
         auto o = query(h);
@@ -78,7 +90,15 @@ namespace agent_framework::tool_runtime
     }
     std::optional<ExecutionHandle> BubblewrapExecutionAdapter::start(const ExecutionRequest &r, std::string *e)
     {
-        auto h = provider_->create(spec_, e);
+        auto spec = spec_;
+        if (r.control.deadline_at_ms)
+        {
+            const auto now = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+            if (r.control.deadline_at_ms <= now) { if (e) *e = "execution deadline exceeded"; return {}; }
+            const auto remaining = static_cast<std::uint64_t>(r.control.deadline_at_ms - now);
+            spec.wall_time_ms = spec.wall_time_ms ? std::min(spec.wall_time_ms, remaining) : remaining;
+        }
+        auto h = provider_->create(spec, e);
         if (!h)
             return {};
         return launch(r, [p = provider_, h = *h](auto c)
@@ -94,6 +114,13 @@ namespace agent_framework::tool_runtime
         auto req = request_;
         req.inputs = r.input;
         req.idempotency_key = r.idempotency_key;
+        if (r.control.deadline_at_ms)
+        {
+            const auto now_system = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+            if (r.control.deadline_at_ms <= now_system) { if (e) *e = "execution deadline exceeded"; return {}; }
+            req.policy.deadline = std::chrono::steady_clock::now() +
+                std::chrono::milliseconds(r.control.deadline_at_ms - now_system);
+        }
         return launch(r, [b = backend_, req = std::move(req)](auto c) mutable
                       {req.policy.cancel_requested=c;auto h=b->start(std::move(req));auto v=h->wait();auto value=child_task_result_to_json(v);auto state=v.status==ChildTaskStatus::Completed?ObservationState::CompletedCandidate:v.status==ChildTaskStatus::Cancelled?ObservationState::Cancelled:ObservationState::Failed;return ExecutionObservation{state,value,digest(value),v.checkpoint.dump(),v.error_code,v.verified_complete(),true}; }, e);
     }

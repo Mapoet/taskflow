@@ -1,6 +1,7 @@
 #include "agent/distributed/object_store.hpp"
 
 #include <array>
+#include <algorithm>
 #include <cctype>
 #include <cerrno>
 #include <cstring>
@@ -196,5 +197,21 @@ namespace agent_framework::distributed
             return std::nullopt;
         }
         return bytes;
+    }
+    ObjectListPage FilesystemObjectStore::list(std::string_view tenant,std::string_view cursor,std::size_t limit) const
+    {
+        ObjectListPage out;if(!safe_component(tenant)||limit==0||limit>1000){out.error="invalid tenant or list limit";return out;}
+        std::vector<std::string> digests;std::error_code ec;const auto root=root_/std::string(tenant);if(!std::filesystem::exists(root,ec))return out;
+        for(std::filesystem::recursive_directory_iterator it(root,std::filesystem::directory_options::skip_permission_denied,ec),end;it!=end&&!ec;it.increment(ec)){
+            const auto status=it->symlink_status(ec);if(ec)break;if(!std::filesystem::is_regular_file(status)||std::filesystem::is_symlink(status))continue;const auto name=it->path().filename().string();if(name.size()!=64)continue;auto digest=std::string("sha256:")+name;if(path_for(tenant,digest)==it->path())digests.push_back(std::move(digest));
+        }
+        if(ec){out.error=ec.message();return out;}std::sort(digests.begin(),digests.end());auto begin=cursor.empty()?digests.begin():std::upper_bound(digests.begin(),digests.end(),std::string(cursor));
+        for(;begin!=digests.end()&&out.objects.size()<limit;++begin){auto path=path_for(tenant,*begin);auto size=std::filesystem::file_size(*path,ec);if(ec){out.error=ec.message();return out;}out.objects.push_back({std::string(tenant),*begin,size,"application/octet-stream"});}
+        out.complete=begin==digests.end();if(!out.complete&&!out.objects.empty())out.next_cursor=out.objects.back().digest;return out;
+    }
+    ObjectRemoveResult FilesystemObjectStore::remove(const ObjectRef& ref)
+    {
+        auto path=path_for(ref.tenant_id,ref.digest);if(!path)return {ObjectRemoveStatus::Conflict,"invalid object reference"};std::error_code ec;auto status=std::filesystem::symlink_status(*path,ec);if(ec==std::errc::no_such_file_or_directory||!std::filesystem::exists(status))return {ObjectRemoveStatus::NotFound,{}};if(ec)return {ObjectRemoveStatus::Error,ec.message()};if(!std::filesystem::is_regular_file(status)||std::filesystem::is_symlink(status))return {ObjectRemoveStatus::Conflict,"object path is not a regular file"};
+        std::string error;if(!get(ref,&error))return {ObjectRemoveStatus::Conflict,error};if(!std::filesystem::remove(*path,ec)||ec)return {ObjectRemoveStatus::Error,ec?ec.message():"object removal failed"};const int directory=::open(path->parent_path().c_str(),O_RDONLY|O_DIRECTORY|O_CLOEXEC);if(directory>=0){::fsync(directory);::close(directory);}return {ObjectRemoveStatus::Removed,{}};
     }
 } // namespace agent_framework::distributed

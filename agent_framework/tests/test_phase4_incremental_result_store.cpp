@@ -49,13 +49,37 @@ int main() {
     auto late=append; late.expected_revision=2; late.idempotency_key="late";
     assert(store.append(late).status==IncrementalStatus::Sealed);
 
+    IncrementalOpenRequest split=open; split.stream_id="stream-split";
+    assert(store.open(split));
+    auto split1=store.append({"tenant-a","stream-split","s1","prefix TOKEN-",0}); assert(split1);
+    assert(store.preview("tenant-a","stream-split",1024).text=="prefix ");
+    { SQLiteIncrementalResultStore restart_split((root/"streams.sqlite").string(),objects,limits,
+          {{"secret","TOKEN-123","[MASKED]"}});
+      auto split2=restart_split.append({"tenant-a","stream-split","s2","123 suffix",1}); assert(split2);
+      auto text=restart_split.preview("tenant-a","stream-split",1024).text;
+      assert(text=="prefix [MASKED] suffix"); assert(text.find("TOKEN-123")==std::string::npos);
+    }
+    IncrementalOpenRequest pending=open; pending.stream_id="stream-pending"; assert(store.open(pending));
+    auto pending_append=store.append({"tenant-a","stream-pending","p1","safe TOKEN-",0}); assert(pending_append);
+    auto pending_seal=store.seal("tenant-a","stream-pending",1); assert(pending_seal);
+    assert(store.preview("tenant-a","stream-pending",1024).text=="safe [MASKED]");
+
+    auto orphan=objects.put("tenant-a","orphan","text/plain"); assert(orphan);
+    assert(store.reconcile_objects("tenant-a")>=1);
+    assert(store.mark_orphans(INT64_MAX)>=1);
+    auto dry=store.collect({INT64_MAX,100,true}); assert(dry.candidates>=1&&dry.deleted==0);
+    auto gc=store.collect({INT64_MAX,100,false}); assert(gc.deleted>=1);
+    assert(!objects.get(*orphan));
+
     { // durable restart restores the sealed head and immutable chunks.
         SQLiteIncrementalResultStore restarted((root / "streams.sqlite").string(), objects, limits,
             {{"secret", "TOKEN-123", "[MASKED]"}});
         auto restored=restarted.load("tenant-a","stream-1"); assert(restored);
         assert(restored->state==IncrementalStreamState::Sealed);
         assert(restored->manifest_digest==sealed.manifest.manifest_digest);
-        assert(restarted.verify("tenant-a","stream-1"));
+        std::string verify_error; if(!restarted.verify("tenant-a","stream-1",&verify_error))
+            std::cerr << "restart verify failed: " << verify_error << "\n";
+        assert(verify_error.empty());
     }
 
     auto metrics=store.metrics(); assert(metrics.bytes_appended>0);

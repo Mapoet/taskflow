@@ -92,7 +92,10 @@ struct IncrementalMetrics {
     std::uint64_t streams_opened{0}, bytes_appended{0}, chunks_written{0}, chunks_deduplicated{0};
     std::uint64_t cas_conflicts{0}, redaction_matches{0}, preview_truncations{0};
     std::uint64_t integrity_failures{0}, orphan_objects{0};
+    std::uint64_t objects_deleted{0}, bytes_reclaimed{0}, legal_hold_skips{0}, cross_append_matches{0};
 };
+struct IncrementalGcPolicy { std::int64_t grace_before_ms{0}; std::size_t maximum_objects{100}; bool dry_run{false}; };
+struct IncrementalGcResult { std::uint64_t candidates{0}, deleted{0}, reclaimed_bytes{0}, quarantined{0}; std::string error; };
 
 nlohmann::json encode(const IncrementalManifest&);
 std::optional<IncrementalManifest> decode_incremental_manifest(const nlohmann::json&, std::string* error = nullptr);
@@ -125,10 +128,15 @@ public:
     bool verify(std::string_view, std::string_view, std::string* = nullptr) override;
     IncrementalMetrics metrics() const;
     std::uint64_t mark_orphans(std::int64_t older_than_ms);
+    IncrementalGcResult collect(const IncrementalGcPolicy&);
+    std::uint64_t reconcile_objects(std::string_view tenant, std::size_t maximum = 1000);
+    bool set_pinned(std::string_view tenant, std::string_view stream, bool pinned);
 private:
     void migrate();
     IncrementalResult transition(std::string_view, std::string_view, std::uint64_t, IncrementalStreamState);
     std::string redact(std::string_view, RedactionReceipt&) const;
+    std::string redact_stream(std::string_view, std::string_view, std::string_view,
+                              RedactionReceipt&);
     void audit(std::string_view event, const IncrementalManifest&, std::string_view outcome, std::string_view error = {}) const noexcept;
     std::string path_; void* db_{nullptr}; distributed::ObjectStore& objects_; IncrementalLimits limits_;
     std::vector<RedactionRule> rules_; std::shared_ptr<AuditSink> audit_; mutable std::mutex mutex_; IncrementalMetrics metrics_;

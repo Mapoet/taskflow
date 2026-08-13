@@ -38,6 +38,9 @@ public:
                                  std::string* error = nullptr) override;
     std::optional<std::string> get(const ObjectRef& reference,
                                    std::string* error = nullptr) const override;
+    ObjectStoreCapabilities capabilities() const noexcept override { return {true,true}; }
+    ObjectListPage list(std::string_view tenant_id, std::string_view cursor = {}, std::size_t limit = 100) const override;
+    ObjectRemoveResult remove(const ObjectRef&) override;
 private:
     std::string host_;
     int port_;

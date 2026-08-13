@@ -7,6 +7,7 @@
 #include <string>
 #include <nlohmann/json.hpp>
 #include "agent/tool_runtime/types.hpp"
+#include "agent/tool_runtime/execution_control.hpp"
 
 namespace agent_framework::tool_runtime
 {
@@ -26,6 +27,7 @@ struct ExecutionRequest
     nlohmann::json input=nlohmann::json::object();
     std::string idempotency_key, checkpoint_ref;
     std::uint64_t fencing_token{0};
+    ExecutionControlEnvelope control;
 };
 struct ExecutionHandle
 {
@@ -40,7 +42,7 @@ struct ExecutionObservation
     bool effect_known{false}, information_gain{false};
     std::optional<PartialResultRef> incremental_result;
 };
-struct CancellationResult { bool accepted{false}, terminal{false}; std::string diagnostic; };
+struct CancellationResult { bool accepted{false}, terminal{false}; std::string diagnostic; bool effect_known{false}; std::string receipt_digest; };
 struct ReconciliationResult { ExecutionObservation observation; bool safe_to_retry{false}; };
 
 class ExecutionAdapter
@@ -58,6 +60,7 @@ public:
     virtual std::optional<ExecutionHandle> attach(const ExecutionRequest&,std::string*);
     virtual ExecutionObservation query(const ExecutionHandle&)=0;
     virtual CancellationResult cancel(const ExecutionHandle&)=0;
+    virtual CancellationResult escalate(const ExecutionHandle&, CancellationStage);
     virtual ReconciliationResult reconcile(const ExecutionRequest&,const ExecutionHandle&)=0;
 };
 

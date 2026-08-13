@@ -1,7 +1,8 @@
 #include "agent/tool_runtime/worker_runtime.hpp"
+#include <chrono>
 namespace agent_framework::tool_runtime
 {
-    LeaseWorkerRuntime::LeaseWorkerRuntime(InvocationStore &s, distributed::SQLiteDurableQueue &q, distributed::SQLiteWorkerRegistry &w, WorkerIdentity id, std::int64_t lease) : store_(s), queue_(q), workers_(w), worker_(std::move(id)), lease_ms_(lease)
+    LeaseWorkerRuntime::LeaseWorkerRuntime(InvocationStore &s, distributed::SQLiteDurableQueue &q, distributed::SQLiteWorkerRegistry &w, WorkerIdentity id, std::int64_t lease, ExecutionControlStore* controls) : store_(s), queue_(q), workers_(w), worker_(std::move(id)), lease_ms_(lease), controls_(controls)
     {
         if (worker_.worker_id.empty() || worker_.instance_id.empty() || worker_.generation == 0 || lease_ms_ <= 0)
             throw std::invalid_argument("valid worker identity and lease required");
@@ -22,6 +23,19 @@ namespace agent_framework::tool_runtime
     }
     StoreResult LeaseWorkerRuntime::enqueue(LongRunningToolInvocation v)
     {
+        if (controls_)
+        {
+            const auto now = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::system_clock::now().time_since_epoch()).count();
+            ExecutionControlEnvelope control{v.invocation_id, v.metadata.identity.tenant_id,
+                v.budget.wall_time_ms ? now + static_cast<std::int64_t>(v.budget.wall_time_ms) : 0, 0,
+                {v.budget.output_bytes ? v.budget.output_bytes : 4U * 1024U * 1024U,
+                 v.budget.progress_events ? v.budget.progress_events : 1024U,
+                 BackpressureMode::Block}};
+            auto created_control = controls_->create(control);
+            if (!created_control && created_control.error != "already exists")
+                return {InvocationStoreStatus::Error, v.revision, created_control.error};
+        }
         auto created = store_.create(v);
         if (!created && created.status != InvocationStoreStatus::AlreadyExists)
             return created;
@@ -177,6 +191,18 @@ namespace agent_framework::tool_runtime
     std::optional<ExecutionHandle> LeaseWorkerRuntime::start(ClaimedInvocation &c, ExecutionAdapter &a, const nlohmann::json &input, std::string *error)
     {
         ExecutionRequest request{c.invocation, input, c.invocation.invocation_id, c.invocation.checkpoint_ref, c.queue_lease.fencing_token};
+        if (controls_)
+        {
+            if (auto intent = controls_->load(c.invocation.invocation_id))
+                request.control = intent->control;
+            const auto now = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::system_clock::now().time_since_epoch()).count();
+            if (request.control.deadline_at_ms && request.control.deadline_at_ms <= now)
+            {
+                if (error) *error = "execution deadline exceeded before adapter start";
+                return {};
+            }
+        }
         auto handle = a.start(request, error);
         if (!handle)
             return {};
@@ -194,6 +220,83 @@ namespace agent_framework::tool_runtime
         }
         return handle;
     }
+    bool LeaseWorkerRuntime::request_cancel(ClaimedInvocation &c, ExecutionControlStore &controls, std::string reason, std::int64_t now, std::string *error)
+    {
+        auto result = controls.request_cancel(c.invocation.invocation_id, std::move(reason), now);
+        if (!result)
+        {
+            if (error)
+                *error = result.error;
+            return false;
+        }
+        auto saved = advance(c.invocation, InvocationState::Cancelling, "invocation_cancel_requested", c.queue_lease.fencing_token, {{"cancel_generation", result.generation}});
+        if (!saved && error)
+            *error = saved.error;
+        return bool(saved);
+    }
+    bool LeaseWorkerRuntime::drive_cancel(ClaimedInvocation &c, ExecutionAdapter &adapter, const ExecutionHandle &handle, ExecutionControlStore &controls, std::int64_t now, std::int64_t escalation, std::string *error)
+    {
+        auto intent = controls.claim(c.invocation.invocation_id, worker_.worker_id, now, lease_ms_);
+        if (!intent)
+        {
+            if (error)
+                *error = "cancellation intent unavailable";
+            return false;
+        }
+        CancellationResult result;
+        CancellationStage attempted = CancellationStage::Cooperative;
+        if (intent->stage == CancellationStage::Cooperative) attempted = CancellationStage::Terminate;
+        else if (intent->stage == CancellationStage::Terminate) attempted = CancellationStage::Kill;
+        else if (intent->stage == CancellationStage::Kill || intent->stage == CancellationStage::Reconciling)
+            attempted = CancellationStage::Reconciling;
+        if (attempted == CancellationStage::Reconciling)
+        {
+            ExecutionRequest request{c.invocation, {}, c.invocation.invocation_id,
+                                     c.invocation.external_operation_id, c.queue_lease.fencing_token,
+                                     intent->control};
+            auto reconciled = adapter.reconcile(request, handle);
+            const auto& observation = reconciled.observation;
+            result = {observation.state == ObservationState::Cancelled,
+                      observation.state == ObservationState::Cancelled,
+                      observation.error_code, observation.effect_known,
+                      observation.result_digest};
+        }
+        else result = adapter.escalate(handle, attempted);
+        const auto next = result.terminal && result.effect_known ? CancellationStage::Cancelled :
+                          attempted == CancellationStage::Reconciling ? CancellationStage::ManualReview :
+                          result.accepted ? attempted : CancellationStage::Reconciling;
+        auto advanced = controls.advance(c.invocation.invocation_id, worker_.worker_id, intent->fencing_token, intent->revision, next, now + escalation, result.effect_known, result.receipt_digest);
+        if (!advanced)
+        {
+            if (error)
+                *error = advanced.error;
+            return false;
+        }
+        if (next == CancellationStage::Cancelled)
+        {
+            auto saved = advance(c.invocation, InvocationState::Cancelled, "invocation_cancelled", c.queue_lease.fencing_token, {{"receipt_digest", result.receipt_digest}});
+            if (!saved)
+            {
+                if (error)
+                    *error = saved.error;
+                return false;
+            }
+            return queue_.ack_with_quota(c.invocation.invocation_id, worker_.worker_id, c.queue_lease.fencing_token);
+        }
+        if (next == CancellationStage::Cooperative || next == CancellationStage::Terminate ||
+            next == CancellationStage::Kill)
+            return true;
+        const auto invocation_state = next == CancellationStage::ManualReview ? InvocationState::ManualReview :
+                                      next == CancellationStage::Reconciling ? InvocationState::Reconciling : InvocationState::Cancelling;
+        auto saved = advance(c.invocation, invocation_state,
+                             next == CancellationStage::ManualReview ? "invocation_cancel_manual_review" :
+                             next == CancellationStage::Reconciling ? "invocation_cancel_reconciling" : "invocation_cancel_escalated",
+                             c.queue_lease.fencing_token,
+                             {{"diagnostic", result.diagnostic}, {"effect_known", result.effect_known}, {"stage", std::string(name(next))}});
+        if (!saved && error)
+            *error = saved.error;
+        return bool(saved);
+    }
     ExecutionObservation LeaseWorkerRuntime::observe(ClaimedInvocation &c, ExecutionAdapter &a, const ExecutionHandle &h, std::string *error)
     {
         if (h.fencing_token != c.queue_lease.fencing_token)
@@ -207,18 +310,68 @@ namespace agent_framework::tool_runtime
             advance(c.invocation, InvocationState::Progressing, "invocation_adapter_progress", h.fencing_token, {{"checkpoint_ref", observation.checkpoint_ref}});
         return observation;
     }
-    bool LeaseWorkerRuntime::persist_observation(ClaimedInvocation& c,ExecutionObservation& o,IncrementalResultStore& streams,IncrementalStreamKind kind,std::string_view key,std::string* error)
+    bool LeaseWorkerRuntime::persist_observation(ClaimedInvocation &c, ExecutionObservation &o, IncrementalResultStore &streams, IncrementalStreamKind kind, std::string_view key, std::string *error)
     {
-        if(key.empty()){if(error)*error="incremental observation idempotency key required";return false;}
-        const auto tenant=c.invocation.metadata.identity.tenant_id;
-        const auto stream=c.invocation.invocation_id+":"+std::string(name(kind));
-        IncrementalOpenRequest request{tenant,stream,c.invocation.metadata.identity.run_id,c.invocation.invocation_id,std::to_string(c.invocation.attempt),"application/json",kind};
-        auto opened=streams.open(request);if(!opened){if(error)*error=opened.error;return false;}
-        auto appended=streams.append({tenant,stream,std::string(key),o.result.dump(),opened.manifest.revision});
-        if(!appended){if(error)*error=appended.error;return false;}
-        auto ref=partial_result_ref(appended.manifest,o.information_gain);o.incremental_result=ref;
-        auto prior=c.invocation.revision;c.invocation.revision++;InvocationEvent event;event.event_type="invocation_incremental_result";event.fencing_token=c.queue_lease.fencing_token;event.information_gain=o.information_gain;event.payload={{"uri",ref.uri},{"manifest_digest",ref.digest},{"size",ref.size}};
-        auto committed=store_.commit({c.invocation,prior,std::move(event),{},ref,{}});if(!committed){c.invocation.revision=prior;if(error)*error=committed.error;return false;}return true;
+        if (key.empty())
+        {
+            if (error)
+                *error = "incremental observation idempotency key required";
+            return false;
+        }
+        const auto tenant = c.invocation.metadata.identity.tenant_id;
+        const auto stream = c.invocation.invocation_id + ":" + std::string(name(kind));
+        IncrementalOpenRequest request{tenant, stream, c.invocation.metadata.identity.run_id, c.invocation.invocation_id, std::to_string(c.invocation.attempt), "application/json", kind};
+        auto opened = streams.open(request);
+        if (!opened)
+        {
+            if (error)
+                *error = opened.error;
+            return false;
+        }
+        const auto payload = o.result.dump();
+        BackpressureReservation reservation;
+        if (controls_)
+        {
+            reservation = controls_->reserve(c.invocation.invocation_id, payload.size(), 1,
+                                               !o.information_gain);
+            if (!reservation.accepted)
+            {
+                if (reservation.dropped) return true;
+                if (error) *error = reservation.error;
+                return false;
+            }
+        }
+        auto appended = streams.append({tenant, stream, std::string(key), payload, opened.manifest.revision});
+        if (!appended)
+        {
+            if (controls_) controls_->release(c.invocation.invocation_id, payload.size(), 1);
+            if (error)
+                *error = appended.error;
+            return false;
+        }
+        auto ref = partial_result_ref(appended.manifest, o.information_gain);
+        o.incremental_result = ref;
+        auto prior = c.invocation.revision;
+        c.invocation.revision++;
+        InvocationEvent event;
+        event.event_type = "invocation_incremental_result";
+        event.fencing_token = c.queue_lease.fencing_token;
+        event.information_gain = o.information_gain;
+        event.payload = {{"uri", ref.uri}, {"manifest_digest", ref.digest}, {"size", ref.size}};
+        auto committed = store_.commit({c.invocation, prior, std::move(event), {}, ref, {}});
+        if (!committed)
+        {
+            c.invocation.revision = prior;
+            if (error)
+                *error = committed.error;
+            return false;
+        }
+        if (controls_ && !controls_->release(c.invocation.invocation_id, payload.size(), 1))
+        {
+            if (error) *error = "backpressure reservation release failed";
+            return false;
+        }
+        return true;
     }
     std::optional<ExecutionHandle> LeaseWorkerRuntime::recover(ClaimedInvocation &c, const ExecutionAdapterRegistry &registry, const nlohmann::json &input, std::string *error)
     {
@@ -230,6 +383,8 @@ namespace agent_framework::tool_runtime
             return {};
         }
         ExecutionRequest request{c.invocation, input, c.invocation.invocation_id, c.invocation.external_operation_id, c.queue_lease.fencing_token};
+        if (controls_)
+            if (auto intent = controls_->load(c.invocation.invocation_id)) request.control = intent->control;
         if (a->restart_policy() == RestartPolicy::Attach)
             return a->attach(request, error);
         if (a->restart_policy() == RestartPolicy::RestartFromCheckpoint || a->restart_policy() == RestartPolicy::RestartFromInput)

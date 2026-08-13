@@ -31,6 +31,8 @@ namespace agent_framework::distributed
         }
         json ref_json(const ObjectRef &v) { return {{"tenant_id", v.tenant_id}, {"digest", v.digest}, {"size", v.size}, {"media_type", v.media_type}}; }
         ObjectRef parse_ref(const json &v) { return {v.at("tenant_id").get<std::string>(), v.at("digest").get<std::string>(), v.at("size").get<std::size_t>(), v.at("media_type").get<std::string>()}; }
+        std::string remove_name(ObjectRemoveStatus v) { switch(v){case ObjectRemoveStatus::Removed:return "removed";case ObjectRemoveStatus::NotFound:return "not_found";case ObjectRemoveStatus::Conflict:return "conflict";case ObjectRemoveStatus::Unsupported:return "unsupported";default:return "error";} }
+        ObjectRemoveStatus remove_status(std::string_view v){return v=="removed"?ObjectRemoveStatus::Removed:v=="not_found"?ObjectRemoveStatus::NotFound:v=="conflict"?ObjectRemoveStatus::Conflict:v=="unsupported"?ObjectRemoveStatus::Unsupported:ObjectRemoveStatus::Error;}
 
         std::unique_ptr<httplib::Client> make_client(std::string_view host, int port,
                                                      const std::optional<RemoteQueueTlsClientConfig> &tls, std::string *error)
@@ -148,6 +150,8 @@ namespace agent_framework::distributed
             } catch(const std::exception& error) {
                 respond(out, 400, {{"error", error.what()}});
             } });
+            server_->Post("/v1/objects/list",[this](const httplib::Request& req,httplib::Response& out){if(!authorized(req,token_))return respond(out,401,{{"error","unauthorized"}});try{auto v=json::parse(req.body);auto page=store_.list(v.at("tenant_id").get<std::string>(),v.value("cursor",std::string{}),v.value("limit",100u));json refs=json::array();for(const auto& ref:page.objects)refs.push_back(ref_json(ref));respond(out,page.error.empty()?200:409,{{"ok",page.error.empty()},{"error",page.error},{"objects",refs},{"next_cursor",page.next_cursor},{"complete",page.complete}});}catch(const std::exception& e){respond(out,400,{{"error",e.what()}});}});
+            server_->Post("/v1/objects/remove",[this](const httplib::Request& req,httplib::Response& out){if(!authorized(req,token_))return respond(out,401,{{"error","unauthorized"}});try{auto result=store_.remove(parse_ref(json::parse(req.body).at("reference")));const bool ok=result.status==ObjectRemoveStatus::Removed||result.status==ObjectRemoveStatus::NotFound;respond(out,ok?200:409,{{"ok",ok},{"status",remove_name(result.status)},{"error",result.error}});}catch(const std::exception& e){respond(out,400,{{"error",e.what()}});}});
         }
         ObjectStore &store_;
         std::string token_;
@@ -186,4 +190,8 @@ namespace agent_framework::distributed
         auto value = request(host_, port_, bearer_token_, timeout_seconds_, "/v1/objects/get", {{"reference", ref_json(ref)}}, tls_, error);
         return value ? std::optional<std::string>(value->at("bytes").get<std::string>()) : std::nullopt;
     }
+    ObjectListPage RemoteObjectStoreClient::list(std::string_view tenant,std::string_view cursor,std::size_t limit) const
+    {std::string error;auto value=request(host_,port_,bearer_token_,timeout_seconds_,"/v1/objects/list",{{"tenant_id",tenant},{"cursor",cursor},{"limit",limit}},tls_,&error);ObjectListPage page;page.error=error;if(!value)return page;for(const auto& v:value->at("objects"))page.objects.push_back(parse_ref(v));page.next_cursor=value->value("next_cursor","");page.complete=value->value("complete",true);return page;}
+    ObjectRemoveResult RemoteObjectStoreClient::remove(const ObjectRef& ref)
+    {std::string error;auto value=request(host_,port_,bearer_token_,timeout_seconds_,"/v1/objects/remove",{{"reference",ref_json(ref)}},tls_,&error);if(!value)return {ObjectRemoveStatus::Error,error};return {remove_status(value->value("status","error")),value->value("error","")};}
 } // namespace agent_framework::distributed

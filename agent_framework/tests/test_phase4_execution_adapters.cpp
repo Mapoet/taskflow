@@ -78,8 +78,8 @@ int main()
     assert(obs.state == ObservationState::CompletedCandidate && obs.result.at("ok"));
     std::map<std::string, ExecutionObservation> remote;
     auto http = std::make_shared<HTTPExecutionAdapter>("http", "v1", "g1", [&](const ExecutionRequest &, std::string *)
-                              {remote["op"]={ObservationState::Running};return std::optional<std::string>{"op"}; }, [&](std::string_view id)
-                              { return remote[std::string(id)]; });
+                                                       {remote["op"]={ObservationState::Running};return std::optional<std::string>{"op"}; }, [&](std::string_view id)
+                                                       { return remote[std::string(id)]; });
     assert(production.register_adapter(http));
     auto hh = http->start(req, &error);
     assert(hh);
@@ -88,13 +88,18 @@ int main()
     assert(attached && attached->external_id == "op");
     auto path = (root / "control.sqlite3").string();
     SQLiteInvocationStore inv(path);
+    SQLiteExecutionControlStore controls(path);
     distributed::SQLiteDurableQueue queue(path);
     distributed::SQLiteWorkerRegistry workers(path);
     auto gen = workers.register_worker({"w", "i", "sha256:c", 0, 0});
     assert(gen && workers.set_quota("tenant", 1));
-    LeaseWorkerRuntime runtime(inv, queue, workers, {"w", "i", *gen}, 100);
+    LeaseWorkerRuntime runtime(inv, queue, workers, {"w", "i", *gen}, 100, &controls);
     auto v = value("commit");
+    v.budget = {60000, 2, 4096};
     assert(runtime.enqueue(v));
+    auto durable_control = controls.load("commit");
+    assert(durable_control && durable_control->control.deadline_at_ms > 0 &&
+           durable_control->control.backpressure.maximum_pending_events == 2);
     auto claim = runtime.claim("tenant", 10);
     assert(claim);
     auto durable_handle = runtime.start(*claim, *http, {{"request", true}}, &error);
@@ -127,6 +132,30 @@ int main()
     assert(!committed.artifact_digest.empty());
     assert(inv.load("commit")->state == InvocationState::EffectCommitted);
     assert(runs.effect("run", "commit")->state == run::EffectState::Committed);
+
+    // Durable cancellation is generation-scoped and unsupported force-kill fails closed
+    // through reconciliation into ManualReview instead of reporting false success.
+    CallbackAdapterSpec cancellation_spec{"cancel-test", "v1", "g1", ExecutionAdapterKind::HTTP, AdapterOrigin::Test, {true, true, true, false, true, true, true}, RestartPolicy::Attach};
+    auto cancellation_adapter = std::make_shared<CallbackExecutionAdapter>(cancellation_spec, [](const ExecutionRequest &r, std::string *)
+                                                                           { return std::optional<ExecutionHandle>{{"cancel-test", "v1", "g1", "remote-op", r.fencing_token}}; }, [](const ExecutionHandle &)
+                                                                           { return ExecutionObservation{ObservationState::Unknown, {}, {}, {}, "remote_unreachable", false, false}; }, [](const ExecutionHandle &)
+                                                                           { return CancellationResult{true, false, "cancel accepted", false, {}}; }, [](const ExecutionRequest &, const ExecutionHandle &)
+                                                                           { return ReconciliationResult{{ObservationState::Unknown, {}, {}, {}, "effect_unknown", false, false}, false}; });
+    auto cv = value("cancelled-effect");
+    assert(runtime.enqueue(cv));
+    auto cancel_claim = runtime.claim("tenant", 30);
+    assert(cancel_claim);
+    auto cancel_handle = runtime.start(*cancel_claim, *cancellation_adapter, {}, &error);
+    assert(cancel_handle);
+    assert(runtime.request_cancel(*cancel_claim, controls, "user_interrupt", 31, &error));
+    assert(runtime.drive_cancel(*cancel_claim, *cancellation_adapter, *cancel_handle, controls, 31, 10, &error));
+    assert(controls.load("cancelled-effect")->stage == CancellationStage::Cooperative);
+    assert(runtime.drive_cancel(*cancel_claim, *cancellation_adapter, *cancel_handle, controls, 41, 10, &error));
+    assert(controls.load("cancelled-effect")->stage == CancellationStage::Reconciling);
+    assert(runtime.drive_cancel(*cancel_claim, *cancellation_adapter, *cancel_handle, controls, 51, 10, &error));
+    assert(controls.load("cancelled-effect")->stage == CancellationStage::ManualReview);
+    assert(inv.load("cancelled-effect")->state == InvocationState::ManualReview);
+
     auto unknown = value("unknown", false);
     unknown.lease = {"w", "i", *gen, 9, 100};
     assert(inv.create(unknown));

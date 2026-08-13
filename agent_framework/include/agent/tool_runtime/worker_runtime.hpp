@@ -18,7 +18,8 @@ namespace agent_framework::tool_runtime
     class LeaseWorkerRuntime
     {
     public:
-        LeaseWorkerRuntime(InvocationStore &, distributed::SQLiteDurableQueue &, distributed::SQLiteWorkerRegistry &, WorkerIdentity, std::int64_t lease_ms);
+        LeaseWorkerRuntime(InvocationStore &, distributed::SQLiteDurableQueue &, distributed::SQLiteWorkerRegistry &, WorkerIdentity, std::int64_t lease_ms,
+                           ExecutionControlStore* controls = nullptr);
         StoreResult enqueue(LongRunningToolInvocation);
         std::optional<ClaimedInvocation> claim(std::string_view tenant, std::int64_t now_ms, std::string *error = nullptr);
         bool renew(const ClaimedInvocation &, std::int64_t now_ms, std::string *error = nullptr);
@@ -32,6 +33,11 @@ namespace agent_framework::tool_runtime
             IncrementalStreamKind, std::string_view idempotency_key, std::string* error = nullptr);
         std::optional<ExecutionHandle> recover(ClaimedInvocation &, const ExecutionAdapterRegistry &,
             const nlohmann::json &, std::string *error = nullptr);
+        bool request_cancel(ClaimedInvocation&, ExecutionControlStore&, std::string reason,
+                            std::int64_t now_ms, std::string* error = nullptr);
+        bool drive_cancel(ClaimedInvocation&, ExecutionAdapter&, const ExecutionHandle&,
+                          ExecutionControlStore&, std::int64_t now_ms,
+                          std::int64_t escalation_ms, std::string* error = nullptr);
 
     private:
         StoreResult advance(LongRunningToolInvocation &, InvocationState, std::string, std::uint64_t, nlohmann::json = {});
@@ -40,5 +46,6 @@ namespace agent_framework::tool_runtime
         distributed::SQLiteWorkerRegistry &workers_;
         WorkerIdentity worker_;
         std::int64_t lease_ms_;
+        ExecutionControlStore* controls_{nullptr};
     };
 }

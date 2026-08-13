@@ -14,6 +14,7 @@ class AsyncExecutionAdapter:public ExecutionAdapter
 public:
     ExecutionObservation query(const ExecutionHandle&)override;
     CancellationResult cancel(const ExecutionHandle&)override;
+    CancellationResult escalate(const ExecutionHandle&, CancellationStage) override;
     ReconciliationResult reconcile(const ExecutionRequest&,const ExecutionHandle&)override;
 protected:
     struct Operation{std::shared_ptr<std::atomic_bool> cancel=std::make_shared<std::atomic_bool>(false);std::future<ExecutionObservation> future;std::optional<ExecutionObservation> terminal;};
