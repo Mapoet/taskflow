@@ -26,6 +26,8 @@ int main()
     auto soak = run_recovery_soak({2000, 42, 4}, [](std::uint64_t, std::uint64_t)
                                   { return true; });
     assert(soak.passed && soak.recoveries == 2000 && !soak.evidence_digest.empty());
+    auto live_path=(root/"provider-live.json").string();auto live=run_provider_live_certification({"sha256:env",live_path,10,7,1},[](RecoveryScenario s){return RecoveryCell{s,RecoveryEvidenceLevel::ProviderLive,true,true,true,{},"sha256:live",1,0};},[](std::uint64_t,std::uint64_t){return true;});assert(live.certified&&fs::exists(live_path));
+    auto not_certified=run_provider_live_certification({"sha256:env",{},0,7,1},{},{},nullptr);assert(!not_certified.certified&&!not_certified.blockers.empty());
     auto db = (root / "control.sqlite").string();
     {
         SQLiteExecutionControlStore s(db);

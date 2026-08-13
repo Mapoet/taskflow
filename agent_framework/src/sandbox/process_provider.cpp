@@ -121,6 +121,7 @@ std::optional<ExecResult> BubblewrapSandboxProvider::exec(
         std::vector<std::string> env{"PATH=/usr/bin:/bin","HOME=/tmp","LANG=C"};std::vector<char*> envp;for(auto& e:env)envp.push_back(e.data());envp.push_back(nullptr);
         ::execve(argv[0],argv.data(),envp.data());_exit(127);}
     (void)::setpgid(pid,pid);::close(out[1]);::close(err[1]);for(auto&s:secrets){::close(s.read);(void)write_all(s.write,s.lease.value);::close(s.write);}
+    {std::lock_guard lock(mutex_);process_groups_[handle.sandbox_id]=pid;}
     ::fcntl(out[0],F_SETFL,O_NONBLOCK);::fcntl(err[0],F_SETFL,O_NONBLOCK);
     std::string stdout_text,stderr_text;int status=0;bool timed_out=false;struct rusage usage{};
     const auto deadline=started+std::chrono::milliseconds(spec.wall_time_ms);
@@ -128,6 +129,7 @@ std::optional<ExecResult> BubblewrapSandboxProvider::exec(
         const auto waited=::wait4(pid,&status,WNOHANG,&usage);if(waited==pid)break;if(waited<0){if(error)*error="wait4 failed";return std::nullopt;}
         if(std::chrono::steady_clock::now()>=deadline){timed_out=true;(void)::kill(-pid,SIGKILL);(void)::kill(pid,SIGKILL);(void)::wait4(pid,&status,0,&usage);break;}}
     drain(out[0],stdout_text,options_.output_limit_bytes);drain(err[0],stderr_text,options_.output_limit_bytes);::close(out[0]);::close(err[0]);
+    {std::lock_guard lock(mutex_);process_groups_.erase(handle.sandbox_id);}
     CredentialBroker::redact(stdout_text,leases);CredentialBroker::redact(stderr_text,leases);
     ExecResult result;result.timed_out=timed_out;result.exit_code=timed_out?-1:WIFEXITED(status)?WEXITSTATUS(status):-1;result.stdout_text=stdout_text;result.stderr_text=stderr_text;
     result.manifest.metadata=spec.metadata;result.manifest.sandbox_id=handle.sandbox_id;result.manifest.spec_digest=handle.spec_digest;result.manifest.provider_version=version();
@@ -141,5 +143,14 @@ std::optional<ExecResult> BubblewrapSandboxProvider::exec(
 
 bool BubblewrapSandboxProvider::destroy(const SandboxHandle& handle,std::string* error) {
     std::lock_guard lock(mutex_);if(specs_.erase(handle.sandbox_id)==0){if(error)*error="unknown sandbox handle";return false;}return true;
+}
+SandboxCancelResult BubblewrapSandboxProvider::cancel(const SandboxHandle&handle,SandboxSignal signal){
+#if defined(_WIN32)
+    return {false,false,false,"unsupported platform",{}};
+#else
+    long pid=0;{std::lock_guard lock(mutex_);auto it=process_groups_.find(handle.sandbox_id);if(it==process_groups_.end())return {false,false,false,"sandbox process not running",{}};pid=it->second;}
+    const int value=signal==SandboxSignal::Kill?SIGKILL:SIGTERM;const bool accepted=::kill(-static_cast<pid_t>(pid),value)==0||::kill(static_cast<pid_t>(pid),value)==0;
+    return {accepted,false,false,accepted?(signal==SandboxSignal::Kill?"process_group_sigkill_sent":"process_group_sigterm_sent"):"process_group_signal_failed",{}};
+#endif
 }
 }  // namespace agent_framework::sandbox

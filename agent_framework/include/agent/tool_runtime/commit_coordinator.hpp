@@ -3,6 +3,7 @@
 #include "agent/toolbus/tool_effect_journal.hpp"
 #include "agent/run/store.hpp"
 #include "agent/harness/cross_store_coordination.hpp"
+#include <functional>
 namespace agent_framework::tool_runtime
 {
 struct InvocationCommitRequest
@@ -21,13 +22,18 @@ struct InvocationCommitOutcome
 class InvocationCommitCoordinator
 {
 public:
+    using FaultInjector=std::function<void(std::string_view)>;
     InvocationCommitCoordinator(InvocationStore&,distributed::ObjectStore&,ToolEffectJournal&,
-                                run::RunStore&,harness::CrossStoreCoordinator&);
+                                run::RunStore&,harness::CrossStoreCoordinator&,FaultInjector={});
+    InvocationCommitOutcome reserve(const InvocationCommitRequest&);
     InvocationCommitOutcome commit(const InvocationCommitRequest&);
     InvocationCommitOutcome reconcile(const InvocationCommitRequest&);
+    std::size_t sweep_orphans(const std::function<std::optional<InvocationCommitRequest>(const ToolEffectRecord&)>&,
+                              std::size_t limit=100);
 private:
     InvocationCommitOutcome drive(const InvocationCommitRequest&,bool);
     InvocationStore& invocations_;distributed::ObjectStore& objects_;ToolEffectJournal& effects_;
     run::RunStore& runs_;harness::CrossStoreCoordinator& coordination_;
+    FaultInjector fault_;
 };
 }

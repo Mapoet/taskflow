@@ -28,10 +28,12 @@ public:
     std::optional<ExecResult> exec(const SandboxHandle& handle,
                                    std::string* error = nullptr) override;
     bool destroy(const SandboxHandle& handle, std::string* error = nullptr) override;
+    SandboxCancelResult cancel(const SandboxHandle&,SandboxSignal) override;
 private:
     ProcessSandboxOptions options_;
     std::shared_ptr<CredentialBroker> credentials_;
     std::mutex mutex_;
     std::map<std::string, SandboxSpec> specs_;
+    std::map<std::string, long> process_groups_;
 };
 }  // namespace agent_framework::sandbox

@@ -9,6 +9,14 @@ using namespace agent_framework;
 using namespace agent_framework::tool_runtime;
 namespace
 {
+    class RemoteProtocol final : public RemoteExecutionProtocol {
+    public:
+        std::optional<RemoteExecutionIdentity> start(const ExecutionRequest&,std::string*) override{return RemoteExecutionIdentity{"external","session","task","peer"};}
+        ExecutionObservation query(const RemoteExecutionIdentity&v) override{assert(v.session_id=="session");return {ObservationState::Running};}
+        CancellationResult cancel(const RemoteExecutionIdentity&v,CancellationStage) override{assert(v.task_id=="task");return {true,false,"remote cancel",false,{}};}
+        ReconciliationResult reconcile(const ExecutionRequest&,const RemoteExecutionIdentity&) override{return {{ObservationState::Unknown},false};}
+        bool attach(const RemoteExecutionIdentity&v,std::string*) override{return v.external_id=="external"&&v.peer_id=="peer";}
+    };
     class Participant final : public harness::CrossStoreParticipant
     {
     public:
@@ -81,6 +89,10 @@ int main()
                                                        {remote["op"]={ObservationState::Running};return std::optional<std::string>{"op"}; }, [&](std::string_view id)
                                                        { return remote[std::string(id)]; });
     assert(production.register_adapter(http));
+    auto remote_protocol=std::make_shared<RemoteProtocol>();
+    auto mcp=std::make_shared<RemoteProtocolExecutionAdapter>(remote_protocol,ExecutionAdapterKind::MCP,"mcp-native","v1","g1");
+    assert(production.register_adapter(mcp));auto mh=mcp->start(req,&error);assert(mh&&mh->provider_session_id=="session"&&mh->remote_task_id=="task");
+    auto remote_invocation=req.invocation;remote_invocation.external_operation_id="external";remote_invocation.provider_session_id="session";remote_invocation.remote_task_id="task";remote_invocation.adapter_peer_id="peer";ExecutionRequest attach_request{remote_invocation,{},"key",{},8};auto ma=mcp->attach(attach_request,&error);assert(ma&&ma->peer_id=="peer");assert(mcp->cancel(*ma).accepted);
     auto hh = http->start(req, &error);
     assert(hh);
     req.checkpoint_ref = "op";
@@ -126,12 +138,22 @@ int main()
     harness::CrossStoreCoordinator cross(journal, "invocation-commit-v1");
     assert(cross.register_participant(std::make_shared<Participant>()));
     InvocationCommitCoordinator coordinator(inv, objects, effects, runs, cross);
+    auto reserved = coordinator.reserve({"commit", "tenant", "run", "harness", "commit-key", "sha256:req", "application/json", {}, claim->queue_lease.fencing_token, true, true});
+    assert(reserved.committed);
+    auto reservation_record=effects.find_idempotency("commit-key");assert(reservation_record&&reservation_record->status==ToolEffectStatus::Started);
+    auto reservation_conflict = coordinator.reserve({"commit", "tenant", "run", "harness", "commit-key", "sha256:different", "application/json", {}, claim->queue_lease.fencing_token, true, true});
+    assert(!reservation_conflict.committed);
     auto committed = coordinator.commit({"commit", "tenant", "run", "harness", "commit-key", "sha256:req", "application/json", {{"answer", 42}}, claim->queue_lease.fencing_token, true, true});
     if (!committed.committed)
         throw std::runtime_error(committed.error);
     assert(!committed.artifact_digest.empty());
     assert(inv.load("commit")->state == InvocationState::EffectCommitted);
     assert(runs.effect("run", "commit")->state == run::EffectState::Committed);
+    // Crash immediately after reservation leaves a classified orphan; missing input is fail-closed.
+    auto orphan=value("orphan",true);orphan.lease={"w","i",*gen,12,100};assert(inv.create(orphan));
+    ToolEffectJournal orphan_effects(root/"orphan-effects.wal");InvocationCommitCoordinator crashing(inv,objects,orphan_effects,runs,cross,[](std::string_view point){if(point=="after_input_reservation")throw std::runtime_error("crash");});
+    bool crashed=false;try{(void)crashing.reserve({"orphan","tenant","run","harness","orphan-key","sha256:orphan","application/json",{},12,true,true});}catch(...){crashed=true;}assert(crashed&&orphan_effects.recoverable().size()==1);
+    InvocationCommitCoordinator sweeper(inv,objects,orphan_effects,runs,cross);assert(sweeper.sweep_orphans([](const ToolEffectRecord&){return std::optional<InvocationCommitRequest>{};})==1);assert(orphan_effects.find_idempotency("orphan-key")->status==ToolEffectStatus::ManualReview);
 
     // Durable cancellation is generation-scoped and unsupported force-kill fails closed
     // through reconciliation into ManualReview instead of reporting false success.

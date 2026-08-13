@@ -41,4 +41,7 @@ struct SoakReport {
 };
 using SoakOperation = std::function<bool(std::uint64_t iteration, std::uint64_t random_value)>;
 SoakReport run_recovery_soak(const SoakOptions&, const SoakOperation&);
+struct ProviderLiveOptions { std::string environment_digest,output_path;std::uint64_t iterations{0},seed{1};std::size_t concurrency{1}; };
+RecoveryCertificationReport run_provider_live_certification(const ProviderLiveOptions&,
+    const RecoveryScenarioExecutor&,const SoakOperation&,std::string* error=nullptr);
 }

@@ -45,7 +45,9 @@ public:
     ExecutionAdapterCapabilities capabilities()const noexcept override{return {false,true,false,true,true,false,true};}
     RestartPolicy restart_policy()const noexcept override{return RestartPolicy::RestartFromCheckpoint;}
     std::optional<ExecutionHandle> start(const ExecutionRequest&,std::string*)override;
+    CancellationResult escalate(const ExecutionHandle&,CancellationStage)override;
 private:std::shared_ptr<sandbox::SandboxProvider> provider_;sandbox::SandboxSpec spec_;std::string revision_,generation_;
+    std::mutex handles_mutex_;std::map<std::string,sandbox::SandboxHandle> handles_;
 };
 
 class ChildTaskExecutionAdapter final:public AsyncExecutionAdapter
@@ -78,5 +80,24 @@ public:
     ExecutionObservation query(const ExecutionHandle&)override;CancellationResult cancel(const ExecutionHandle&)override;
     ReconciliationResult reconcile(const ExecutionRequest&,const ExecutionHandle&)override;
 private:std::string id_,revision_,generation_;Start start_;Query query_;Cancel cancel_;Reconcile reconcile_;
+};
+
+struct RemoteExecutionIdentity { std::string external_id,session_id,task_id,peer_id; };
+class RemoteExecutionProtocol {
+public: virtual ~RemoteExecutionProtocol()=default;
+    virtual std::optional<RemoteExecutionIdentity> start(const ExecutionRequest&,std::string*)=0;
+    virtual ExecutionObservation query(const RemoteExecutionIdentity&)=0;
+    virtual CancellationResult cancel(const RemoteExecutionIdentity&,CancellationStage)=0;
+    virtual ReconciliationResult reconcile(const ExecutionRequest&,const RemoteExecutionIdentity&)=0;
+    virtual bool attach(const RemoteExecutionIdentity&,std::string*)=0;
+};
+class RemoteProtocolExecutionAdapter final:public ExecutionAdapter {
+public: RemoteProtocolExecutionAdapter(std::shared_ptr<RemoteExecutionProtocol>,ExecutionAdapterKind,std::string,std::string,std::string,RestartPolicy=RestartPolicy::Attach);
+    std::string id()const override{return id_;}std::string revision()const override{return revision_;}std::string deployment_generation()const override{return generation_;}
+    ExecutionAdapterKind kind()const noexcept override{return kind_;}AdapterOrigin origin()const noexcept override{return AdapterOrigin::Production;}
+    ExecutionAdapterCapabilities capabilities()const noexcept override{return {true,true,true,true,true,true,true};}RestartPolicy restart_policy()const noexcept override{return restart_;}
+    std::optional<ExecutionHandle> start(const ExecutionRequest&,std::string*)override;std::optional<ExecutionHandle> attach(const ExecutionRequest&,std::string*)override;
+    ExecutionObservation query(const ExecutionHandle&)override;CancellationResult cancel(const ExecutionHandle&)override;CancellationResult escalate(const ExecutionHandle&,CancellationStage)override;ReconciliationResult reconcile(const ExecutionRequest&,const ExecutionHandle&)override;
+private:RemoteExecutionIdentity identity(const ExecutionHandle&)const;std::shared_ptr<RemoteExecutionProtocol> protocol_;ExecutionAdapterKind kind_;std::string id_,revision_,generation_;RestartPolicy restart_;
 };
 }

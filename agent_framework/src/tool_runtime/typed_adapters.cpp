@@ -59,13 +59,15 @@ namespace agent_framework::tool_runtime
     {
         std::lock_guard l(operations_mutex_);
         auto it = operations_.find(h.external_id);
-        if (it == operations_.end()) return {false, false, "operation_not_found", false, {}};
+        if (it == operations_.end())
+            return {false, false, "operation_not_found", false, {}};
         it->second->cancel->store(true);
         if (it->second->terminal && it->second->terminal->state == ObservationState::Cancelled)
             return {true, true, "cancel_observed", true, it->second->terminal->result_digest};
-        return {true, false, stage == CancellationStage::Kill ? "kill_requested; awaiting effect reconciliation" :
-                    stage == CancellationStage::Terminate ? "terminate_requested; awaiting effect reconciliation" :
-                    "cooperative_cancel_requested", false, {}};
+        return {true, false, stage == CancellationStage::Kill ? "kill_requested; awaiting effect reconciliation" : stage == CancellationStage::Terminate ? "terminate_requested; awaiting effect reconciliation"
+                                                                                                                                                         : "cooperative_cancel_requested",
+                false,
+                {}};
     }
     ReconciliationResult AsyncExecutionAdapter::reconcile(const ExecutionRequest &r, const ExecutionHandle &h)
     {
@@ -94,15 +96,41 @@ namespace agent_framework::tool_runtime
         if (r.control.deadline_at_ms)
         {
             const auto now = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
-            if (r.control.deadline_at_ms <= now) { if (e) *e = "execution deadline exceeded"; return {}; }
+            if (r.control.deadline_at_ms <= now)
+            {
+                if (e)
+                    *e = "execution deadline exceeded";
+                return {};
+            }
             const auto remaining = static_cast<std::uint64_t>(r.control.deadline_at_ms - now);
             spec.wall_time_ms = spec.wall_time_ms ? std::min(spec.wall_time_ms, remaining) : remaining;
         }
         auto h = provider_->create(spec, e);
         if (!h)
             return {};
-        return launch(r, [p = provider_, h = *h](auto c)
-                      {if(c->load()){p->destroy(h,nullptr);return ExecutionObservation{ObservationState::Cancelled,{}, {},{}, {},false,true};}std::string error;auto v=p->exec(h,&error);p->destroy(h,nullptr);if(!v)return ExecutionObservation{ObservationState::Failed,{}, {},{},error,false,true};nlohmann::json result={{"exit_code",v->exit_code},{"stdout",v->stdout_text},{"stderr",v->stderr_text},{"manifest",sandbox::encode(v->manifest)}};return ExecutionObservation{v->timed_out||v->exit_code!=0?ObservationState::Failed:ObservationState::CompletedCandidate,result,digest(result),v->manifest.workspace_output_digest,v->timed_out?"deadline_exceeded":v->exit_code?"process_failed":"",true,true}; }, e);
+        auto launched = launch(r, [p = provider_, h = *h](auto c)
+                               {if(c->load()){p->destroy(h,nullptr);return ExecutionObservation{ObservationState::Cancelled,{}, {},{}, {},false,true};}std::string error;auto v=p->exec(h,&error);p->destroy(h,nullptr);if(!v)return ExecutionObservation{ObservationState::Failed,{}, {},{},error,false,true};nlohmann::json result={{"exit_code",v->exit_code},{"stdout",v->stdout_text},{"stderr",v->stderr_text},{"manifest",sandbox::encode(v->manifest)}};return ExecutionObservation{v->timed_out||v->exit_code!=0?ObservationState::Failed:ObservationState::CompletedCandidate,result,digest(result),v->manifest.workspace_output_digest,v->timed_out?"deadline_exceeded":v->exit_code?"process_failed":"",true,true}; }, e);
+        if (launched)
+        {
+            std::lock_guard l(handles_mutex_);
+            handles_[launched->external_id] = *h;
+        }
+        return launched;
+    }
+    CancellationResult BubblewrapExecutionAdapter::escalate(const ExecutionHandle &h, CancellationStage s)
+    {
+        sandbox::SandboxHandle handle;
+        {
+            std::lock_guard l(handles_mutex_);
+            auto it = handles_.find(h.external_id);
+            if (it == handles_.end())
+                return AsyncExecutionAdapter::escalate(h, s);
+            handle = it->second;
+        }
+        auto signal = s == CancellationStage::Kill ? sandbox::SandboxSignal::Kill : s == CancellationStage::Terminate ? sandbox::SandboxSignal::Terminate
+                                                                                                                      : sandbox::SandboxSignal::Cooperative;
+        auto result = provider_->cancel(handle, signal);
+        return {result.accepted, result.terminal, result.diagnostic, result.effect_known, result.receipt_digest};
     }
     ChildTaskExecutionAdapter::ChildTaskExecutionAdapter(std::shared_ptr<ChildTaskBackend> b, ChildTaskRequest r, std::string i, std::string v, std::string g, bool remote) : backend_(std::move(b)), request_(std::move(r)), id_(std::move(i)), revision_(std::move(v)), generation_(std::move(g)), remote_(remote)
     {
@@ -117,9 +145,14 @@ namespace agent_framework::tool_runtime
         if (r.control.deadline_at_ms)
         {
             const auto now_system = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
-            if (r.control.deadline_at_ms <= now_system) { if (e) *e = "execution deadline exceeded"; return {}; }
+            if (r.control.deadline_at_ms <= now_system)
+            {
+                if (e)
+                    *e = "execution deadline exceeded";
+                return {};
+            }
             req.policy.deadline = std::chrono::steady_clock::now() +
-                std::chrono::milliseconds(r.control.deadline_at_ms - now_system);
+                                  std::chrono::milliseconds(r.control.deadline_at_ms - now_system);
         }
         return launch(r, [b = backend_, req = std::move(req)](auto c) mutable
                       {req.policy.cancel_requested=c;auto h=b->start(std::move(req));auto v=h->wait();auto value=child_task_result_to_json(v);auto state=v.status==ChildTaskStatus::Completed?ObservationState::CompletedCandidate:v.status==ChildTaskStatus::Cancelled?ObservationState::Cancelled:ObservationState::Failed;return ExecutionObservation{state,value,digest(value),v.checkpoint.dump(),v.error_code,v.verified_complete(),true}; }, e);
@@ -147,4 +180,32 @@ namespace agent_framework::tool_runtime
     ExecutionObservation HTTPExecutionAdapter::query(const ExecutionHandle &h) { return query_(h.external_id); }
     CancellationResult HTTPExecutionAdapter::cancel(const ExecutionHandle &h) { return cancel_ ? cancel_(h.external_id) : CancellationResult{false, false, "cancel endpoint unavailable"}; }
     ReconciliationResult HTTPExecutionAdapter::reconcile(const ExecutionRequest &r, const ExecutionHandle &h) { return reconcile_ ? reconcile_(r, h.external_id) : ReconciliationResult{query(h), false}; }
+    RemoteProtocolExecutionAdapter::RemoteProtocolExecutionAdapter(std::shared_ptr<RemoteExecutionProtocol> p, ExecutionAdapterKind k, std::string i, std::string r, std::string g, RestartPolicy restart) : protocol_(std::move(p)), kind_(k), id_(std::move(i)), revision_(std::move(r)), generation_(std::move(g)), restart_(restart)
+    {
+        if (!protocol_ || (k != ExecutionAdapterKind::MCP && k != ExecutionAdapterKind::A2AChildTask))
+            throw std::invalid_argument("native MCP/A2A protocol required");
+    }
+    RemoteExecutionIdentity RemoteProtocolExecutionAdapter::identity(const ExecutionHandle &h) const { return {h.external_id, h.provider_session_id, h.remote_task_id, h.peer_id}; }
+    std::optional<ExecutionHandle> RemoteProtocolExecutionAdapter::start(const ExecutionRequest &r, std::string *e)
+    {
+        auto x = protocol_->start(r, e);
+        return x ? std::optional<ExecutionHandle>{{id_, revision_, generation_, x->external_id, r.fencing_token, x->session_id, x->task_id, x->peer_id}} : std::nullopt;
+    }
+    std::optional<ExecutionHandle> RemoteProtocolExecutionAdapter::attach(const ExecutionRequest &r, std::string *e)
+    {
+        RemoteExecutionIdentity x{r.invocation.external_operation_id, r.invocation.provider_session_id, r.invocation.remote_task_id, r.invocation.adapter_peer_id};
+        if (x.external_id.empty() || x.session_id.empty() || (kind_ == ExecutionAdapterKind::A2AChildTask && (x.task_id.empty() || x.peer_id.empty())))
+        {
+            if (e)
+                *e = "pinned remote execution identity required";
+            return {};
+        }
+        if (!protocol_->attach(x, e))
+            return {};
+        return ExecutionHandle{id_, revision_, generation_, x.external_id, r.fencing_token, x.session_id, x.task_id, x.peer_id};
+    }
+    ExecutionObservation RemoteProtocolExecutionAdapter::query(const ExecutionHandle &h) { return protocol_->query(identity(h)); }
+    CancellationResult RemoteProtocolExecutionAdapter::cancel(const ExecutionHandle &h) { return protocol_->cancel(identity(h), CancellationStage::Cooperative); }
+    CancellationResult RemoteProtocolExecutionAdapter::escalate(const ExecutionHandle &h, CancellationStage s) { return protocol_->cancel(identity(h), s); }
+    ReconciliationResult RemoteProtocolExecutionAdapter::reconcile(const ExecutionRequest &r, const ExecutionHandle &h) { return protocol_->reconcile(r, identity(h)); }
 }

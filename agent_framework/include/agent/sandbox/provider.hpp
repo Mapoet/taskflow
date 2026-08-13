@@ -22,6 +22,8 @@ struct ExecResult {
     bool timed_out{false};
     SandboxManifest manifest;
 };
+enum class SandboxSignal { Cooperative, Terminate, Kill };
+struct SandboxCancelResult { bool accepted{false},terminal{false},effect_known{false};std::string diagnostic,receipt_digest; };
 
 class SandboxProvider {
 public:
@@ -34,6 +36,7 @@ public:
     virtual std::optional<ExecResult> exec(const SandboxHandle& handle,
                                            std::string* error = nullptr) = 0;
     virtual bool destroy(const SandboxHandle& handle, std::string* error = nullptr) = 0;
+    virtual SandboxCancelResult cancel(const SandboxHandle&,SandboxSignal){return {false,false,false,"sandbox cancellation unsupported",{}};}
 };
 
 class SandboxProviderRegistry {

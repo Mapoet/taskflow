@@ -33,6 +33,7 @@ struct ExecutionHandle
 {
     std::string adapter_id, adapter_revision, deployment_generation, external_id;
     std::uint64_t fencing_token{0};
+    std::string provider_session_id, remote_task_id, peer_id;
 };
 struct ExecutionObservation
 {

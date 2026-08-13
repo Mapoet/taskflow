@@ -210,8 +210,11 @@ namespace agent_framework::tool_runtime
         c.invocation.adapter_revision = a.revision();
         c.invocation.adapter_generation = a.deployment_generation();
         c.invocation.external_operation_id = handle->external_id;
+        c.invocation.provider_session_id = handle->provider_session_id;
+        c.invocation.remote_task_id = handle->remote_task_id;
+        c.invocation.adapter_peer_id = handle->peer_id;
         c.invocation.adapter_restart_policy = restart_name(a.restart_policy());
-        auto saved = advance(c.invocation, InvocationState::Progressing, "invocation_adapter_started", c.queue_lease.fencing_token, {{"adapter_id", a.id()}, {"adapter_revision", a.revision()}, {"adapter_generation", a.deployment_generation()}, {"external_operation_id", handle->external_id}, {"restart_policy", c.invocation.adapter_restart_policy}});
+        auto saved = advance(c.invocation, InvocationState::Progressing, "invocation_adapter_started", c.queue_lease.fencing_token, {{"adapter_id", a.id()}, {"adapter_revision", a.revision()}, {"adapter_generation", a.deployment_generation()}, {"external_operation_id", handle->external_id},{"provider_session_id",handle->provider_session_id},{"remote_task_id",handle->remote_task_id},{"peer_id",handle->peer_id}, {"restart_policy", c.invocation.adapter_restart_policy}});
         if (!saved)
         {
             if (error)
