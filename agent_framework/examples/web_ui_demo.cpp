@@ -20,6 +20,7 @@
 #include <agent/toolbus/fs_sandbox.hpp>
 #include <agent/core/types.hpp>
 #include <agent/ui/ui_manager.hpp>
+#include <agent/ui/live_operations_projection.hpp>
 #include <agent/agent/user_input_preprocessor.hpp>
 #include <agent/approval/executor.hpp>
 
@@ -160,6 +161,7 @@ int run_graph_ui(tf::Executor& executor,
                  const std::shared_ptr<internal::AgentThreadState>& state,
                  UIManager& ui,
                  const std::shared_ptr<TaskControl>& control,
+                 const std::shared_ptr<LiveOperationsProjection>& operations,
                  const example::LiveRuntime& runtime) {
     GraphExecutor gx;
     ReactCliRunRequest req;
@@ -175,7 +177,7 @@ int run_graph_ui(tf::Executor& executor,
         ui.stream_thinking("default", tok);
     };
     req.options.graph_options.task_control = control;
-    req.options.graph_options.tool_execution_observer = [&ui](const ToolExecutionEvent& event) {
+    req.options.graph_options.tool_execution_observer = [&ui, operations](const ToolExecutionEvent& event) {
         json payload{{"tool_name", event.tool_name},
                      {"tool_call_id", event.tool_call_id},
                      {"arguments", event.arguments}};
@@ -183,6 +185,7 @@ int run_graph_ui(tf::Executor& executor,
         ui.dispatch_message(event.phase == ToolExecutionPhase::Started ? "tool_started"
                                                                        : "tool_completed",
                             payload);
+        if (operations) operations->observe_tool(event);
     };
     req.options.graph_options.skill_event_sink = [](const SkillEvent& event) {
         std::clog << example::skill_event_json(event).dump() << '\n';
@@ -328,6 +331,15 @@ int main(int argc, char** argv) {
     auto operations = std::make_shared<Phase4OperationsSnapshot>(
         std::move(operations_bootstrap.snapshot));
     auto operations_mutex = std::make_shared<std::mutex>();
+    auto live_operations = std::make_shared<LiveOperationsProjection>(
+        *operations, operations_store,
+        [&ui, operations, operations_mutex](const Phase4OperationsSnapshot& snapshot) {
+            {
+                std::lock_guard<std::mutex> lock(*operations_mutex);
+                *operations = snapshot;
+            }
+            ui.publish_phase4_operations(snapshot);
+        });
     auto approval_store = std::make_shared<approval::SQLiteApprovalStore>(
         (std::filesystem::path(phase4_state_dir_arg) / "approval.sqlite3").string());
     auto approval_executor = std::make_shared<approval::AccountableApprovalExecutor>(
@@ -384,7 +396,7 @@ int main(int argc, char** argv) {
             return;
         }
         apply_processed_to_agent_state(std::move(proc), ectx, *state);
-        (void)run_graph_ui(*executor, cfg, deps, state, ui, control, runtime);
+        (void)run_graph_ui(*executor, cfg, deps, state, ui, control, live_operations, runtime);
         {
             std::lock_guard<std::mutex> lock(g_control_mutex);
             if (g_active_control == control) g_active_control.reset();
@@ -432,6 +444,14 @@ int main(int argc, char** argv) {
         ui.dispatch_message("tool_completed", json{{"tool_name", "web_search"}, {"tool_call_id", "demo-web"}, {"arguments", json{{"query", "sin(x) maximum 0 to 2pi"}}}, {"result", json{{"sources", 5}, {"status", "verified"}}}});
         ui.dispatch_message("tool_started", json{{"tool_name", "expr_eval"}, {"tool_call_id", "demo-expr"}, {"arguments", json{{"expression", "max(sin(x))"}}}});
         ui.dispatch_message("tool_completed", json{{"tool_name", "expr_eval"}, {"tool_call_id", "demo-expr"}, {"arguments", json{{"expression", "max(sin(x))"}}}, {"result", json{{"value", 1.0}, {"x", 1.5708}}}});
+        for (const auto& event : std::vector<ToolExecutionEvent>{
+                 {ToolExecutionPhase::Started, "fs_search", "demo-fs", json::object(), json::object()},
+                 {ToolExecutionPhase::Completed, "fs_search", "demo-fs", json::object(), {{"ok", true}}},
+                 {ToolExecutionPhase::Started, "web_search", "demo-web", json::object(), json::object()},
+                 {ToolExecutionPhase::Completed, "web_search", "demo-web", json::object(), {{"ok", true}}},
+                 {ToolExecutionPhase::Started, "expr_eval", "demo-expr", json::object(), json::object()},
+                 {ToolExecutionPhase::Completed, "expr_eval", "demo-expr", json::object(), {{"ok", true}}}})
+            live_operations->observe_tool(event);
         ui.dispatch_message("artifact", json{{"id", "demo-console-reference"},
                                                {"mime", "image/png"},
                                                {"path", "agent_framework/docs/assets/ui/scientific-console-reference.png"},

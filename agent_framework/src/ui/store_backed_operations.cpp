@@ -79,7 +79,7 @@ std::optional<Phase4OperationsSnapshot> SQLiteOperationsSnapshotStore::latest(
     std::string_view tenant, std::string_view run) {
     std::lock_guard lock(mutex_); auto* db = sqlite::database(db_);
     sqlite::Statement query(db, "SELECT document_json,document_digest FROM phase4_operations_snapshots "
-                                "WHERE tenant_id=? AND run_id=? ORDER BY updated_at DESC,snapshot_id DESC LIMIT 1");
+                                "WHERE tenant_id=? AND run_id=? ORDER BY updated_at DESC,rowid DESC LIMIT 1");
     sqlite::bind_text(query.get(), 1, tenant); sqlite::bind_text(query.get(), 2, run);
     if(sqlite::step(query.get()) != SQLITE_ROW) return std::nullopt;
     const auto document = sqlite::column_text(query.get(), 0); const auto json = nlohmann::json::parse(document);

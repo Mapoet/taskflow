@@ -31,6 +31,7 @@
 #include <agent/toolbus/toolbus.hpp>
 #include <agent/core/types.hpp>
 #include <agent/ui/ui_manager.hpp>
+#include <agent/ui/live_operations_projection.hpp>
 
 #include <atomic>
 #include <cstdlib>
@@ -162,6 +163,7 @@ int run_graph_once(tf::Executor& executor,
                    const AgentWorkflowDeps& deps,
                    const std::shared_ptr<internal::AgentThreadState>& state,
                    CLIHandler& cli,
+                   const std::shared_ptr<LiveOperationsProjection>& operations,
                    const example::LiveRuntime& runtime) {
     GraphExecutor gx;
     ReactCliRunRequest req;
@@ -174,6 +176,12 @@ int run_graph_once(tf::Executor& executor,
         if (!g_shutdown_requested.load()) {
             cli.handle_stream_token(tok);
         }
+    };
+    req.options.graph_options.tool_execution_observer = [&cli, operations](const ToolExecutionEvent& event) {
+        if (!operations) return;
+        operations->observe_tool(event);
+        cli.handle_aux_event(Phase4OperationsProjection::event_type,
+            Phase4OperationsProjection::to_json(operations->snapshot()));
     };
     req.options.graph_options.skill_event_sink = [](const SkillEvent& event) {
         std::clog << example::skill_event_json(event).dump() << '\n';
@@ -293,6 +301,11 @@ int main(int argc, char** argv) {
     tf::Executor executor;
 
     auto state = std::make_shared<internal::AgentThreadState>();
+    Phase4OperationsSnapshot initial_operations;
+    initial_operations.tenant_id = operations_tenant_arg;
+    initial_operations.run_id = operations_run_arg;
+    initial_operations.task_id = "cli-live-task";
+    auto operations = std::make_shared<LiveOperationsProjection>(std::move(initial_operations));
 
     auto exec_line = [&](const std::string& line) -> int {
         if (g_shutdown_requested.load()) {
@@ -319,7 +332,7 @@ int main(int argc, char** argv) {
         std::clog << "[cli_agent_demo] running agent loop (streaming to stdout; "
                      "wait up to AGENT_HTTP_TIMEOUT_SEC)...\n"
                   << std::flush;
-        return run_graph_once(executor, cfg, deps, state, cli, runtime);
+        return run_graph_once(executor, cfg, deps, state, cli, operations, runtime);
     };
 
     if (!prompt_arg.empty()) {

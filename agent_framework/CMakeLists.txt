@@ -825,6 +825,9 @@ endif()
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/ui/store_backed_operations.cpp)
     list(APPEND AGENT_SOURCES src/ui/store_backed_operations.cpp)
 endif()
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/ui/live_operations_projection.cpp)
+    list(APPEND AGENT_SOURCES src/ui/live_operations_projection.cpp)
+endif()
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/ui/streaming_markdown.cpp)
     list(APPEND AGENT_SOURCES src/ui/streaming_markdown.cpp)
 endif()
@@ -2039,6 +2042,15 @@ if(BUILD_TESTING)
         target_link_libraries(test_phase4_store_backed_operations PRIVATE agent_framework)
         add_test(NAME phase4_store_backed_operations COMMAND test_phase4_store_backed_operations)
         set_tests_properties(phase4_store_backed_operations PROPERTIES
+            LABELS "phase4-operations;phase4-ui-v2;phase4-integration;phase4-durable;phase4-offline;offline"
+            RUN_SERIAL TRUE)
+    endif()
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_live_operations_projection.cpp)
+        add_executable(test_live_operations_projection
+            tests/test_live_operations_projection.cpp)
+        target_link_libraries(test_live_operations_projection PRIVATE agent_framework)
+        add_test(NAME live_operations_projection COMMAND test_live_operations_projection)
+        set_tests_properties(live_operations_projection PROPERTIES
             LABELS "phase4-operations;phase4-ui-v2;phase4-integration;phase4-durable;phase4-offline;offline"
             RUN_SERIAL TRUE)
     endif()

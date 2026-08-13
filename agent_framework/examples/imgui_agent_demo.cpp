@@ -25,6 +25,7 @@
 #include <agent/core/types.hpp>
 #include <agent/ui/ui_manager.hpp>
 #include <agent/ui/presentation_model.hpp>
+#include <agent/ui/live_operations_projection.hpp>
 #include <agent/agent/user_input_preprocessor.hpp>
 
 #include <imgui.h>
@@ -250,6 +251,7 @@ int run_graph_ui(tf::Executor& executor,
                  UIManager& ui,
                  const std::shared_ptr<TaskControl>& control,
                  const std::shared_ptr<UiPresentationModel>& presentation,
+                 const std::shared_ptr<LiveOperationsProjection>& operations,
                  const example::LiveRuntime& runtime) {
     GraphExecutor gx;
     ReactCliRunRequest req;
@@ -267,8 +269,9 @@ int run_graph_ui(tf::Executor& executor,
         if (!g_shutdown.load()) ui.stream_thinking("default", tok);
     };
     req.options.graph_options.task_control = control;
-    req.options.graph_options.tool_execution_observer = [presentation](const ToolExecutionEvent& event) {
+    req.options.graph_options.tool_execution_observer = [presentation, operations](const ToolExecutionEvent& event) {
         if (presentation) presentation->observe_tool(event);
+        if (operations) operations->observe_tool(event);
     };
     req.options.graph_options.skill_event_sink = [](const SkillEvent& event) {
         std::clog << example::skill_event_json(event).dump() << '\n';
@@ -449,6 +452,24 @@ int main(int argc, char** argv) {
         presentation->add_system_notice("MCP unavailable: " + diagnostic, true);
     for (const auto& service : mcp_boot.skipped_mcp_services)
         presentation->add_system_notice("MCP skipped by policy: " + service);
+    std::shared_ptr<SQLiteOperationsSnapshotStore> operations_store;
+    Phase4OperationsSnapshot initial_operations;
+    if (demo_state) {
+        auto loaded = example::load_phase4_operations({
+            operations_db_arg, operations_tenant_arg, operations_run_arg, true});
+        operations_store = loaded.store;
+        initial_operations = std::move(loaded.snapshot);
+        presentation->observe_operations(initial_operations);
+    } else {
+        initial_operations.tenant_id = operations_tenant_arg;
+        initial_operations.run_id = operations_run_arg;
+        initial_operations.task_id = "imgui-live-task";
+    }
+    auto operations = std::make_shared<LiveOperationsProjection>(
+        std::move(initial_operations), operations_store,
+        [presentation](const Phase4OperationsSnapshot& snapshot) {
+            presentation->observe_operations(snapshot);
+        });
     auto imgui_handler = std::make_unique<ImGuiHandler>(queue, "default", presentation);
     ImGuiHandler* imgui_h = imgui_handler.get();
 
@@ -486,7 +507,7 @@ int main(int argc, char** argv) {
             return;
         }
         apply_processed_to_agent_state(std::move(proc), ectx, *state);
-        (void)run_graph_ui(executor, cfg, deps, state, ui, control, presentation, runtime);
+        (void)run_graph_ui(executor, cfg, deps, state, ui, control, presentation, operations, runtime);
         {
             std::lock_guard<std::mutex> lock(control_mutex);
             if (active_control == control) active_control.reset();
@@ -494,8 +515,6 @@ int main(int argc, char** argv) {
     };
 
     if (demo_state) {
-        presentation->observe_operations(example::load_phase4_operations({
-            operations_db_arg, operations_tenant_arg, operations_run_arg, true}).snapshot);
         presentation->add_system_notice(
             "中文显示验证：GNSS 掩星、电离层建模、数据同化、轨道与气象卫星；扩展字：龘。");
     } else if (!prompt_arg.empty()) {
