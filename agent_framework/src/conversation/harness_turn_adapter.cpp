@@ -119,6 +119,9 @@ ModelTurnOutcome HarnessTurnAdapter::execute(const HarnessSupportedTurnRequest& 
             out.error_code = model.reason == ModelTurnStopReason::EndTurn
                 ? "interactive_execution_empty_delivery"
                 : "interactive_execution_failed";
+            out.error_message = user_facing_turn_failure(out.error_code);
+            out.public_output = {{"error_code", out.error_code},
+                                 {"user_message", out.error_message}};
         }
         return out;
     });
@@ -196,9 +199,8 @@ ModelTurnOutcome HarnessTurnAdapter::execute(const HarnessSupportedTurnRequest& 
     if(result.state != harness::HarnessState::Completed) {
         model.reason = ModelTurnStopReason::GuardStopped;
         model.task_completion_verified = false;
-        if(model.candidate_answer.empty())
-            model.candidate_answer = result.error_code.empty()
-                ? result.checkpoint.terminal_reason : result.error_code;
+        // Keep any streamed candidate. Never promote an internal error code
+        // into user-visible answer content; the UI maps the failure separately.
         return model;
     }
     // Structural harness completion is not semantic task verification.

@@ -100,4 +100,18 @@ namespace agent_framework::conversation
             e.push_back("tool_receipt_required");
         return e;
     }
+    std::string user_facing_turn_failure(std::string_view diagnostic)
+    {
+        if (diagnostic.empty() ||
+            diagnostic == "interactive_execution_empty_delivery" ||
+            diagnostic == "empty_delivery" ||
+            diagnostic == "interactive_execution_failed")
+            return "The model finished without a usable reply. Please retry.";
+        const bool looks_like_code =
+            diagnostic.find(' ') == std::string_view::npos &&
+            diagnostic.find('_') != std::string_view::npos;
+        if (looks_like_code)
+            return "The model turn failed before a reply could be delivered. Please retry.";
+        return std::string(diagnostic);
+    }
 }

@@ -2174,6 +2174,13 @@ if(BUILD_TESTING)
             LABELS "phase4-harness;phase4-conversation;phase4-integration;phase4-durable;phase4-offline;offline"
             RUN_SERIAL TRUE)
     endif()
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_empty_delivery.cpp)
+        add_executable(test_empty_delivery tests/test_empty_delivery.cpp)
+        target_link_libraries(test_empty_delivery PRIVATE agent_framework)
+        add_test(NAME empty_delivery COMMAND test_empty_delivery)
+        set_tests_properties(empty_delivery PROPERTIES
+            LABELS "phase4-conversation;phase4-offline;offline")
+    endif()
     if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_agent_template_contracts.cpp)
         add_executable(test_agent_template_contracts tests/test_agent_template_contracts.cpp)
         target_link_libraries(test_agent_template_contracts PRIVATE agent_framework)

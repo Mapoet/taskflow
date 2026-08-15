@@ -185,4 +185,11 @@ namespace agent_framework::conversation
     std::vector<std::string> validate(const TurnRequest &);
     std::vector<std::string> validate(const ModelTurnOutcome &);
 
+    /**
+     * Map an internal diagnostic (error code or empty) to user-visible text.
+     * Snake-case codes such as `interactive_execution_empty_delivery` must not
+     * be shown as the conversation answer.
+     */
+    std::string user_facing_turn_failure(std::string_view diagnostic = {});
+
 } // namespace agent_framework::conversation

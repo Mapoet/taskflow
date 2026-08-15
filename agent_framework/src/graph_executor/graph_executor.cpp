@@ -494,6 +494,25 @@ WorkflowResult GraphExecutor::run_react_cli_sync(tf::Executor& executor,
             wr.error_message = error;
             return wr;
         }
+        {
+            const std::string stop = last_sink_json.value("model_stop_reason", std::string{});
+            const std::string answer = last_sink_json.value("final_answer", std::string{});
+            const bool has_receipts =
+                last_sink_json.contains("tool_receipt_refs") &&
+                last_sink_json["tool_receipt_refs"].is_array() &&
+                !last_sink_json["tool_receipt_refs"].empty();
+            const bool empty_end =
+                answer.empty() && !has_receipts &&
+                (stop == "empty_delivery" || stop == "model_turn_completed" || stop.empty());
+            if (empty_end) {
+                wr.outputs = last_sink_json;
+                wr.success = false;
+                wr.exit_code = 1;
+                wr.error_message =
+                    "The model finished without a usable reply. Please retry.";
+                return wr;
+            }
+        }
         use_full_user_merge = false;
 
         if (!verifier_should_run) {

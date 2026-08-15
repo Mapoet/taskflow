@@ -134,6 +134,16 @@ void append_cli_terminal_sink(workflow::GraphBuilder& builder,
             j["completion_authority"] = "none";
             j["model_stop_reason"] = std::any_cast<std::string>(
                 outs.at(std::string(internal::kModelStopReason)));
+            json receipts = json::array();
+            if (st_ptr) {
+                for (const auto& message : st_ptr->history) {
+                    if (message.role == "tool" && message.tool_call_id &&
+                        !message.tool_call_id->empty()) {
+                        receipts.push_back(*message.tool_call_id);
+                    }
+                }
+            }
+            j[std::string(internal::kToolReceiptRefs)] = std::move(receipts);
             // Optional guard fields (best-effort; keep backward compatibility)
             // Convention: guard-triggered final_answer starts with "[guard]".
             bool guard_triggered = final_answer.rfind("[guard]", 0) == 0;

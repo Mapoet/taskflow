@@ -83,10 +83,16 @@ int main() {
     empty_request.turn.run_id = "run-empty";
     const auto empty = empty_adapter.execute(empty_request);
     assert(empty.reason == conversation::ModelTurnStopReason::GuardStopped);
+    assert(empty.candidate_answer.empty());
+    assert(empty.candidate_answer.find("interactive_execution") == std::string::npos);
     const auto empty_checkpoint = store.load("tenant", "turn:turn-empty");
     assert(empty_checkpoint.has_value());
     assert(empty_checkpoint->checkpoint.state == harness::HarnessState::Failed);
     assert(empty_checkpoint->checkpoint.terminal_reason ==
            "interactive_execution_empty_delivery");
+    const auto facing = conversation::user_facing_turn_failure(
+        "interactive_execution_empty_delivery");
+    assert(facing.find("interactive_execution") == std::string::npos);
+    assert(!facing.empty());
     fs::remove_all(root, ec);
 }

@@ -160,6 +160,16 @@ int main()
     auto turn = GraphTurnAdapter::from_execution(execution);
     assert(turn.reason == ModelTurnStopReason::EndTurn);
     assert(!turn.task_completion_verified && turn.candidate_answer == "candidate");
+    execution.outputs["tool_receipt_refs"] = nlohmann::json::array({"receipt-1", "receipt-2"});
+    execution.outputs["final_answer"] = "";
+    auto receipt_turn = GraphTurnAdapter::from_execution(execution);
+    assert(receipt_turn.tool_receipt_refs.size() == 2);
+    assert(receipt_turn.tool_receipt_refs[0] == "receipt-1");
+    assert(receipt_turn.candidate_answer.empty());
+    execution.outputs = {{"final_answer", ""}, {"model_stop_reason", "empty_delivery"}};
+    auto empty_turn = GraphTurnAdapter::from_execution(execution);
+    assert(empty_turn.reason == ModelTurnStopReason::ProviderError);
+    assert(empty_turn.candidate_answer.empty());
     agent_framework::WorkflowResult workflow{};
     workflow.success = false;
     workflow.outputs = {{"final_answer", "candidate failure"}};
@@ -167,6 +177,10 @@ int main()
     auto workflow_turn = GraphTurnAdapter::from_workflow(workflow);
     assert(workflow_turn.reason == ModelTurnStopReason::ProviderError);
     assert(!workflow_turn.task_completion_verified && workflow_turn.candidate_answer == "candidate failure");
+    workflow.outputs = {{"final_answer", ""}, {"model_stop_reason", "empty_delivery"}};
+    auto empty_workflow = GraphTurnAdapter::from_workflow(workflow);
+    assert(empty_workflow.reason == ModelTurnStopReason::ProviderError);
+    assert(empty_workflow.candidate_answer.empty());
     workflow.success = true; workflow.error_message.reset(); workflow.exit_code = 4;
     workflow.outputs = {{"model_stop_reason", "guard_stopped"}};
     assert(GraphTurnAdapter::from_workflow(workflow).reason == ModelTurnStopReason::GuardStopped);

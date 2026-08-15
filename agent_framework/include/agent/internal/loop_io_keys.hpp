@@ -32,6 +32,7 @@ constexpr std::string_view kFinalAnswer = "final_answer";
 // `is_final` is retained for loop compatibility and means only that the model turn stopped.
 // It is never task-completion authority; production completion is issued by TaskClosureController.
 constexpr std::string_view kModelStopReason = "model_stop_reason";
+constexpr std::string_view kToolReceiptRefs = "tool_receipt_refs";
 
 } // namespace internal
 } // namespace agent_framework

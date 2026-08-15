@@ -199,7 +199,8 @@ int run_graph_once(tf::Executor& executor,
             });
         if (!turn.error.empty() || turn.outcome.reason != conversation::ModelTurnStopReason::EndTurn) {
             cli.handle_error(!turn.error.empty() ? turn.error :
-                graph_result.error_message.value_or(turn.outcome.candidate_answer));
+                graph_result.error_message.value_or(
+                    conversation::user_facing_turn_failure(turn.outcome.candidate_answer)));
             return graph_result.exit_code != 0 ? graph_result.exit_code : 1;
         }
     } catch (const std::exception& e) {

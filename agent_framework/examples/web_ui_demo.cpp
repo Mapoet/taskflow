@@ -204,7 +204,8 @@ int run_graph_ui(tf::Executor& executor,
                 return 0;
             }
             ui.dispatch_error(!turn.error.empty() ? turn.error :
-                wr.error_message.value_or(turn.outcome.candidate_answer));
+                wr.error_message.value_or(
+                    conversation::user_facing_turn_failure(turn.outcome.candidate_answer)));
             return wr.exit_code != 0 ? wr.exit_code : 1;
         }
     } catch (const std::exception& e) {
