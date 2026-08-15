@@ -120,10 +120,12 @@ int main() {
             record.outcome = harness::StageOutcome::Succeeded;
             facts.checkpoint.stage_records.push_back(record);
         }
-        facts.satisfied_criteria = {"verified-output"};
         facts.strong_evidence_refs = {"evidence:runner"};
         facts.artifact_refs = {"artifact:output"};
         facts.last_progress_revision = 1;
+        facts.criterion_verdicts.push_back({"verified-output","pass",
+            facts.strong_evidence_refs,facts.artifact_refs,"runner-receipt",
+            "test-verifier","sha256:report",1});
         return facts;
     });
     const auto accepted = closure.evaluate({});

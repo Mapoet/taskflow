@@ -30,13 +30,14 @@ int main() {
     request.checkpoint.identity = request.turn.identity;
     request.checkpoint.turn_id = request.turn.turn_id;
     const auto outcome = adapter.execute(request);
-    assert(calls == 1 && outcome.task_completion_verified);
-    assert(snapshot.overall_status == OperationsStatus::Passed);
+    assert(calls == 1 && !outcome.task_completion_verified);
+    assert(snapshot.overall_status == OperationsStatus::Running);
+    assert(snapshot.task_closure_state == "execution_completed_unverified");
     auto stored = store.load("tenant", "turn:turn-1");
     assert(stored && stored->checkpoint.state == harness::HarnessState::Completed);
     assert(harness::Phase4HarnessRuntime::completion_gate_issues(
         stored->checkpoint).empty());
     const auto again = adapter.execute(request);
-    assert(again.task_completion_verified && calls == 1); // durable resume, no re-execution
+    assert(!again.task_completion_verified && calls == 1); // durable resume, no re-execution
     fs::remove_all(root, ec);
 }

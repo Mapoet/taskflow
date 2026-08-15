@@ -101,7 +101,8 @@ int main() {
     harness::ClosureFacts facts;facts.checkpoint.state=harness::HarnessState::Completed;facts.checkpoint.judge_required=false;
     facts.checkpoint.pins={"sha256:intake",invocation.plan_digest,"sha256:acceptance","memory-at8","sha256:memory","sha256:profile","sha256:prompt","at8-approval","sha256:artifact","sha256:report","","sha256:operations"};
     for(const auto stage:{harness::HarnessStage::Intake,harness::HarnessStage::Cognition,harness::HarnessStage::PlanApproval,harness::HarnessStage::Execution,harness::HarnessStage::MemoryUpdate,harness::HarnessStage::Assurance,harness::HarnessStage::Operations})facts.checkpoint.stage_records.push_back({stage,1,harness::StageOutcome::Succeeded});
-    facts.satisfied_criteria=contract.mandatory_criteria;facts.strong_evidence_refs={contracts::embedded_digest(resumed.output).value_or("sha256:evidence")};facts.artifact_refs={"file:cmake-build/at8"};
+    facts.strong_evidence_refs={contracts::embedded_digest(resumed.output).value_or("sha256:evidence")};facts.artifact_refs={"file:cmake-build/at8"};facts.last_progress_revision=1;
+    for(const auto&id:contract.mandatory_criteria)facts.criterion_verdicts.push_back({id,"pass",facts.strong_evidence_refs,facts.artifact_refs,contract.verification_methods.at(id).front(),"at8-verifier","sha256:at8-report",1});
     const auto closure=harness::TaskClosureController().evaluate(contract,facts);assert(closure.state==harness::TaskTerminalState::CompletedVerified);
     server.stop();server_thread.join();fs::remove_all(root,ec);std::cout<<"test_at8_portable_e2e: ok\n";
 }

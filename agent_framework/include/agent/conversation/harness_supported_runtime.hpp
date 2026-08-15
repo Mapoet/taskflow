@@ -19,7 +19,6 @@ struct HarnessSupportedRuntimePolicy {
 struct TurnExecutionDecision {
     TurnExecutionPath path{TurnExecutionPath::FailClosed};
     std::string reason_code;
-    bool completion_may_be_verified{false};
 };
 
 struct HarnessSupportedTurnRequest {

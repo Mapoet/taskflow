@@ -40,7 +40,8 @@ struct PortCounters {
 };
 
 inline harness::HarnessStageResult successful(
-    const harness::HarnessStageRequest& request, bool remediation_path = true) {
+    const harness::HarnessStageRequest& request, bool remediation_path = true,
+    bool accepted_findings = false) {
     using namespace harness;
     HarnessStageResult result;
     result.outcome = StageOutcome::Succeeded;
@@ -72,6 +73,10 @@ inline harness::HarnessStageResult successful(
             } else {
                 result.acceptance_decision = "accepted";
                 result.pins.acceptance_report_digest = "sha256:acceptance-report-v1";
+                if(accepted_findings) {
+                    result.finding_ids = {"unclassified-finding"};
+                    result.blocking_finding_ids = result.finding_ids;
+                }
             }
             break;
         case HarnessStage::Remediation:
@@ -108,7 +113,8 @@ inline harness::HarnessPortRegistry ports(
     const std::shared_ptr<PortCounters>& counters,
     bool remediation_path = true,
     bool reconcile_side_effects = true,
-    bool await_plan_approval_once = false) {
+    bool await_plan_approval_once = false,
+    bool accepted_findings = false) {
     using namespace harness;
     HarnessPortRegistry registry;
     for(std::size_t index = 0;
@@ -116,7 +122,7 @@ inline harness::HarnessPortRegistry ports(
         const auto stage = static_cast<HarnessStage>(index);
         const bool effect = side_effecting(stage);
         auto execute = [counters, remediation_path,
-                        await_plan_approval_once](const HarnessStageRequest& request) {
+                        await_plan_approval_once, accepted_findings](const HarnessStageRequest& request) {
             ++counters->execute[request.stage];
             if(await_plan_approval_once && request.stage == HarnessStage::PlanApproval &&
                request.attempt == 1) {
@@ -125,7 +131,7 @@ inline harness::HarnessPortRegistry ports(
                 waiting.output_digest = "sha256:approval-request";
                 return waiting;
             }
-            return successful(request, remediation_path);
+            return successful(request, remediation_path, accepted_findings);
         };
         CallbackHarnessStagePort::Reconcile reconcile;
         if(effect && reconcile_side_effects) {

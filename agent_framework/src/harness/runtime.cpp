@@ -378,6 +378,10 @@ HarnessRunResult Phase4HarnessRuntime::drive(HarnessCheckpoint checkpoint,
                        checkpoint.pins.acceptance_report_digest.empty()) {
                         checkpoint.state = HarnessState::ManualReview;
                         checkpoint.terminal_reason = "assurance_success_without_accepted_report";
+                    } else if(!result.blocking_finding_ids.empty()) {
+                        checkpoint.unresolved_findings = result.blocking_finding_ids;
+                        checkpoint.state = HarnessState::ManualReview;
+                        checkpoint.terminal_reason = "accepted_report_contains_unclassified_findings";
                     } else {
                         checkpoint.unresolved_findings.clear();
                         checkpoint.next_stage = checkpoint.judge_required

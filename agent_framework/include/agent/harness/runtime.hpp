@@ -31,6 +31,7 @@ struct HarnessStageResult {
     std::string acceptance_decision;
     std::string error_code;
     std::string error_message;
+    std::vector<std::string> blocking_finding_ids;
 };
 
 class HarnessStagePort {

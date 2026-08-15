@@ -41,7 +41,7 @@ int main() {
         },
         [&](const auto& event) { events.push_back(event); });
     const auto verified = runtime.execute(request, checkpoint);
-    assert(verified.task_completion_verified && harness_calls == 1 && fallback_calls == 0);
+    assert(!verified.task_completion_verified && harness_calls == 1 && fallback_calls == 0);
     assert(events.size() == 1 && events[0].payload.at("path") == "harness");
 
     request.profile = TaskExecutionProfile::Conversation;

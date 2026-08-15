@@ -272,7 +272,11 @@ WorkflowStageExecution AssuranceWorkflowAdapter::run(const HarnessStageRequest& 
             ? StageOutcome::Succeeded : StageOutcome::NeedsRemediation;
         out.result.acceptance_decision = value.report->decision == assurance::AcceptanceDecision::Accepted
             ? "accepted" : "rejected";
-        for(const auto& finding : value.report->findings) out.result.finding_ids.push_back(finding.finding_id);
+        for(const auto& finding : value.report->findings) {
+            out.result.finding_ids.push_back(finding.finding_id);
+            if(finding.outcome != assurance::FindingOutcome::Pass)
+                out.result.blocking_finding_ids.push_back(finding.finding_id);
+        }
     } else if(value.state == assurance::AssuranceWorkflowState::Cancelled)
         out.result.outcome = StageOutcome::Cancelled;
     else out.result.outcome = StageOutcome::ManualReview;

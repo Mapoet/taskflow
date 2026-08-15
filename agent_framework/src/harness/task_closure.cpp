@@ -216,7 +216,19 @@ namespace agent_framework::harness
         auto errors = validate(c);
         if (!errors.empty())
             return decision(TaskTerminalState::ManualReview, "closure_contract_invalid", c, f, c.mandatory_criteria, "repair contract");
-        auto satisfied = setof(f.satisfied_criteria);
+        std::set<std::string> satisfied;
+        for (const auto &verdict : f.criterion_verdicts)
+        {
+            const auto methods = c.verification_methods.find(verdict.criterion_id);
+            const bool allowed_method = methods != c.verification_methods.end() &&
+                std::find(methods->second.begin(), methods->second.end(),
+                          verdict.verification_method) != methods->second.end();
+            if (verdict.outcome == "pass" && allowed_method &&
+                !verdict.evidence_refs.empty() && !verdict.artifact_refs.empty() &&
+                !verdict.verifier_id.empty() && !verdict.report_digest.empty() &&
+                verdict.revision == f.last_progress_revision)
+                satisfied.insert(verdict.criterion_id);
+        }
         std::vector<std::string> missing;
         for (const auto &id : c.mandatory_criteria)
             if (!satisfied.count(id))
@@ -289,9 +301,9 @@ namespace agent_framework::harness
             current.valid_evidence_digests.push_back(run.checkpoint.pins.acceptance_report_digest);
         if(!run.checkpoint.pins.judge_report_digest.empty())
             current.valid_evidence_digests.push_back(run.checkpoint.pins.judge_report_digest);
-        const bool verified=run.checkpoint.state==HarnessState::Completed &&
-            Phase4HarnessRuntime::completion_gate_issues(run.checkpoint).empty();
-        if(verified) current.closed_criteria=contract_.mandatory_criteria;
+        // Harness structural completion cannot close semantic criteria.  A
+        // production assurance/judge adapter must supply typed criterion
+        // verdicts to TaskClosureController.
         ProgressAssessment assessment;
         if(previous && previous->revision==current.revision && prior_assessment) {
             current=*previous;
@@ -309,7 +321,9 @@ namespace agent_framework::harness
         facts.verification_failed=run.error_code=="verification_failed";
         facts.last_progress_revision=run.checkpoint.revision;
         facts.finding_refs=run.checkpoint.unresolved_findings;
-        facts.satisfied_criteria=current.closed_criteria;
+        if(verdicts_) facts.criterion_verdicts=verdicts_(run.checkpoint);
+        for(const auto& verdict:facts.criterion_verdicts)
+            if(verdict.outcome=="pass") current.closed_criteria.push_back(verdict.criterion_id);
         facts.strong_evidence_refs=current.valid_evidence_digests;
         facts.artifact_refs=current.artifact_digests;
         facts.progress=assessment;

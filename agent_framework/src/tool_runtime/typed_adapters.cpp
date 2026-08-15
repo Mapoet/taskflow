@@ -165,7 +165,7 @@ namespace agent_framework::tool_runtime
         auto result = provider_->cancel(handle, signal);
         return {result.accepted, result.terminal, result.diagnostic, result.effect_known, result.receipt_digest};
     }
-    ChildTaskExecutionAdapter::ChildTaskExecutionAdapter(std::shared_ptr<ChildTaskBackend> b, ChildTaskRequest r, std::string i, std::string v, std::string g, bool remote) : backend_(std::move(b)), request_(std::move(r)), id_(std::move(i)), revision_(std::move(v)), generation_(std::move(g)), remote_(remote)
+    ChildTaskExecutionAdapter::ChildTaskExecutionAdapter(std::shared_ptr<ChildTaskBackend> b, ChildTaskRequest r, std::string i, std::string v, std::string g, bool remote, ChildTaskResult::ClosureReceiptVerifier verifier) : backend_(std::move(b)), request_(std::move(r)), id_(std::move(i)), revision_(std::move(v)), generation_(std::move(g)), remote_(remote), verifier_(std::move(verifier))
     {
         if (!backend_)
             throw std::invalid_argument("child backend required");
@@ -187,8 +187,18 @@ namespace agent_framework::tool_runtime
             req.policy.deadline = std::chrono::steady_clock::now() +
                                   std::chrono::milliseconds(r.control.deadline_at_ms - now_system);
         }
-        return launch(r, [b = backend_, req = std::move(req)](auto c) mutable
-                      {req.policy.cancel_requested=c;auto h=b->start(std::move(req));auto v=h->wait();auto value=child_task_result_to_json(v);auto state=v.status==ChildTaskStatus::Completed?ObservationState::CompletedCandidate:v.status==ChildTaskStatus::Cancelled?ObservationState::Cancelled:ObservationState::Failed;return ExecutionObservation{state,value,digest(value),v.checkpoint.dump(),v.error_code,v.verified_complete(),true}; }, e);
+        return launch(r, [b = backend_, req = std::move(req), verifier = verifier_](auto c) mutable
+                      {req.policy.cancel_requested=c;auto h=b->start(std::move(req));auto v=h->wait();
+                       if(verifier && v.outputs.contains("closure_receipt") && v.outputs.at("closure_receipt").is_object()) {
+                           const auto& j=v.outputs.at("closure_receipt");
+                           ChildTaskResult::ClosureReceipt receipt;
+                           receipt.tenant_id=j.value("tenant_id","");receipt.parent_run_id=j.value("parent_run_id","");
+                           receipt.child_id=j.value("child_id","");receipt.run_id=j.value("run_id","");
+                           receipt.plan_digest=j.value("plan_digest","");receipt.artifact_manifest_digest=j.value("artifact_manifest_digest","");
+                           receipt.decision_digest=j.value("decision_digest","");receipt.revision=j.value("revision",0ULL);
+                           (void)v.accept_verified_closure_receipt(std::move(receipt),verifier);
+                       }
+                       auto value=child_task_result_to_json(v);auto state=v.status==ChildTaskStatus::Completed?ObservationState::CompletedCandidate:v.status==ChildTaskStatus::Cancelled?ObservationState::Cancelled:ObservationState::Failed;return ExecutionObservation{state,value,digest(value),v.checkpoint.dump(),v.error_code,v.verified_complete(),true}; }, e);
     }
     HTTPExecutionAdapter::HTTPExecutionAdapter(std::string i, std::string r, std::string g, Start s, Query q, Cancel c, Reconcile x) : id_(std::move(i)), revision_(std::move(r)), generation_(std::move(g)), start_(std::move(s)), query_(std::move(q)), cancel_(std::move(c)), reconcile_(std::move(x))
     {

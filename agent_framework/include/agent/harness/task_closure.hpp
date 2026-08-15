@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <mutex>
 #include <optional>
@@ -53,8 +54,21 @@ struct ProgressAssessment {
 };
 
 struct ClosureFacts {
+    struct CriterionVerdict {
+        std::string criterion_id;
+        std::string outcome;
+        std::vector<std::string> evidence_refs;
+        std::vector<std::string> artifact_refs;
+        std::string verification_method;
+        std::string verifier_id;
+        std::string report_digest;
+        std::uint64_t revision{0};
+    };
     HarnessCheckpoint checkpoint;
+    // Deprecated compatibility input. It is deliberately ignored by the
+    // closure controller because a list of identifiers is not evidence.
     std::vector<std::string> satisfied_criteria;
+    std::vector<CriterionVerdict> criterion_verdicts;
     std::vector<std::string> strong_evidence_refs;
     std::vector<std::string> artifact_refs;
     std::vector<std::string> finding_refs;
@@ -143,9 +157,13 @@ public:
 
 class ProductionTaskRuntime {
 public:
+    using CriterionVerdictProvider = std::function<std::vector<ClosureFacts::CriterionVerdict>(
+        const HarnessCheckpoint&)>;
     ProductionTaskRuntime(TaskClosureContract contract, Phase4HarnessRuntime& harness,
-                          SQLiteProgressLedger& progress, TaskClosureController& closure)
-        : contract_(std::move(contract)), harness_(harness), progress_(progress), closure_(closure) {}
+                          SQLiteProgressLedger& progress, TaskClosureController& closure,
+                          CriterionVerdictProvider verdicts = {})
+        : contract_(std::move(contract)), harness_(harness), progress_(progress), closure_(closure),
+          verdicts_(std::move(verdicts)) {}
     TaskClosureDecision start(const HarnessStart&, const HarnessRuntimeOptions& = {});
     TaskClosureDecision resume(std::string_view tenant_id, std::string_view harness_id,
                                const HarnessRuntimeOptions& = {});
@@ -155,6 +173,7 @@ private:
     Phase4HarnessRuntime& harness_;
     SQLiteProgressLedger& progress_;
     TaskClosureController& closure_;
+    CriterionVerdictProvider verdicts_;
 };
 
 } // namespace agent_framework::harness

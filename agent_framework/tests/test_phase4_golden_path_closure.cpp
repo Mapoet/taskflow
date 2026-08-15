@@ -29,8 +29,12 @@ ClosureFacts complete(const TaskClosureContract& c) {
         HarnessStage::Execution,HarnessStage::MemoryUpdate,HarnessStage::Assurance,
         HarnessStage::Judge,HarnessStage::Operations})
         f.checkpoint.stage_records.push_back({stage,1,StageOutcome::Succeeded});
-    f.satisfied_criteria=c.mandatory_criteria; f.strong_evidence_refs={"sha256:evidence"};
-    f.artifact_refs={"sha256:artifact"}; f.last_progress_revision=9; return f;
+    f.strong_evidence_refs={"sha256:evidence"};
+    f.artifact_refs={"sha256:artifact"}; f.last_progress_revision=9;
+    for(const auto& id:c.mandatory_criteria)
+        f.criterion_verdicts.push_back({id,"pass",f.strong_evidence_refs,f.artifact_refs,
+            c.verification_methods.at(id).front(),"test-verifier","sha256:report",9});
+    return f;
 }
 }
 
@@ -45,7 +49,7 @@ int main() {
     // Golden B: failed verification selects the smallest bounded remediation, then closes.
     auto b=contract("golden-code"); auto bf=complete(b);
     bf.checkpoint.state=HarnessState::Running; bf.verification_failed=true;
-    bf.satisfied_criteria={"exists"}; bf.finding_refs={"compile_failure"};
+    bf.criterion_verdicts.resize(1); bf.finding_refs={"compile_failure"};
     assert(controller.evaluate(b,bf).state==TaskTerminalState::MinimalRemediation);
     bf.checkpoint.remediation_cycle=b.max_remediation_cycles;
     assert(controller.evaluate(b,bf).state==TaskTerminalState::FailedVerification);
@@ -70,6 +74,10 @@ int main() {
     child.outputs={{"task_completion_verified",false},{"completion_authority","none"}};
     assert(child.ok() && !child.verified_complete());
     child.outputs={{"task_completion_verified",true},{"completion_authority","task_closure_controller"}};
+    assert(!child.verified_complete()); // untrusted output cannot grant closure authority
+    agent_framework::ChildTaskResult::ClosureReceipt receipt{"tenant","parent",child.child_id,
+        child.run_id,"sha256:plan","sha256:artifacts","sha256:decision",1};
+    assert(child.accept_verified_closure_receipt(receipt,[](const auto&){return true;}));
     assert(child.verified_complete());
     return 0;
 }

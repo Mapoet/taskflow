@@ -113,7 +113,18 @@ ModelTurnOutcome HarnessTurnAdapter::execute(const HarnessSupportedTurnRequest& 
     harness::HarnessRuntimeOptions options;
     options.now = now;
     const auto result = runtime.run(start, options);
-    if(projection_) projection_(harness::Phase4HarnessRuntime::project_operations(result.checkpoint));
+    if(projection_) {
+        auto snapshot = harness::Phase4HarnessRuntime::project_operations(result.checkpoint);
+        snapshot.task_completion_verified = false;
+        snapshot.completion_authority = "none";
+        snapshot.task_closure_state = result.state == harness::HarnessState::Completed
+            ? "execution_completed_unverified" : "execution_incomplete";
+        if(result.state == harness::HarnessState::Completed) {
+            snapshot.overall_status = OperationsStatus::Running;
+            snapshot.summary = "Interactive execution completed; task closure not evaluated";
+        }
+        projection_(snapshot);
+    }
     if(result.state != harness::HarnessState::Completed) {
         model.reason = ModelTurnStopReason::GuardStopped;
         model.task_completion_verified = false;
@@ -122,8 +133,8 @@ ModelTurnOutcome HarnessTurnAdapter::execute(const HarnessSupportedTurnRequest& 
                 ? result.checkpoint.terminal_reason : result.error_code;
         return model;
     }
-    model.task_completion_verified =
-        harness::Phase4HarnessRuntime::completion_gate_issues(result.checkpoint).empty();
+    // Structural harness completion is not semantic task verification.
+    model.task_completion_verified = false;
     return model;
 }
 

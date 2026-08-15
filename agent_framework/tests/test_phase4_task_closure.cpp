@@ -77,7 +77,14 @@ int main()
                        HarnessStage::MemoryUpdate, HarnessStage::Assurance,
                        HarnessStage::Judge, HarnessStage::Operations})
         facts.checkpoint.stage_records.push_back({stage, 1, StageOutcome::Succeeded});
+    // Bare identifiers are not semantic evidence, even when every mandatory
+    // criterion is named.
     facts.satisfied_criteria = contract.mandatory_criteria;
+    assert(controller.evaluate(contract, facts).state == TaskTerminalState::MinimalRemediation);
+    for(const auto& id:contract.mandatory_criteria)
+        facts.criterion_verdicts.push_back({id,"pass",facts.strong_evidence_refs,
+            facts.artifact_refs,contract.verification_methods.at(id).front(),
+            "test-verifier","sha256:report",facts.last_progress_revision});
     facts.finding_refs.clear();
     auto completed = controller.evaluate(contract, facts);
     assert(completed.state == TaskTerminalState::CompletedVerified);

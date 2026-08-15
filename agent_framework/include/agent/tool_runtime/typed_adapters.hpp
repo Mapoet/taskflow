@@ -73,13 +73,14 @@ class ChildTaskExecutionAdapter final:public AsyncExecutionAdapter
 {
 public:
     ChildTaskExecutionAdapter(std::shared_ptr<ChildTaskBackend>,ChildTaskRequest,
-                              std::string id,std::string revision,std::string generation,bool remote);
+                              std::string id,std::string revision,std::string generation,bool remote,
+                              ChildTaskResult::ClosureReceiptVerifier verifier = {});
     std::string id()const override{return id_;}std::string revision()const override{return revision_;}std::string deployment_generation()const override{return generation_;}
     ExecutionAdapterKind kind()const noexcept override{return ExecutionAdapterKind::A2AChildTask;}AdapterOrigin origin()const noexcept override{return AdapterOrigin::Production;}
     ExecutionAdapterCapabilities capabilities()const noexcept override{return {false,true,true,true,true,true,true};}
     RestartPolicy restart_policy()const noexcept override{return remote_?RestartPolicy::ManualReview:RestartPolicy::RestartFromCheckpoint;}
     std::optional<ExecutionHandle> start(const ExecutionRequest&,std::string*)override;
-private:std::shared_ptr<ChildTaskBackend> backend_;ChildTaskRequest request_;std::string id_,revision_,generation_;bool remote_;
+private:std::shared_ptr<ChildTaskBackend> backend_;ChildTaskRequest request_;std::string id_,revision_,generation_;bool remote_;ChildTaskResult::ClosureReceiptVerifier verifier_;
 };
 
 class HTTPExecutionAdapter final:public ExecutionAdapter

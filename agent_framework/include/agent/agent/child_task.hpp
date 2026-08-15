@@ -64,10 +64,26 @@ struct ChildTaskResult {
     json checkpoint = json::object();
 
     bool ok() const { return status == ChildTaskStatus::Completed; }
-    bool verified_complete() const {
-        return ok() && outputs.value("task_completion_verified", false) &&
-               outputs.value("completion_authority", std::string()) == "task_closure_controller";
+    struct ClosureReceipt {
+        std::string tenant_id, parent_run_id, child_id, run_id;
+        std::string plan_digest, artifact_manifest_digest, decision_digest;
+        std::uint64_t revision{0};
+    };
+    using ClosureReceiptVerifier = std::function<bool(const ClosureReceipt&)>;
+
+    bool accept_verified_closure_receipt(ClosureReceipt receipt,
+                                         const ClosureReceiptVerifier& verifier) {
+        if (!ok() || !verifier || receipt.child_id != child_id || receipt.run_id != run_id ||
+            receipt.parent_run_id.empty() || receipt.decision_digest.empty() ||
+            receipt.artifact_manifest_digest.empty() || receipt.revision == 0 ||
+            !verifier(receipt)) return false;
+        verified_closure_receipt_ = std::move(receipt);
+        return true;
     }
+    bool verified_complete() const { return ok() && verified_closure_receipt_.has_value(); }
+
+private:
+    std::optional<ClosureReceipt> verified_closure_receipt_;
 };
 
 const char* child_task_start_mode_cstr(ChildTaskStartMode mode) noexcept;

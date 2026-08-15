@@ -628,9 +628,10 @@ std::future<WorkflowResult> GraphExecutor::run_react_cli_async(tf::Executor& exe
 
 ExecutionResult GraphExecutor::execute_sync(tf::Executor& executor, ExecutionRequest request) {
     if(request.trust_profile == ExecutionTrustProfile::Production) {
-        if(!request.production_closure || !request.production_closure->evaluate ||
-           request.production_closure->dependency_manifest_digest.empty() ||
-           request.production_closure->composition_manifest_digest.empty()) {
+        if(!request.production_closure || !request.production_closure->authority ||
+           !request.production_closure->authority->production_ready() ||
+           request.production_closure->authority->dependency_manifest_digest().empty() ||
+           request.production_closure->authority->composition_manifest_digest().empty()) {
             ExecutionResult denied;
             denied.error = "production_closure_binding_required";
             denied.outputs = {{"task_completion_verified",false},
@@ -936,12 +937,15 @@ ExecutionResult GraphExecutor::execute_sync(tf::Executor& executor, ExecutionReq
     result.exit_code = 0;
     result.status = ExecutionTerminalStatus::Completed;
     if(request.trust_profile == ExecutionTrustProfile::Production) {
-        const json closure=request.production_closure->evaluate(result);
-        result.outputs["task_closure_state"]=closure.value("state","manual_review");
-        result.outputs["task_completion_verified"]=closure.value("task_completion_verified",false);
-        result.outputs["completion_authority"]=closure.value("terminal_authority","none");
-        result.outputs["closure_receipt_digest"]=closure.value("receipt_digest","");
-        result.outputs["closure_reason_code"]=closure.value("reason_code","closure_decision_missing");
+        const auto closure=request.production_closure->authority->evaluate(result);
+        const bool authoritative = closure.task_completion_verified &&
+            closure.terminal_authority == "task_closure_controller" &&
+            !closure.receipt_digest.empty();
+        result.outputs["task_closure_state"]=closure.state;
+        result.outputs["task_completion_verified"]=authoritative;
+        result.outputs["completion_authority"]=authoritative ? closure.terminal_authority : "none";
+        result.outputs["closure_receipt_digest"]=closure.receipt_digest;
+        result.outputs["closure_reason_code"]=closure.reason_code;
         if(!result.outputs["task_completion_verified"].get<bool>()) {
             result.success=false; result.exit_code=2; result.status=ExecutionTerminalStatus::Failed;
             result.error="production_task_not_verified";

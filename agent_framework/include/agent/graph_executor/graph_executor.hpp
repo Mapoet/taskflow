@@ -232,10 +232,25 @@ struct ExecutionOptions {
 enum class ExecutionTrustProfile { Demo, Test, Production };
 
 struct ExecutionResult;
+struct ProductionClosureDecision {
+    std::string state{"manual_review"};
+    std::string terminal_authority{"none"};
+    std::string receipt_digest;
+    std::string reason_code{"closure_decision_missing"};
+    bool task_completion_verified{false};
+};
+
+class ProductionClosureAuthority {
+public:
+    virtual ~ProductionClosureAuthority() = default;
+    virtual std::string dependency_manifest_digest() const = 0;
+    virtual std::string composition_manifest_digest() const = 0;
+    virtual bool production_ready() const noexcept = 0;
+    virtual ProductionClosureDecision evaluate(const ExecutionResult&) const = 0;
+};
+
 struct ProductionClosureBinding {
-    std::string dependency_manifest_digest;
-    std::string composition_manifest_digest;
-    std::function<json(const ExecutionResult&)> evaluate;
+    std::shared_ptr<const ProductionClosureAuthority> authority;
 };
 
 enum class TierBFailureMode { FallbackTierA, Reject };

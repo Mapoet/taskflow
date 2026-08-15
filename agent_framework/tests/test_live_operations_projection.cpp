@@ -65,8 +65,17 @@ int main() {
     recovered.observe_invocation(progress);recovered.observe_invocation(progress);
     auto durable=recovered.snapshot();
     assert(durable.invocations.back().id=="durable-1"&&durable.summary.find("50.000000%")!=std::string::npos);
+    auto completed_event=progress;completed_event.event_type="invocation_completed_candidate";completed_event.sequence=3;
+    completed_event.event_digest="sha256:c";recovered.observe_invocation(completed_event);
+    durable=recovered.snapshot();
+    assert(durable.invocations.back().status==OperationsStatus::Passed);
+    assert(durable.overall_status==OperationsStatus::Running); // a tool cannot close the task
+    auto ambiguous=completed_event;ambiguous.event_type="not_verified";ambiguous.sequence=4;ambiguous.event_digest="sha256:u";
+    recovered.observe_invocation(ambiguous);durable=recovered.snapshot();
+    assert(durable.invocations.back().status==OperationsStatus::Unknown);
+    assert(durable.overall_status==OperationsStatus::Warning);
     auto durable_source=std::find_if(durable.source_revisions.begin(),durable.source_revisions.end(),[](const auto& x){return x.store=="tool_invocation_events";});
-    assert(durable_source!=durable.source_revisions.end()&&durable_source->revision==2);
+    assert(durable_source!=durable.source_revisions.end()&&durable_source->revision==4);
     fs::remove_all(root, ec);
     return 0;
 }

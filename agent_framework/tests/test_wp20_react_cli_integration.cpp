@@ -307,6 +307,16 @@ void test_i6_unknown_template_fails_before_execution() {
 }
 
 void test_i7_production_completion_is_fail_closed() {
+    class TestClosureAuthority final : public ProductionClosureAuthority {
+    public:
+        std::string dependency_manifest_digest() const override { return "sha256:deps"; }
+        std::string composition_manifest_digest() const override { return "sha256:composition"; }
+        bool production_ready() const noexcept override { return true; }
+        ProductionClosureDecision evaluate(const ExecutionResult& execution) const override {
+            assert(execution.success);
+            return {"completed_verified","task_closure_controller","sha256:closure","verified",true};
+        }
+    };
     GraphExecutor gx; tf::Executor executor;
     ExecutionRequest missing;
     missing.trust_profile = ExecutionTrustProfile::Production;
@@ -327,11 +337,7 @@ void test_i7_production_completion_is_fail_closed() {
     bound.options.persist_session=false;
     bound.options.react.sink.on_final_json=[](const json&){};
     bound.trust_profile=ExecutionTrustProfile::Production;
-    bound.production_closure=ProductionClosureBinding{"sha256:deps","sha256:composition",
-        [](const ExecutionResult& execution){assert(execution.success);
-            return json{{"state","completed_verified"},
-            {"task_completion_verified",true},{"terminal_authority","task_closure_controller"},
-            {"reason_code","verified"},{"receipt_digest","sha256:closure"}};}};
+    bound.production_closure=ProductionClosureBinding{std::make_shared<TestClosureAuthority>()};
     auto verified=gx.execute_sync(executor,std::move(bound));
     assert(verified.success && verified.outputs.at("task_completion_verified").get<bool>());
     assert(verified.outputs.at("completion_authority") == "task_closure_controller");

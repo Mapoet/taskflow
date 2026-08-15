@@ -29,16 +29,16 @@ HarnessSupportedTurnRuntime::HarnessSupportedTurnRuntime(
 TurnExecutionDecision HarnessSupportedTurnRuntime::route(
     const HarnessSupportedRuntimePolicy& policy, TaskExecutionProfile profile) {
     if(policy.harness_ready)
-        return {TurnExecutionPath::Harness, "harness_ready", true};
+        return {TurnExecutionPath::Harness, "harness_ready"};
     if(policy.production)
-        return {TurnExecutionPath::FailClosed, "production_harness_unavailable", false};
+        return {TurnExecutionPath::FailClosed, "production_harness_unavailable"};
     if(policy.explicit_legacy_fallback && fallback_profile(profile))
         return {TurnExecutionPath::LegacyReactFallback,
-                "explicit_nonproduction_compatibility_mode", false};
+                "explicit_nonproduction_compatibility_mode"};
     return {TurnExecutionPath::FailClosed,
             policy.explicit_legacy_fallback
                 ? "legacy_fallback_forbidden_for_profile"
-                : "harness_unavailable_and_fallback_not_explicit", false};
+                : "harness_unavailable_and_fallback_not_explicit"};
 }
 
 ModelTurnOutcome HarnessSupportedTurnRuntime::execute(
@@ -57,13 +57,14 @@ ModelTurnOutcome HarnessSupportedTurnRuntime::execute(
             if(!legacy_fallback_)
                 throw std::runtime_error("explicit_legacy_fallback_executor_missing");
             outcome = legacy_fallback_(supported);
-            outcome.task_completion_verified = false;
             break;
         case TurnExecutionPath::FailClosed:
             throw std::runtime_error(decision.reason_code);
     }
-    if(!decision.completion_may_be_verified)
-        outcome.task_completion_verified = false;
+    // A model/executor turn may produce a completion candidate, but only the
+    // TaskClosure authority may verify the task.  Keep the legacy field
+    // fail-closed until it is removed from the wire contract.
+    outcome.task_completion_verified = false;
     return outcome;
 }
 

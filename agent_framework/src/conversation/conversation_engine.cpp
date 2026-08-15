@@ -113,11 +113,16 @@ namespace agent_framework::conversation
             o.reason = ModelTurnStopReason::ProviderError;
             o.candidate_answer = e.what();
         }
-        if (auto problems = validate(o); !problems.empty())
+        std::vector<std::string> contract_problems = validate(o);
+        if (!contract_problems.empty())
         {
             o.reason = ModelTurnStopReason::ProviderError;
             o.task_completion_verified = false;
-            o.candidate_answer = problems.front();
+            // Preserve an answer that may already have been streamed.  Adapter
+            // contract failures belong to Operations/Audit, not user content.
+            event(r, c, "turn_executor_contract_violation",
+                  {{"issues", contract_problems}}, EventDurability::Durable,
+                  EventVisibility::Operations);
         }
         auto next = phase_for(o.reason);
         std::string err;
@@ -147,6 +152,8 @@ namespace agent_framework::conversation
         stopped.event_type = "model_stop";
         stopped.timestamp = stamp();
         stopped.payload = {{"reason", name(o.reason)}, {"task_completion_verified", false}};
+        if (!contract_problems.empty())
+            stopped.payload["contract_violation"] = true;
         ConversationCommit terminal{c, expected, std::move(pending_messages), {stopped}, {}};
         if (!store_.commit(terminal, &err))
             return {c, o, err};

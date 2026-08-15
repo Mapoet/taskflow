@@ -36,6 +36,34 @@ bool failed_result(const json& result) {
         (result.contains("ok") && result["ok"].is_boolean() && !result["ok"].get<bool>()));
 }
 
+OperationsStatus invocation_status(std::string_view type) {
+    if(type == "failed" || type == "invocation_failed" ||
+       type == "invocation_orphaned" || type == "orphan_input_unavailable")
+        return OperationsStatus::Failed;
+    if(type == "completed_candidate" || type == "invocation_completed_candidate" ||
+       type == "effect_committed" || type == "verified" || type == "integrity_verified")
+        return OperationsStatus::Passed;
+    if(type == "manual_review" || type == "invocation_manual_review" ||
+       type == "invocation_cancel_manual_review" || type == "unknown_effect")
+        return OperationsStatus::Warning;
+    if(type == "created" || type == "admitted" || type == "queued" || type == "leased" ||
+       type == "running" || type == "progress" || type == "progressing" ||
+       type == "checkpointed" || type == "awaiting_input" || type == "awaiting_approval" ||
+       type == "cancelling" || type == "retrying" || type == "reconciling")
+        return OperationsStatus::Running;
+    return OperationsStatus::Unknown;
+}
+
+void project_activity_status(Phase4OperationsSnapshot& snapshot, OperationsStatus activity) {
+    // Tool lifecycle is evidence about one invocation, never task closure.
+    if(snapshot.task_completion_verified) return;
+    if(activity == OperationsStatus::Failed || activity == OperationsStatus::Warning ||
+       activity == OperationsStatus::Unknown)
+        snapshot.overall_status = OperationsStatus::Warning;
+    else
+        snapshot.overall_status = OperationsStatus::Running;
+}
+
 }  // namespace
 
 LiveOperationsProjection::LiveOperationsProjection(
@@ -86,8 +114,7 @@ void LiveOperationsProjection::observe_tool(const ToolExecutionEvent& event) {
 
         ++revision_;
         snapshot_.updated_at = timestamp();
-        snapshot_.overall_status = invocation->status == OperationsStatus::Failed
-            ? OperationsStatus::Warning : OperationsStatus::Running;
+        project_activity_status(snapshot_, invocation->status);
         snapshot_.summary = event.phase == ToolExecutionPhase::Started
             ? "Tool running: " + event.tool_name
             : "Tool observation synchronized: " + event.tool_name;
@@ -136,18 +163,9 @@ void LiveOperationsProjection::observe_invocation(const tool_runtime::Invocation
         }
         invocation->provider = tool_name;
         const auto& type = event.event_type;
-        if(type.find("failed") != std::string::npos || type.find("orphan") != std::string::npos)
-            invocation->status = OperationsStatus::Failed;
-        else if(type.find("completed") != std::string::npos || type.find("verified") != std::string::npos ||
-                type.find("effect_committed") != std::string::npos)
-            invocation->status = OperationsStatus::Passed;
-        else if(type.find("manual_review") != std::string::npos || type.find("unknown_effect") != std::string::npos)
-            invocation->status = OperationsStatus::Warning;
-        else invocation->status = OperationsStatus::Running;
+        invocation->status = invocation_status(type);
         snapshot_.updated_at = event.created_at.empty() ? timestamp() : event.created_at;
-        snapshot_.overall_status = invocation->status == OperationsStatus::Failed ? OperationsStatus::Warning
-                                  : invocation->status == OperationsStatus::Passed ? OperationsStatus::Passed
-                                                                                  : invocation->status;
+        project_activity_status(snapshot_, invocation->status);
         snapshot_.summary = "Tool lifecycle synchronized: " + type;
         if(event.payload.contains("fraction"))
             snapshot_.summary += " (" + std::to_string(event.payload.at("fraction").get<double>() * 100.0) + "%)";

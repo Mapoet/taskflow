@@ -56,6 +56,17 @@ int main() {
     assert(resumed.checkpoint.pins.approval_decision_id == "approval-plan-v1");
     assert(approval_counters->execute[HarnessStage::PlanApproval] == 2);
 
+    InMemoryHarnessStore ambiguous_store;
+    auto ambiguous_counters = std::make_shared<PortCounters>();
+    Phase4HarnessRuntime ambiguous_runtime(
+        ambiguous_store, ports(ambiguous_counters, false, true, false, true));
+    const auto ambiguous = ambiguous_runtime.run(start("harness-ambiguous-findings"), options);
+    assert(ambiguous.state == HarnessState::ManualReview);
+    assert(ambiguous.checkpoint.terminal_reason ==
+           "accepted_report_contains_unclassified_findings");
+    assert(ambiguous.checkpoint.unresolved_findings ==
+           std::vector<std::string>{"unclassified-finding"});
+
     std::filesystem::remove_all(root, error);
     return 0;
 }

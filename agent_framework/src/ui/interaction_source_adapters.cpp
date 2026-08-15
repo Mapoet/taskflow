@@ -15,6 +15,12 @@ InteractionObjectState state(OperationsStatus value) {
     default: return InteractionObjectState::Unavailable;
     }
 }
+InteractionObjectState workflow_state(const Phase4OperationsSnapshot& snapshot) {
+    if(snapshot.overall_status == OperationsStatus::Passed &&
+       !snapshot.task_completion_verified)
+        return InteractionObjectState::Running;
+    return state(snapshot.overall_status);
+}
 InteractionSourceRevision source(const Phase4OperationsSnapshot& s,std::string id) {
     auto found=std::find_if(s.source_revisions.begin(),s.source_revisions.end(),
         [&](const auto&r){return r.object_id==id;});
@@ -51,7 +57,7 @@ InteractionSnapshot project_interactions(const Phase4OperationsSnapshot&s,
     thinking.ref=ref;thinking.label="Cognition & planning summary";thinking.summary=s.summary;
     thinking.display={{"unknowns",s.unknowns},{"method","Evidence-grounded cognition → plan → execution → assurance"},
         {"privacy","Display-safe reasoning summary; hidden chain-of-thought is not retained."}};
-    thinking.state=state(s.overall_status);thinking.visibility=InteractionVisibility::User;
+    thinking.state=workflow_state(s);thinking.visibility=InteractionVisibility::User;
     thinking.source=source(s,"thinking:"+c.turn_id);thinking.updated_at=s.updated_at;out.nodes.push_back(thinking);
     out.edges.push_back(edge(s,"edge:message-thinking",InteractionEdgeKind::PlannedBy,message.node_id,thinking.node_id));
 
@@ -60,7 +66,7 @@ InteractionSnapshot project_interactions(const Phase4OperationsSnapshot&s,
     plan.label="Execution plan r"+std::to_string(plan.ref.plan_revision);plan.summary=s.summary;
     plan.display={{"criteria_closed",s.criteria_closed},{"criteria_total",s.criteria_total},
         {"progress_delta",s.progress_delta},{"stagnation_count",s.stagnation_count},{"blocker",s.blocker}};
-    plan.state=state(s.overall_status);plan.visibility=InteractionVisibility::User;
+    plan.state=workflow_state(s);plan.visibility=InteractionVisibility::User;
     plan.source=source(s,plan.ref.plan_id);plan.updated_at=s.updated_at;out.nodes.push_back(plan);
     out.edges.push_back(edge(s,"edge:thinking-plan",InteractionEdgeKind::PlannedBy,thinking.node_id,plan.node_id));
 
