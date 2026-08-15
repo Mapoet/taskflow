@@ -283,7 +283,9 @@
     const updated = $("ops-updated");
     if (updated) updated.textContent = text(snapshot.updated_at || "—");
     $("ops-revision").textContent = "r" + Number(snapshot.plan_revision || 0);
-    $("ops-run").textContent = text(snapshot.run_id || "—");
+    $("ops-run").textContent = "task " + text(snapshot.task_id || "—") +
+      " · run " + text(snapshot.run_id || "—") +
+      " · turn " + text(snapshot.turn_id || "—");
     $("ops-criteria").textContent = Number(snapshot.criteria_closed || 0) + " / " + Number(snapshot.criteria_total || 0);
     $("ops-progress").textContent = "delta " + Number(snapshot.progress_delta || 0) + " · stagnant " + Number(snapshot.stagnation_count || 0);
     $("ops-live").textContent = text(snapshot.live_certification || "Unknown");

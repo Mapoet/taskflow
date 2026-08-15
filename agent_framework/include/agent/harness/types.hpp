@@ -30,6 +30,7 @@ enum class HarnessStage {
 enum class HarnessState {
     Running,
     AwaitingApproval,
+    AwaitingExternal,
     ManualReview,
     Completed,
     Rejected,
@@ -40,6 +41,7 @@ enum class HarnessState {
 enum class StageOutcome {
     Succeeded,
     AwaitingApproval,
+    AwaitingExternal,
     NeedsRemediation,
     Rejected,
     Retryable,

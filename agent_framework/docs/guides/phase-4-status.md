@@ -8,6 +8,12 @@
 **Interaction UI 闭环计划**：[phase4-uix-r2](./phase-4-interaction-ui-closure.md) 已完成 UIXR0–UIXR8 本地 residual closure；外部 IdP/KMS、跨主机 replay 与 Live campaign 仍开放
 **v1 历史计划**：[phase-4-plan.md](./phase-4-plan.md)
 
+**2026-08-15 AF-SLT 增量**：Conversation active Task/TaskRunLink、LLM task classifier、
+LongTaskWorkflow production execution adapter、Task status/output/cancel、startup orphan/timer
+recovery 与四端 Operations identity 已形成同一主链。Phase 4 offline 当前为 **90/90 PASS**，
+2000-cycle recovery soak PASS，真实 Web UI 已截图验证。ProviderLive 5–10 分钟 provider/MCP
+campaign 因当前环境无 provider 凭据仍为 `NotCertified`，不得据此宣告 Production Live 完成。
+
 ## 1. 状态语义
 
 | 标记 | 含义 | 允许的证据 |

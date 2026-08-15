@@ -127,6 +127,8 @@ struct Phase4OperationsSnapshot {
     std::string tenant_id;
     std::string run_id;
     std::string task_id;
+    std::string conversation_id;
+    std::string turn_id;
     std::string updated_at;
     OperationsStatus overall_status{OperationsStatus::Unknown};
     std::uint64_t plan_revision{0};
@@ -142,6 +144,7 @@ struct Phase4OperationsSnapshot {
     std::uint64_t stagnation_count{0};
     std::uint64_t criteria_closed{0};
     std::uint64_t criteria_total{0};
+    std::uint64_t invocations_compacted{0};
     double cost_per_closed_criterion{0.0};
     std::vector<std::string> unknowns;
     std::vector<OperationsStage> stages;
@@ -158,11 +161,15 @@ struct Phase4OperationsSnapshot {
 class Phase4OperationsProjection {
 public:
     static constexpr std::string_view event_type{"phase4_operations"};
+    static constexpr std::size_t max_items{256};
 
     static const char* status_name(OperationsStatus status) noexcept;
     static OperationsStatus parse_status(std::string_view value);
     static json to_json(const Phase4OperationsSnapshot& snapshot);
     static Phase4OperationsSnapshot from_json(const json& value);
+    // Keeps active invocations and the newest terminal history while bounding
+    // both invocation rows and their per-invocation replay cursors.
+    static std::size_t compact_invocations(Phase4OperationsSnapshot& snapshot);
     static std::string render_text(const Phase4OperationsSnapshot& snapshot,
                                    std::size_t width = 100);
     static Phase4OperationsSnapshot demo_snapshot();

@@ -73,6 +73,8 @@ LiveOperationsProjection::LiveOperationsProjection(
     snapshot_.tenant_id = std::move(identity.tenant_id);
     snapshot_.run_id = std::move(identity.run_id);
     snapshot_.task_id = std::move(identity.task_id);
+    snapshot_.conversation_id = std::move(identity.conversation_id);
+    snapshot_.turn_id = std::move(identity.turn_id);
     snapshot_.summary = "Live workflow observation";
     snapshot_.live_certification = "live-unverified";
     initialize_locked();
@@ -92,7 +94,8 @@ void LiveOperationsProjection::initialize_locked() {
         [](const auto& item) { return item.store == "tool_lifecycle"; });
     if(source != snapshot_.source_revisions.end()) revision_ = source->revision;
     if(snapshot_.updated_at.empty()) snapshot_.updated_at = timestamp();
-    if(snapshot_.snapshot_id.empty()) snapshot_.snapshot_id = digest(snapshot_);
+    const auto compacted = Phase4OperationsProjection::compact_invocations(snapshot_);
+    if(snapshot_.snapshot_id.empty() || compacted != 0) snapshot_.snapshot_id = digest(snapshot_);
 }
 
 void LiveOperationsProjection::observe_tool(const ToolExecutionEvent& event) {
@@ -126,6 +129,7 @@ void LiveOperationsProjection::observe_tool(const ToolExecutionEvent& event) {
                 ? "started" : "completed"}, {"revision", revision_}}).value_or("sha256:unavailable");
         if(source == snapshot_.source_revisions.end()) snapshot_.source_revisions.push_back(next);
         else *source = std::move(next);
+        Phase4OperationsProjection::compact_invocations(snapshot_);
         snapshot_.snapshot_id = digest(snapshot_);
         if(store_) {
             std::string error;
@@ -151,7 +155,8 @@ void LiveOperationsProjection::observe_invocation(const tool_runtime::Invocation
     {
         std::lock_guard lock(mutex_);
         auto source = std::find_if(snapshot_.source_revisions.begin(), snapshot_.source_revisions.end(),
-            [](const auto& item) { return item.store == "tool_invocation_events"; });
+            [&](const auto& item) { return item.store == "tool_invocation_events" &&
+                                           item.object_id == event.invocation_id; });
         if(source != snapshot_.source_revisions.end() && event.sequence <= source->revision) return;
         auto invocation = std::find_if(snapshot_.invocations.begin(), snapshot_.invocations.end(),
             [&](const auto& item) { return item.id == event.invocation_id; });
@@ -171,11 +176,120 @@ void LiveOperationsProjection::observe_invocation(const tool_runtime::Invocation
             snapshot_.summary += " (" + std::to_string(event.payload.at("fraction").get<double>() * 100.0) + "%)";
         OperationsSourceRevision next{"tool_invocation_events", event.invocation_id, event.sequence, event.event_digest};
         if(source == snapshot_.source_revisions.end()) snapshot_.source_revisions.push_back(next); else *source = next;
+        Phase4OperationsProjection::compact_invocations(snapshot_);
         snapshot_.snapshot_id = digest(snapshot_);
         if(store_) {
             std::string error;
             if(!store_->save(snapshot_, &error))
                 throw std::runtime_error("cannot persist durable operations snapshot: " + error);
+        }
+        published = snapshot_;
+        publisher = publisher_;
+    }
+    if(publisher) publisher(published);
+}
+
+void LiveOperationsProjection::observe_runtime(
+    const conversation::RuntimeEventEnvelope& event) {
+    if(event.sequence == 0 || event.durability != conversation::EventDurability::Durable)
+        return;
+    Phase4OperationsSnapshot published;
+    Publisher publisher;
+    {
+        std::lock_guard lock(mutex_);
+        auto source = std::find_if(snapshot_.source_revisions.begin(),
+            snapshot_.source_revisions.end(), [](const auto& item) {
+                return item.store == "conversation_harness_events";
+            });
+        if(source != snapshot_.source_revisions.end() &&
+           event.sequence <= source->revision) return;
+
+        snapshot_.tenant_id = event.tenant_id;
+        snapshot_.run_id = event.run_id;
+        snapshot_.conversation_id = event.conversation_id;
+        snapshot_.turn_id = event.turn_id;
+        snapshot_.updated_at = event.timestamp.empty() ? timestamp() : event.timestamp;
+        snapshot_.task_completion_verified = false;
+        snapshot_.completion_authority = "none";
+        const auto type = event.event_type;
+        if(type == "harness.stage_result") {
+            const auto stage_id = event.payload.value("stage", std::string("unknown"));
+            auto stage = std::find_if(snapshot_.stages.begin(), snapshot_.stages.end(),
+                [&](const auto& value) { return value.id == stage_id; });
+            if(stage == snapshot_.stages.end()) {
+                snapshot_.stages.push_back({stage_id, stage_id, OperationsStatus::Running,
+                    0, "harness", "", {}});
+                stage = std::prev(snapshot_.stages.end());
+            }
+            const auto outcome = event.payload.value("outcome", std::string("failed"));
+            stage->status = outcome == "succeeded" ? OperationsStatus::Passed
+                : outcome == "awaiting_approval" ? OperationsStatus::Pending
+                : outcome == "awaiting_external" ? OperationsStatus::Running
+                : outcome == "needs_remediation" ? OperationsStatus::Warning
+                : outcome == "rejected" ? OperationsStatus::Blocked
+                : OperationsStatus::Failed;
+            stage->revision = event.payload.value("checkpoint_revision",
+                                                  event.sequence);
+            stage->summary = outcome;
+            if(event.payload.contains("output_digest") &&
+               event.payload["output_digest"].is_string()) {
+                const auto output_digest = event.payload["output_digest"].get<std::string>();
+                const auto evidence_id = "harness-stage:" + stage_id + ":output";
+                stage->evidence_ids = {evidence_id};
+                auto evidence = std::find_if(snapshot_.evidence.begin(), snapshot_.evidence.end(),
+                    [&](const auto& value) { return value.id == evidence_id; });
+                OperationsEvidence projected{evidence_id,
+                    "Committed output for Harness stage " + stage_id,
+                    "stage_output", "conversation_harness_events", "committed",
+                    snapshot_.updated_at, stage->status, output_digest};
+                if(evidence == snapshot_.evidence.end())
+                    snapshot_.evidence.push_back(std::move(projected));
+                else
+                    *evidence = std::move(projected);
+            }
+            const auto output = event.payload.value(
+                "public_output", nlohmann::json::object());
+            if(stage_id == "cognition" && output.is_object() &&
+               output.value("schema", "") ==
+                   "agent.lightweight_conversation_plan/v1") {
+                ++snapshot_.plan_revision;
+                snapshot_.criteria_total = output.value(
+                    "acceptance_criteria", nlohmann::json::array()).size();
+                snapshot_.criteria_closed = 0;
+            }
+            snapshot_.summary = "Harness stage synchronized: " + stage_id +
+                                " (" + outcome + ")";
+            project_activity_status(snapshot_, stage->status);
+        } else if(type == "harness.harness_completed") {
+            snapshot_.task_closure_state = "execution_completed_unverified";
+            snapshot_.task_closure_reason =
+                "structural harness completion; semantic closure not evaluated";
+            snapshot_.overall_status = OperationsStatus::Running;
+            snapshot_.summary =
+                "Execution completed; authoritative task verification pending";
+        } else if(type == "harness.completion_gate_failed" ||
+                  type == "harness.stage_port_missing" ||
+                  type == "harness.effect_unknown") {
+            snapshot_.overall_status = OperationsStatus::Blocked;
+            snapshot_.blocker = type;
+            snapshot_.summary = "Harness blocked: " + type;
+        } else if(type.rfind("harness.", 0) == 0) {
+            snapshot_.overall_status = OperationsStatus::Running;
+            snapshot_.summary = "Harness event synchronized: " + type.substr(8);
+        }
+
+        OperationsSourceRevision next{"conversation_harness_events",
+            event.conversation_id, event.sequence, event.digest};
+        if(source == snapshot_.source_revisions.end())
+            snapshot_.source_revisions.push_back(next);
+        else *source = std::move(next);
+        Phase4OperationsProjection::compact_invocations(snapshot_);
+        snapshot_.snapshot_id = digest(snapshot_);
+        if(store_) {
+            std::string error;
+            if(!store_->save(snapshot_, &error))
+                throw std::runtime_error(
+                    "cannot persist runtime operations snapshot: " + error);
         }
         published = snapshot_;
         publisher = publisher_;

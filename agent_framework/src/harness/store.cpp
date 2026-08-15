@@ -13,7 +13,8 @@ namespace {
 namespace sqlite = internal::sqlite;
 
 bool terminal(HarnessState state) {
-    return state == HarnessState::Completed || state == HarnessState::Rejected ||
+    return state == HarnessState::AwaitingExternal ||
+           state == HarnessState::Completed || state == HarnessState::Rejected ||
            state == HarnessState::Failed || state == HarnessState::Cancelled ||
            state == HarnessState::ManualReview;
 }

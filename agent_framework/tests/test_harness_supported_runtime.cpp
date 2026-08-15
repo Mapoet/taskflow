@@ -12,20 +12,20 @@ int main() {
     checkpoint.identity = request.identity;
     checkpoint.turn_id = request.turn_id;
 
-    auto route = HarnessSupportedTurnRuntime::route({true, false, true}, request.profile);
+    auto route = HarnessSupportedTurnRuntime::route({true, false, false, true}, request.profile);
     assert(route.path == TurnExecutionPath::FailClosed);
-    route = HarnessSupportedTurnRuntime::route({false, false, true}, request.profile);
+    route = HarnessSupportedTurnRuntime::route({false, false, false, true}, request.profile);
     assert(route.path == TurnExecutionPath::FailClosed);
     route = HarnessSupportedTurnRuntime::route(
-        {false, false, true}, TaskExecutionProfile::Conversation);
+        {false, false, false, true}, TaskExecutionProfile::Conversation);
     assert(route.path == TurnExecutionPath::LegacyReactFallback);
-    route = HarnessSupportedTurnRuntime::route({true, true, true}, request.profile);
-    assert(route.path == TurnExecutionPath::Harness);
+    route = HarnessSupportedTurnRuntime::route({true, true, true, true}, request.profile);
+    assert(route.path == TurnExecutionPath::LongTaskWorkflow);
 
     int harness_calls = 0, fallback_calls = 0;
     std::vector<RuntimeEventEnvelope> events;
     HarnessSupportedTurnRuntime runtime(
-        {true, true, true},
+        {true, true, true, true},
         [&](const auto&) {
             ++harness_calls;
             ModelTurnOutcome out;
@@ -39,14 +39,20 @@ int main() {
             out.task_completion_verified = true;
             return out;
         },
-        [&](const auto& event) { events.push_back(event); });
+        [&](const auto& event) { events.push_back(event); },
+        [&](const auto&) {
+            ++harness_calls;
+            ModelTurnOutcome out;
+            out.candidate_answer = "long-task-accepted";
+            return out;
+        });
     const auto verified = runtime.execute(request, checkpoint);
     assert(!verified.task_completion_verified && harness_calls == 1 && fallback_calls == 0);
-    assert(events.size() == 1 && events[0].payload.at("path") == "harness");
+    assert(events.size() == 1 && events[0].payload.at("path") == "long_task_workflow");
 
     request.profile = TaskExecutionProfile::Conversation;
     HarnessSupportedTurnRuntime fallback(
-        {false, false, true}, {},
+        {false, false, false, true}, {},
         [&](const auto&) {
             ++fallback_calls;
             ModelTurnOutcome out;
@@ -55,7 +61,7 @@ int main() {
         });
     assert(!fallback.execute(request, checkpoint).task_completion_verified);
 
-    HarnessSupportedTurnRuntime closed({true, false, true}, {}, fallback_calls
+    HarnessSupportedTurnRuntime closed({true, false, false, true}, {}, fallback_calls
         ? HarnessSupportedTurnRuntime::Executor([&](const auto&) { return ModelTurnOutcome{}; })
         : HarnessSupportedTurnRuntime::Executor{});
     bool threw = false;

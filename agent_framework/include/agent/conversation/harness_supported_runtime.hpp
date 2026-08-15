@@ -8,11 +8,12 @@
 
 namespace agent_framework::conversation {
 
-enum class TurnExecutionPath { Harness, LegacyReactFallback, FailClosed };
+enum class TurnExecutionPath { Harness, LongTaskWorkflow, LegacyReactFallback, FailClosed };
 
 struct HarnessSupportedRuntimePolicy {
     bool production{false};
     bool harness_ready{false};
+    bool long_task_ready{false};
     bool explicit_legacy_fallback{false};
 };
 
@@ -33,7 +34,8 @@ public:
     HarnessSupportedTurnRuntime(HarnessSupportedRuntimePolicy policy,
                                 Executor harness_executor,
                                 Executor legacy_fallback = {},
-                                RuntimeEventSink events = {});
+                                RuntimeEventSink events = {},
+                                Executor long_task_executor = {});
 
     static TurnExecutionDecision route(const HarnessSupportedRuntimePolicy& policy,
                                        TaskExecutionProfile profile);
@@ -46,6 +48,7 @@ private:
 
     HarnessSupportedRuntimePolicy policy_;
     Executor harness_executor_;
+    Executor long_task_executor_;
     Executor legacy_fallback_;
     RuntimeEventSink events_;
 };

@@ -281,7 +281,10 @@ int run_graph_ui(tf::Executor& executor,
         WorkflowResult wr{};
         auto turn = example::run_conversation_turn(runtime, "imgui_agent_demo",
             state->initial_user_prompt,
-            [&] { wr = gx.run_react_cli_sync(executor, req); return wr; });
+            [&] { wr = gx.run_react_cli_sync(executor, req); return wr; },
+            [operations](const conversation::RuntimeEventEnvelope& event) {
+                if(operations) operations->observe_runtime(event);
+            });
         if (!turn.error.empty() || turn.outcome.reason != conversation::ModelTurnStopReason::EndTurn) {
             if (control && control->is_cancel_requested()) {
                 if (presentation) presentation->cancel();
@@ -305,7 +308,7 @@ int run_graph_ui(tf::Executor& executor,
 #undef main
 #endif
 
-int main(int argc, char** argv) {
+int imgui_agent_demo_main(int argc, char** argv) {
     agent_imgui_merge_lsan_suppressions();
 
     CLI::App app("imgui_agent_demo — WP2.U ImGui + same ReAct graph as cli_agent_demo");
@@ -462,6 +465,9 @@ int main(int argc, char** argv) {
         initial_operations = std::move(loaded.snapshot);
         presentation->observe_operations(initial_operations);
     } else {
+        if(operations_db_arg.empty())
+            operations_db_arg = example::default_operations_database("imgui_agent_demo");
+        operations_store = std::make_shared<SQLiteOperationsSnapshotStore>(operations_db_arg);
         initial_operations.tenant_id = operations_tenant_arg;
         initial_operations.run_id = operations_run_arg;
         initial_operations.task_id = "imgui-live-task";
@@ -583,4 +589,12 @@ int main(int argc, char** argv) {
     glfwDestroyWindow(window);
     glfwTerminate();
     return 0;
+}
+
+int main(int argc, char** argv) {
+    try { return imgui_agent_demo_main(argc, argv); }
+    catch(const std::exception& error) {
+        std::cerr << "[imgui_agent_demo] fatal startup/runtime error: " << error.what() << '\n';
+        return 2;
+    }
 }

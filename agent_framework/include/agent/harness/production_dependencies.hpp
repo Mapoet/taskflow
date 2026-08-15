@@ -22,6 +22,8 @@
 #include "agent/tool_runtime/long_task_workflow.hpp"
 #include "agent/tool_runtime/incremental_result_store.hpp"
 #include "agent/tool_runtime/execution_control.hpp"
+#include "agent/tool_runtime/orphan_recovery.hpp"
+#include "agent/conversation/task_registry.hpp"
 
 namespace agent_framework::harness {
 
@@ -30,6 +32,7 @@ struct ProductionCompositionDependencies {
     run::RunStore* run_store{nullptr};
     SQLiteRunHarnessSaga* run_harness_saga{nullptr};
     CrossStoreCoordinator* cross_store_coordinator{nullptr};
+    conversation::TaskRegistry* task_registry{nullptr};
     ProductionWorkflowInputRepository* input_repository{nullptr};
     planning::PlanStore* plan_store{nullptr};
     tool_runtime::LongTaskStore* long_task_store{nullptr};
@@ -37,9 +40,11 @@ struct ProductionCompositionDependencies {
     tool_runtime::PlanNodeInputRepository* plan_node_input_repository{nullptr};
     tool_runtime::PlanNodeExecutorRegistry* plan_node_executor_registry{nullptr};
     tool_runtime::LongTaskWorkflow* long_task_workflow{nullptr};
+    tool_runtime::LongTaskDispatcher* long_task_dispatcher{nullptr};
     tool_runtime::LongTaskTimerWorker* long_task_timer_worker{nullptr};
     tool_runtime::IncrementalResultStore* incremental_result_store{nullptr};
     tool_runtime::ExecutionControlStore* execution_control_store{nullptr};
+    tool_runtime::InvocationOrphanSweeper* orphan_sweeper{nullptr};
     std::shared_ptr<llm_runtime::LLMRuntimeStore> llm_store;
     std::shared_ptr<llm_runtime::RoleRuntime> role_runtime;
     std::shared_ptr<telemetry::TelemetryRuntime> telemetry;

@@ -334,8 +334,9 @@ void render_operations(const UiPresentationSnapshot& s) {
     ImGui::SameLine();
     ImGui::TextColored(operations_color(ops.overall_status), "%s",
                        Phase4OperationsProjection::status_name(ops.overall_status));
-    ImGui::SameLine(); ImGui::TextColored(kMuted, "run %s · plan r%llu · %s", ops.run_id.c_str(),
-                                         static_cast<unsigned long long>(ops.plan_revision), ops.updated_at.c_str());
+    ImGui::SameLine(); ImGui::TextColored(kMuted, "task %s · run %s · turn %s · plan r%llu · %s",
+        ops.task_id.c_str(),ops.run_id.c_str(),ops.turn_id.empty()?"—":ops.turn_id.c_str(),
+        static_cast<unsigned long long>(ops.plan_revision), ops.updated_at.c_str());
     ImGui::TextWrapped("%s", ops.summary.c_str());
     ImGui::TextColored(ops.task_completion_verified ? kSuccess : operations_color(OperationsStatus::Warning),
                        "%s", ops.task_completion_verified ? "VERIFIED" : "UNVERIFIED");

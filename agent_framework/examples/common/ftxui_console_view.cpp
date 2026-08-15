@@ -110,7 +110,9 @@ Elements operations_rows(const UiPresentationSnapshot& snapshot) {
     const auto& ops = snapshot.operations;
     rows.push_back(hbox({text(" " + std::string(Phase4OperationsProjection::status_name(ops.overall_status)) + " ") |
                             bold | color(operations_color(ops.overall_status)),
-                        text(" run " + ops.run_id + " · plan r" + std::to_string(ops.plan_revision)) | color(kMuted)}));
+                        text(" task " + ops.task_id + " · run " + ops.run_id +
+                             (ops.turn_id.empty()?"":" · turn "+ops.turn_id) +
+                             " · plan r" + std::to_string(ops.plan_revision)) | color(kMuted)}));
     rows.push_back(paragraph(ops.summary));
     rows.push_back(hbox({text(ops.task_completion_verified ? " VERIFIED " : " UNVERIFIED ") |
                             bold | color(ops.task_completion_verified ? Color::GreenLight : Color::YellowLight),

@@ -1,8 +1,10 @@
 #include "agent/harness/production_builder.hpp"
 
 #include <array>
+#include <chrono>
 
 #include "agent/contracts/contract.hpp"
+#include "agent/harness/production_boundary_adapters.hpp"
 
 namespace agent_framework::harness {
 namespace {
@@ -36,8 +38,6 @@ std::optional<Phase4HarnessRuntime> DefaultProductionCompositionBuilder::build(
                       HarnessStage::Intake, local);
     validate_boundary(boundary.approval, WorkflowAdapterKind::Approval,
                       HarnessStage::PlanApproval, local);
-    validate_boundary(boundary.execution, WorkflowAdapterKind::Execution,
-                      HarnessStage::Execution, local);
     validate_boundary(boundary.operations, WorkflowAdapterKind::Operations,
                       HarnessStage::Operations, local);
     if(!dependencies.ready || !local.composition_issues.empty()) {
@@ -47,6 +47,18 @@ std::optional<Phase4HarnessRuntime> DefaultProductionCompositionBuilder::build(
         if(output) *output = std::move(local);
         return std::nullopt;
     }
+    const auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
+    local.startup_recovery = dependencies_.orphan_sweeper->sweep(now_ms, 256);
+    if(local.startup_recovery.failures != 0) {
+        local.dependency_issues.push_back({"orphan_recovery_failed", "orphan_sweeper",
+            "startup orphan recovery contains failed fenced transitions"});
+        if(error) *error = "orphan_recovery_failed";
+        if(output) *output = std::move(local);
+        return std::nullopt;
+    }
+    local.startup_timers_processed =
+        dependencies_.long_task_timer_worker->run_due(now_ms, 256);
 
     auto observer = std::make_shared<TelemetryLLMInvocationObserver>(*dependencies_.telemetry);
     InvocationManifestResolver resolver(dependencies_.llm_store);
@@ -70,6 +82,13 @@ std::optional<Phase4HarnessRuntime> DefaultProductionCompositionBuilder::build(
     auto judge = std::make_shared<JudgeWorkflowAdapter>(
         *dependencies_.judge_workflow, *dependencies_.input_assembler,
         resolver, revision, config);
+    auto execution = std::make_shared<LongTaskExecutionWorkflowAdapter>(
+        *dependencies_.long_task_store, *dependencies_.plan_store,
+        *dependencies_.long_task_workflow, *dependencies_.long_task_dispatcher,
+        [] {
+            return std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::system_clock::now().time_since_epoch()).count();
+        }, revision, config);
 
     auto saga_observer=std::shared_ptr<HarnessCheckpointObserver>(
         dependencies_.cross_store_coordinator, [](HarnessCheckpointObserver*){});
@@ -78,11 +97,11 @@ std::optional<Phase4HarnessRuntime> DefaultProductionCompositionBuilder::build(
     composition.bind(HarnessStage::Intake, port(boundary.intake, observer));
     composition.bind(HarnessStage::Cognition, port(cognition, observer));
     composition.bind(HarnessStage::PlanApproval, port(boundary.approval, observer));
-    composition.bind(HarnessStage::Execution, port(boundary.execution, observer));
+    composition.bind(HarnessStage::Execution, port(execution, observer));
     composition.bind(HarnessStage::MemoryUpdate, port(memory, observer));
     composition.bind(HarnessStage::Assurance, port(assurance, observer));
     composition.bind(HarnessStage::Remediation, port(remediation, observer));
-    composition.bind(HarnessStage::Reexecution, port(boundary.execution, observer));
+    composition.bind(HarnessStage::Reexecution, port(execution, observer));
     composition.bind(HarnessStage::Reverification, port(reverification, observer));
     composition.bind(HarnessStage::Judge, port(judge, observer));
     composition.bind(HarnessStage::Operations, port(boundary.operations, observer));

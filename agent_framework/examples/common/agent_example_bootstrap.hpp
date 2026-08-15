@@ -17,6 +17,9 @@
 #include <agent/conversation/graph_turn_adapter.hpp>
 #include <agent/conversation/harness_supported_runtime.hpp>
 #include <agent/conversation/harness_turn_adapter.hpp>
+#include <agent/conversation/task_registry.hpp>
+#include <agent/conversation/task_classifier.hpp>
+#include <agent/conversation/task_control_service.hpp>
 #include <agent/harness/store.hpp>
 #include <agent/agent_template/runner.hpp>
 
@@ -96,6 +99,9 @@ struct LiveRuntime {
         conversation::TaskExecutionProfile::Conversation};
     BootstrapResult bootstrap;
     conversation::HarnessSupportedTurnRuntime::Executor harness_turn_executor;
+    conversation::HarnessSupportedTurnRuntime::Executor long_task_executor;
+    std::shared_ptr<conversation::TaskClassifier> task_classifier;
+    std::shared_ptr<conversation::TaskControlService> task_control_service;
     bool harness_ready{false};
     bool explicit_legacy_fallback{false};
     nlohmann::json composition_report = nlohmann::json::object();
@@ -132,6 +138,152 @@ inline conversation::TurnResult run_conversation_turn(
         std::move(input), runtime.task_profile,
         static_cast<std::uint64_t>(std::max(1, runtime.config.max_iterations))};
     conversation::SQLiteConversationStore store(database.string());
+    conversation::SQLiteTaskRegistry task_registry(database.string());
+    const char* configured_task = std::getenv("AGENT_TASK_ID");
+    const char* configured_run = std::getenv("AGENT_RUN_ID");
+    auto active_task = task_registry.active(identity);
+    const auto intent = conversation::classify_task_input(
+        request.input, active_task.has_value());
+    const bool control_only = intent == conversation::TaskInputIntent::StatusQuery ||
+        intent == conversation::TaskInputIntent::CancelTask ||
+        intent == conversation::TaskInputIntent::SuspendTask;
+    if(runtime.task_classifier && !control_only) {
+        auto classification=runtime.task_classifier->classify(
+            request.input,active_task.has_value());
+        classification=conversation::apply_task_routing_policy(
+            std::move(classification),runtime.task_profile,runtime.trust_profile);
+        if(!classification) {
+            if(runtime.trust_profile==ExecutionTrustProfile::Production)
+                throw std::runtime_error("task_classification_failed:"+classification.error);
+            classification=conversation::deterministic_task_classification(request.input);
+        }
+        request.profile=classification.profile;
+    }
+    if(control_only && !active_task)
+        throw std::runtime_error("task_context_required_for_control_request");
+    const bool force_new = intent == conversation::TaskInputIntent::StartNewTask;
+    if(force_new && active_task) {
+        const auto suspended = task_registry.transition(
+            identity, active_task->task_id, active_task->revision,
+            conversation::TaskLifecycleState::Suspended,
+            "suspended_by_new_active_task");
+        if(!suspended.ok)
+            throw std::runtime_error("task_registry_suspend_failed:" + suspended.error);
+    }
+    if(configured_task && *configured_task) {
+        request.task_id = configured_task;
+        auto selected = task_registry.load(identity, request.task_id);
+        if(selected) active_task = std::move(selected);
+    } else if(active_task && !force_new) {
+        request.task_id = active_task->task_id;
+    } else {
+        request.task_id = std::string(agent_name) + ":task:" +
+            std::to_string(now) + ":" +
+            std::to_string(serial.fetch_add(1, std::memory_order_relaxed));
+        active_task.reset();
+    }
+    request.run_id = configured_run && *configured_run
+        ? configured_run
+        : (active_task && !active_task->current_run_id.empty()
+               ? active_task->current_run_id
+               : request.turn_id);
+    if(active_task) {
+        // Status is observational and must not mutate the requirement history.
+        if(control_only) {
+            conversation::TurnTaskLink link{
+                identity, request.turn_id, request.task_id, request.run_id, 0,
+                intent};
+            const auto mutation = task_registry.attach_turn(
+                link, active_task->revision);
+            if(!mutation.ok)
+                throw std::runtime_error("task_registry_attach_failed:" + mutation.error);
+            if(intent == conversation::TaskInputIntent::CancelTask ||
+               intent == conversation::TaskInputIntent::SuspendTask) {
+                const auto state = intent == conversation::TaskInputIntent::CancelTask
+                    ? conversation::TaskLifecycleState::Cancelled
+                    : conversation::TaskLifecycleState::Suspended;
+                const auto closure = intent == conversation::TaskInputIntent::CancelTask
+                    ? "cancel_requested" : "suspended_by_user";
+                const auto transition = task_registry.transition(
+                    identity, request.task_id, mutation.revision, state, closure);
+                if(!transition.ok)
+                    throw std::runtime_error("task_registry_control_failed:" + transition.error);
+            }
+        } else {
+            auto expected_revision = active_task->revision;
+            if(active_task->state == conversation::TaskLifecycleState::Suspended &&
+               (intent == conversation::TaskInputIntent::ContinueTask ||
+                intent == conversation::TaskInputIntent::ReplanTask)) {
+                const auto resumed = task_registry.transition(
+                    identity, request.task_id, expected_revision,
+                    conversation::TaskLifecycleState::Active, "running");
+                if(!resumed.ok)
+                    throw std::runtime_error("task_registry_resume_failed:" + resumed.error);
+                expected_revision = resumed.revision;
+            }
+            conversation::TaskRequirementRevision revision{
+                identity, request.task_id, 0, intent, request.turn_id,
+                request.input};
+            conversation::TurnTaskLink link{
+                identity, request.turn_id, request.task_id, request.run_id, 0,
+                intent};
+            const auto mutation = task_registry.append_requirement(
+                revision, link, expected_revision, request.run_id);
+            if(!mutation.ok)
+                throw std::runtime_error("task_registry_append_failed:" + mutation.error);
+        }
+    } else {
+        conversation::PersistentTask task;
+        task.identity = identity;
+        task.task_id = request.task_id;
+        task.root_turn_id = request.turn_id;
+        task.current_turn_id = request.turn_id;
+        task.current_run_id = request.run_id;
+        conversation::TaskRequirementRevision revision{
+            identity, request.task_id, 1, intent, request.turn_id,
+            request.input};
+        conversation::TurnTaskLink link{
+            identity, request.turn_id, request.task_id, request.run_id, 1,
+            intent};
+        const auto mutation = task_registry.create(task, revision, link);
+        if(!mutation.ok)
+            throw std::runtime_error("task_registry_create_failed:" + mutation.error);
+    }
+    if(control_only) {
+        std::string response;
+        if(intent == conversation::TaskInputIntent::StatusQuery &&
+           runtime.task_control_service) {
+            response = runtime.task_control_service->status(identity, request.task_id).dump(2);
+        } else if(intent == conversation::TaskInputIntent::StatusQuery) {
+            response = "Task " + request.task_id + " is " +
+               std::string(conversation::name(active_task->state)) +
+               "; run=" + request.run_id +
+               "; requirement_revision=" +
+               std::to_string(active_task->requirement_revision);
+        } else {
+            if(intent == conversation::TaskInputIntent::CancelTask &&
+               runtime.task_control_service) {
+                const auto cancelled = runtime.task_control_service->cancel(
+                    identity, request.task_id, "cancelled_by_user",
+                    std::chrono::duration_cast<std::chrono::milliseconds>(
+                        std::chrono::system_clock::now().time_since_epoch()).count());
+                if(!cancelled.ok)
+                    throw std::runtime_error("task_cancel_propagation_failed:" +
+                        nlohmann::json(cancelled.errors).dump());
+            }
+            response = "Task " + request.task_id +
+               (intent == conversation::TaskInputIntent::CancelTask
+                    ? " cancellation recorded and propagated." : " suspended.");
+        }
+        conversation::ConversationEngine control_engine(
+            store, [response](const auto&, const auto&) {
+                conversation::ModelTurnOutcome outcome;
+                outcome.reason = conversation::ModelTurnStopReason::EndTurn;
+                outcome.candidate_answer = response;
+                return outcome;
+            }, std::move(event_sink));
+        return control_engine.start_turn(request);
+    }
     auto event_forwarder = event_sink;
     auto harness_executor = runtime.harness_turn_executor;
     std::shared_ptr<harness::SQLiteHarnessStore> interactive_harness_store;
@@ -139,6 +291,10 @@ inline conversation::TurnResult run_conversation_turn(
     if(runtime.harness_ready && !harness_executor) {
         if(runtime.trust_profile == ExecutionTrustProfile::Production)
             throw std::runtime_error("production_harness_executor_not_injected");
+        if(runtime.task_profile != conversation::TaskExecutionProfile::Conversation &&
+           runtime.task_profile != conversation::TaskExecutionProfile::ReadOnlyAnalysis)
+            throw std::runtime_error(
+                "production_harness_executor_required_for_task_profile");
         const char* configured_harness_db = std::getenv("AGENT_HARNESS_DB");
         const auto harness_database = configured_harness_db && *configured_harness_db
             ? std::filesystem::path(configured_harness_db)
@@ -150,6 +306,30 @@ inline conversation::TurnResult run_conversation_turn(
             *interactive_harness_store,
             [callback = graph](const auto&) mutable {
                 return conversation::GraphTurnAdapter::from_workflow(callback());
+            }, conversation::HarnessTurnAdapter::ProjectionSink{},
+            [&store, identity, turn_id = request.turn_id,
+                    run_id = request.run_id, event_forwarder](const auto& source) {
+                conversation::RuntimeEventEnvelope event;
+                event.tenant_id = identity.tenant_id;
+                event.conversation_id = identity.conversation_id;
+                event.turn_id = turn_id;
+                event.run_id = run_id;
+                event.sequence = store.last_event_sequence(identity) + 1;
+                event.event_id = source.harness_id + ":" +
+                    std::to_string(source.sequence);
+                event.durability = conversation::EventDurability::Durable;
+                event.visibility = conversation::EventVisibility::Operations;
+                event.event_type = "harness." + source.event_type;
+                event.timestamp = source.created_at;
+                event.payload = source.payload;
+                event.payload["harness_id"] = source.harness_id;
+                event.payload["harness_sequence"] = source.sequence;
+                event.payload["checkpoint_revision"] = source.checkpoint_revision;
+                std::string error;
+                if(!store.append_event(event, &error))
+                    throw std::runtime_error(
+                        "conversation_harness_trace_commit_failed:" + error);
+                if(event_forwarder) event_forwarder(event);
             });
         harness_executor = [interactive_harness](const auto& request) {
             return interactive_harness->execute(request);
@@ -157,11 +337,12 @@ inline conversation::TurnResult run_conversation_turn(
     }
     conversation::HarnessSupportedTurnRuntime supported(
         {runtime.trust_profile == ExecutionTrustProfile::Production,
-         runtime.harness_ready, runtime.explicit_legacy_fallback},
+         runtime.harness_ready, static_cast<bool>(runtime.long_task_executor),
+         runtime.explicit_legacy_fallback},
         std::move(harness_executor),
         [callback = std::move(graph)](const auto&) mutable {
             return conversation::GraphTurnAdapter::from_workflow(callback());
-        }, event_forwarder);
+        }, event_forwarder, runtime.long_task_executor);
     conversation::ConversationEngine engine(
         store,
         [&supported](const conversation::TurnRequest& request,
@@ -193,10 +374,11 @@ inline conversation::TaskExecutionProfile task_execution_profile_from_env() {
 
 inline void require_harness_supported_execution(const LiveRuntime& runtime) {
     if(runtime.trust_profile == ExecutionTrustProfile::Production &&
-       (!runtime.harness_ready || !runtime.harness_turn_executor))
+       (!runtime.harness_ready || !runtime.harness_turn_executor ||
+        !runtime.long_task_executor || !runtime.task_control_service))
         throw std::runtime_error(
-            "production_harness_executor_required: inject a DefaultProductionCompositionBuilder "
-            "backed executor");
+            "production_workflow_executors_required: inject production Harness and "
+            "LongTaskWorkflow executors");
 }
 
 inline void set_environment_override(const char* key, const std::string& value) {
@@ -397,6 +579,13 @@ inline LiveRuntime build_live_runtime(const LiveRuntimeOptions& options) {
     runtime.harness_ready = runtime.trust_profile != ExecutionTrustProfile::Production;
     runtime.llm = std::make_shared<LLMClient>(LLMClient::from_env());
     runtime.llm->set_prompt_renderer(std::make_shared<PromptRenderer>());
+    const char* classifier_mode=std::getenv("AGENT_TASK_CLASSIFIER");
+    if(!classifier_mode||std::string(classifier_mode)!="off") {
+        const std::string provider=std::getenv("AGENT_LLM_PROVIDER")
+            ?std::getenv("AGENT_LLM_PROVIDER"):std::string{};
+        runtime.task_classifier=std::make_shared<conversation::LLMTaskClassifier>(
+            runtime.llm,provider);
+    }
     if(const char* strategy = std::getenv("AGENT_MEMORY_COMPACTOR");
        strategy && std::string(strategy) == "structured") {
         runtime.memory_compaction_llm = std::make_shared<LLMClient>(LLMClient::from_env());
@@ -445,8 +634,10 @@ inline LiveRuntime build_live_runtime(const LiveRuntimeOptions& options) {
         {"runner_process",bool(runtime.skill_runners->resolve(agent_template::SkillRunnerKind::SandboxedProcess))},{"runner_cli",bool(runtime.skill_runners->resolve(agent_template::SkillRunnerKind::Cli))},
         {"runner_mcp",bool(runtime.skill_runners->resolve(agent_template::SkillRunnerKind::Mcp))},{"runner_child",bool(runtime.skill_runners->resolve(agent_template::SkillRunnerKind::ChildAgent))},
         {"runner_nested",bool(runtime.skill_runners->resolve(agent_template::SkillRunnerKind::NestedWorkflow))},{"runner_approval",bool(runtime.skill_runners->resolve(agent_template::SkillRunnerKind::HumanApproval))},
-        {"harness_ready",runtime.harness_ready},{"legacy_fallback",runtime.explicit_legacy_fallback}};
-    runtime.composition_report["production_ready"]=runtime.trust_profile==ExecutionTrustProfile::Production&&runtime.harness_ready&&runtime.harness_turn_executor&&runtime.composition_report["runner_child"].get<bool>()&&runtime.composition_report["runner_nested"].get<bool>()&&runtime.composition_report["runner_approval"].get<bool>();
+        {"harness_ready",runtime.harness_ready},{"long_task_ready",bool(runtime.long_task_executor)},
+        {"task_control_ready",bool(runtime.task_control_service)},
+        {"legacy_fallback",runtime.explicit_legacy_fallback}};
+    runtime.composition_report["production_ready"]=runtime.trust_profile==ExecutionTrustProfile::Production&&runtime.harness_ready&&runtime.harness_turn_executor&&runtime.long_task_executor&&runtime.task_control_service&&runtime.composition_report["runner_child"].get<bool>()&&runtime.composition_report["runner_nested"].get<bool>()&&runtime.composition_report["runner_approval"].get<bool>();
     runtime.config.name = options.agent_name;
     runtime.config.system_prompt = live_system_prompt(runtime.bootstrap.mcp_services > 0,
                                                       runtime.skills != nullptr);

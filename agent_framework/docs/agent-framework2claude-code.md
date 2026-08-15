@@ -657,6 +657,13 @@ ChildTask/A2A/Skill 子运行时使用能力交集和独立 transcript。父授�
 9. **LTW8 — Cancellation/Deadline Closure `[x]`**：新增 tenant-scoped `ExecutionControlEnvelope` 与 SQLite durable control store，持久化 absolute deadline、cancel generation、revision、owner lease/fencing、升级时点、effect/receipt 和 pending bytes/events；Worker admission 由 invocation budget 生成 control，start/recover 将其注入统一 adapter request，过期任务在 provider 启动前拒绝。增量结果写入执行 durable reserve/release，支持 block、fail 与仅丢弃 ephemeral 三种明确策略。ToolBus 传播 cooperative token，Bubblewrap 将剩余 deadline 收紧到 wall-time，ChildTask 将系统时钟 deadline 转换为 steady-clock deadline，HTTP/MCP/A2A 通过类型化 request/cancel/reconcile contract 传播。取消执行 `Requested→Cooperative→Terminate→Kill→Reconciling→Cancelled/ManualReview`，每次 claim 增长 fencing，旧 owner/revision 写入被拒绝；provider 不支持强杀或远端 effect 不可证明时不得伪报取消成功，必须进入 reconcile，仍未知则 fail closed 到 ManualReview。专项测试覆盖背压、generation、重启恢复、lease takeover/stale fencing、升级链和 unknown-effect。
 10. **LTW9 — Recovery/Soak Certification `[~]`**：实现版本化 mandatory recovery matrix，覆盖 worker crash/takeover、stale completion、cancel-before-start、cancel/complete 与 deadline/result 竞态、cancel restart/escalation、对象损坏/缺失、SQLite busy/storage failure、schema migration、provider disconnect/reattach。认证单元按 `Offline/ProcessLive/ProviderLive` 分级，required cell 未执行、失败或缺 evidence digest 均形成 blocker，不能 skip-as-pass；报告可 canonical JSON 输出。ExecutionControl schema 具备独立 component version，并拒绝未来版本。专项验证已覆盖 control restart/takeover/stale fencing、对象实际篡改检测、SQLite 写锁失败分类、未来 schema 拒绝和 2000 次固定种子 soak。当前实现闭合了 LTW9A–H 的本地 correctness 与 LTW9I/J 的门禁/报告，但本轮没有伪造“数小时真实 provider soak”：provider disconnect/reattach 要求 ProviderLive，缺少真实执行证据时报告明确 `NotCertified`。因此在真实 MCP/HTTP/A2A/provider 环境完成长时认证前保持 `[~]`。
 
+2026-08-15 的 AF-SLT 集成批次已把上述模块从“可复用组件”接入 Conversation 主链：
+LLM classifier 负责 task profile，复杂任务进入独立 `LongTaskWorkflow` executor；默认 production
+builder 自建类型化 execution adapter，并在启动时执行 orphan sweep 与 durable timer；
+TaskRunLink、status/output/cancel 和 Operations conversation/task/run/turn identity 已连通。
+这关闭了“live demo 仍只调用一次 ReAct callback”的主要接线缺口。当前剩余认证缺口是
+ProviderLive 5–10 分钟真实 provider/MCP late-result campaign，而不是 Offline 代码路径。
+
 建议初期只以 SQLite + 本机多进程作为 correctness baseline；跨主机扩展复用同一 invocation/event contract，替换为 PostgreSQL queue/notification 或消息总线。不要在单机恢复、fencing 和 effect reconciliation 尚未闭环前引入新的分布式执行后端。
 
 ## 18. 定量退出门槛

@@ -299,7 +299,10 @@ if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/conversation/types.cpp)
         src/conversation/graph_turn_adapter.cpp
         src/conversation/production_bridge.cpp
         src/conversation/harness_supported_runtime.cpp
-        src/conversation/harness_turn_adapter.cpp)
+        src/conversation/harness_turn_adapter.cpp
+        src/conversation/task_classifier.cpp
+        src/conversation/task_control_service.cpp
+        src/conversation/sqlite_task_registry.cpp)
 endif()
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/run/state_machine.cpp)
     list(APPEND AGENT_SOURCES src/run/state_machine.cpp)
@@ -721,6 +724,7 @@ if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/tool_runtime/types.cpp)
     list(APPEND AGENT_SOURCES src/tool_runtime/typed_adapters.cpp)
     list(APPEND AGENT_SOURCES src/tool_runtime/commit_coordinator.cpp)
     list(APPEND AGENT_SOURCES src/tool_runtime/long_task_workflow.cpp)
+    list(APPEND AGENT_SOURCES src/tool_runtime/orphan_recovery.cpp)
     list(APPEND AGENT_SOURCES src/tool_runtime/incremental_result_store.cpp)
     list(APPEND AGENT_SOURCES src/tool_runtime/execution_control.cpp)
     list(APPEND AGENT_SOURCES src/tool_runtime/recovery_certification.cpp)
@@ -1826,6 +1830,29 @@ if(BUILD_TESTING)
         add_test(NAME phase4_conversation_runtime COMMAND test_phase4_conversation_runtime)
         set_tests_properties(phase4_conversation_runtime PROPERTIES
             LABELS "phase4-offline;offline;phase4-conversation;phase4-durable;phase4-integration;phase4-security")
+    endif()
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_conversation_task_registry.cpp)
+        add_executable(test_conversation_task_registry
+            tests/test_conversation_task_registry.cpp)
+        target_link_libraries(test_conversation_task_registry PRIVATE agent_framework)
+        add_test(NAME conversation_task_registry COMMAND test_conversation_task_registry)
+        set_tests_properties(conversation_task_registry PROPERTIES
+            LABELS "phase4-offline;offline;phase4-conversation;phase4-durable;phase4-integration;phase4-security"
+            RUN_SERIAL TRUE)
+    endif()
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_task_classifier.cpp)
+        add_executable(test_task_classifier tests/test_task_classifier.cpp)
+        target_link_libraries(test_task_classifier PRIVATE agent_framework)
+        add_test(NAME task_classifier COMMAND test_task_classifier)
+        set_tests_properties(task_classifier PROPERTIES
+            LABELS "phase4-offline;offline;phase4-conversation;phase4-llm-runtime;phase4-integration")
+    endif()
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_task_control_service.cpp)
+        add_executable(test_task_control_service tests/test_task_control_service.cpp)
+        target_link_libraries(test_task_control_service PRIVATE agent_framework)
+        add_test(NAME task_control_service COMMAND test_task_control_service)
+        set_tests_properties(task_control_service PROPERTIES
+            LABELS "phase4-offline;offline;phase4-conversation;phase4-tool-runtime;phase4-integration")
     endif()
     if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_phase4_tool_runtime.cpp)
         add_executable(test_phase4_tool_runtime tests/test_phase4_tool_runtime.cpp)

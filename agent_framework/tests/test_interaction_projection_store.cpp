@@ -17,6 +17,26 @@ UiInteractionEvent event(std::uint64_t sequence,std::string id,std::string objec
     e.event_type="projection.updated"; e.visibility=InteractionVisibility::User; e.primary_ref=base_ref(); e.primary_ref.message_id="m";
     e.display={{"label","updated"}}; e.navigation_target={"conversation",std::move(object),1};
     e.source=src(e.event_id); e.timestamp="2026-08-15T00:00:00Z"; return e; }
+InteractionSnapshot projection(std::string conversation, std::string node_id) {
+    InteractionSnapshot value; value.tenant_id="t"; value.conversation_id=std::move(conversation);
+    value.updated_at="2026-08-15T00:00:02Z"; value.digest="sha256:projection";
+    auto node=message();node.node_id=std::move(node_id);node.ref.conversation_id=value.conversation_id;
+    node.ref.message_id=node.node_id;value.nodes.push_back(std::move(node));return value;
+}
+class ConflictOnceStore final : public InteractionProjectionStore {
+public:
+    explicit ConflictOnceStore(InteractionProjectionStore& inner):inner_(inner){}
+    InteractionCommitResult commit(const InteractionCommit& value,std::uint64_t expected) override {
+        if(first_){first_=false;auto competing=value;competing.event.event_id += ":competitor";
+            competing.event.source.object_id=competing.event.event_id;
+            const auto won=inner_.commit(competing,expected);assert(won.ok());}
+        return inner_.commit(value,expected);
+    }
+    std::optional<InteractionSnapshot> snapshot(std::string_view t,std::string_view c,InteractionVisibility v) override{return inner_.snapshot(t,c,v);}
+    std::vector<UiInteractionEvent> events(std::string_view t,std::string_view c,std::uint64_t a,std::size_t l,InteractionVisibility v) override{return inner_.events(t,c,a,l,v);}
+    std::optional<InteractionNode> node(std::string_view t,std::string_view c,std::string_view n,InteractionVisibility v) override{return inner_.node(t,c,n,v);}
+private: InteractionProjectionStore& inner_;bool first_{true};
+};
 }
 
 int main() {
@@ -45,6 +65,14 @@ int main() {
         auto replay=store.events("t","c",0,10,InteractionVisibility::User); assert(replay.size()==2);
         auto stale=store.commit({event(3,"e3","plan:p"),{},{}},0);
         assert(stale.status==InteractionCommitStatus::RevisionConflict);
+
+        auto default_commit=commit_interaction_projection(store,projection("default","message:default"));
+        auto real_commit=commit_interaction_projection(store,projection("conversation-real","message:real"));
+        assert(default_commit.ok()&&default_commit.revision==1);
+        assert(real_commit.ok()&&real_commit.revision==1); // independent stream, not default revision
+        ConflictOnceStore racing(store);
+        auto retried=commit_interaction_projection(racing,projection("conversation-race","message:race"),2);
+        assert(retried.ok()&&retried.revision==2&&retried.head_sequence==2);
     }
     {
         SQLiteInteractionProjectionStore reopened(path);

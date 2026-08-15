@@ -76,6 +76,69 @@ int main() {
     assert(durable.overall_status==OperationsStatus::Warning);
     auto durable_source=std::find_if(durable.source_revisions.begin(),durable.source_revisions.end(),[](const auto& x){return x.store=="tool_invocation_events";});
     assert(durable_source!=durable.source_revisions.end()&&durable_source->revision==4);
+    auto second=queued;second.invocation_id="durable-2";second.sequence=1;
+    second.event_digest="sha256:q2";recovered.observe_invocation(second);
+    durable=recovered.snapshot();
+    assert(std::any_of(durable.invocations.begin(),durable.invocations.end(),
+        [](const auto& value){return value.id=="durable-2";}));
+    const auto durable_sources=std::count_if(durable.source_revisions.begin(),
+        durable.source_revisions.end(),[](const auto& value){
+            return value.store=="tool_invocation_events";});
+    assert(durable_sources==2);
+    conversation::RuntimeEventEnvelope cognition;
+    cognition.event_id="harness:1";cognition.tenant_id="tenant-live";
+    cognition.conversation_id="conversation-live";cognition.turn_id="turn-live";
+    cognition.run_id="run-live";cognition.sequence=10;
+    cognition.durability=conversation::EventDurability::Durable;
+    cognition.event_type="harness.stage_result";cognition.timestamp="2026-08-15T00:00:00Z";
+    cognition.payload={{"stage","cognition"},{"outcome","succeeded"},
+        {"checkpoint_revision",4},{"output_digest","sha256:plan"},
+        {"public_output",{{"schema","agent.lightweight_conversation_plan/v1"},
+            {"acceptance_criteria",json::array({{{"id","criterion-1"}}})}}}};
+    recovered.observe_runtime(cognition);
+    auto harness=recovered.snapshot();
+    assert(harness.plan_revision==1&&harness.criteria_total==1);
+    assert(!harness.stages.empty()&&harness.stages.back().id=="cognition");
+    auto waiting=cognition;waiting.sequence=11;waiting.payload={{"stage","execution"},
+        {"outcome","awaiting_external"},{"checkpoint_revision",5}};
+    recovered.observe_runtime(waiting);harness=recovered.snapshot();
+    assert(harness.stages.back().status==OperationsStatus::Running);
+    auto completed_harness=cognition;completed_harness.sequence=12;
+    completed_harness.event_type="harness.harness_completed";
+    completed_harness.payload=json::object();
+    recovered.observe_runtime(completed_harness);
+    harness=recovered.snapshot();
+    assert(harness.task_closure_state=="execution_completed_unverified");
+    assert(!harness.task_completion_verified&&harness.completion_authority=="none");
+    recovered.observe_runtime(completed_harness);
+    auto harness_source=std::find_if(harness.source_revisions.begin(),
+        harness.source_revisions.end(),[](const auto& x){
+            return x.store=="conversation_harness_events";
+        });
+    assert(harness_source!=harness.source_revisions.end()&&harness_source->revision==12);
+
+    ToolExecutionEvent retained_active = started;
+    retained_active.tool_call_id = "active-must-survive-retention";
+    recovered.observe_tool(retained_active);
+    for(int i = 0; i < 300; ++i) {
+        ToolExecutionEvent terminal = started;
+        terminal.tool_call_id = "retained-terminal-" + std::to_string(i);
+        terminal.phase = ToolExecutionPhase::Completed;
+        terminal.result = {{"ok", true}};
+        recovered.observe_tool(terminal);
+    }
+    const auto bounded = recovered.snapshot();
+    assert(bounded.invocations.size() <= Phase4OperationsProjection::max_items);
+    assert(bounded.source_revisions.size() <= Phase4OperationsProjection::max_items);
+    assert(bounded.invocations_compacted > 0);
+    assert(std::any_of(bounded.invocations.begin(), bounded.invocations.end(), [](const auto& item) {
+        return item.id == "active-must-survive-retention" &&
+               item.status == OperationsStatus::Running;
+    }));
+    const auto bounded_replay = store->latest("tenant-live", "run-live");
+    assert(bounded_replay && bounded_replay->invocations.size() <=
+           Phase4OperationsProjection::max_items);
+    assert(bounded_replay->invocations_compacted == bounded.invocations_compacted);
     fs::remove_all(root, ec);
     return 0;
 }

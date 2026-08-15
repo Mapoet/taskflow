@@ -98,6 +98,83 @@ std::optional<WorkflowStageExecution> ArtifactExecutionWorkflowAdapter::reconcil
                   : std::nullopt;
 }
 
+LongTaskExecutionWorkflowAdapter::LongTaskExecutionWorkflowAdapter(
+    tool_runtime::LongTaskStore& store, planning::PlanStore& plans,
+    tool_runtime::LongTaskWorkflow& workflow,
+    tool_runtime::LongTaskDispatcher& dispatcher,
+    std::function<std::int64_t()> now_ms, std::string revision,
+    std::string configuration_digest)
+    : store_(store), plans_(plans), workflow_(workflow), dispatcher_(dispatcher),
+      now_ms_(std::move(now_ms)), revision_(std::move(revision)),
+      configuration_digest_(std::move(configuration_digest)) {}
+
+WorkflowStageExecution LongTaskExecutionWorkflowAdapter::advance(
+    const HarnessStageRequest& request) {
+    const auto& identity = request.checkpoint.metadata.identity;
+    const auto workflow_id = request.checkpoint.harness_id + ":long-task";
+    auto current = store_.load(workflow_id);
+    if(!current) {
+        const auto plan = plans_.current(identity);
+        if(!plan) return failure("long_task_plan_missing",
+            "the pinned durable execution plan is unavailable");
+        const auto plan_digest = planning::encode(*plan)
+            .at("canonical_digest").get<std::string>();
+        if(plan_digest != request.checkpoint.pins.plan_digest)
+            return failure("long_task_plan_pin_mismatch",
+                "the current plan does not match the Harness plan pin");
+        tool_runtime::LongTaskCheckpoint checkpoint;
+        checkpoint.metadata = request.checkpoint.metadata;
+        checkpoint.workflow_id = workflow_id;
+        const auto& extensions = request.checkpoint.metadata.extensions;
+        checkpoint.conversation_id =
+            extensions.contains("conversation_id") && extensions.at("conversation_id").is_string()
+                ? extensions.at("conversation_id").get<std::string>()
+                : identity.task_id;
+        checkpoint.turn_id =
+            extensions.contains("turn_id") && extensions.at("turn_id").is_string()
+                ? extensions.at("turn_id").get<std::string>()
+                : identity.run_id;
+        checkpoint.plan_revision = plan->plan_revision;
+        checkpoint.plan_digest = plan_digest;
+        checkpoint.created_at = request.checkpoint.updated_at;
+        checkpoint.updated_at = request.checkpoint.updated_at;
+        const auto started = workflow_.start(std::move(checkpoint), *plan);
+        if(!started && started.error != "already exists")
+            return failure("long_task_start_failed", started.error);
+    }
+    auto stepped = workflow_.step(workflow_id, now_ms_ ? now_ms_() : 0);
+    if(!stepped.error.empty())
+        return failure("long_task_step_failed", stepped.error);
+    if(!stepped.ready_nodes.empty()) stepped = dispatcher_.dispatch(stepped);
+    if(!stepped.error.empty())
+        return failure("long_task_dispatch_failed", stepped.error);
+
+    WorkflowStageExecution out;
+    out.result.invocation_manifest_digest = request.request_digest;
+    out.result.output_digest = contracts::canonical_digest(
+        tool_runtime::encode(stepped.checkpoint)).value_or("");
+    out.result.effect_receipt_digest = out.result.output_digest;
+    out.result.public_output = {
+        {"workflow_id", workflow_id},
+        {"state", tool_runtime::name(stepped.checkpoint.state)},
+        {"revision", stepped.checkpoint.revision},
+        {"ready_nodes", stepped.ready_nodes}};
+    using State = tool_runtime::LongTaskState;
+    switch(stepped.checkpoint.state) {
+        case State::CompletedCandidate: out.result.outcome = StageOutcome::Succeeded; break;
+        case State::AwaitingApproval: out.result.outcome = StageOutcome::AwaitingApproval; break;
+        case State::Failed: out.result.outcome = StageOutcome::Failed; break;
+        case State::Cancelled: out.result.outcome = StageOutcome::Cancelled; break;
+        case State::ManualReview: out.result.outcome = StageOutcome::ManualReview; break;
+        default: out.result.outcome = StageOutcome::AwaitingExternal; break;
+    }
+    return out;
+}
+WorkflowStageExecution LongTaskExecutionWorkflowAdapter::run(
+    const HarnessStageRequest& request) { return advance(request); }
+std::optional<WorkflowStageExecution> LongTaskExecutionWorkflowAdapter::reconcile(
+    const HarnessStageRequest& request) { return advance(request); }
+
 StoreBackedOperationsAdapter::StoreBackedOperationsAdapter(
     StoreBackedOperationsAssembler& assembler, memory_v2::MemoryScope subject,
     std::function<std::string()> now, std::string revision,

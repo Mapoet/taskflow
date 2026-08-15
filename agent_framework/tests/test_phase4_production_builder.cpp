@@ -32,12 +32,12 @@ int main() {
     std::string error;
     assert(!builder.build(boundary, &report, &error));
     assert(!report.ready && !report.dependency_issues.empty());
-    assert(report.composition_issues.size() == 4);
+    assert(report.composition_issues.size() == 3);
     assert(error.find("production_dependency_missing") == 0);
 
     boundary.intake = std::make_shared<Boundary>(WorkflowAdapterKind::Cognition,
                                                  HarnessStage::Cognition);
     report = {};
     assert(!builder.build(boundary, &report, &error));
-    assert(report.composition_issues.size() == 4); // wrong kind cannot masquerade as intake
+    assert(report.composition_issues.size() == 3); // wrong kind cannot masquerade as intake
 }

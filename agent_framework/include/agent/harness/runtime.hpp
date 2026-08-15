@@ -32,6 +32,8 @@ struct HarnessStageResult {
     std::string error_code;
     std::string error_message;
     std::vector<std::string> blocking_finding_ids;
+    // Display/audit-safe typed output. Never place secrets or hidden reasoning here.
+    nlohmann::json public_output = nlohmann::json::object();
 };
 
 class HarnessStagePort {

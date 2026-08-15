@@ -6,6 +6,7 @@
 #include <string>
 
 #include "agent/toolbus/toolbus.hpp"
+#include "agent/conversation/types.hpp"
 #include "agent/tool_runtime/types.hpp"
 #include "agent/tool_runtime/event_stream.hpp"
 #include "agent/ui/store_backed_operations.hpp"
@@ -16,6 +17,8 @@ struct LiveOperationsIdentity {
     std::string tenant_id;
     std::string run_id;
     std::string task_id;
+    std::string conversation_id;
+    std::string turn_id;
 };
 
 /**
@@ -38,6 +41,8 @@ public:
 
     void observe_tool(const ToolExecutionEvent& event);
     void observe_invocation(const tool_runtime::InvocationEvent& event);
+    /** Project the unified conversation/harness event stream into live Operations. */
+    void observe_runtime(const conversation::RuntimeEventEnvelope& event);
     /** Drain replay/live events from the canonical subscription until timeout or terminal status. */
     std::size_t consume_invocations(tool_runtime::InvocationEventSubscription& subscription,
                                     std::chrono::milliseconds timeout,

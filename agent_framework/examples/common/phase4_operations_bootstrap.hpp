@@ -3,10 +3,20 @@
 #include <agent/ui/store_backed_operations.hpp>
 
 #include <memory>
+#include <filesystem>
+#include <cstdlib>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 
 namespace agent_framework::example {
+
+inline std::string default_operations_database(std::string_view agent_name) {
+    const char* configured = std::getenv("AGENT_OPERATIONS_DB");
+    if(configured && *configured) return configured;
+    return (std::filesystem::path(".agent-framework") /
+            (std::string(agent_name) + "-operations.sqlite3")).string();
+}
 
 struct Phase4OperationsBootstrapOptions {
     std::string database_path;

@@ -190,7 +190,13 @@ int run_graph_once(tf::Executor& executor,
         WorkflowResult graph_result{};
         auto turn = example::run_conversation_turn(
             runtime, "cli_agent_demo", state->initial_user_prompt,
-            [&] { graph_result = gx.run_react_cli_sync(executor, req); return graph_result; });
+            [&] { graph_result = gx.run_react_cli_sync(executor, req); return graph_result; },
+            [&cli, operations](const conversation::RuntimeEventEnvelope& event) {
+                if(!operations) return;
+                operations->observe_runtime(event);
+                cli.handle_aux_event(Phase4OperationsProjection::event_type,
+                    Phase4OperationsProjection::to_json(operations->snapshot()));
+            });
         if (!turn.error.empty() || turn.outcome.reason != conversation::ModelTurnStopReason::EndTurn) {
             cli.handle_error(!turn.error.empty() ? turn.error :
                 graph_result.error_message.value_or(turn.outcome.candidate_answer));
@@ -205,7 +211,7 @@ int run_graph_once(tf::Executor& executor,
 
 } // namespace
 
-int main(int argc, char** argv) {
+int cli_agent_demo_main(int argc, char** argv) {
     CLI::App app("cli_agent_demo — Agent Framework WP1.6 (stdio CLI)\n"
                  "Streaming prints tokens to stdout; final line is a short [result] summary "
                  "(full answer often already streamed). Set AGENT_LOG_LEVEL=debug or -v for more.");
@@ -305,7 +311,12 @@ int main(int argc, char** argv) {
     initial_operations.tenant_id = operations_tenant_arg;
     initial_operations.run_id = operations_run_arg;
     initial_operations.task_id = "cli-live-task";
-    auto operations = std::make_shared<LiveOperationsProjection>(std::move(initial_operations));
+    if(operations_db_arg.empty())
+        operations_db_arg = example::default_operations_database("cli_agent_demo");
+    auto operations_store =
+        std::make_shared<SQLiteOperationsSnapshotStore>(operations_db_arg);
+    auto operations = std::make_shared<LiveOperationsProjection>(
+        std::move(initial_operations), operations_store);
 
     auto exec_line = [&](const std::string& line) -> int {
         if (g_shutdown_requested.load()) {
@@ -386,4 +397,12 @@ int main(int argc, char** argv) {
         return 1;
     }
     return exec_line(line);
+}
+
+int main(int argc, char** argv) {
+    try { return cli_agent_demo_main(argc, argv); }
+    catch(const std::exception& error) {
+        std::cerr << "[cli_agent_demo] fatal startup/runtime error: " << error.what() << '\n';
+        return 2;
+    }
 }

@@ -194,7 +194,8 @@ int run_graph_ui(tf::Executor& executor,
         auto turn = example::run_conversation_turn(runtime, "web_ui_demo",
             state->initial_user_prompt,
             [&] { wr = gx.run_react_cli_sync(executor, req); return wr; },
-            [&ui](const conversation::RuntimeEventEnvelope& event) {
+            [&ui, operations](const conversation::RuntimeEventEnvelope& event) {
+                if(operations) operations->observe_runtime(event);
                 ui.dispatch_message("runtime_event", conversation::encode(event));
             });
         if (!turn.error.empty() || turn.outcome.reason != conversation::ModelTurnStopReason::EndTurn) {
@@ -215,7 +216,7 @@ int run_graph_ui(tf::Executor& executor,
 
 } // namespace
 
-int main(int argc, char** argv) {
+int web_ui_demo_main(int argc, char** argv) {
     CLI::App app("web_ui_demo — WP2.U httplib + SSE + static UI");
     int port = 8080;
     std::string prompt_arg;
@@ -339,24 +340,13 @@ int main(int argc, char** argv) {
     auto interaction_mutex = std::make_shared<std::mutex>();
     auto interaction_store=std::make_shared<ui::SQLiteInteractionProjectionStore>(
         (std::filesystem::path(phase4_state_dir_arg)/"interactions.sqlite3").string());
-    auto interaction_revision=std::make_shared<std::uint64_t>(0);
-    if(auto prior=interaction_store->snapshot(operations_tenant_arg,"default",ui::InteractionVisibility::Audit))
-        *interaction_revision=prior->revision;
-    auto persist_interactions=[interaction_store,interaction_revision,interaction_mutex](const ui::InteractionSnapshot& projected){
+    auto persist_interactions=[interaction_store,interaction_mutex](const ui::InteractionSnapshot& projected){
         std::lock_guard<std::mutex> lock(*interaction_mutex);
-        auto nodes=projected.nodes;auto edges=projected.edges;
-        for(auto& node:nodes)node.revision=*interaction_revision+1;
-        for(auto& edge:edges)edge.revision=*interaction_revision+1;
-        ui::UiInteractionEvent event;event.event_id="interaction-update:"+std::to_string(*interaction_revision+1);
-        event.tenant_id=projected.tenant_id;event.conversation_id=projected.conversation_id;event.sequence=*interaction_revision+1;
-        event.event_type="projection.updated";event.visibility=ui::InteractionVisibility::User;
-        if(!projected.nodes.empty())event.primary_ref=projected.nodes.front().ref;else event.primary_ref.tenant_id=projected.tenant_id;
-        event.display={{"node_count",projected.nodes.size()},{"edge_count",projected.edges.size()}};
-        event.navigation_target={"interaction_graph",projected.nodes.empty()?"root":projected.nodes.front().node_id,*interaction_revision+1};
-        event.source={"interaction_assembler",event.event_id,*interaction_revision+1,projected.digest};event.timestamp=projected.updated_at;
-        const auto committed=interaction_store->commit({event,std::move(nodes),std::move(edges)},*interaction_revision);
-        if(!committed.ok())throw std::runtime_error("interaction projection commit failed: "+committed.error);
-        *interaction_revision=committed.revision;
+        return ui::commit_interaction_projection(*interaction_store, projected, 4);
+    };
+    auto current_interaction_conversation=[interaction_context,interaction_mutex]{
+        std::lock_guard<std::mutex> lock(*interaction_mutex);
+        return interaction_context->conversation_id;
     };
     auto live_operations = std::make_shared<LiveOperationsProjection>(
         *operations, operations_store,
@@ -368,7 +358,18 @@ int main(int argc, char** argv) {
             ui.publish_phase4_operations(snapshot);
             ui::InteractionProjectionContext context;
             { std::lock_guard<std::mutex> lock(*interaction_mutex); context=*interaction_context; }
-            auto projected=ui::project_interactions(snapshot,context);persist_interactions(projected);ui.publish_interactions(projected);
+            auto projected=ui::project_interactions(snapshot,context);
+            const auto committed=persist_interactions(projected);
+            if(committed.ok()) ui.publish_interactions(projected);
+            else {
+                std::cerr << "[interaction_projection] degraded: " << committed.error << '\n';
+                auto degraded=snapshot;
+                degraded.residual_risk="interaction projection is pending durable reconciliation";
+                if(std::find(degraded.unknowns.begin(),degraded.unknowns.end(),
+                    "interaction_projection_degraded")==degraded.unknowns.end())
+                    degraded.unknowns.push_back("interaction_projection_degraded");
+                ui.publish_phase4_operations(degraded);
+            }
         });
     auto approval_store = std::make_shared<approval::SQLiteApprovalStore>(
         (std::filesystem::path(phase4_state_dir_arg) / "approval.sqlite3").string());
@@ -598,7 +599,10 @@ int main(int argc, char** argv) {
                 std::string save_error;if(!operations_store||!operations_store->save(*operations,&save_error))throw std::runtime_error("cannot persist administrative approval projection: "+save_error);
                 ui.publish_phase4_operations(*operations);ui::InteractionProjectionContext context;
                 {std::lock_guard<std::mutex> interaction_lock(*interaction_mutex);context=*interaction_context;}
-                auto projected=ui::project_interactions(*operations,context);persist_interactions(projected);ui.publish_interactions(projected);
+                auto projected=ui::project_interactions(*operations,context);
+                const auto committed=persist_interactions(projected);
+                if(!committed.ok())throw std::runtime_error("interaction projection commit failed: "+committed.error);
+                ui.publish_interactions(projected);
             };
             approval::AuthenticatedPrincipal principal{reviewer_id, {"approver"},
                 "server-session:" + reviewer_id};
@@ -698,23 +702,28 @@ int main(int argc, char** argv) {
                         "application/json");
     });
     svr.Get("/ui/interactions/snapshot", [&](const httplib::Request&, httplib::Response& res) {
-        auto snapshot=interaction_store->snapshot(operations_tenant_arg,"default",ui::InteractionVisibility::User);
+        const auto conversation=current_interaction_conversation();
+        auto snapshot=interaction_store->snapshot(operations_tenant_arg,conversation,ui::InteractionVisibility::User);
         if(!snapshot){Phase4OperationsSnapshot operations_copy;ui::InteractionProjectionContext context;
             {std::lock_guard<std::mutex> lock(*operations_mutex);operations_copy=*operations;}
             {std::lock_guard<std::mutex> lock(*interaction_mutex);context=*interaction_context;}
-            auto projected=ui::project_interactions(operations_copy,context);persist_interactions(projected);
-            snapshot=interaction_store->snapshot(operations_tenant_arg,"default",ui::InteractionVisibility::User);}
+            auto projected=ui::project_interactions(operations_copy,context);
+            const auto committed=persist_interactions(projected);
+            if(!committed.ok()){res.status=503;res.set_content(json{{"error","interaction projection unavailable"},{"detail",committed.error}}.dump(),"application/json");return;}
+            snapshot=interaction_store->snapshot(operations_tenant_arg,conversation,ui::InteractionVisibility::User);}
         if(!snapshot){res.status=404;res.set_content(R"({"error":"interaction projection unavailable"})","application/json");return;}
         res.set_header("Cache-Control","no-store");res.set_content(ui::encode(*snapshot).dump(),"application/json");
     });
     svr.Get("/ui/interactions/events", [&](const httplib::Request& req, httplib::Response& res) {
         std::uint64_t after=0;std::size_t limit=100;
         try{if(req.has_param("after"))after=std::stoull(req.get_param_value("after"));if(req.has_param("limit"))limit=std::min<std::size_t>(500,std::stoull(req.get_param_value("limit")));}catch(...){res.status=400;res.set_content(R"({"error":"invalid replay cursor"})","application/json");return;}
-        json body=json::array();for(const auto&e:interaction_store->events(operations_tenant_arg,"default",after,limit,ui::InteractionVisibility::User))body.push_back(ui::encode(e));
+        const auto conversation=current_interaction_conversation();
+        json body=json::array();for(const auto&e:interaction_store->events(operations_tenant_arg,conversation,after,limit,ui::InteractionVisibility::User))body.push_back(ui::encode(e));
         res.set_header("Cache-Control","no-store");res.set_content(body.dump(),"application/json");
     });
     svr.Get(R"(/ui/interactions/node/(.+))", [&](const httplib::Request& req, httplib::Response& res) {
-        auto found=interaction_store->node(operations_tenant_arg,"default",req.matches[1].str(),ui::InteractionVisibility::User);
+        const auto conversation=current_interaction_conversation();
+        auto found=interaction_store->node(operations_tenant_arg,conversation,req.matches[1].str(),ui::InteractionVisibility::User);
         if(!found){res.status=404;res.set_content(R"({"error":"interaction object not found"})","application/json");return;}
         res.set_header("Cache-Control","no-store");res.set_content(ui::encode(*found).dump(),"application/json");
     });
@@ -825,4 +834,12 @@ int main(int argc, char** argv) {
         return 1;
     }
     return 0;
+}
+
+int main(int argc, char** argv) {
+    try { return web_ui_demo_main(argc, argv); }
+    catch(const std::exception& error) {
+        std::cerr << "[web_ui_demo] fatal startup/runtime error: " << error.what() << '\n';
+        return 2;
+    }
 }

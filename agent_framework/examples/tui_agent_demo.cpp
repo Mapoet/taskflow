@@ -182,7 +182,10 @@ int run_graph_ui(tf::Executor& executor,
         WorkflowResult wr{};
         auto turn = example::run_conversation_turn(runtime, "tui_agent_demo",
             state->initial_user_prompt,
-            [&] { wr = gx.run_react_cli_sync(executor, req); return wr; });
+            [&] { wr = gx.run_react_cli_sync(executor, req); return wr; },
+            [operations](const conversation::RuntimeEventEnvelope& event) {
+                if(operations) operations->observe_runtime(event);
+            });
         if (!turn.error.empty() || turn.outcome.reason != conversation::ModelTurnStopReason::EndTurn) {
             if (control && control->is_cancel_requested()) {
                 if (presentation) presentation->cancel();
@@ -201,7 +204,7 @@ int run_graph_ui(tf::Executor& executor,
 
 } // namespace
 
-int main(int argc, char** argv) {
+int tui_agent_demo_main(int argc, char** argv) {
     CLI::App app("tui_agent_demo — FTXUI 7.0.1 + TuiHandler + MCP/Skills");
     std::string prompt_arg;
     std::string provider_arg;
@@ -297,6 +300,9 @@ int main(int argc, char** argv) {
         initial_operations = std::move(loaded.snapshot);
         presentation->observe_operations(initial_operations);
     } else {
+        if(operations_db_arg.empty())
+            operations_db_arg = example::default_operations_database("tui_agent_demo");
+        operations_store = std::make_shared<SQLiteOperationsSnapshotStore>(operations_db_arg);
         initial_operations.tenant_id = operations_tenant_arg;
         initial_operations.run_id = operations_run_arg;
         initial_operations.task_id = "tui-live-task";
@@ -450,4 +456,12 @@ int main(int argc, char** argv) {
     }
     view_ptr = nullptr;
     return rc;
+}
+
+int main(int argc, char** argv) {
+    try { return tui_agent_demo_main(argc, argv); }
+    catch(const std::exception& error) {
+        std::cerr << "[tui_agent_demo] fatal startup/runtime error: " << error.what() << '\n';
+        return 2;
+    }
 }

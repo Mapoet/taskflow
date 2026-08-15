@@ -27,11 +27,42 @@ private:
     std::string id_;
     Run run_;
 };
+
+class TraceObserver final : public harness::HarnessCheckpointObserver {
+public:
+    TraceObserver(harness::HarnessStore& store, std::string tenant,
+                  std::string harness_id, HarnessTurnAdapter::TraceSink sink)
+        : store_(store), tenant_(std::move(tenant)),
+          harness_id_(std::move(harness_id)), sink_(std::move(sink)) {}
+
+    bool committed(const harness::HarnessCheckpoint&, std::string_view,
+                   std::string* error) override {
+        try {
+            for(const auto& event : store_.events(tenant_, harness_id_, cursor_)) {
+                sink_(event);
+                cursor_ = event.sequence;
+            }
+            return true;
+        } catch(const std::exception& exception) {
+            if(error) *error = exception.what();
+            return false;
+        }
+    }
+
+private:
+    harness::HarnessStore& store_;
+    std::string tenant_;
+    std::string harness_id_;
+    HarnessTurnAdapter::TraceSink sink_;
+    std::uint64_t cursor_{0};
+};
 }
 
 HarnessTurnAdapter::HarnessTurnAdapter(
-    harness::HarnessStore& store, Execution execution, ProjectionSink projection)
-    : store_(store), execution_(std::move(execution)), projection_(std::move(projection)) {
+    harness::HarnessStore& store, Execution execution, ProjectionSink projection,
+    TraceSink trace)
+    : store_(store), execution_(std::move(execution)), projection_(std::move(projection)),
+      trace_(std::move(trace)) {
     if(!execution_) throw std::invalid_argument("harness turn execution stage is required");
 }
 
@@ -47,27 +78,48 @@ ModelTurnOutcome HarnessTurnAdapter::execute(const HarnessSupportedTurnRequest& 
         harness::HarnessStageResult out; out.outcome = harness::StageOutcome::Succeeded;
         out.output_digest = r.checkpoint.pins.intake_digest; return out;
     });
-    bind(harness::HarnessStage::Cognition, [](const auto& r) {
+    bind(harness::HarnessStage::Cognition, [&request](const auto&) {
         harness::HarnessStageResult out; out.outcome = harness::StageOutcome::Succeeded;
-        out.pins.plan_digest = digest({{"request", r.request_digest}, {"stage", "cognition"}});
+        out.public_output = {
+            {"schema", "agent.lightweight_conversation_plan/v1"},
+            {"authority", "non_authoritative"},
+            {"profile", name(request.turn.profile)},
+            {"objective", request.turn.input},
+            {"steps", nlohmann::json::array({
+                {{"id", "respond"}, {"action", "produce a relevant response"}},
+                {{"id", "handoff"}, {"action", "return a candidate without claiming verification"}}
+            })},
+            {"acceptance_criteria", nlohmann::json::array({
+                {{"id", "response-produced"},
+                 {"requirement", "a candidate response is produced"}}
+            })}
+        };
+        out.pins.plan_digest = digest(out.public_output);
         out.output_digest = out.pins.plan_digest; return out;
     });
     bind(harness::HarnessStage::PlanApproval, [](const auto& r) {
         harness::HarnessStageResult out; out.outcome = harness::StageOutcome::Succeeded;
         out.pins.approval_decision_id = "interactive-policy:" + r.checkpoint.harness_id;
+        out.public_output = {{"authority", "non_authoritative"},
+                             {"decision", "conversation_execution_allowed"}};
         out.output_digest = digest({{"policy", "interactive-nonproduction"},
                                     {"plan", r.checkpoint.pins.plan_digest}}); return out;
     });
     bind(harness::HarnessStage::Execution, [&](const auto& r) {
         model = execution_(request);
         harness::HarnessStageResult out;
-        out.outcome = model.reason == ModelTurnStopReason::EndTurn
+        const bool has_delivery = !model.candidate_answer.empty() ||
+                                  !model.tool_receipt_refs.empty();
+        out.outcome = model.reason == ModelTurnStopReason::EndTurn && has_delivery
             ? harness::StageOutcome::Succeeded : harness::StageOutcome::Failed;
         out.pins.artifact_manifest_digest = digest({{"turn", request.turn.turn_id},
             {"answer", model.candidate_answer}, {"request", r.request_digest}});
         out.output_digest = out.pins.artifact_manifest_digest;
-        if(out.outcome != harness::StageOutcome::Succeeded)
-            out.error_code = "interactive_execution_failed";
+        if(out.outcome != harness::StageOutcome::Succeeded) {
+            out.error_code = model.reason == ModelTurnStopReason::EndTurn
+                ? "interactive_execution_empty_delivery"
+                : "interactive_execution_failed";
+        }
         return out;
     });
     bind(harness::HarnessStage::MemoryUpdate, [](const auto& r) {
@@ -80,6 +132,9 @@ ModelTurnOutcome HarnessTurnAdapter::execute(const HarnessSupportedTurnRequest& 
     bind(harness::HarnessStage::Assurance, [](const auto& r) {
         harness::HarnessStageResult out; out.outcome = harness::StageOutcome::Succeeded;
         out.acceptance_decision = "accepted";
+        out.public_output = {{"scope", "response_pipeline_only"},
+                             {"task_verification", false},
+                             {"authority", "non_authoritative"}};
         out.pins.acceptance_report_digest = digest({{"artifact", r.checkpoint.pins.artifact_manifest_digest},
                                                      {"scope", "interactive-assurance"}});
         out.output_digest = out.pins.acceptance_report_digest; return out;
@@ -88,6 +143,9 @@ ModelTurnOutcome HarnessTurnAdapter::execute(const HarnessSupportedTurnRequest& 
         harness::HarnessStageResult out; out.outcome = harness::StageOutcome::Succeeded;
         out.pins.judge_report_digest = digest({{"acceptance", r.checkpoint.pins.acceptance_report_digest},
                                                {"judge", "interactive"}});
+        out.public_output = {{"scope", "response_pipeline_only"},
+                             {"task_verification", false},
+                             {"authority", "non_authoritative"}};
         out.output_digest = out.pins.judge_report_digest; return out;
     });
     bind(harness::HarnessStage::Operations, [](const auto& r) {
@@ -97,12 +155,17 @@ ModelTurnOutcome HarnessTurnAdapter::execute(const HarnessSupportedTurnRequest& 
         out.output_digest = out.pins.operations_snapshot_digest; return out;
     });
 
-    harness::Phase4HarnessRuntime runtime(store_, std::move(ports));
     harness::HarnessStart start;
     start.metadata.identity.tenant_id = request.turn.identity.tenant_id;
-    start.metadata.identity.task_id = request.turn.turn_id;
-    start.metadata.identity.run_id = request.turn.turn_id;
+    start.metadata.identity.task_id = request.turn.task_id.empty()
+        ? request.turn.turn_id : request.turn.task_id;
+    start.metadata.identity.run_id = request.turn.run_id.empty()
+        ? request.turn.turn_id : request.turn.run_id;
     start.metadata.extensions["conversation_id"] = request.turn.identity.conversation_id;
+    // Completing this harness only proves that the interactive response pipeline
+    // ran.  It never grants task-closure authority.
+    start.metadata.extensions["completion_semantics"] =
+        "pipeline_completed_unverified";
     start.harness_id = "turn:" + request.turn.turn_id;
     start.intake_digest = digest({{"input", request.turn.input},
                                   {"profile", name(request.turn.profile)}});
@@ -110,6 +173,11 @@ ModelTurnOutcome HarnessTurnAdapter::execute(const HarnessSupportedTurnRequest& 
                                                 {"authority", "harness"}});
     start.profile_revision_digest = digest({{"profile", name(request.turn.profile)}});
     start.prompt_revision_digest = digest({{"prompt", "interactive-harness-v1"}});
+    std::shared_ptr<harness::HarnessCheckpointObserver> observer;
+    if(trace_) observer = std::make_shared<TraceObserver>(
+        store_, start.metadata.identity.tenant_id, start.harness_id, trace_);
+    harness::Phase4HarnessRuntime runtime(
+        store_, std::move(ports), std::move(observer));
     harness::HarnessRuntimeOptions options;
     options.now = now;
     const auto result = runtime.run(start, options);

@@ -9,11 +9,18 @@ bool fallback_profile(TaskExecutionProfile profile) {
     return profile == TaskExecutionProfile::Conversation ||
            profile == TaskExecutionProfile::ReadOnlyAnalysis;
 }
+bool long_task_profile(TaskExecutionProfile profile) {
+    return profile == TaskExecutionProfile::ArtifactDelivery ||
+           profile == TaskExecutionProfile::CodeChange ||
+           profile == TaskExecutionProfile::ExternalAction ||
+           profile == TaskExecutionProfile::Professional;
+}
 }
 
 const char* turn_execution_path_name(TurnExecutionPath path) noexcept {
     switch(path) {
         case TurnExecutionPath::Harness: return "harness";
+        case TurnExecutionPath::LongTaskWorkflow: return "long_task_workflow";
         case TurnExecutionPath::LegacyReactFallback: return "legacy_react_fallback";
         case TurnExecutionPath::FailClosed: return "fail_closed";
     }
@@ -22,12 +29,22 @@ const char* turn_execution_path_name(TurnExecutionPath path) noexcept {
 
 HarnessSupportedTurnRuntime::HarnessSupportedTurnRuntime(
     HarnessSupportedRuntimePolicy policy, Executor harness_executor,
-    Executor legacy_fallback, RuntimeEventSink events)
+    Executor legacy_fallback, RuntimeEventSink events, Executor long_task_executor)
     : policy_(policy), harness_executor_(std::move(harness_executor)),
+      long_task_executor_(std::move(long_task_executor)),
       legacy_fallback_(std::move(legacy_fallback)), events_(std::move(events)) {}
 
 TurnExecutionDecision HarnessSupportedTurnRuntime::route(
     const HarnessSupportedRuntimePolicy& policy, TaskExecutionProfile profile) {
+    if(long_task_profile(profile)) {
+        if(policy.long_task_ready)
+            return {TurnExecutionPath::LongTaskWorkflow, "long_task_workflow_ready"};
+        if(!policy.production && policy.harness_ready)
+            return {TurnExecutionPath::Harness,
+                    "nonproduction_long_task_harness_compatibility"};
+        return {TurnExecutionPath::FailClosed,
+                "long_task_workflow_unavailable_for_profile"};
+    }
     if(policy.harness_ready)
         return {TurnExecutionPath::Harness, "harness_ready"};
     if(policy.production)
@@ -52,6 +69,11 @@ ModelTurnOutcome HarnessSupportedTurnRuntime::execute(
             if(!harness_executor_)
                 throw std::runtime_error("harness_executor_missing_after_ready_route");
             outcome = harness_executor_(supported);
+            break;
+        case TurnExecutionPath::LongTaskWorkflow:
+            if(!long_task_executor_)
+                throw std::runtime_error("long_task_executor_missing_after_ready_route");
+            outcome = long_task_executor_(supported);
             break;
         case TurnExecutionPath::LegacyReactFallback:
             if(!legacy_fallback_)
@@ -84,7 +106,8 @@ void HarnessSupportedTurnRuntime::emit(
     event.payload = {{"path", turn_execution_path_name(path)},
                      {"reason", reason},
                      {"production", policy_.production},
-                     {"harness_ready", policy_.harness_ready}};
+                     {"harness_ready", policy_.harness_ready},
+                     {"long_task_ready", policy_.long_task_ready}};
     events_(event);
 }
 

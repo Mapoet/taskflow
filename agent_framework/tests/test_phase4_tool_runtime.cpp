@@ -2,6 +2,7 @@
 #include <agent/tool_runtime/state_machine.hpp>
 #include <agent/tool_runtime/progress_protocol.hpp>
 #include <agent/tool_runtime/event_stream.hpp>
+#include <agent/tool_runtime/orphan_recovery.hpp>
 #include <agent/ui/live_operations_projection.hpp>
 #include <agent/distributed/object_store.hpp>
 #include <agent/internal/platform_io.hpp>
@@ -154,5 +155,31 @@ int main()
     auto takeover_events=takeover_store.events("takeover");bool saw_orphan=false;
     for(const auto&e:takeover_events)saw_orphan=saw_orphan||e.event_type=="invocation_orphaned";
     assert(saw_orphan&&takeover_store.verify_history("takeover").valid);
+
+    auto sweep_path=(base/"sweep.sqlite3").string();
+    SQLiteInvocationStore sweep_store(sweep_path);
+    agent_framework::distributed::SQLiteDurableQueue sweep_queue(sweep_path);
+    agent_framework::distributed::SQLiteWorkerRegistry sweep_workers(sweep_path);
+    auto sweep_generation=sweep_workers.register_worker({"sweeper-old","instance","sha256:s",0,0});
+    assert(sweep_generation&&sweep_workers.set_quota("tenant",1));
+    LeaseWorkerRuntime sweep_runtime(sweep_store,sweep_queue,sweep_workers,
+        {"sweeper-old","instance",*sweep_generation},10);
+    auto sv=invocation();sv.invocation_id="sweep-inv";sv.tool_call_id="sweep-call";
+    sv.idempotent=false;sv.external_operation_id="provider-op-1";
+    assert(sweep_runtime.enqueue(sv));auto sc=sweep_runtime.claim("tenant",100);
+    assert(sc&&sc->invocation.state==InvocationState::Running);
+    InvocationOrphanSweeper sweeper(sweep_store);
+    auto sweep_report=sweeper.sweep(111,10);
+    assert(sweep_report.inspected==1&&sweep_report.orphaned==1&&
+           sweep_report.queued_for_reconcile==1&&sweep_report.failures==0);
+    auto recovered=sweep_store.load("sweep-inv");
+    assert(recovered&&recovered->state==InvocationState::Reconciling&&
+           recovered->lease.fencing_token==2);
+    auto late_invocation=*recovered;late_invocation.revision++;
+    late_invocation.state=InvocationState::Failed;
+    InvocationEvent stale_after_sweep;stale_after_sweep.event_type="stale_completion";
+    stale_after_sweep.fencing_token=1;
+    assert(sweep_store.commit({late_invocation,recovered->revision,stale_after_sweep,{},{},{}}).status==
+           InvocationStoreStatus::FencingRejected);
     std::filesystem::remove_all(base, ec);
 }

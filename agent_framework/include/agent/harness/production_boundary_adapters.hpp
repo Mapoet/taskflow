@@ -5,6 +5,7 @@
 #include "agent/execution/harness_ports.hpp"
 #include "agent/harness/production_workflow_adapters.hpp"
 #include "agent/ui/store_backed_operations.hpp"
+#include "agent/tool_runtime/long_task_workflow.hpp"
 
 namespace agent_framework::harness {
 
@@ -58,6 +59,34 @@ public:
     std::optional<WorkflowStageExecution> reconcile(const HarnessStageRequest&) override;
 private:
     execution::ArtifactExecutionHarnessPort port_;
+    std::string revision_, configuration_digest_;
+};
+
+// Production execution boundary for durable, event-driven work.  It starts or
+// advances exactly one workflow identified by the Harness identity and returns
+// AwaitingExternal while workers continue executing plan nodes.
+class LongTaskExecutionWorkflowAdapter final : public TypedWorkflowAdapter {
+public:
+    LongTaskExecutionWorkflowAdapter(tool_runtime::LongTaskStore& store,
+        planning::PlanStore& plans, tool_runtime::LongTaskWorkflow& workflow,
+        tool_runtime::LongTaskDispatcher& dispatcher,
+        std::function<std::int64_t()> now_ms,
+        std::string revision, std::string configuration_digest);
+    std::string id() const override { return "phase4.execution.long-task"; }
+    WorkflowAdapterKind kind() const noexcept override { return WorkflowAdapterKind::Execution; }
+    HarnessStage stage() const noexcept override { return HarnessStage::Execution; }
+    bool side_effecting() const noexcept override { return true; }
+    std::string implementation_revision() const override { return revision_; }
+    std::string configuration_digest() const override { return configuration_digest_; }
+    WorkflowStageExecution run(const HarnessStageRequest&) override;
+    std::optional<WorkflowStageExecution> reconcile(const HarnessStageRequest&) override;
+private:
+    WorkflowStageExecution advance(const HarnessStageRequest&);
+    tool_runtime::LongTaskStore& store_;
+    planning::PlanStore& plans_;
+    tool_runtime::LongTaskWorkflow& workflow_;
+    tool_runtime::LongTaskDispatcher& dispatcher_;
+    std::function<std::int64_t()> now_ms_;
     std::string revision_, configuration_digest_;
 };
 

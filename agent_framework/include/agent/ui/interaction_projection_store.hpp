@@ -38,6 +38,13 @@ public:
         std::string_view conversation,std::string_view node_id,InteractionVisibility viewer)=0;
 };
 
+// Commits a complete projection against the durable head of its own
+// (tenant, conversation) stream. Revision conflicts are rebuilt and retried;
+// invalid/corrupt/storage failures remain fail-closed.
+InteractionCommitResult commit_interaction_projection(
+    InteractionProjectionStore& store, const InteractionSnapshot& projection,
+    std::size_t max_revision_retries = 4);
+
 class SQLiteInteractionProjectionStore final : public InteractionProjectionStore {
 public:
     explicit SQLiteInteractionProjectionStore(std::string path);

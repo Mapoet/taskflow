@@ -12,7 +12,7 @@ namespace agent_framework
     namespace
     {
 
-        constexpr std::size_t kMaxItems = 256;
+        constexpr std::size_t kMaxItems = Phase4OperationsProjection::max_items;
         constexpr std::size_t kMaxText = 4096;
 
         std::string bounded(const json &object, const char *key, bool required = false)
@@ -137,7 +137,7 @@ namespace agent_framework
 
     json Phase4OperationsProjection::to_json(const Phase4OperationsSnapshot &s)
     {
-        json out{{"schema_version", s.schema_version}, {"snapshot_id", s.snapshot_id}, {"tenant_id", s.tenant_id}, {"run_id", s.run_id}, {"task_id", s.task_id}, {"updated_at", s.updated_at}, {"overall_status", status_json(s.overall_status)}, {"plan_revision", s.plan_revision}, {"summary", s.summary}, {"blocker", s.blocker}, {"residual_risk", s.residual_risk}, {"live_certification", s.live_certification}, {"task_closure_state",s.task_closure_state},{"task_closure_reason",s.task_closure_reason},{"completion_authority",s.completion_authority},{"task_completion_verified",s.task_completion_verified},{"progress_delta",s.progress_delta},{"stagnation_count",s.stagnation_count},{"criteria_closed",s.criteria_closed},{"criteria_total",s.criteria_total},{"cost_per_closed_criterion",s.cost_per_closed_criterion},{"unknowns", s.unknowns}};
+        json out{{"schema_version", s.schema_version}, {"snapshot_id", s.snapshot_id}, {"tenant_id", s.tenant_id}, {"run_id", s.run_id}, {"task_id", s.task_id}, {"conversation_id",s.conversation_id},{"turn_id",s.turn_id},{"updated_at", s.updated_at}, {"overall_status", status_json(s.overall_status)}, {"plan_revision", s.plan_revision}, {"summary", s.summary}, {"blocker", s.blocker}, {"residual_risk", s.residual_risk}, {"live_certification", s.live_certification}, {"task_closure_state",s.task_closure_state},{"task_closure_reason",s.task_closure_reason},{"completion_authority",s.completion_authority},{"task_completion_verified",s.task_completion_verified},{"progress_delta",s.progress_delta},{"stagnation_count",s.stagnation_count},{"criteria_closed",s.criteria_closed},{"criteria_total",s.criteria_total},{"invocations_compacted",s.invocations_compacted},{"cost_per_closed_criterion",s.cost_per_closed_criterion},{"unknowns", s.unknowns}};
         out["stages"] = json::array();
         for (const auto &v : s.stages)
             out["stages"].push_back(json{{"id", v.id}, {"label", v.label}, {"status", status_json(v.status)}, {"revision", v.revision}, {"role", v.role}, {"summary", v.summary}, {"evidence_ids", v.evidence_ids}});
@@ -181,6 +181,8 @@ namespace agent_framework
         s.tenant_id = bounded(root, "tenant_id", true);
         s.run_id = bounded(root, "run_id", true);
         s.task_id = bounded(root, "task_id", true);
+        s.conversation_id = bounded(root, "conversation_id");
+        s.turn_id = bounded(root, "turn_id");
         s.updated_at = bounded(root, "updated_at", true);
         if (s.snapshot_id.empty() || s.tenant_id.empty() || s.run_id.empty() || s.task_id.empty() || s.updated_at.empty())
             throw std::invalid_argument("operations identity fields must not be empty");
@@ -200,6 +202,7 @@ namespace agent_framework
         s.stagnation_count=root.value("stagnation_count",std::uint64_t{0});
         s.criteria_closed=root.value("criteria_closed",std::uint64_t{0});
         s.criteria_total=root.value("criteria_total",std::uint64_t{0});
+        s.invocations_compacted=root.value("invocations_compacted",std::uint64_t{0});
         s.cost_per_closed_criterion=root.value("cost_per_closed_criterion",0.0);
         if(!std::isfinite(s.cost_per_closed_criterion)||s.cost_per_closed_criterion<0.0 ||
            s.criteria_closed>s.criteria_total) throw std::invalid_argument("invalid closure metrics");
@@ -265,11 +268,59 @@ namespace agent_framework
         return s;
     }
 
+    std::size_t Phase4OperationsProjection::compact_invocations(
+        Phase4OperationsSnapshot& snapshot) {
+        const auto active = [](OperationsStatus status) {
+            return status == OperationsStatus::Pending || status == OperationsStatus::Running ||
+                   status == OperationsStatus::Blocked;
+        };
+        const auto non_invocation_sources = static_cast<std::size_t>(std::count_if(snapshot.source_revisions.begin(),
+            snapshot.source_revisions.end(), [](const auto& source) {
+                return source.store != "tool_invocation_events";
+            }));
+        const auto capacity = non_invocation_sources >= max_items
+            ? std::size_t{0} : max_items - non_invocation_sources;
+        const auto active_count = static_cast<std::size_t>(std::count_if(snapshot.invocations.begin(),
+            snapshot.invocations.end(), [&](const auto& item) { return active(item.status); }));
+        if(active_count > capacity)
+            throw std::invalid_argument("active operations invocations exceed bounded capacity");
+        if(snapshot.invocations.size() <= capacity &&
+           snapshot.source_revisions.size() <= max_items) return 0;
+
+        std::vector<bool> keep(snapshot.invocations.size(), false);
+        std::size_t kept = 0;
+        for(std::size_t i = 0; i < snapshot.invocations.size(); ++i) {
+            if(active(snapshot.invocations[i].status)) { keep[i] = true; ++kept; }
+        }
+        for(std::size_t i = snapshot.invocations.size(); i > 0 && kept < capacity; --i) {
+            if(!keep[i - 1]) { keep[i - 1] = true; ++kept; }
+        }
+        std::unordered_set<std::string> retained_ids;
+        std::vector<OperationsInvocation> retained;
+        retained.reserve(kept);
+        for(std::size_t i = 0; i < snapshot.invocations.size(); ++i) if(keep[i]) {
+            retained_ids.insert(snapshot.invocations[i].id);
+            retained.push_back(std::move(snapshot.invocations[i]));
+        }
+        const auto removed = snapshot.invocations.size() - retained.size();
+        snapshot.invocations = std::move(retained);
+        snapshot.source_revisions.erase(std::remove_if(snapshot.source_revisions.begin(),
+            snapshot.source_revisions.end(), [&](const auto& source) {
+                return source.store == "tool_invocation_events" &&
+                       !retained_ids.count(source.object_id);
+            }), snapshot.source_revisions.end());
+        snapshot.invocations_compacted += removed;
+        return removed;
+    }
+
     std::string Phase4OperationsProjection::render_text(const Phase4OperationsSnapshot &s,
                                                         std::size_t width)
     {
         std::ostringstream out;
-        out << "\n[PHASE 4 OPERATIONS] " << status_name(s.overall_status) << "  run=" << s.run_id
+        out << "\n[PHASE 4 OPERATIONS] " << status_name(s.overall_status)
+            << "  task=" << s.task_id << "  run=" << s.run_id;
+        if(!s.turn_id.empty()) out << "  turn=" << s.turn_id;
+        out
             << "  plan=r" << s.plan_revision << "  updated=" << s.updated_at << '\n';
         out << clipped(s.summary, width) << '\n';
         out << "Closure " << s.task_closure_state << " · "
@@ -307,6 +358,8 @@ namespace agent_framework
         s.tenant_id = "demo-tenant";
         s.run_id = "run-orbit-042";
         s.task_id = "task-gnss-ro-qa";
+        s.conversation_id = "session-scientific-001";
+        s.turn_id = "turn-demo-001";
         s.updated_at = "2026-08-10T14:32:18+08:00";
         s.overall_status = OperationsStatus::Blocked;
         s.plan_revision = 3;

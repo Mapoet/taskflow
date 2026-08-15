@@ -15,6 +15,7 @@
 #include "agent/approval/store.hpp"
 #include "agent/memory_v2/store.hpp"
 #include "agent/assurance/professional_workflow.hpp"
+#include "agent/conversation/task_registry.hpp"
 
 namespace agent_framework::harness {
 
@@ -99,6 +100,24 @@ public:
     bool confirm(const CrossStoreOperation&,const ParticipantPin&,std::string*) override;
     bool compensate(const CrossStoreOperation&,const ParticipantPin&,std::string*) override;
 private: HarnessStore& store_; std::string manifest_digest_;
+};
+
+class ConversationTaskCoordinationParticipant final : public CrossStoreParticipant {
+public:
+    explicit ConversationTaskCoordinationParticipant(
+        conversation::TaskRegistry& registry, std::string revision);
+    std::string id() const override { return "conversation_task_registry"; }
+    std::string capability_manifest_digest() const override { return manifest_digest_; }
+    bool supports(const CrossStoreOperation& value) const noexcept override;
+    std::optional<ParticipantPin> inspect(const CrossStoreOperation&,
+                                           std::string*) override;
+    bool prepare(const CrossStoreOperation&,const ParticipantPin&,std::string*) override;
+    bool commit(const CrossStoreOperation&,const ParticipantPin&,std::string*) override;
+    bool confirm(const CrossStoreOperation&,const ParticipantPin&,std::string*) override;
+    bool compensate(const CrossStoreOperation&,const ParticipantPin&,std::string*) override;
+private:
+    conversation::TaskRegistry& registry_;
+    std::string manifest_digest_;
 };
 
 class ApprovalStoreCoordinationParticipant final : public CrossStoreParticipant {

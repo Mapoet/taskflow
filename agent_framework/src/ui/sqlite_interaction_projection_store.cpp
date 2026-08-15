@@ -18,6 +18,54 @@ namespace agent_framework::ui
         bool valid_scope(const InteractionRef &r, std::string_view tenant, std::string_view conversation) { return r.tenant_id == tenant && (r.conversation_id.empty() || r.conversation_id == conversation); }
     }
 
+    InteractionCommitResult commit_interaction_projection(
+        InteractionProjectionStore& store, const InteractionSnapshot& projection,
+        std::size_t max_revision_retries) {
+        if(projection.tenant_id.empty() || projection.conversation_id.empty())
+            return {InteractionCommitStatus::Invalid, 0, 0, "",
+                    "projection tenant and conversation are required"};
+        auto current = store.snapshot(projection.tenant_id, projection.conversation_id,
+                                      InteractionVisibility::Audit);
+        std::uint64_t expected = current ? current->revision : 0;
+        std::uint64_t head = current ? current->head_sequence : 0;
+        for(std::size_t attempt = 0; attempt <= max_revision_retries; ++attempt) {
+            const auto next_revision = expected + 1;
+            const auto next_sequence = head + 1;
+            auto nodes = projection.nodes;
+            auto edges = projection.edges;
+            for(auto& node : nodes) node.revision = next_revision;
+            for(auto& edge : edges) edge.revision = next_revision;
+            UiInteractionEvent event;
+            event.event_id = "interaction-update:" + projection.conversation_id + ":" +
+                             std::to_string(next_sequence);
+            event.tenant_id = projection.tenant_id;
+            event.conversation_id = projection.conversation_id;
+            event.sequence = next_sequence;
+            event.event_type = "projection.updated";
+            event.visibility = InteractionVisibility::User;
+            if(!projection.nodes.empty()) event.primary_ref = projection.nodes.front().ref;
+            else {
+                event.primary_ref.tenant_id = projection.tenant_id;
+                event.primary_ref.conversation_id = projection.conversation_id;
+            }
+            event.display = {{"node_count", projection.nodes.size()},
+                             {"edge_count", projection.edges.size()}};
+            event.navigation_target = {"interaction_graph",
+                projection.nodes.empty() ? "root" : projection.nodes.front().node_id,
+                next_revision};
+            event.source = {"interaction_assembler", event.event_id, next_revision,
+                            projection.digest.empty() ? "sha256:projection-unavailable" : projection.digest};
+            event.timestamp = projection.updated_at;
+            auto result = store.commit({event, std::move(nodes), std::move(edges)}, expected);
+            if(result.ok() || result.status != InteractionCommitStatus::RevisionConflict)
+                return result;
+            expected = result.revision;
+            head = result.head_sequence;
+        }
+        return {InteractionCommitStatus::RevisionConflict, expected, head, "",
+                "stream revision conflict retry budget exhausted"};
+    }
+
     SQLiteInteractionProjectionStore::SQLiteInteractionProjectionStore(std::string path) : path_(std::move(path))
     {
         if (path_.empty())

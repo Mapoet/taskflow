@@ -95,6 +95,8 @@ namespace agent_framework::conversation
         std::string turn_id, input;
         TaskExecutionProfile profile{TaskExecutionProfile::Conversation};
         std::uint64_t max_iterations{10}, max_input_tokens{0}, max_output_tokens{0};
+        // A conversation may contain several turns for one task/run.
+        std::string task_id, run_id;
     };
     struct ConversationInput
     {

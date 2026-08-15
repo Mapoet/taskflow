@@ -18,15 +18,17 @@ class HarnessTurnAdapter {
 public:
     using Execution = std::function<ModelTurnOutcome(const HarnessSupportedTurnRequest&)>;
     using ProjectionSink = std::function<void(const Phase4OperationsSnapshot&)>;
+    using TraceSink = std::function<void(const harness::HarnessEvent&)>;
 
     HarnessTurnAdapter(harness::HarnessStore& store, Execution execution,
-                       ProjectionSink projection = {});
+                       ProjectionSink projection = {}, TraceSink trace = {});
     ModelTurnOutcome execute(const HarnessSupportedTurnRequest& request);
 
 private:
     harness::HarnessStore& store_;
     Execution execution_;
     ProjectionSink projection_;
+    TraceSink trace_;
 };
 
 }  // namespace agent_framework::conversation

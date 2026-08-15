@@ -9,7 +9,8 @@ namespace {
 using json = nlohmann::json;
 
 bool terminal(HarnessState state) {
-    return state == HarnessState::ManualReview || state == HarnessState::Completed ||
+    return state == HarnessState::AwaitingExternal ||
+           state == HarnessState::ManualReview || state == HarnessState::Completed ||
            state == HarnessState::Rejected || state == HarnessState::Failed ||
            state == HarnessState::Cancelled;
 }
@@ -133,6 +134,7 @@ OperationsStatus operation_status(StageOutcome outcome) {
     switch(outcome) {
         case StageOutcome::Succeeded: return OperationsStatus::Passed;
         case StageOutcome::AwaitingApproval: return OperationsStatus::Pending;
+        case StageOutcome::AwaitingExternal: return OperationsStatus::Running;
         case StageOutcome::NeedsRemediation: return OperationsStatus::Warning;
         case StageOutcome::Rejected: return OperationsStatus::Blocked;
         case StageOutcome::Retryable: return OperationsStatus::Warning;
@@ -224,7 +226,8 @@ HarnessRunResult Phase4HarnessRuntime::resume(std::string_view tenant_id,
     auto stored = store_.load(tenant_id, harness_id);
     if(!stored)
         return {HarnessState::Failed, {}, "harness_not_found", "harness checkpoint not found"};
-    if(stored->checkpoint.state == HarnessState::AwaitingApproval) {
+    if(stored->checkpoint.state == HarnessState::AwaitingApproval ||
+       stored->checkpoint.state == HarnessState::AwaitingExternal) {
         auto checkpoint = stored->checkpoint;
         checkpoint.revision += 1;
         checkpoint.state = HarnessState::Running;
@@ -282,8 +285,11 @@ HarnessRunResult Phase4HarnessRuntime::drive(HarnessCheckpoint checkpoint,
                 persist("completion_gate_failed", {{"issues", issues}});
             } else {
                 checkpoint.state = HarnessState::Completed;
-                checkpoint.terminal_reason = "accepted";
-                persist("harness_completed", json::object());
+                const auto semantics = checkpoint.metadata.extensions.value(
+                    "completion_semantics", std::string("task_accepted"));
+                checkpoint.terminal_reason = semantics == "pipeline_completed_unverified"
+                    ? semantics : "accepted";
+                persist("harness_completed", {{"completion_semantics", semantics}});
             }
             break;
         }
@@ -355,6 +361,7 @@ HarnessRunResult Phase4HarnessRuntime::drive(HarnessCheckpoint checkpoint,
         pending->receipt_digest = result.effect_receipt_digest;
         pending->state = result.outcome == StageOutcome::Succeeded ||
                                  result.outcome == StageOutcome::AwaitingApproval ||
+                                 result.outcome == StageOutcome::AwaitingExternal ||
                                  result.outcome == StageOutcome::NeedsRemediation
             ? OutboxState::Committed
             : OutboxState::Rejected;
@@ -398,6 +405,10 @@ HarnessRunResult Phase4HarnessRuntime::drive(HarnessCheckpoint checkpoint,
             case StageOutcome::AwaitingApproval:
                 checkpoint.state = HarnessState::AwaitingApproval;
                 checkpoint.terminal_reason = "approval_required";
+                break;
+            case StageOutcome::AwaitingExternal:
+                checkpoint.state = HarnessState::AwaitingExternal;
+                checkpoint.terminal_reason = "external_work_pending";
                 break;
             case StageOutcome::NeedsRemediation:
                 checkpoint.unresolved_findings = result.finding_ids;
@@ -445,9 +456,16 @@ HarnessRunResult Phase4HarnessRuntime::drive(HarnessCheckpoint checkpoint,
         if(!persist("stage_result", {{"stage", harness_stage_name(stage)},
                                      {"outcome", stage_outcome_name(result.outcome)},
                                      {"effect_id", request.effect_id},
-                                     {"next_stage", harness_stage_name(checkpoint.next_stage)}}))
+                                     {"next_stage", harness_stage_name(checkpoint.next_stage)},
+                                     {"output_digest", result.output_digest},
+                                     {"invocation_manifest_digest", result.invocation_manifest_digest},
+                                     {"finding_ids", result.finding_ids},
+                                     {"acceptance_decision", result.acceptance_decision},
+                                     {"error_code", result.error_code},
+                                     {"public_output", result.public_output}}))
             break;
-        if(checkpoint.state == HarnessState::AwaitingApproval) break;
+        if(checkpoint.state == HarnessState::AwaitingApproval ||
+           checkpoint.state == HarnessState::AwaitingExternal) break;
     }
     if(!terminal(checkpoint.state) && transitions >= options.max_transitions_per_run) {
         checkpoint.state = HarnessState::ManualReview;
@@ -542,6 +560,7 @@ Phase4OperationsSnapshot Phase4HarnessRuntime::project_operations(
         case HarnessState::Completed: snapshot.overall_status = OperationsStatus::Passed; break;
         case HarnessState::Running: snapshot.overall_status = OperationsStatus::Running; break;
         case HarnessState::AwaitingApproval: snapshot.overall_status = OperationsStatus::Pending; break;
+        case HarnessState::AwaitingExternal: snapshot.overall_status = OperationsStatus::Running; break;
         case HarnessState::ManualReview: snapshot.overall_status = OperationsStatus::Blocked; break;
         case HarnessState::Rejected:
         case HarnessState::Failed: snapshot.overall_status = OperationsStatus::Failed; break;

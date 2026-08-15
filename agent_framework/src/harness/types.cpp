@@ -28,10 +28,10 @@ constexpr std::array kStages = {
     "assurance", "remediation", "reexecution", "reverification", "judge",
     "operations", "complete"};
 constexpr std::array kStates = {
-    "running", "awaiting_approval", "manual_review", "completed", "rejected",
+    "running", "awaiting_approval", "awaiting_external", "manual_review", "completed", "rejected",
     "failed", "cancelled"};
 constexpr std::array kOutcomes = {
-    "succeeded", "awaiting_approval", "needs_remediation", "rejected", "retryable",
+    "succeeded", "awaiting_approval", "awaiting_external", "needs_remediation", "rejected", "retryable",
     "manual_review", "failed", "cancelled"};
 constexpr std::array kOutboxStates = {"pending", "committed", "rejected", "unknown"};
 

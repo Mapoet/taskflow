@@ -7,67 +7,654 @@
 #include "agent/contracts/contract.hpp"
 #include "agent/internal/sqlite_utils.hpp"
 
-namespace agent_framework::harness {
-namespace {
-namespace sqlite=internal::sqlite;
-const char* name(CoordinationState s){switch(s){case CoordinationState::Prepared:return"prepared";case CoordinationState::Committing:return"committing";case CoordinationState::Confirming:return"confirming";case CoordinationState::Confirmed:return"confirmed";case CoordinationState::Compensating:return"compensating";case CoordinationState::Compensated:return"compensated";case CoordinationState::ManualReview:return"manual_review";}return"manual_review";}
-CoordinationState state(std::string_view s){if(s=="prepared")return CoordinationState::Prepared;if(s=="committing")return CoordinationState::Committing;if(s=="confirming")return CoordinationState::Confirming;if(s=="confirmed")return CoordinationState::Confirmed;if(s=="compensating")return CoordinationState::Compensating;if(s=="compensated")return CoordinationState::Compensated;return CoordinationState::ManualReview;}
-nlohmann::json encode(const CrossStoreOperation&o){nlohmann::json pins=nlohmann::json::array();for(const auto&p:o.participants)pins.push_back({{"participant_id",p.participant_id},{"revision",p.revision},{"digest",p.digest},{"reversible",p.reversible}});return{{"schema","agent.cross_store_operation/v1"},{"operation_id",o.operation_id},{"tenant_id",o.tenant_id},{"run_id",o.run_id},{"harness_id",o.harness_id},{"operation_kind",o.operation_kind},{"idempotency_key",o.idempotency_key},{"policy_revision",o.policy_revision},{"expected_refs",o.expected_refs},{"participants",pins}};}
-std::optional<CrossStoreOperation> decode(const std::string&s){try{auto j=nlohmann::json::parse(s);CrossStoreOperation o;o.operation_id=j.at("operation_id");o.tenant_id=j.at("tenant_id");o.run_id=j.at("run_id");o.harness_id=j.at("harness_id");o.operation_kind=j.at("operation_kind");o.idempotency_key=j.at("idempotency_key");o.policy_revision=j.at("policy_revision");o.expected_refs=j.value("expected_refs",std::map<std::string,std::string>{});for(const auto&p:j.at("participants"))o.participants.push_back({p.at("participant_id"),p.at("revision"),p.at("digest"),p.at("reversible")});return o;}catch(...){return std::nullopt;}}
-std::string receipt_digest(const CrossStoreOperation&o,CoordinationState s,std::uint64_t seq,std::string_view prev,std::string_view diagnostic){return contracts::canonical_digest({{"operation",encode(o)},{"state",name(s)},{"sequence",seq},{"previous_digest",prev},{"diagnostic",diagnostic}}).value_or("");}
-}
-SQLiteCoordinationJournal::SQLiteCoordinationJournal(std::string path){if(path.empty())throw std::invalid_argument("coordination journal path is required");std::filesystem::path p(path);std::error_code ec;if(p.has_parent_path())std::filesystem::create_directories(p.parent_path(),ec);sqlite3*db=nullptr;if(ec||sqlite3_open_v2(path.c_str(),&db,SQLITE_OPEN_READWRITE|SQLITE_OPEN_CREATE|SQLITE_OPEN_FULLMUTEX,nullptr)!=SQLITE_OK){std::string e=db?sqlite3_errmsg(db):ec.message();if(db)sqlite3_close(db);throw std::runtime_error(e);}db_=db;sqlite3_busy_timeout(db,3000);sqlite::exec(db,"PRAGMA journal_mode=WAL");sqlite::exec(db,"PRAGMA synchronous=FULL");migrate();}
-SQLiteCoordinationJournal::~SQLiteCoordinationJournal(){if(db_)sqlite3_close(sqlite::database(db_));}
-void SQLiteCoordinationJournal::migrate(){auto*d=sqlite::database(db_);sqlite::exec(d,"CREATE TABLE IF NOT EXISTS phase4_coordination_operations(operation_id TEXT PRIMARY KEY,idempotency_key TEXT NOT NULL UNIQUE,document_json TEXT NOT NULL,state TEXT NOT NULL,sequence INTEGER NOT NULL,previous_digest TEXT NOT NULL,receipt_digest TEXT NOT NULL,diagnostic TEXT NOT NULL,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)");sqlite::exec(d,"CREATE TABLE IF NOT EXISTS phase4_coordination_history(operation_id TEXT NOT NULL,sequence INTEGER NOT NULL,state TEXT NOT NULL,receipt_digest TEXT NOT NULL,previous_digest TEXT NOT NULL,diagnostic TEXT NOT NULL,PRIMARY KEY(operation_id,sequence))");sqlite::exec(d,"CREATE INDEX IF NOT EXISTS phase4_coordination_unresolved ON phase4_coordination_operations(state,updated_at)");}
-bool SQLiteCoordinationJournal::create(const CrossStoreOperation&o,std::string*e){if(o.operation_id.empty()||o.idempotency_key.empty()||o.tenant_id.empty()||o.policy_revision.empty()||o.participants.empty()){if(e)*e="coordination identity, policy and participants are required";return false;}const auto doc=encode(o).dump(),digest=receipt_digest(o,CoordinationState::Prepared,1,"","");std::lock_guard l(mutex_);auto*d=sqlite::database(db_);try{sqlite::Transaction tx(d);sqlite::Statement q(d,"INSERT INTO phase4_coordination_operations VALUES(?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)");sqlite::bind_text(q.get(),1,o.operation_id);sqlite::bind_text(q.get(),2,o.idempotency_key);sqlite::bind_text(q.get(),3,doc);sqlite::bind_text(q.get(),4,name(CoordinationState::Prepared));sqlite::bind_int64(q.get(),5,1);sqlite::bind_text(q.get(),6,"");sqlite::bind_text(q.get(),7,digest);sqlite::bind_text(q.get(),8,"");if(sqlite::step(q.get())!=SQLITE_DONE){if(e)*e=sqlite3_errmsg(d);return false;}sqlite::Statement h(d,"INSERT INTO phase4_coordination_history VALUES(?,?,?,?,?,?)");sqlite::bind_text(h.get(),1,o.operation_id);sqlite::bind_int64(h.get(),2,1);sqlite::bind_text(h.get(),3,name(CoordinationState::Prepared));sqlite::bind_text(h.get(),4,digest);sqlite::bind_text(h.get(),5,"");sqlite::bind_text(h.get(),6,"");if(sqlite::step(h.get())!=SQLITE_DONE){if(e)*e=sqlite3_errmsg(d);return false;}tx.commit();return true;}catch(const std::exception&x){if(e)*e=x.what();return false;}}
-std::optional<CoordinationReceipt> SQLiteCoordinationJournal::load(std::string_view id){std::lock_guard l(mutex_);auto*d=sqlite::database(db_);sqlite::Statement q(d,"SELECT document_json,state,sequence,previous_digest,receipt_digest,diagnostic FROM phase4_coordination_operations WHERE operation_id=?");sqlite::bind_text(q.get(),1,id);if(sqlite::step(q.get())!=SQLITE_ROW)return std::nullopt;auto o=decode(sqlite::column_text(q.get(),0));if(!o)return std::nullopt;CoordinationReceipt r{*o,state(sqlite::column_text(q.get(),1)),static_cast<std::uint64_t>(sqlite::column_int64(q.get(),2)),sqlite::column_text(q.get(),3),sqlite::column_text(q.get(),4),sqlite::column_text(q.get(),5)};if(receipt_digest(r.operation,r.state,r.transition_sequence,r.previous_digest,r.diagnostic)!=r.receipt_digest){r.state=CoordinationState::ManualReview;r.diagnostic="coordination receipt digest mismatch";}return r;}
-bool SQLiteCoordinationJournal::transition(std::string_view id,CoordinationState expected,CoordinationState next,std::string_view diagnostic,std::string*e){auto current=load(id);if(!current||current->state!=expected){if(e)*e="coordination state conflict";return false;}const auto seq=current->transition_sequence+1;const auto prev=current->receipt_digest;const auto digest=receipt_digest(current->operation,next,seq,prev,diagnostic);std::lock_guard l(mutex_);auto*d=sqlite::database(db_);try{sqlite::Transaction tx(d);sqlite::Statement q(d,"UPDATE phase4_coordination_operations SET state=?,sequence=?,previous_digest=?,receipt_digest=?,diagnostic=?,updated_at=CURRENT_TIMESTAMP WHERE operation_id=? AND state=? AND sequence=?");sqlite::bind_text(q.get(),1,name(next));sqlite::bind_int64(q.get(),2,seq);sqlite::bind_text(q.get(),3,prev);sqlite::bind_text(q.get(),4,digest);sqlite::bind_text(q.get(),5,diagnostic);sqlite::bind_text(q.get(),6,id);sqlite::bind_text(q.get(),7,name(expected));sqlite::bind_int64(q.get(),8,current->transition_sequence);if(sqlite::step(q.get())!=SQLITE_DONE||sqlite::changes(d)!=1){if(e)*e="coordination transition CAS failed";return false;}sqlite::Statement h(d,"INSERT INTO phase4_coordination_history VALUES(?,?,?,?,?,?)");sqlite::bind_text(h.get(),1,id);sqlite::bind_int64(h.get(),2,seq);sqlite::bind_text(h.get(),3,name(next));sqlite::bind_text(h.get(),4,digest);sqlite::bind_text(h.get(),5,prev);sqlite::bind_text(h.get(),6,diagnostic);if(sqlite::step(h.get())!=SQLITE_DONE){if(e)*e=sqlite3_errmsg(d);return false;}tx.commit();return true;}catch(const std::exception&x){if(e)*e=x.what();return false;}}
-std::vector<CoordinationReceipt> SQLiteCoordinationJournal::unresolved(std::size_t limit){std::vector<std::string>ids;{std::lock_guard l(mutex_);auto*d=sqlite::database(db_);sqlite::Statement q(d,"SELECT operation_id FROM phase4_coordination_operations WHERE state NOT IN('confirmed','compensated') ORDER BY updated_at LIMIT ?");sqlite::bind_int64(q.get(),1,limit);while(sqlite::step(q.get())==SQLITE_ROW)ids.push_back(sqlite::column_text(q.get(),0));}std::vector<CoordinationReceipt>out;for(const auto&id:ids)if(auto r=load(id))out.push_back(*r);return out;}
-CrossStoreCoordinator::CrossStoreCoordinator(SQLiteCoordinationJournal&j,std::string p,std::shared_ptr<HarnessCheckpointObserver>d):journal_(j),policy_revision_(std::move(p)),downstream_(std::move(d)){if(policy_revision_.empty())throw std::invalid_argument("coordination policy revision is required");}
-bool CrossStoreCoordinator::register_participant(std::shared_ptr<CrossStoreParticipant>p){if(!p||p->id().empty()||p->capability_manifest_digest().empty())return false;std::lock_guard l(mutex_);return participants_.emplace(p->id(),std::move(p)).second;}
-bool CrossStoreCoordinator::production_ready(std::vector<std::string>*issues)const{static const std::vector<std::string>required={"run_store","harness_store","approval_store","memory_store","assurance_store"};std::lock_guard l(mutex_);bool ready=true;for(const auto&id:required)if(!participants_.count(id)){ready=false;if(issues)issues->push_back("coordination_participant_missing:"+id);}return ready;}
-std::string CrossStoreCoordinator::capability_manifest_digest()const{std::lock_guard l(mutex_);nlohmann::json a=nlohmann::json::array();for(const auto&[id,p]:participants_)a.push_back({{"id",id},{"digest",p->capability_manifest_digest()}});return contracts::canonical_digest({{"schema","agent.cross_store_coordinator/v1"},{"policy_revision",policy_revision_},{"participants",a}}).value_or("");}
-bool CrossStoreCoordinator::execute(CrossStoreOperation o,std::string*e){if(o.policy_revision!=policy_revision_){if(e)*e="coordination policy revision mismatch";return false;}std::map<std::string,std::shared_ptr<CrossStoreParticipant>> ps;{std::lock_guard l(mutex_);ps=participants_;}o.participants.clear();for(const auto&[id,p]:ps){if(!p->supports(o))continue;auto pin=p->inspect(o,e);if(!pin||pin->participant_id!=id||pin->revision==0||pin->digest.empty())return false;if(!p->prepare(o,*pin,e))return false;o.participants.push_back(*pin);}if(o.participants.empty()){if(e)*e="no coordination participant supports operation";return false;}if(!journal_.create(o,e)){auto existing=journal_.load(o.operation_id);if(!existing||existing->operation.idempotency_key!=o.idempotency_key)return false;}return reconcile(o.operation_id,e);}
-bool CrossStoreCoordinator::drive(const CoordinationReceipt&r,std::string*e){std::map<std::string,std::shared_ptr<CrossStoreParticipant>>ps;{std::lock_guard l(mutex_);ps=participants_;}if(r.state==CoordinationState::ManualReview||r.state==CoordinationState::Compensated)return false;if(r.state==CoordinationState::Confirmed)return true;if(r.state==CoordinationState::Prepared){if(!journal_.transition(r.operation.operation_id,r.state,CoordinationState::Committing,"",e))return false;return reconcile(r.operation.operation_id,e);}if(r.state==CoordinationState::Committing){for(const auto&pin:r.operation.participants){auto it=ps.find(pin.participant_id);if(it==ps.end()||!it->second->commit(r.operation,pin,e)){journal_.transition(r.operation.operation_id,r.state,CoordinationState::ManualReview,e?*e:"participant commit failed",nullptr);return false;}}if(!journal_.transition(r.operation.operation_id,r.state,CoordinationState::Confirming,"",e))return false;return reconcile(r.operation.operation_id,e);}if(r.state==CoordinationState::Confirming){for(const auto&pin:r.operation.participants){auto it=ps.find(pin.participant_id);if(it==ps.end()||!it->second->confirm(r.operation,pin,e)){journal_.transition(r.operation.operation_id,r.state,CoordinationState::ManualReview,e?*e:"participant confirmation failed",nullptr);return false;}}return journal_.transition(r.operation.operation_id,r.state,CoordinationState::Confirmed,"",e);}return false;}
-bool CrossStoreCoordinator::reconcile(std::string_view id,std::string*e){auto r=journal_.load(id);if(!r){if(e)*e="coordination operation not found";return false;}return drive(*r,e);}
-std::size_t CrossStoreCoordinator::reconcile_unresolved(std::size_t limit){std::size_t n=0;for(const auto&r:journal_.unresolved(limit)){std::string e;if(drive(r,&e))++n;}return n;}
-bool CrossStoreCoordinator::committed(const HarnessCheckpoint&cp,std::string_view event,std::string*e){if(downstream_&&!downstream_->committed(cp,event,e))return false;CrossStoreOperation o;o.operation_id=cp.harness_id+":"+std::to_string(cp.revision)+":"+std::string(event);o.tenant_id=cp.metadata.identity.tenant_id;o.run_id=cp.metadata.identity.run_id;o.harness_id=cp.harness_id;o.operation_kind="harness_checkpoint:"+std::string(event);o.idempotency_key=o.operation_id;o.policy_revision=policy_revision_;if(!cp.pins.approval_decision_id.empty())o.expected_refs["approval_id"]=cp.pins.approval_decision_id;if(!cp.pins.memory_view_digest.empty())o.expected_refs["memory_view_digest"]=cp.pins.memory_view_digest;if(!cp.pins.memory_snapshot_id.empty())o.expected_refs["memory_snapshot_id"]=cp.pins.memory_snapshot_id;if(!cp.pins.acceptance_report_digest.empty())o.expected_refs["acceptance_report_digest"]=cp.pins.acceptance_report_digest;return execute(std::move(o),e);}
+namespace agent_framework::harness
+{
+    namespace
+    {
+        namespace sqlite = internal::sqlite;
+        const char *name(CoordinationState s)
+        {
+            switch (s)
+            {
+            case CoordinationState::Prepared:
+                return "prepared";
+            case CoordinationState::Committing:
+                return "committing";
+            case CoordinationState::Confirming:
+                return "confirming";
+            case CoordinationState::Confirmed:
+                return "confirmed";
+            case CoordinationState::Compensating:
+                return "compensating";
+            case CoordinationState::Compensated:
+                return "compensated";
+            case CoordinationState::ManualReview:
+                return "manual_review";
+            }
+            return "manual_review";
+        }
+        CoordinationState state(std::string_view s)
+        {
+            if (s == "prepared")
+                return CoordinationState::Prepared;
+            if (s == "committing")
+                return CoordinationState::Committing;
+            if (s == "confirming")
+                return CoordinationState::Confirming;
+            if (s == "confirmed")
+                return CoordinationState::Confirmed;
+            if (s == "compensating")
+                return CoordinationState::Compensating;
+            if (s == "compensated")
+                return CoordinationState::Compensated;
+            return CoordinationState::ManualReview;
+        }
+        nlohmann::json encode(const CrossStoreOperation &o)
+        {
+            nlohmann::json pins = nlohmann::json::array();
+            for (const auto &p : o.participants)
+                pins.push_back({{"participant_id", p.participant_id}, {"revision", p.revision}, {"digest", p.digest}, {"reversible", p.reversible}});
+            return {{"schema", "agent.cross_store_operation/v1"}, {"operation_id", o.operation_id}, {"tenant_id", o.tenant_id}, {"run_id", o.run_id}, {"harness_id", o.harness_id}, {"operation_kind", o.operation_kind}, {"idempotency_key", o.idempotency_key}, {"policy_revision", o.policy_revision}, {"expected_refs", o.expected_refs}, {"participants", pins}};
+        }
+        std::optional<CrossStoreOperation> decode(const std::string &s)
+        {
+            try
+            {
+                auto j = nlohmann::json::parse(s);
+                CrossStoreOperation o;
+                o.operation_id = j.at("operation_id");
+                o.tenant_id = j.at("tenant_id");
+                o.run_id = j.at("run_id");
+                o.harness_id = j.at("harness_id");
+                o.operation_kind = j.at("operation_kind");
+                o.idempotency_key = j.at("idempotency_key");
+                o.policy_revision = j.at("policy_revision");
+                o.expected_refs = j.value("expected_refs", std::map<std::string, std::string>{});
+                for (const auto &p : j.at("participants"))
+                    o.participants.push_back({p.at("participant_id"), p.at("revision"), p.at("digest"), p.at("reversible")});
+                return o;
+            }
+            catch (...)
+            {
+                return std::nullopt;
+            }
+        }
+        std::string receipt_digest(const CrossStoreOperation &o, CoordinationState s, std::uint64_t seq, std::string_view prev, std::string_view diagnostic) { return contracts::canonical_digest({{"operation", encode(o)}, {"state", name(s)}, {"sequence", seq}, {"previous_digest", prev}, {"diagnostic", diagnostic}}).value_or(""); }
+    }
+    SQLiteCoordinationJournal::SQLiteCoordinationJournal(std::string path)
+    {
+        if (path.empty())
+            throw std::invalid_argument("coordination journal path is required");
+        std::filesystem::path p(path);
+        std::error_code ec;
+        if (p.has_parent_path())
+            std::filesystem::create_directories(p.parent_path(), ec);
+        sqlite3 *db = nullptr;
+        if (ec || sqlite3_open_v2(path.c_str(), &db, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX, nullptr) != SQLITE_OK)
+        {
+            std::string e = db ? sqlite3_errmsg(db) : ec.message();
+            if (db)
+                sqlite3_close(db);
+            throw std::runtime_error(e);
+        }
+        db_ = db;
+        sqlite3_busy_timeout(db, 3000);
+        sqlite::exec(db, "PRAGMA journal_mode=WAL");
+        sqlite::exec(db, "PRAGMA synchronous=FULL");
+        migrate();
+    }
+    SQLiteCoordinationJournal::~SQLiteCoordinationJournal()
+    {
+        if (db_)
+            sqlite3_close(sqlite::database(db_));
+    }
+    void SQLiteCoordinationJournal::migrate()
+    {
+        auto *d = sqlite::database(db_);
+        sqlite::exec(d, "CREATE TABLE IF NOT EXISTS phase4_coordination_operations(operation_id TEXT PRIMARY KEY,idempotency_key TEXT NOT NULL UNIQUE,document_json TEXT NOT NULL,state TEXT NOT NULL,sequence INTEGER NOT NULL,previous_digest TEXT NOT NULL,receipt_digest TEXT NOT NULL,diagnostic TEXT NOT NULL,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)");
+        sqlite::exec(d, "CREATE TABLE IF NOT EXISTS phase4_coordination_history(operation_id TEXT NOT NULL,sequence INTEGER NOT NULL,state TEXT NOT NULL,receipt_digest TEXT NOT NULL,previous_digest TEXT NOT NULL,diagnostic TEXT NOT NULL,PRIMARY KEY(operation_id,sequence))");
+        sqlite::exec(d, "CREATE INDEX IF NOT EXISTS phase4_coordination_unresolved ON phase4_coordination_operations(state,updated_at)");
+    }
+    bool SQLiteCoordinationJournal::create(const CrossStoreOperation &o, std::string *e)
+    {
+        if (o.operation_id.empty() || o.idempotency_key.empty() || o.tenant_id.empty() || o.policy_revision.empty() || o.participants.empty())
+        {
+            if (e)
+                *e = "coordination identity, policy and participants are required";
+            return false;
+        }
+        const auto doc = encode(o).dump(), digest = receipt_digest(o, CoordinationState::Prepared, 1, "", "");
+        std::lock_guard l(mutex_);
+        auto *d = sqlite::database(db_);
+        try
+        {
+            sqlite::Transaction tx(d);
+            sqlite::Statement q(d, "INSERT INTO phase4_coordination_operations VALUES(?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)");
+            sqlite::bind_text(q.get(), 1, o.operation_id);
+            sqlite::bind_text(q.get(), 2, o.idempotency_key);
+            sqlite::bind_text(q.get(), 3, doc);
+            sqlite::bind_text(q.get(), 4, name(CoordinationState::Prepared));
+            sqlite::bind_int64(q.get(), 5, 1);
+            sqlite::bind_text(q.get(), 6, "");
+            sqlite::bind_text(q.get(), 7, digest);
+            sqlite::bind_text(q.get(), 8, "");
+            if (sqlite::step(q.get()) != SQLITE_DONE)
+            {
+                if (e)
+                    *e = sqlite3_errmsg(d);
+                return false;
+            }
+            sqlite::Statement h(d, "INSERT INTO phase4_coordination_history VALUES(?,?,?,?,?,?)");
+            sqlite::bind_text(h.get(), 1, o.operation_id);
+            sqlite::bind_int64(h.get(), 2, 1);
+            sqlite::bind_text(h.get(), 3, name(CoordinationState::Prepared));
+            sqlite::bind_text(h.get(), 4, digest);
+            sqlite::bind_text(h.get(), 5, "");
+            sqlite::bind_text(h.get(), 6, "");
+            if (sqlite::step(h.get()) != SQLITE_DONE)
+            {
+                if (e)
+                    *e = sqlite3_errmsg(d);
+                return false;
+            }
+            tx.commit();
+            return true;
+        }
+        catch (const std::exception &x)
+        {
+            if (e)
+                *e = x.what();
+            return false;
+        }
+    }
+    std::optional<CoordinationReceipt> SQLiteCoordinationJournal::load(std::string_view id)
+    {
+        std::lock_guard l(mutex_);
+        auto *d = sqlite::database(db_);
+        sqlite::Statement q(d, "SELECT document_json,state,sequence,previous_digest,receipt_digest,diagnostic FROM phase4_coordination_operations WHERE operation_id=?");
+        sqlite::bind_text(q.get(), 1, id);
+        if (sqlite::step(q.get()) != SQLITE_ROW)
+            return std::nullopt;
+        auto o = decode(sqlite::column_text(q.get(), 0));
+        if (!o)
+            return std::nullopt;
+        CoordinationReceipt r{*o, state(sqlite::column_text(q.get(), 1)), static_cast<std::uint64_t>(sqlite::column_int64(q.get(), 2)), sqlite::column_text(q.get(), 3), sqlite::column_text(q.get(), 4), sqlite::column_text(q.get(), 5)};
+        if (receipt_digest(r.operation, r.state, r.transition_sequence, r.previous_digest, r.diagnostic) != r.receipt_digest)
+        {
+            r.state = CoordinationState::ManualReview;
+            r.diagnostic = "coordination receipt digest mismatch";
+        }
+        return r;
+    }
+    bool SQLiteCoordinationJournal::transition(std::string_view id, CoordinationState expected, CoordinationState next, std::string_view diagnostic, std::string *e)
+    {
+        auto current = load(id);
+        if (!current || current->state != expected)
+        {
+            if (e)
+                *e = "coordination state conflict";
+            return false;
+        }
+        const auto seq = current->transition_sequence + 1;
+        const auto prev = current->receipt_digest;
+        const auto digest = receipt_digest(current->operation, next, seq, prev, diagnostic);
+        std::lock_guard l(mutex_);
+        auto *d = sqlite::database(db_);
+        try
+        {
+            sqlite::Transaction tx(d);
+            sqlite::Statement q(d, "UPDATE phase4_coordination_operations SET state=?,sequence=?,previous_digest=?,receipt_digest=?,diagnostic=?,updated_at=CURRENT_TIMESTAMP WHERE operation_id=? AND state=? AND sequence=?");
+            sqlite::bind_text(q.get(), 1, name(next));
+            sqlite::bind_int64(q.get(), 2, seq);
+            sqlite::bind_text(q.get(), 3, prev);
+            sqlite::bind_text(q.get(), 4, digest);
+            sqlite::bind_text(q.get(), 5, diagnostic);
+            sqlite::bind_text(q.get(), 6, id);
+            sqlite::bind_text(q.get(), 7, name(expected));
+            sqlite::bind_int64(q.get(), 8, current->transition_sequence);
+            if (sqlite::step(q.get()) != SQLITE_DONE || sqlite::changes(d) != 1)
+            {
+                if (e)
+                    *e = "coordination transition CAS failed";
+                return false;
+            }
+            sqlite::Statement h(d, "INSERT INTO phase4_coordination_history VALUES(?,?,?,?,?,?)");
+            sqlite::bind_text(h.get(), 1, id);
+            sqlite::bind_int64(h.get(), 2, seq);
+            sqlite::bind_text(h.get(), 3, name(next));
+            sqlite::bind_text(h.get(), 4, digest);
+            sqlite::bind_text(h.get(), 5, prev);
+            sqlite::bind_text(h.get(), 6, diagnostic);
+            if (sqlite::step(h.get()) != SQLITE_DONE)
+            {
+                if (e)
+                    *e = sqlite3_errmsg(d);
+                return false;
+            }
+            tx.commit();
+            return true;
+        }
+        catch (const std::exception &x)
+        {
+            if (e)
+                *e = x.what();
+            return false;
+        }
+    }
+    std::vector<CoordinationReceipt> SQLiteCoordinationJournal::unresolved(std::size_t limit)
+    {
+        std::vector<std::string> ids;
+        {
+            std::lock_guard l(mutex_);
+            auto *d = sqlite::database(db_);
+            sqlite::Statement q(d, "SELECT operation_id FROM phase4_coordination_operations WHERE state NOT IN('confirmed','compensated') ORDER BY updated_at LIMIT ?");
+            sqlite::bind_int64(q.get(), 1, limit);
+            while (sqlite::step(q.get()) == SQLITE_ROW)
+                ids.push_back(sqlite::column_text(q.get(), 0));
+        }
+        std::vector<CoordinationReceipt> out;
+        for (const auto &id : ids)
+            if (auto r = load(id))
+                out.push_back(*r);
+        return out;
+    }
+    CrossStoreCoordinator::CrossStoreCoordinator(SQLiteCoordinationJournal &j, std::string p, std::shared_ptr<HarnessCheckpointObserver> d) : journal_(j), policy_revision_(std::move(p)), downstream_(std::move(d))
+    {
+        if (policy_revision_.empty())
+            throw std::invalid_argument("coordination policy revision is required");
+    }
+    bool CrossStoreCoordinator::register_participant(std::shared_ptr<CrossStoreParticipant> p)
+    {
+        if (!p || p->id().empty() || p->capability_manifest_digest().empty())
+            return false;
+        std::lock_guard l(mutex_);
+        return participants_.emplace(p->id(), std::move(p)).second;
+    }
+    bool CrossStoreCoordinator::production_ready(std::vector<std::string> *issues) const
+    {
+        static const std::vector<std::string> required = {"conversation_task_registry", "run_store", "harness_store", "approval_store", "memory_store", "assurance_store"};
+        std::lock_guard l(mutex_);
+        bool ready = true;
+        for (const auto &id : required)
+            if (!participants_.count(id))
+            {
+                ready = false;
+                if (issues)
+                    issues->push_back("coordination_participant_missing:" + id);
+            }
+        return ready;
+    }
+    std::string CrossStoreCoordinator::capability_manifest_digest() const
+    {
+        std::lock_guard l(mutex_);
+        nlohmann::json a = nlohmann::json::array();
+        for (const auto &[id, p] : participants_)
+            a.push_back({{"id", id}, {"digest", p->capability_manifest_digest()}});
+        return contracts::canonical_digest({{"schema", "agent.cross_store_coordinator/v1"}, {"policy_revision", policy_revision_}, {"participants", a}}).value_or("");
+    }
+    bool CrossStoreCoordinator::execute(CrossStoreOperation o, std::string *e)
+    {
+        if (o.policy_revision != policy_revision_)
+        {
+            if (e)
+                *e = "coordination policy revision mismatch";
+            return false;
+        }
+        std::map<std::string, std::shared_ptr<CrossStoreParticipant>> ps;
+        {
+            std::lock_guard l(mutex_);
+            ps = participants_;
+        }
+        o.participants.clear();
+        for (const auto &[id, p] : ps)
+        {
+            if (!p->supports(o))
+                continue;
+            auto pin = p->inspect(o, e);
+            if (!pin || pin->participant_id != id || pin->revision == 0 || pin->digest.empty())
+                return false;
+            if (!p->prepare(o, *pin, e))
+                return false;
+            o.participants.push_back(*pin);
+        }
+        if (o.participants.empty())
+        {
+            if (e)
+                *e = "no coordination participant supports operation";
+            return false;
+        }
+        if (!journal_.create(o, e))
+        {
+            auto existing = journal_.load(o.operation_id);
+            if (!existing || existing->operation.idempotency_key != o.idempotency_key)
+                return false;
+        }
+        return reconcile(o.operation_id, e);
+    }
+    bool CrossStoreCoordinator::drive(const CoordinationReceipt &r, std::string *e)
+    {
+        std::map<std::string, std::shared_ptr<CrossStoreParticipant>> ps;
+        {
+            std::lock_guard l(mutex_);
+            ps = participants_;
+        }
+        if (r.state == CoordinationState::ManualReview || r.state == CoordinationState::Compensated)
+            return false;
+        if (r.state == CoordinationState::Confirmed)
+            return true;
+        if (r.state == CoordinationState::Prepared)
+        {
+            if (!journal_.transition(r.operation.operation_id, r.state, CoordinationState::Committing, "", e))
+                return false;
+            return reconcile(r.operation.operation_id, e);
+        }
+        if (r.state == CoordinationState::Committing)
+        {
+            for (const auto &pin : r.operation.participants)
+            {
+                auto it = ps.find(pin.participant_id);
+                if (it == ps.end() || !it->second->commit(r.operation, pin, e))
+                {
+                    journal_.transition(r.operation.operation_id, r.state, CoordinationState::ManualReview, e ? *e : "participant commit failed", nullptr);
+                    return false;
+                }
+            }
+            if (!journal_.transition(r.operation.operation_id, r.state, CoordinationState::Confirming, "", e))
+                return false;
+            return reconcile(r.operation.operation_id, e);
+        }
+        if (r.state == CoordinationState::Confirming)
+        {
+            for (const auto &pin : r.operation.participants)
+            {
+                auto it = ps.find(pin.participant_id);
+                if (it == ps.end() || !it->second->confirm(r.operation, pin, e))
+                {
+                    journal_.transition(r.operation.operation_id, r.state, CoordinationState::ManualReview, e ? *e : "participant confirmation failed", nullptr);
+                    return false;
+                }
+            }
+            return journal_.transition(r.operation.operation_id, r.state, CoordinationState::Confirmed, "", e);
+        }
+        return false;
+    }
+    bool CrossStoreCoordinator::reconcile(std::string_view id, std::string *e)
+    {
+        auto r = journal_.load(id);
+        if (!r)
+        {
+            if (e)
+                *e = "coordination operation not found";
+            return false;
+        }
+        return drive(*r, e);
+    }
+    std::size_t CrossStoreCoordinator::reconcile_unresolved(std::size_t limit)
+    {
+        std::size_t n = 0;
+        for (const auto &r : journal_.unresolved(limit))
+        {
+            std::string e;
+            if (drive(r, &e))
+                ++n;
+        }
+        return n;
+    }
+    bool CrossStoreCoordinator::committed(const HarnessCheckpoint &cp, std::string_view event, std::string *e)
+    {
+        if (downstream_ && !downstream_->committed(cp, event, e))
+            return false;
+        CrossStoreOperation o;
+        o.operation_id = cp.harness_id + ":" + std::to_string(cp.revision) + ":" + std::string(event);
+        o.tenant_id = cp.metadata.identity.tenant_id;
+        o.run_id = cp.metadata.identity.run_id;
+        o.harness_id = cp.harness_id;
+        o.operation_kind = "harness_checkpoint:" + std::string(event);
+        o.idempotency_key = o.operation_id;
+        o.policy_revision = policy_revision_;
+        if (!cp.pins.approval_decision_id.empty())
+            o.expected_refs["approval_id"] = cp.pins.approval_decision_id;
+        if (!cp.pins.memory_view_digest.empty())
+            o.expected_refs["memory_view_digest"] = cp.pins.memory_view_digest;
+        if (!cp.pins.memory_snapshot_id.empty())
+            o.expected_refs["memory_snapshot_id"] = cp.pins.memory_snapshot_id;
+        if (!cp.pins.acceptance_report_digest.empty())
+            o.expected_refs["acceptance_report_digest"] = cp.pins.acceptance_report_digest;
+        return execute(std::move(o), e);
+    }
 
-RunStoreCoordinationParticipant::RunStoreCoordinationParticipant(run::RunStore&s,std::string r):store_(s){manifest_digest_=contracts::canonical_digest({{"schema","agent.coordination_participant/v1"},{"id",id()},{"revision",r}}).value_or("");}
-std::optional<ParticipantPin> RunStoreCoordinationParticipant::inspect(const CrossStoreOperation&o,std::string*e){auto v=store_.load(o.run_id);if(!v){if(e)*e="run store record not found";return std::nullopt;}auto d=contracts::canonical_digest(run::encode(v->checkpoint)).value_or("");if(d.empty()){if(e)*e="run checkpoint digest failed";return std::nullopt;}return ParticipantPin{id(),v->revision,d,false};}
-bool RunStoreCoordinationParticipant::prepare(const CrossStoreOperation&o,const ParticipantPin&p,std::string*e){return confirm(o,p,e);}
-bool RunStoreCoordinationParticipant::commit(const CrossStoreOperation&o,const ParticipantPin&p,std::string*e){return confirm(o,p,e);}
-bool RunStoreCoordinationParticipant::confirm(const CrossStoreOperation&o,const ParticipantPin&p,std::string*e){auto v=store_.load(o.run_id);const bool ok=v&&v->revision==p.revision&&contracts::canonical_digest(run::encode(v->checkpoint)).value_or("")==p.digest;if(!ok&&e)*e="run store revision/digest pin drift";return ok;}
-bool RunStoreCoordinationParticipant::compensate(const CrossStoreOperation&,const ParticipantPin&,std::string*e){if(e)*e="run checkpoint is not automatically reversible";return false;}
+    RunStoreCoordinationParticipant::RunStoreCoordinationParticipant(run::RunStore &s, std::string r) : store_(s) { manifest_digest_ = contracts::canonical_digest({{"schema", "agent.coordination_participant/v1"}, {"id", id()}, {"revision", r}}).value_or(""); }
+    std::optional<ParticipantPin> RunStoreCoordinationParticipant::inspect(const CrossStoreOperation &o, std::string *e)
+    {
+        auto v = store_.load(o.run_id);
+        if (!v)
+        {
+            if (e)
+                *e = "run store record not found";
+            return std::nullopt;
+        }
+        auto d = contracts::canonical_digest(run::encode(v->checkpoint)).value_or("");
+        if (d.empty())
+        {
+            if (e)
+                *e = "run checkpoint digest failed";
+            return std::nullopt;
+        }
+        return ParticipantPin{id(), v->revision, d, false};
+    }
+    bool RunStoreCoordinationParticipant::prepare(const CrossStoreOperation &o, const ParticipantPin &p, std::string *e) { return confirm(o, p, e); }
+    bool RunStoreCoordinationParticipant::commit(const CrossStoreOperation &o, const ParticipantPin &p, std::string *e) { return confirm(o, p, e); }
+    bool RunStoreCoordinationParticipant::confirm(const CrossStoreOperation &o, const ParticipantPin &p, std::string *e)
+    {
+        auto v = store_.load(o.run_id);
+        const bool ok = v && v->revision == p.revision && contracts::canonical_digest(run::encode(v->checkpoint)).value_or("") == p.digest;
+        if (!ok && e)
+            *e = "run store revision/digest pin drift";
+        return ok;
+    }
+    bool RunStoreCoordinationParticipant::compensate(const CrossStoreOperation &, const ParticipantPin &, std::string *e)
+    {
+        if (e)
+            *e = "run checkpoint is not automatically reversible";
+        return false;
+    }
 
-HarnessStoreCoordinationParticipant::HarnessStoreCoordinationParticipant(HarnessStore&s,std::string r):store_(s){manifest_digest_=contracts::canonical_digest({{"schema","agent.coordination_participant/v1"},{"id",id()},{"revision",r}}).value_or("");}
-std::optional<ParticipantPin> HarnessStoreCoordinationParticipant::inspect(const CrossStoreOperation&o,std::string*e){auto v=store_.load(o.tenant_id,o.harness_id);if(!v){if(e)*e="harness store checkpoint not found";return std::nullopt;}return ParticipantPin{id(),v->revision,v->digest,false};}
-bool HarnessStoreCoordinationParticipant::prepare(const CrossStoreOperation&o,const ParticipantPin&p,std::string*e){return confirm(o,p,e);}
-bool HarnessStoreCoordinationParticipant::commit(const CrossStoreOperation&o,const ParticipantPin&p,std::string*e){return confirm(o,p,e);}
-bool HarnessStoreCoordinationParticipant::confirm(const CrossStoreOperation&o,const ParticipantPin&p,std::string*e){auto v=store_.load(o.tenant_id,o.harness_id);const bool ok=v&&v->revision==p.revision&&v->digest==p.digest;if(!ok&&e)*e="harness store revision/digest pin drift";return ok;}
-bool HarnessStoreCoordinationParticipant::compensate(const CrossStoreOperation&,const ParticipantPin&,std::string*e){if(e)*e="harness checkpoint is not automatically reversible";return false;}
+    HarnessStoreCoordinationParticipant::HarnessStoreCoordinationParticipant(HarnessStore &s, std::string r) : store_(s) { manifest_digest_ = contracts::canonical_digest({{"schema", "agent.coordination_participant/v1"}, {"id", id()}, {"revision", r}}).value_or(""); }
+    std::optional<ParticipantPin> HarnessStoreCoordinationParticipant::inspect(const CrossStoreOperation &o, std::string *e)
+    {
+        auto v = store_.load(o.tenant_id, o.harness_id);
+        if (!v)
+        {
+            if (e)
+                *e = "harness store checkpoint not found";
+            return std::nullopt;
+        }
+        return ParticipantPin{id(), v->revision, v->digest, false};
+    }
+    bool HarnessStoreCoordinationParticipant::prepare(const CrossStoreOperation &o, const ParticipantPin &p, std::string *e) { return confirm(o, p, e); }
+    bool HarnessStoreCoordinationParticipant::commit(const CrossStoreOperation &o, const ParticipantPin &p, std::string *e) { return confirm(o, p, e); }
+    bool HarnessStoreCoordinationParticipant::confirm(const CrossStoreOperation &o, const ParticipantPin &p, std::string *e)
+    {
+        auto v = store_.load(o.tenant_id, o.harness_id);
+        const bool ok = v && v->revision == p.revision && v->digest == p.digest;
+        if (!ok && e)
+            *e = "harness store revision/digest pin drift";
+        return ok;
+    }
+    bool HarnessStoreCoordinationParticipant::compensate(const CrossStoreOperation &, const ParticipantPin &, std::string *e)
+    {
+        if (e)
+            *e = "harness checkpoint is not automatically reversible";
+        return false;
+    }
 
-ApprovalStoreCoordinationParticipant::ApprovalStoreCoordinationParticipant(approval::ApprovalStore&s,std::string r):store_(s){manifest_digest_=contracts::canonical_digest({{"schema","agent.coordination_participant/v1"},{"id",id()},{"revision",r}}).value_or("");}
-bool ApprovalStoreCoordinationParticipant::supports(const CrossStoreOperation&o)const noexcept{return o.expected_refs.count("approval_id")!=0;}
-std::optional<ParticipantPin> ApprovalStoreCoordinationParticipant::inspect(const CrossStoreOperation&o,std::string*e){const auto approval_id=o.expected_refs.at("approval_id");auto request=store_.request(approval_id);auto decision=store_.latest_decision(approval_id);const auto history=store_.decision_history(approval_id);if(!request||!decision||history.empty()){if(e)*e="approval request/decision not found";return std::nullopt;}const auto digest=contracts::canonical_digest({{"request",approval::encode(*request)},{"decision",approval::encode(*decision)}}).value_or("");if(digest.empty()){if(e)*e="approval digest failed";return std::nullopt;}return ParticipantPin{id(),history.size(),digest,false};}
-bool ApprovalStoreCoordinationParticipant::prepare(const CrossStoreOperation&o,const ParticipantPin&p,std::string*e){return confirm(o,p,e);}
-bool ApprovalStoreCoordinationParticipant::commit(const CrossStoreOperation&o,const ParticipantPin&p,std::string*e){return confirm(o,p,e);}
-bool ApprovalStoreCoordinationParticipant::confirm(const CrossStoreOperation&o,const ParticipantPin&p,std::string*e){auto current=inspect(o,e);const bool ok=current&&current->revision==p.revision&&current->digest==p.digest;if(!ok&&e&&e->empty())*e="approval revision/digest pin drift";return ok;}
-bool ApprovalStoreCoordinationParticipant::compensate(const CrossStoreOperation&,const ParticipantPin&,std::string*e){if(e)*e="approval decision is not reversible";return false;}
+    ConversationTaskCoordinationParticipant::ConversationTaskCoordinationParticipant(
+        conversation::TaskRegistry &registry, std::string revision) : registry_(registry)
+    {
+        manifest_digest_ = contracts::canonical_digest({{"schema", "agent.coordination_participant/v1"},
+                                                        {"id", id()},
+                                                        {"revision", revision}})
+                               .value_or("");
+    }
+    bool ConversationTaskCoordinationParticipant::supports(const CrossStoreOperation &o) const noexcept
+    {
+        return !o.tenant_id.empty() && o.expected_refs.count("conversation_id") &&
+               o.expected_refs.count("task_id");
+    }
+    std::optional<ParticipantPin> ConversationTaskCoordinationParticipant::inspect(
+        const CrossStoreOperation &o, std::string *e)
+    {
+        const conversation::ConversationIdentity identity{o.tenant_id,
+                                                          o.expected_refs.at("conversation_id")};
+        auto task = registry_.load(identity, o.expected_refs.at("task_id"));
+        if (!task)
+        {
+            if (e)
+                *e = "conversation task not found";
+            return std::nullopt;
+        }
+        const auto digest = contracts::canonical_digest(conversation::encode(*task)).value_or("");
+        if (digest.empty())
+        {
+            if (e)
+                *e = "conversation task digest failed";
+            return std::nullopt;
+        }
+        return ParticipantPin{id(), task->revision, digest, false};
+    }
+    bool ConversationTaskCoordinationParticipant::prepare(const CrossStoreOperation &o,
+                                                          const ParticipantPin &p, std::string *e) { return confirm(o, p, e); }
+    bool ConversationTaskCoordinationParticipant::commit(const CrossStoreOperation &o,
+                                                         const ParticipantPin &p, std::string *e) { return confirm(o, p, e); }
+    bool ConversationTaskCoordinationParticipant::confirm(const CrossStoreOperation &o,
+                                                          const ParticipantPin &p, std::string *e)
+    {
+        auto current = inspect(o, e);
+        const bool ok = current && current->revision == p.revision &&
+                        current->digest == p.digest;
+        if (!ok && e && e->empty())
+            *e = "conversation task revision/digest pin drift";
+        return ok;
+    }
+    bool ConversationTaskCoordinationParticipant::compensate(const CrossStoreOperation &,
+                                                             const ParticipantPin &, std::string *e)
+    {
+        if (e)
+            *e = "conversation task is not automatically reversible";
+        return false;
+    }
 
-MemoryStoreCoordinationParticipant::MemoryStoreCoordinationParticipant(memory_v2::MemoryStore&s,std::string r):store_(s){manifest_digest_=contracts::canonical_digest({{"schema","agent.coordination_participant/v1"},{"id",id()},{"revision",r}}).value_or("");}
-bool MemoryStoreCoordinationParticipant::supports(const CrossStoreOperation&o)const noexcept{return o.expected_refs.count("memory_record_id")!=0;}
-std::optional<ParticipantPin> MemoryStoreCoordinationParticipant::inspect(const CrossStoreOperation&o,std::string*e){auto record=store_.current(o.expected_refs.at("memory_record_id"));if(!record){if(e)*e="memory record not found";return std::nullopt;}const auto digest=contracts::canonical_digest(memory_v2::encode(*record)).value_or("");if(digest.empty()){if(e)*e="memory record digest failed";return std::nullopt;}return ParticipantPin{id(),record->revision,digest,false};}
-bool MemoryStoreCoordinationParticipant::prepare(const CrossStoreOperation&o,const ParticipantPin&p,std::string*e){return confirm(o,p,e);}
-bool MemoryStoreCoordinationParticipant::commit(const CrossStoreOperation&o,const ParticipantPin&p,std::string*e){return confirm(o,p,e);}
-bool MemoryStoreCoordinationParticipant::confirm(const CrossStoreOperation&o,const ParticipantPin&p,std::string*e){auto current=inspect(o,e);const bool ok=current&&current->revision==p.revision&&current->digest==p.digest;if(!ok&&e&&e->empty())*e="memory revision/digest pin drift";return ok;}
-bool MemoryStoreCoordinationParticipant::compensate(const CrossStoreOperation&,const ParticipantPin&,std::string*e){if(e)*e="governed memory revision is not automatically reversible";return false;}
+    ApprovalStoreCoordinationParticipant::ApprovalStoreCoordinationParticipant(approval::ApprovalStore &s, std::string r) : store_(s) { manifest_digest_ = contracts::canonical_digest({{"schema", "agent.coordination_participant/v1"}, {"id", id()}, {"revision", r}}).value_or(""); }
+    bool ApprovalStoreCoordinationParticipant::supports(const CrossStoreOperation &o) const noexcept { return o.expected_refs.count("approval_id") != 0; }
+    std::optional<ParticipantPin> ApprovalStoreCoordinationParticipant::inspect(const CrossStoreOperation &o, std::string *e)
+    {
+        const auto approval_id = o.expected_refs.at("approval_id");
+        auto request = store_.request(approval_id);
+        auto decision = store_.latest_decision(approval_id);
+        const auto history = store_.decision_history(approval_id);
+        if (!request || !decision || history.empty())
+        {
+            if (e)
+                *e = "approval request/decision not found";
+            return std::nullopt;
+        }
+        const auto digest = contracts::canonical_digest({{"request", approval::encode(*request)}, {"decision", approval::encode(*decision)}}).value_or("");
+        if (digest.empty())
+        {
+            if (e)
+                *e = "approval digest failed";
+            return std::nullopt;
+        }
+        return ParticipantPin{id(), history.size(), digest, false};
+    }
+    bool ApprovalStoreCoordinationParticipant::prepare(const CrossStoreOperation &o, const ParticipantPin &p, std::string *e) { return confirm(o, p, e); }
+    bool ApprovalStoreCoordinationParticipant::commit(const CrossStoreOperation &o, const ParticipantPin &p, std::string *e) { return confirm(o, p, e); }
+    bool ApprovalStoreCoordinationParticipant::confirm(const CrossStoreOperation &o, const ParticipantPin &p, std::string *e)
+    {
+        auto current = inspect(o, e);
+        const bool ok = current && current->revision == p.revision && current->digest == p.digest;
+        if (!ok && e && e->empty())
+            *e = "approval revision/digest pin drift";
+        return ok;
+    }
+    bool ApprovalStoreCoordinationParticipant::compensate(const CrossStoreOperation &, const ParticipantPin &, std::string *e)
+    {
+        if (e)
+            *e = "approval decision is not reversible";
+        return false;
+    }
 
-AssuranceStoreCoordinationParticipant::AssuranceStoreCoordinationParticipant(assurance::AssuranceStore&s,std::string r):store_(s){manifest_digest_=contracts::canonical_digest({{"schema","agent.coordination_participant/v1"},{"id",id()},{"revision",r}}).value_or("");}
-bool AssuranceStoreCoordinationParticipant::supports(const CrossStoreOperation&o)const noexcept{return o.expected_refs.count("assurance_workflow_id")!=0;}
-std::optional<ParticipantPin> AssuranceStoreCoordinationParticipant::inspect(const CrossStoreOperation&o,std::string*e){auto report=store_.load_report(o.tenant_id,o.expected_refs.at("assurance_workflow_id"));if(!report){if(e)*e="assurance report not found";return std::nullopt;}const auto digest=contracts::canonical_digest(assurance::encode(report->report)).value_or("");if(auto expected=o.expected_refs.find("acceptance_report_digest");expected!=o.expected_refs.end()&&expected->second!=digest){if(e)*e="acceptance report digest binding mismatch";return std::nullopt;}return ParticipantPin{id(),report->revision,digest,false};}
-bool AssuranceStoreCoordinationParticipant::prepare(const CrossStoreOperation&o,const ParticipantPin&p,std::string*e){return confirm(o,p,e);}
-bool AssuranceStoreCoordinationParticipant::commit(const CrossStoreOperation&o,const ParticipantPin&p,std::string*e){return confirm(o,p,e);}
-bool AssuranceStoreCoordinationParticipant::confirm(const CrossStoreOperation&o,const ParticipantPin&p,std::string*e){auto current=inspect(o,e);const bool ok=current&&current->revision==p.revision&&current->digest==p.digest;if(!ok&&e&&e->empty())*e="assurance revision/digest pin drift";return ok;}
-bool AssuranceStoreCoordinationParticipant::compensate(const CrossStoreOperation&,const ParticipantPin&,std::string*e){if(e)*e="acceptance report is not automatically reversible";return false;}
+    MemoryStoreCoordinationParticipant::MemoryStoreCoordinationParticipant(memory_v2::MemoryStore &s, std::string r) : store_(s) { manifest_digest_ = contracts::canonical_digest({{"schema", "agent.coordination_participant/v1"}, {"id", id()}, {"revision", r}}).value_or(""); }
+    bool MemoryStoreCoordinationParticipant::supports(const CrossStoreOperation &o) const noexcept { return o.expected_refs.count("memory_record_id") != 0; }
+    std::optional<ParticipantPin> MemoryStoreCoordinationParticipant::inspect(const CrossStoreOperation &o, std::string *e)
+    {
+        auto record = store_.current(o.expected_refs.at("memory_record_id"));
+        if (!record)
+        {
+            if (e)
+                *e = "memory record not found";
+            return std::nullopt;
+        }
+        const auto digest = contracts::canonical_digest(memory_v2::encode(*record)).value_or("");
+        if (digest.empty())
+        {
+            if (e)
+                *e = "memory record digest failed";
+            return std::nullopt;
+        }
+        return ParticipantPin{id(), record->revision, digest, false};
+    }
+    bool MemoryStoreCoordinationParticipant::prepare(const CrossStoreOperation &o, const ParticipantPin &p, std::string *e) { return confirm(o, p, e); }
+    bool MemoryStoreCoordinationParticipant::commit(const CrossStoreOperation &o, const ParticipantPin &p, std::string *e) { return confirm(o, p, e); }
+    bool MemoryStoreCoordinationParticipant::confirm(const CrossStoreOperation &o, const ParticipantPin &p, std::string *e)
+    {
+        auto current = inspect(o, e);
+        const bool ok = current && current->revision == p.revision && current->digest == p.digest;
+        if (!ok && e && e->empty())
+            *e = "memory revision/digest pin drift";
+        return ok;
+    }
+    bool MemoryStoreCoordinationParticipant::compensate(const CrossStoreOperation &, const ParticipantPin &, std::string *e)
+    {
+        if (e)
+            *e = "governed memory revision is not automatically reversible";
+        return false;
+    }
+
+    AssuranceStoreCoordinationParticipant::AssuranceStoreCoordinationParticipant(assurance::AssuranceStore &s, std::string r) : store_(s) { manifest_digest_ = contracts::canonical_digest({{"schema", "agent.coordination_participant/v1"}, {"id", id()}, {"revision", r}}).value_or(""); }
+    bool AssuranceStoreCoordinationParticipant::supports(const CrossStoreOperation &o) const noexcept { return o.expected_refs.count("assurance_workflow_id") != 0; }
+    std::optional<ParticipantPin> AssuranceStoreCoordinationParticipant::inspect(const CrossStoreOperation &o, std::string *e)
+    {
+        auto report = store_.load_report(o.tenant_id, o.expected_refs.at("assurance_workflow_id"));
+        if (!report)
+        {
+            if (e)
+                *e = "assurance report not found";
+            return std::nullopt;
+        }
+        const auto digest = contracts::canonical_digest(assurance::encode(report->report)).value_or("");
+        if (auto expected = o.expected_refs.find("acceptance_report_digest"); expected != o.expected_refs.end() && expected->second != digest)
+        {
+            if (e)
+                *e = "acceptance report digest binding mismatch";
+            return std::nullopt;
+        }
+        return ParticipantPin{id(), report->revision, digest, false};
+    }
+    bool AssuranceStoreCoordinationParticipant::prepare(const CrossStoreOperation &o, const ParticipantPin &p, std::string *e) { return confirm(o, p, e); }
+    bool AssuranceStoreCoordinationParticipant::commit(const CrossStoreOperation &o, const ParticipantPin &p, std::string *e) { return confirm(o, p, e); }
+    bool AssuranceStoreCoordinationParticipant::confirm(const CrossStoreOperation &o, const ParticipantPin &p, std::string *e)
+    {
+        auto current = inspect(o, e);
+        const bool ok = current && current->revision == p.revision && current->digest == p.digest;
+        if (!ok && e && e->empty())
+            *e = "assurance revision/digest pin drift";
+        return ok;
+    }
+    bool AssuranceStoreCoordinationParticipant::compensate(const CrossStoreOperation &, const ParticipantPin &, std::string *e)
+    {
+        if (e)
+            *e = "acceptance report is not automatically reversible";
+        return false;
+    }
 } // namespace agent_framework::harness
