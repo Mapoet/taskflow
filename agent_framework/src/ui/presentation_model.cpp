@@ -268,6 +268,21 @@ void UiPresentationModel::observe_operations(const Phase4OperationsSnapshot& sna
     state_.has_operations = true;
 }
 
+void UiPresentationModel::observe_interactions(const ui::InteractionSnapshot& snapshot) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if(state_.has_interactions && snapshot.revision < state_.interactions.revision) return;
+    state_.interactions=snapshot;state_.has_interactions=true;
+    if(state_.selected_interaction_id.empty()&&!snapshot.nodes.empty())state_.selected_interaction_id=snapshot.nodes.front().node_id;
+    if(!state_.selected_interaction_id.empty()&&std::none_of(snapshot.nodes.begin(),snapshot.nodes.end(),[&](const auto&n){return n.node_id==state_.selected_interaction_id;}))
+        state_.selected_interaction_id=snapshot.nodes.empty()?std::string{}:snapshot.nodes.front().node_id;
+}
+
+bool UiPresentationModel::select_interaction(std::string_view node_id) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if(!state_.has_interactions||std::none_of(state_.interactions.nodes.begin(),state_.interactions.nodes.end(),[&](const auto&n){return n.node_id==node_id;}))return false;
+    state_.selected_interaction_id=std::string(node_id);return true;
+}
+
 void UiPresentationModel::trim_locked() {
     if (state_.turns.size() > max_turns_) {
         state_.turns.erase(state_.turns.begin(),

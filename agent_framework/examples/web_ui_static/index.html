@@ -125,6 +125,23 @@
       </div>
     </aside>
 
+    <aside class="interaction-inspector" id="interaction-inspector" aria-label="Interaction inspector" hidden>
+      <div class="inspector-head">
+        <div><span class="eyebrow">TRACEABLE CONTEXT</span><h2 id="inspector-title">Object inspector</h2></div>
+        <button class="quiet-button" id="inspector-close" type="button">Close</button>
+      </div>
+      <nav class="inspector-tabs" aria-label="Inspector view">
+        <button type="button" data-inspector-kind="thinking">Think &amp; Plan</button>
+        <button type="button" data-inspector-kind="memory_view">Memory</button>
+        <button type="button" data-inspector-kind="agent">Agents</button>
+        <button type="button" data-inspector-kind="approval">Approval</button>
+        <button type="button" data-inspector-kind="evidence">Assurance</button>
+      </nav>
+      <div id="inspector-provenance" class="inspector-provenance"></div>
+      <div id="inspector-content" class="inspector-content"></div>
+      <div class="inspector-actions"><button class="quiet-button" id="inspector-origin" type="button">Back to original request</button><button class="quiet-button" id="inspector-related" type="button">Open related object</button></div>
+    </aside>
+
     <footer class="statusbar">
       <span id="status-message">Connecting to event stream…</span>
       <span><b id="message-count">0</b> turns · <b id="tool-count">0</b> tools</span>

@@ -6,6 +6,7 @@
 **上游计划**：[Phase 4 v2 计划](./phase-4-plan-v2.md)  
 **事实基线**：[Phase 4 状态](./phase-4-status.md)  
 **追溯**：[需求—计划—执行—证据矩阵](./phase-4/traceability-matrix.md)
+**Interaction UI 接续计划**：[P4-UIX0→UIX9](./phase-4-interaction-ui-closure.md)（approved/planned；不以当前 Operations 展示替代）
 
 ## 1. 立项事实
 
@@ -52,6 +53,7 @@ Execution/Evidence
 | `R4V2-RC-05` | 固定真实数据集、人工基线、校准、nightly、签名趋势报告阻止质量回归 | R4V2-06 |
 | `R4V2-RC-06` | 至少一个批准的真实 provider/外部依赖组合产生未过期 `executed=true` 认证 | R4V2-07 |
 | `R4V2-RC-07` | 远程 durable queue、worker lease/fencing、共享 Store 和故障恢复通过 HA/chaos | R4.8 |
+| `R4V2-RC-08` | Conversation、Planner、五层 Memory、Child/Collaborative Agent、Approval、Assurance 通过统一 Interaction Graph 双向接通并可重启/replay | R4V2-08、WP4.0/3/9、AgentTemplate/Conversation |
 
 ## 4. 连续实施批次
 

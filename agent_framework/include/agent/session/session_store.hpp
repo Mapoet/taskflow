@@ -62,6 +62,9 @@ public:
 class SessionStore {
 public:
     virtual ~SessionStore() = default;
+    // Side-effect-free current-state lookup for projections, diagnostics and
+    // recovery. Observers must never create a session merely by reading it.
+    virtual std::optional<SessionSnapshot> load_current(std::string_view session_id) = 0;
     virtual SessionSnapshot load_or_create(std::string_view session_id) = 0;
     virtual SessionCommitResult commit(const SessionSnapshot& next,
                                        std::uint64_t expected_revision) = 0;
@@ -71,6 +74,7 @@ public:
 
 class InMemorySessionStore final : public SessionStore {
 public:
+    std::optional<SessionSnapshot> load_current(std::string_view session_id) override;
     SessionSnapshot load_or_create(std::string_view session_id) override;
     SessionCommitResult commit(const SessionSnapshot& next,
                                std::uint64_t expected_revision) override;
@@ -96,6 +100,7 @@ public:
     SQLiteSessionStore(const SQLiteSessionStore&) = delete;
     SQLiteSessionStore& operator=(const SQLiteSessionStore&) = delete;
 
+    std::optional<SessionSnapshot> load_current(std::string_view session_id) override;
     SessionSnapshot load_or_create(std::string_view session_id) override;
     SessionCommitResult commit(const SessionSnapshot& next,
                                std::uint64_t expected_revision) override;

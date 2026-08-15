@@ -2,9 +2,10 @@
 
 **状态**：Phase 4 v2 技术状态重估基线（未完成项保持开放）  
 **Residual Closure**：[`phase4-v2-residual-r1`](./phase-4-residual-closure-plan.md) 已于 2026-08-11 批准执行；R1I–R7D 按直接集成/生产证据关闭，不以既有模块测试替代
-**最后核对日期**：2026-08-12
+**最后核对日期**：2026-08-15
 **上游章程**：[phase-4.md](./phase-4.md)  
 **当前总体计划**：[phase-4-plan-v2.md](./phase-4-plan-v2.md)  
+**Interaction UI 闭环计划**：[phase4-uix-r2](./phase-4-interaction-ui-closure.md) 已完成 UIXR0–UIXR8 本地 residual closure；外部 IdP/KMS、跨主机 replay 与 Live campaign 仍开放
 **v1 历史计划**：[phase-4-plan.md](./phase-4-plan.md)
 
 ## 1. 状态语义
@@ -54,7 +55,7 @@ P4-GPC0–GPC10 新增唯一确定性 `TaskClosureController`、TaskClosureContr
 | LLM Remediation/Replan | `[~]` | 70–75% | Impact Analyst/Remediation Planner/Reverification Planner 三个 RoleRuntime stage；typed inventory/impact；确定性下游失效闭包；授权/回滚/风险校验；Plan CAS；anti-downgrade HITL；token/cost/deadline；digest/freshness 复用；SQLite restart 与 GraphExecutor | remediation action 实际执行、产物新摘要回填、自动调用 F4V 复验、ApprovalStore 直连、跨 Store 原子协调、生产 calibration/live |
 | LLM Eval/Judge | `[~]` | 70–75% | 分层 suite/run/trajectory 契约；Evaluation Memory View；匿名候选与顺序反转；Primary/Secondary/Adjudicator RoleRuntime；provider/model/group 独立性；agreement/kappa/bias/variance/ground-truth accuracy/Wilson CI；24 项规划/记忆/验收/修复/runtime 指标；flaky/missing/critical/regression 门禁；PDP/HITL upgrade/rollback；SQLite terminal report、restart 和 GraphExecutor | 真实仓库/领域/对抗/recovery/live 数据集，人工标注与 inter-rater 基线，生产 Judge/profile/prompt/model 校准，nightly scheduler、报告签名、trend/SLO、跨 Store atomic 与默认不可绕过 |
 | LLM Observability | `[~]` | 82–87% | production Harness 强制 invocation evidence；GenAI span/metric；确定性采样；隐私受控 correlated log；provider/model/profile/prompt/view/route/fallback/token/cache/cost/latency/calibration 与 stage/memory pin 关联 | 真实 provider usage/cost 对账、全 production composition 跨进程 trace、cardinality 压测和 live evidence |
-| Explainable UI / Operations | `[~]` | 75–80% | `phase4.operations.v1` display-safe contract；CLI/Web/TUI/ImGui 同源投影；Plan/Evidence、Memory、Invocation、五层 Assurance、Live/HITL；桌面真实截图与交互 | production Store revision assembler、ApprovalStore/PDP/identity executor、真实移动截图、production Live snapshot/replay |
+| Explainable UI / Operations | `[~]` | 92–95% | `phase4.operations.v1`；`agent.ui.interaction_* /v1`；Conversation/Run/Plan/Session/Approval/Assurance/Remediation direct Store assembler；fail-closed scope/revision join；SQLite CAS/replay/restart/orphan；真实 ChildTask/Tool relation；authenticated decision/edit/delegation/escalation；remediation/reverification/closure navigation；Web object/replay API；TUI/ImGui/CLI canonical consumption；真实 Chrome 截图 | 真实 OIDC/JWT/KMS 多签、跨主机 replay/HA、production Live golden campaign 与端到端浏览器动作自动化 |
 
 v2 采用“**LLM Cognitive Plane + Deterministic Control Plane**”：LLM 深度参与分析、调查、综合、规划、记忆加工和专业解释；ACL、authority、policy、CAS、artifact/test/metric oracle 与最终 Arbiter 保持确定性。系统持久化结构化事实、证据、假设、备选方案、风险和决策理由，不持久化模型私有 chain-of-thought。
 

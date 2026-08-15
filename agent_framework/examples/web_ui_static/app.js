@@ -22,6 +22,8 @@
   let activeAssistant = null;
   let busy = false;
   let turnCount = 0;
+  let interactionSnapshot = null;
+  let selectedInteraction = null;
 
   if (window.mermaid) {
     window.mermaid.initialize({ startOnLoad: false, securityLevel: "strict", theme: "dark" });
@@ -157,6 +159,7 @@
     const article = document.createElement("article");
     article.className = "turn" + (streaming ? " streaming" : "");
     article.dataset.role = role;
+    article.dataset.interactive = "true";
     const marker = document.createElement("div"); marker.className = "turn-marker";
     marker.textContent = role === "assistant" ? "A" : role === "user" ? "U" : "!";
     const contentWrap = document.createElement("div"); contentWrap.className = "turn-content";
@@ -174,6 +177,11 @@
     head.append(strong, time); contentWrap.append(head, thinking, body); article.append(marker, contentWrap);
     conversation.appendChild(article); turnCount += 1; updateCounts();
     const turn = { article, body, markdownBody, artifacts, thinking, thinkingBody, rawAnswer: text(content), rawThinking: "" };
+    article.addEventListener("click", function (event) {
+      if (event.target.closest("a, button, details")) return;
+      openInspector(role === "user" ? "message" : "thinking");
+    });
+    thinkingSummary.addEventListener("click", function () { window.setTimeout(function(){ openInspector("thinking"); },0); });
     renderMarkdown(markdownBody, turn.rawAnswer, true);
     scrollConversation();
     return turn;
@@ -236,6 +244,25 @@
   }
 
   function statusLabel(value) { const v = text(value || "unknown"); return v.charAt(0).toUpperCase() + v.slice(1); }
+  function nodesOf(kind) { return interactionSnapshot ? (interactionSnapshot.nodes || []).filter(function(n){ return n.kind === kind || (kind === "thinking" && (n.kind === "plan" || n.kind === "plan_node")) || (kind === "agent" && n.kind === "skill_node") || (kind === "evidence" && (n.kind === "finding" || n.kind === "artifact")); }) : []; }
+  function sourceLine(node) { const source=node.source||{}; return text(source.store)+" / "+text(source.object_id)+" · r"+Number(source.revision||0)+" · "+text(source.digest); }
+  function inspectorKind(nodeKind) { if(["plan","plan_node","cognition_stage"].includes(nodeKind))return "thinking";if(nodeKind==="skill_node")return "agent";if(["finding","artifact"].includes(nodeKind))return "evidence";return nodeKind; }
+  function renderInspector(kind, objectId) {
+    const content=$("inspector-content"); content.replaceChildren();
+    const candidates=nodesOf(kind); selectedInteraction=candidates.find(function(n){return n.node_id===objectId;})||candidates[0]||null;
+    $("inspector-title").textContent=kind === "thinking" ? "Cognition & executable plan" : kind === "memory_view" ? "Five-layer memory view" : kind === "agent" ? "Collaborative agents & skills" : kind === "approval" ? "Accountable approval" : kind === "evidence" ? "Assurance, findings & artifacts" : "Conversation source";
+    document.querySelectorAll("[data-inspector-kind]").forEach(function(button){button.classList.toggle("selected",button.dataset.inspectorKind===kind);});
+    $("inspector-provenance").textContent=selectedInteraction ? sourceLine(selectedInteraction) : "No canonical source revision is available";
+    candidates.forEach(function(node){const card=document.createElement("article");card.className="inspector-card"+(node===selectedInteraction?" selected":"");card.dataset.nodeId=node.node_id;
+      const title=document.createElement("h3");title.textContent=text(node.label||node.node_id);const state=statusNode(node.state);const summary=document.createElement("p");summary.textContent=text(node.summary);
+      const detail=document.createElement("pre");detail.textContent=pretty(node.display||{});card.append(title,state,summary,detail);card.addEventListener("click",function(){renderInspector(kind,node.node_id);});content.append(card);});
+    if(!candidates.length){const empty=document.createElement("p");empty.className="ops-note";empty.textContent="No view-safe "+kind+" object is attached to this turn.";content.append(empty);}
+  }
+  function openInspector(kind, objectId) { $("interaction-inspector").hidden=false;renderInspector(kind,objectId);if(selectedInteraction)history.replaceState(null,"","#inspect="+encodeURIComponent(selectedInteraction.node_id)); }
+  function loadInteractionSnapshot() { return fetch("/ui/interactions/snapshot",{cache:"no-store"}).then(function(response){if(!response.ok)throw new Error("interaction snapshot HTTP "+response.status);return response.json();}).then(function(snapshot){interactionSnapshot=snapshot;
+      if(screenshotMode && turnCount===0){const message=(snapshot.nodes||[]).find(function(n){return n.kind==="message";});const plan=(snapshot.nodes||[]).find(function(n){return n.kind==="plan";});
+        if(message)addTurn("user",message.summary,false);if(plan){const answer=addTurn("assistant","## Harness-linked result\n\n"+text(plan.summary)+"\n\nPlan revision **"+Number((plan.ref||{}).plan_revision||plan.revision||0)+"** is connected to cognition, governed memory, delegated agents, approval and assurance evidence.",false);answer.rawThinking=text(((snapshot.nodes||[]).find(function(n){return n.kind==="thinking";})||{}).summary);answer.thinking.hidden=false;answer.thinkingBody.textContent=answer.rawThinking;}}
+      const hash=new URLSearchParams(location.hash.replace(/^#/,""));const id=hash.get("inspect");if(id){const n=(snapshot.nodes||[]).find(function(item){return item.node_id===id;});if(n)openInspector(inspectorKind(n.kind),n.node_id);}}); }
   function statusNode(value) {
     const span = document.createElement("span"); span.className = "ops-state";
     span.dataset.state = text(value || "unknown"); span.textContent = statusLabel(value); return span;
@@ -277,6 +304,7 @@
     const agents = $("ops-agents"); agents.replaceChildren();
     (snapshot.agent_templates || []).forEach(function (agent) {
       const card = document.createElement("article"); card.className = "agent-runtime-card";
+      card.addEventListener("click", function(){ openInspector("agent", "agent:"+text(agent.invocation_id)); });
       const head = document.createElement("div"); head.className = "stage-head";
       const title = document.createElement("b"); title.textContent = text(agent.template_id) + " · r" + Number(agent.template_revision || 0);
       const mode = document.createElement("span"); mode.className = "runtime-mode"; mode.textContent = text(agent.business_mode) + " / " + text(agent.hosting_mode);
@@ -296,6 +324,7 @@
     const memory = $("ops-memory"); memory.replaceChildren();
     (snapshot.memory || []).forEach(function (item) {
       const row = document.createElement("tr"); const source = document.createElement("div");
+      row.addEventListener("click", function(){ openInspector("memory_view"); });
       const scope = document.createElement("b"); scope.textContent = text(item.scope);
       const small = document.createElement("small"); small.textContent = text(item.source); source.append(scope, small);
       cell(row, source); cell(row, item.authority); cell(row, item.freshness);
@@ -306,6 +335,7 @@
     const assurance = $("ops-assurance"); assurance.replaceChildren();
     (snapshot.assurance || []).forEach(function (layer) {
       const row = document.createElement("div"); row.className = "assurance-row"; const name = document.createElement("div");
+      row.addEventListener("click", function(){ openInspector("evidence", (layer.finding_ids || []).length ? "finding:"+text(layer.finding_ids[0]) : undefined); });
       const b = document.createElement("b"); b.textContent = text(layer.label); const small = document.createElement("small");
       small.textContent = text(layer.oracle || "no oracle") + " · " + text(layer.verifier || "no verifier");
       name.append(b, small); row.append(name, statusNode(layer.status)); assurance.append(row);
@@ -323,6 +353,7 @@
     const hitl = $("ops-hitl"); hitl.replaceChildren();
     (snapshot.hitl || []).forEach(function (request) {
       const card = document.createElement("article"); card.className = "hitl-card"; const body = document.createElement("div");
+      card.addEventListener("click", function(event){ if(!event.target.closest("button"))openInspector("approval","approval:"+text(request.id)); });
       const head = document.createElement("div"); head.className = "hitl-head"; const title = document.createElement("b"); title.textContent = text(request.kind).replaceAll("_", " "); head.append(title, statusNode(request.status));
       const summary = document.createElement("p"); summary.textContent = text(request.summary); const meta = document.createElement("small"); meta.textContent = "Requested by " + text(request.requested_by || "system") + " · due " + text(request.deadline || "not set"); body.append(head, summary, meta);
       const actions = document.createElement("div"); actions.className = "hitl-actions";
@@ -377,6 +408,7 @@
       $("execution-path").textContent = path === "legacy_react_fallback" ? "UNVERIFIED FALLBACK" : path.toUpperCase();
       $("execution-path").dataset.state = path === "harness" ? "passed" : "warning";
     } else if (type === "phase4_operations") renderOperations(payload);
+    else if (type === "interaction_snapshot") interactionSnapshot = payload;
     else if (type === "user_turn" || type === "demo_user") {
       addTurn("user", payload.content || payload.prompt || "", false); setBusy(true);
     } else if (type === "tool_started" || type === "tool_completed") updateTool(type, payload);
@@ -427,12 +459,14 @@
     loadOperationsSnapshot().catch(function () {
       setStatus("Operations snapshot unavailable; waiting for event stream…");
     });
+    loadInteractionSnapshot().catch(function(){ setStatus("Interaction projection unavailable; canonical operations remain visible"); });
     const es = new EventSource("/ui/sse?session=default");
     es.onopen = function () { setConnection("Connected", "connected"); setStatus("Event stream connected"); };
     es.onerror = function () { setConnection("Reconnecting", "error"); setStatus("Event stream interrupted; reconnecting…"); };
     es.onmessage = handleServerEvent;
   } else {
     loadOperationsSnapshot()
+      .then(loadInteractionSnapshot)
       .then(function () { setConnection("Snapshot", "connected"); setStatus("Deterministic screenshot state loaded"); });
   }
 
@@ -457,6 +491,10 @@
   $("operations-tab").addEventListener("click", function () { setWorkspace("operations"); });
   $("rail-toggle").addEventListener("click", function () { $("left-rail").classList.toggle("open"); });
   $("activity-close").addEventListener("click", function () { $("activity-panel").classList.remove("open"); });
+  $("inspector-close").addEventListener("click",function(){ $("interaction-inspector").hidden=true;history.replaceState(null,"",location.pathname+location.search); });
+  document.querySelectorAll("[data-inspector-kind]").forEach(function(button){button.addEventListener("click",function(){openInspector(button.dataset.inspectorKind);});});
+  $("inspector-origin").addEventListener("click",function(){const original=nodesOf("message")[0];if(!original)return;openInspector("message",original.node_id);const turn=document.querySelector('.turn[data-role="user"]');if(turn)turn.scrollIntoView({behavior:"smooth",block:"center"});});
+  $("inspector-related").addEventListener("click",function(){if(!selectedInteraction||!interactionSnapshot)return;const edge=(interactionSnapshot.edges||[]).find(function(e){return e.from_node_id===selectedInteraction.node_id||e.to_node_id===selectedInteraction.node_id;});if(!edge)return;const id=edge.from_node_id===selectedInteraction.node_id?edge.to_node_id:edge.from_node_id;const node=(interactionSnapshot.nodes||[]).find(function(n){return n.node_id===id;});if(node)openInspector(inspectorKind(node.kind),node.node_id);});
   $("command-button").addEventListener("click", function () { $("command-dialog").showModal(); $("command-input").focus(); });
   document.addEventListener("keydown", function (event) {
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") { event.preventDefault(); $("command-dialog").showModal(); $("command-input").focus(); }

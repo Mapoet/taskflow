@@ -366,6 +366,28 @@ ReviewResult AuthenticatedApprovalActionService::submit(
     return executor_.review(review, intent.expected_vote_revision);
 }
 
+ApprovalAdministrativeResult AuthenticatedApprovalActionService::revise(
+    const AuthenticatedPrincipal& principal,const ApprovalRevisionIntent& intent){
+    if(principal.principal_id.empty()||principal.identity_attestation.empty())return {false,{},"authenticated_identity_required",{}};
+    ReviewerIdentity editor{principal.principal_id,principal.roles,{},{},{},principal.identity_attestation};
+    auto result=executor_.revise(intent.original_approval_id,intent.revised_request,editor,intent.original_request_digest);
+    return {result.committed,result.request_digest,result.error_code,{}};
+}
+ApprovalAdministrativeResult AuthenticatedApprovalActionService::delegate(
+    const AuthenticatedPrincipal& principal,const ApprovalDelegationIntent& intent){
+    if(principal.principal_id.empty()||principal.identity_attestation.empty())return {false,{},"authenticated_identity_required",{}};
+    if(intent.grant.grantor_id!=principal.principal_id)return {false,{},"delegation_grantor_mismatch",{}};
+    std::string error;const bool ok=executor_.grant_delegation(intent.grant,&error);
+    return {ok,contracts::canonical_digest(nlohmann::json{{"grant_id",intent.grant.grant_id},{"delegate_id",intent.grant.delegate_id},{"scopes",intent.grant.scopes}}).value_or(""),ok?std::string{}:"delegation_rejected",error};
+}
+ApprovalAdministrativeResult AuthenticatedApprovalActionService::escalate(
+    const AuthenticatedPrincipal& principal,const ApprovalEscalationIntent& intent){
+    if(principal.principal_id.empty()||principal.identity_attestation.empty())return {false,{},"authenticated_identity_required",{}};
+    if(!principal.roles.count("approver")&&!principal.roles.count("approval_admin"))return {false,{},"escalation_role_required",{}};
+    std::string error;const bool ok=executor_.escalate(intent.escalation,&error);
+    return {ok,contracts::canonical_digest(nlohmann::json{{"escalation_id",intent.escalation.escalation_id},{"approval_id",intent.escalation.approval_id},{"target_group",intent.escalation.target_group}}).value_or(""),ok?std::string{}:"escalation_rejected",error};
+}
+
 ApprovalHarnessPort::ApprovalHarnessPort(std::string id, ApprovalStore& store,
                                          std::string approval_id, std::string now)
     : id_(std::move(id)), store_(store), approval_id_(std::move(approval_id)), now_(std::move(now)) {

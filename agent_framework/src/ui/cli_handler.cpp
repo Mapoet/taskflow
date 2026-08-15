@@ -5,6 +5,7 @@
 
 #include <agent/ui/ui_manager.hpp>
 #include <agent/ui/phase4_operations.hpp>
+#include <agent/ui/interaction_graph.hpp>
 
 #include <iostream>
 #include <sstream>
@@ -61,7 +62,17 @@ void CLIHandler::handle_error(const std::string& error_message) {
 }
 
 void CLIHandler::handle_aux_event(std::string_view type, const json& payload) {
-    if (!active_ || type != Phase4OperationsProjection::event_type) return;
+    if (!active_) return;
+    if (type == ui::interaction_snapshot_event_type) {
+        std::lock_guard<std::mutex> lock(output_mutex_);
+        output_stream_ << "\n[interactions] revision=" << payload.value("revision", 0)
+                       << " nodes=" << payload.value("nodes", json::array()).size()
+                       << " edges=" << payload.value("edges", json::array()).size()
+                       << " orphan=" << payload.value("orphan_edge_ids", json::array()).size() << "\n";
+        output_stream_.flush();
+        return;
+    }
+    if (type != Phase4OperationsProjection::event_type) return;
     const auto snapshot = Phase4OperationsProjection::from_json(payload);
     std::lock_guard<std::mutex> lock(output_mutex_);
     output_stream_ << Phase4OperationsProjection::render_text(snapshot);

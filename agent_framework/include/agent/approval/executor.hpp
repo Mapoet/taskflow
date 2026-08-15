@@ -133,6 +133,19 @@ struct ApprovalActionIntent {
     std::string decided_at;
     std::uint64_t expected_vote_revision{0};
 };
+struct ApprovalRevisionIntent {
+    std::string original_approval_id;
+    std::string original_request_digest;
+    ApprovalRequest revised_request;
+};
+struct ApprovalDelegationIntent { DelegationGrant grant; };
+struct ApprovalEscalationIntent { EscalationRecord escalation; };
+struct ApprovalAdministrativeResult {
+    bool accepted{false};
+    std::string object_digest;
+    std::string error_code;
+    std::string error_message;
+};
 
 class AuthenticatedApprovalActionService {
 public:
@@ -140,6 +153,12 @@ public:
         : executor_(executor) {}
     ReviewResult submit(const AuthenticatedPrincipal& principal,
                         const ApprovalActionIntent& intent);
+    ApprovalAdministrativeResult revise(const AuthenticatedPrincipal& principal,
+                                         const ApprovalRevisionIntent& intent);
+    ApprovalAdministrativeResult delegate(const AuthenticatedPrincipal& principal,
+                                           const ApprovalDelegationIntent& intent);
+    ApprovalAdministrativeResult escalate(const AuthenticatedPrincipal& principal,
+                                           const ApprovalEscalationIntent& intent);
 private:
     AccountableApprovalExecutor& executor_;
 };

@@ -5,6 +5,7 @@
 
 #include <agent/ui/tui_handler.hpp>
 #include <agent/ui/phase4_operations.hpp>
+#include <agent/ui/interaction_graph.hpp>
 
 #include <sstream>
 
@@ -97,6 +98,10 @@ void TuiHandler::handle_aux_event(std::string_view type, const json& payload) {
     std::lock_guard<std::mutex> lock(mutex_);
     if (type == Phase4OperationsProjection::event_type && presentation_) {
         presentation_->observe_operations(Phase4OperationsProjection::from_json(payload));
+    }
+    if(type==ui::interaction_snapshot_event_type&&presentation_){
+        std::vector<contracts::ContractIssue> issues;auto decoded=ui::decode_interaction_snapshot(payload,&issues);
+        if(decoded)presentation_->observe_interactions(*decoded);
     }
     std::string line = std::string("aux:") + std::string(type) + " " + payload.dump() + "\n";
     append_capped(aux_text_, line, k_max_aux_bytes);

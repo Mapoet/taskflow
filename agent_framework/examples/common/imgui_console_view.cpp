@@ -407,6 +407,24 @@ void render_operations(const UiPresentationSnapshot& s) {
     ImGui::EndChild();
 }
 
+void render_interactions(const UiPresentationSnapshot& s) {
+    ImGui::BeginChild("##interactions",ImVec2(0,0),true);
+    ImGui::TextColored(kAccent,"CANONICAL INTERACTION GRAPH");
+    if(!s.has_interactions){ImGui::TextWrapped("No canonical interaction snapshot has been published.");ImGui::EndChild();return;}
+    ImGui::TextColored(kMuted,"revision %llu · %zu objects · %zu relations · source revisions %zu",
+        static_cast<unsigned long long>(s.interactions.revision),s.interactions.nodes.size(),s.interactions.edges.size(),s.interactions.source_revisions.size());
+    ImGui::Separator();
+    if(ImGui::BeginTable("##interaction-objects",4,ImGuiTableFlags_Borders|ImGuiTableFlags_RowBg|ImGuiTableFlags_SizingStretchProp)){
+        for(const char* title:{"Kind / object","State","Summary","Canonical source"})ImGui::TableSetupColumn(title);ImGui::TableHeadersRow();
+        for(const auto& n:s.interactions.nodes){ImGui::TableNextRow();ImGui::TableSetColumnIndex(0);ImGui::Text("%s",std::string(ui::name(n.kind)).c_str());ImGui::TextColored(kMuted,"%s",n.node_id.c_str());
+            ImGui::TableSetColumnIndex(1);ImGui::Text("%s",std::string(ui::name(n.state)).c_str());
+            ImGui::TableSetColumnIndex(2);ImGui::TextWrapped("%s",n.label.c_str());ImGui::TextColored(kMuted,"%s",n.summary.c_str());
+            ImGui::TableSetColumnIndex(3);ImGui::Text("%s r%llu",n.source.store.c_str(),static_cast<unsigned long long>(n.source.revision));ImGui::TextColored(kMuted,"%s",n.source.object_id.c_str());}
+        ImGui::EndTable();
+    }
+    ImGui::EndChild();
+}
+
 } // namespace
 
 void clear_imgui_artifact_textures() {
@@ -474,6 +492,7 @@ ImGuiConsoleAction render_scientific_console(const UiPresentationSnapshot& s,
         render_operations(s);
         ImGui::EndTabItem();
     }
+    if(ImGui::BeginTabItem("Interaction Graph")){render_interactions(s);ImGui::EndTabItem();}
     ImGui::EndTabBar();
     }
     ImGui::End();

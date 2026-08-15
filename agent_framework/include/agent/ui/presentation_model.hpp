@@ -4,6 +4,7 @@
 #include <agent/core/types.hpp>
 #include <agent/toolbus/toolbus.hpp>
 #include <agent/ui/phase4_operations.hpp>
+#include <agent/ui/interaction_graph.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -90,6 +91,9 @@ struct UiPresentationSnapshot {
     std::vector<UiToolActivity> tools;
     Phase4OperationsSnapshot operations;
     bool has_operations = false;
+    ui::InteractionSnapshot interactions;
+    bool has_interactions = false;
+    std::string selected_interaction_id;
 };
 
 class UiPresentationModel {
@@ -109,6 +113,8 @@ public:
     void add_system_notice(std::string message, bool error = false);
     void observe_tool(const ToolExecutionEvent& event);
     void observe_operations(const Phase4OperationsSnapshot& snapshot);
+    void observe_interactions(const ui::InteractionSnapshot& snapshot);
+    bool select_interaction(std::string_view node_id);
     void reset();
     void load_demo_state();
 

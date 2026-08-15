@@ -11,6 +11,7 @@
 #include <agent/core/types.hpp>
 #include <agent/ui/thread_safe_queue.hpp>
 #include <agent/ui/phase4_operations.hpp>
+#include <agent/ui/interaction_graph.hpp>
 
 #include <atomic>
 #include <cstdint>
@@ -261,6 +262,7 @@ public:
 
     /** Publish the canonical display-safe Phase 4 control-plane projection. */
     void publish_phase4_operations(const Phase4OperationsSnapshot& snapshot);
+    void publish_interactions(const ui::InteractionSnapshot& snapshot);
 
     /**
      * @brief WP2.U：终稿 JSON 分发到全部 handler（与 Sink 回调对齐）

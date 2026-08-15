@@ -21,6 +21,8 @@
 #include <agent/core/types.hpp>
 #include <agent/ui/ui_manager.hpp>
 #include <agent/ui/live_operations_projection.hpp>
+#include <agent/ui/interaction_source_adapters.hpp>
+#include <agent/ui/interaction_projection_store.hpp>
 #include <agent/agent/user_input_preprocessor.hpp>
 #include <agent/approval/executor.hpp>
 
@@ -328,14 +330,45 @@ int main(int argc, char** argv) {
     auto operations = std::make_shared<Phase4OperationsSnapshot>(
         std::move(operations_bootstrap.snapshot));
     auto operations_mutex = std::make_shared<std::mutex>();
+    auto interaction_context = std::make_shared<ui::InteractionProjectionContext>();
+    interaction_context->conversation_id="default";
+    interaction_context->turn_id=demo_state?"turn-demo-001":"turn-current";
+    interaction_context->user_message_id=demo_state?"message-demo-user-001":"message-current";
+    interaction_context->user_message_summary=demo_state
+        ? "分析 sin(x) 在 [0, 2π] 的极值，并给出可复核结果。" : "Current user request";
+    auto interaction_mutex = std::make_shared<std::mutex>();
+    auto interaction_store=std::make_shared<ui::SQLiteInteractionProjectionStore>(
+        (std::filesystem::path(phase4_state_dir_arg)/"interactions.sqlite3").string());
+    auto interaction_revision=std::make_shared<std::uint64_t>(0);
+    if(auto prior=interaction_store->snapshot(operations_tenant_arg,"default",ui::InteractionVisibility::Audit))
+        *interaction_revision=prior->revision;
+    auto persist_interactions=[interaction_store,interaction_revision,interaction_mutex](const ui::InteractionSnapshot& projected){
+        std::lock_guard<std::mutex> lock(*interaction_mutex);
+        auto nodes=projected.nodes;auto edges=projected.edges;
+        for(auto& node:nodes)node.revision=*interaction_revision+1;
+        for(auto& edge:edges)edge.revision=*interaction_revision+1;
+        ui::UiInteractionEvent event;event.event_id="interaction-update:"+std::to_string(*interaction_revision+1);
+        event.tenant_id=projected.tenant_id;event.conversation_id=projected.conversation_id;event.sequence=*interaction_revision+1;
+        event.event_type="projection.updated";event.visibility=ui::InteractionVisibility::User;
+        if(!projected.nodes.empty())event.primary_ref=projected.nodes.front().ref;else event.primary_ref.tenant_id=projected.tenant_id;
+        event.display={{"node_count",projected.nodes.size()},{"edge_count",projected.edges.size()}};
+        event.navigation_target={"interaction_graph",projected.nodes.empty()?"root":projected.nodes.front().node_id,*interaction_revision+1};
+        event.source={"interaction_assembler",event.event_id,*interaction_revision+1,projected.digest};event.timestamp=projected.updated_at;
+        const auto committed=interaction_store->commit({event,std::move(nodes),std::move(edges)},*interaction_revision);
+        if(!committed.ok())throw std::runtime_error("interaction projection commit failed: "+committed.error);
+        *interaction_revision=committed.revision;
+    };
     auto live_operations = std::make_shared<LiveOperationsProjection>(
         *operations, operations_store,
-        [&ui, operations, operations_mutex](const Phase4OperationsSnapshot& snapshot) {
+        [&ui, operations, operations_mutex, interaction_context, interaction_mutex,persist_interactions](const Phase4OperationsSnapshot& snapshot) {
             {
                 std::lock_guard<std::mutex> lock(*operations_mutex);
                 *operations = snapshot;
             }
             ui.publish_phase4_operations(snapshot);
+            ui::InteractionProjectionContext context;
+            { std::lock_guard<std::mutex> lock(*interaction_mutex); context=*interaction_context; }
+            auto projected=ui::project_interactions(snapshot,context);persist_interactions(projected);ui.publish_interactions(projected);
         });
     auto approval_store = std::make_shared<approval::SQLiteApprovalStore>(
         (std::filesystem::path(phase4_state_dir_arg) / "approval.sqlite3").string());
@@ -369,6 +402,13 @@ int main(int argc, char** argv) {
     auto executor = std::make_shared<tf::Executor>();
 
     auto run_line = [&](const std::string& line) {
+        {
+            std::lock_guard<std::mutex> lock(*interaction_mutex);
+            const auto ordinal=std::chrono::steady_clock::now().time_since_epoch().count();
+            interaction_context->turn_id="turn-"+std::to_string(ordinal);
+            interaction_context->user_message_id="message-"+std::to_string(ordinal);
+            interaction_context->user_message_summary=line;
+        }
         auto control = std::make_shared<TaskControl>();
         {
             std::lock_guard<std::mutex> lock(g_control_mutex);
@@ -428,6 +468,9 @@ int main(int argc, char** argv) {
         {
             std::lock_guard<std::mutex> lock(*operations_mutex);
             ui.publish_phase4_operations(*operations);
+            ui::InteractionProjectionContext context;
+            { std::lock_guard<std::mutex> interaction_lock(*interaction_mutex); context=*interaction_context; }
+            ui.publish_interactions(ui::project_interactions(*operations,context));
         }
         ui.dispatch_message("demo_user", json{{"content", "分析 sin(x) 在 [0, 2π] 的极值，并给出可复核结果。"}});
         ui.stream_thinking("default", "已完成符号分析与数值交叉验证；以下仅展示可公开的推理摘要。\n");
@@ -550,8 +593,41 @@ int main(int argc, char** argv) {
                 res.set_content(R"({"error":"request or action is not allowed"})", "application/json");
                 return;
             }
+            auto publish_administrative_change=[&]{
+                operations->snapshot_id+=".admin";operations->updated_at="2026-08-15T00:00:00Z";
+                std::string save_error;if(!operations_store||!operations_store->save(*operations,&save_error))throw std::runtime_error("cannot persist administrative approval projection: "+save_error);
+                ui.publish_phase4_operations(*operations);ui::InteractionProjectionContext context;
+                {std::lock_guard<std::mutex> interaction_lock(*interaction_mutex);context=*interaction_context;}
+                auto projected=ui::project_interactions(*operations,context);persist_interactions(projected);ui.publish_interactions(projected);
+            };
             approval::AuthenticatedPrincipal principal{reviewer_id, {"approver"},
                 "server-session:" + reviewer_id};
+            if(action=="delegate"){
+                approval::DelegationGrant grant;grant.grant_id=body.at("grant_id");grant.grantor_id=reviewer_id;grant.delegate_id=body.at("delegate_id");
+                grant.scopes.insert(persisted_request->scope);grant.roles={"approver"};grant.valid_from=body.value("valid_from",persisted_request->created_at);
+                grant.expires_at=body.value("expires_at",persisted_request->expires_at);grant.authority_attestation=principal.identity_attestation;
+                auto administrative=approval_actions->delegate(principal,{grant});if(!administrative.accepted){res.status=409;res.set_content(json{{"error",administrative.error_code},{"detail",administrative.error_message}}.dump(),"application/json");return;}
+                request->summary="Delegated by "+reviewer_id+" to "+grant.delegate_id;request->status=OperationsStatus::Warning;
+                publish_administrative_change();
+                res.status=202;res.set_content(json{{"accepted",true},{"delegation_digest",administrative.object_digest}}.dump(),"application/json");return;
+            }
+            if(action=="escalate"){
+                approval::EscalationRecord escalation;escalation.escalation_id=body.at("escalation_id");escalation.approval_id=request_id;
+                escalation.target_group=body.at("target_group");escalation.reason=body.value("reason","Escalated from accountable UI");escalation.created_at=body.value("created_at","2026-08-15T00:00:00Z");
+                auto administrative=approval_actions->escalate(principal,{escalation});if(!administrative.accepted){res.status=409;res.set_content(json{{"error",administrative.error_code},{"detail",administrative.error_message}}.dump(),"application/json");return;}
+                request->summary="Escalated to "+escalation.target_group;request->status=OperationsStatus::Warning;
+                publish_administrative_change();
+                res.status=202;res.set_content(json{{"accepted",true},{"escalation_digest",administrative.object_digest}}.dump(),"application/json");return;
+            }
+            if(action=="edit"){
+                auto revised=*persisted_request;revised.approval_id=body.at("new_request_id");revised.reason=body.value("reason",revised.reason);
+                revised.proposed_change=body.value("proposed_change",revised.proposed_change);revised.created_at=body.value("created_at","2026-08-15T00:00:00Z");
+                auto administrative=approval_actions->revise(principal,{request_id,approval::encode(*persisted_request).at("canonical_digest"),revised});
+                if(!administrative.accepted){res.status=409;res.set_content(json{{"error",administrative.error_code}}.dump(),"application/json");return;}
+                request->summary="Superseded by edited request "+revised.approval_id;request->status=OperationsStatus::Warning;
+                publish_administrative_change();
+                res.status=202;res.set_content(json{{"accepted",true},{"new_request_id",revised.approval_id},{"request_digest",administrative.object_digest}}.dump(),"application/json");return;
+            }
             approval::ApprovalActionIntent intent{request_id,
                 approval::encode(*persisted_request).at("canonical_digest"), action,
                 action == "request_remediation" ?
@@ -620,6 +696,27 @@ int main(int argc, char** argv) {
         res.set_header("Cache-Control", "no-store");
         res.set_content(Phase4OperationsProjection::to_json(*operations).dump(),
                         "application/json");
+    });
+    svr.Get("/ui/interactions/snapshot", [&](const httplib::Request&, httplib::Response& res) {
+        auto snapshot=interaction_store->snapshot(operations_tenant_arg,"default",ui::InteractionVisibility::User);
+        if(!snapshot){Phase4OperationsSnapshot operations_copy;ui::InteractionProjectionContext context;
+            {std::lock_guard<std::mutex> lock(*operations_mutex);operations_copy=*operations;}
+            {std::lock_guard<std::mutex> lock(*interaction_mutex);context=*interaction_context;}
+            auto projected=ui::project_interactions(operations_copy,context);persist_interactions(projected);
+            snapshot=interaction_store->snapshot(operations_tenant_arg,"default",ui::InteractionVisibility::User);}
+        if(!snapshot){res.status=404;res.set_content(R"({"error":"interaction projection unavailable"})","application/json");return;}
+        res.set_header("Cache-Control","no-store");res.set_content(ui::encode(*snapshot).dump(),"application/json");
+    });
+    svr.Get("/ui/interactions/events", [&](const httplib::Request& req, httplib::Response& res) {
+        std::uint64_t after=0;std::size_t limit=100;
+        try{if(req.has_param("after"))after=std::stoull(req.get_param_value("after"));if(req.has_param("limit"))limit=std::min<std::size_t>(500,std::stoull(req.get_param_value("limit")));}catch(...){res.status=400;res.set_content(R"({"error":"invalid replay cursor"})","application/json");return;}
+        json body=json::array();for(const auto&e:interaction_store->events(operations_tenant_arg,"default",after,limit,ui::InteractionVisibility::User))body.push_back(ui::encode(e));
+        res.set_header("Cache-Control","no-store");res.set_content(body.dump(),"application/json");
+    });
+    svr.Get(R"(/ui/interactions/node/(.+))", [&](const httplib::Request& req, httplib::Response& res) {
+        auto found=interaction_store->node(operations_tenant_arg,"default",req.matches[1].str(),ui::InteractionVisibility::User);
+        if(!found){res.status=404;res.set_content(R"({"error":"interaction object not found"})","application/json");return;}
+        res.set_header("Cache-Control","no-store");res.set_content(ui::encode(*found).dump(),"application/json");
     });
     svr.Get("/ui/bootstrap", [&](const httplib::Request&, httplib::Response& res) {
         const auto skills=example::skill_ui_status(deps.skills);

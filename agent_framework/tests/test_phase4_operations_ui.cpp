@@ -2,7 +2,9 @@
 #include <agent/ui/presentation_model.hpp>
 #include <agent/ui/tui_handler.hpp>
 #include <agent/ui/ui_manager.hpp>
+#include <agent/ui/interaction_source_adapters.hpp>
 
+#include <algorithm>
 #include <cassert>
 #include <memory>
 #include <sstream>
@@ -84,6 +86,23 @@ int main() {
     assert(sse.find("phase4_operations") != std::string::npos);
     assert(sse.find(expected.snapshot_id) != std::string::npos);
     assert(sse.find("raw_prompt") == std::string::npos);
+
+    const auto interactions=ui::project_interactions(expected,
+        {"conversation-test","turn-test","message-test","Original test question"});
+    manager.publish_interactions(interactions);
+    assert(cli_output.str().find("[interactions]") != std::string::npos);
+    assert(cli_output.str().find("orphan=0") != std::string::npos);
+    assert(web_ptr->try_pop_sse_chunk(sse));
+    assert(sse.find("interaction_snapshot") != std::string::npos);
+    assert(sse.find("message:message-test") != std::string::npos);
+    assert(sse.find("chain_of_thought") == std::string::npos);
+    const auto interaction_ui=tui_ptr->presentation_snapshot();
+    assert(interaction_ui.has_interactions);
+    assert(interaction_ui.interactions.digest==interactions.digest);
+    assert(!interaction_ui.selected_interaction_id.empty());
+    const auto approval_node=std::find_if(interactions.nodes.begin(),interactions.nodes.end(),[](const auto& n){return n.kind==ui::InteractionNodeKind::Approval;});
+    assert(approval_node!=interactions.nodes.end());assert(presentation->select_interaction(approval_node->node_id));
+    assert(presentation->snapshot().selected_interaction_id==approval_node->node_id);
 
     const std::string text = Phase4OperationsProjection::render_text(expected, 96);
     assert(text.find("HITL pending") != std::string::npos);

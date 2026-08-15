@@ -125,6 +125,23 @@ h1 { font-size: 19px; } h2 { font-size: 16px; }
 .thinking[hidden] { display: none; }
 .thinking summary { padding: 8px 11px; color: var(--muted); cursor: pointer; font-size: 12px; user-select: none; }
 .thinking-body { max-height: 260px; padding: 0 11px 11px; overflow: auto; color: var(--muted); font: 12px/1.62 "JetBrains Mono", "Noto Sans Mono", monospace; white-space: pre-wrap; }
+.turn[data-interactive="true"], .thinking summary, .agent-runtime-card, #ops-memory tr, .hitl-card { cursor: pointer; }
+.turn[data-interactive="true"]:hover, .agent-runtime-card:hover, #ops-memory tr:hover, .hitl-card:hover { background-color: rgba(57,197,213,.06); }
+.interaction-inspector { position: fixed; z-index: 30; inset: 58px 0 28px auto; width: min(520px, 94vw); padding: 18px; overflow: auto; border-left: 1px solid var(--line-strong); background: rgba(10,14,18,.98); box-shadow: -18px 0 48px rgba(0,0,0,.38); }
+.interaction-inspector[hidden] { display: none; }
+.inspector-head { display:flex; justify-content:space-between; gap:14px; align-items:flex-start; }
+.inspector-head h2 { margin:4px 0 14px; }
+.inspector-tabs { display:grid; grid-template-columns:repeat(5,1fr); gap:5px; margin-bottom:14px; }
+.inspector-tabs button { border:1px solid var(--line); border-radius:5px; padding:8px 5px; background:var(--surface); color:var(--muted); cursor:pointer; }
+.inspector-tabs button.selected { border-color:var(--accent); color:var(--text); background:rgba(57,197,213,.1); }
+.inspector-provenance { padding:10px; border:1px solid var(--line); border-radius:5px; color:var(--muted); font:11px/1.5 "JetBrains Mono", monospace; overflow-wrap:anywhere; }
+.inspector-content { display:grid; gap:10px; margin:14px 0; }
+.inspector-card { padding:12px; border:1px solid var(--line); border-radius:7px; background:var(--surface); }
+.inspector-card.selected { border-color:var(--accent); }
+.inspector-card h3 { margin:0 0 6px; font-size:14px; }
+.inspector-card p { margin:4px 0; color:var(--muted); line-height:1.5; }
+.inspector-card pre { max-height:260px; overflow:auto; white-space:pre-wrap; color:#cbd6df; font-size:11px; }
+.inspector-actions { display:flex; gap:8px; position:sticky; bottom:0; padding:12px 0 2px; background:rgba(10,14,18,.96); }
 .math-inline { color: var(--text); }
 .math-block { max-width: 100%; margin: 1em 0; padding: 10px; overflow-x: auto; border-radius: 5px; background: rgba(255,255,255,.018); text-align: center; }
 .mermaid { max-width: 100%; margin: 1em 0; padding: 14px; overflow: auto; border: 1px solid var(--line); border-radius: 6px; background: #0f141a; text-align: center; }

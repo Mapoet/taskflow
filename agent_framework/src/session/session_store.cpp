@@ -177,6 +177,13 @@ SessionSnapshot InMemorySessionStore::load_or_create(std::string_view id) {
     return it->second;
 }
 
+std::optional<SessionSnapshot> InMemorySessionStore::load_current(std::string_view id) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto found = sessions_.find(std::string(id));
+    if (found == sessions_.end()) return std::nullopt;
+    return found->second;
+}
+
 SessionCommitResult InMemorySessionStore::commit(const SessionSnapshot& next, std::uint64_t expected) {
     std::lock_guard<std::mutex> lock(mutex_);
     auto [it, inserted] = sessions_.try_emplace(next.session_id);
@@ -263,6 +270,12 @@ SessionSnapshot SQLiteSessionStore::load_or_create(std::string_view id) {
     }
     sqlite3_finalize(st);
     SessionSnapshot fresh; fresh.session_id = std::string(id); return fresh;
+}
+
+std::optional<SessionSnapshot> SQLiteSessionStore::load_current(std::string_view id) {
+    auto snapshot = load_or_create(id);
+    if (snapshot.revision == 0) return std::nullopt;
+    return snapshot;
 }
 
 SessionCommitResult SQLiteSessionStore::commit(const SessionSnapshot& next, std::uint64_t expected) {

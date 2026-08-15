@@ -155,6 +155,18 @@ Elements operations_rows(const UiPresentationSnapshot& snapshot) {
     for (const auto& request : ops.hitl)
         rows.push_back(paragraph("HITL " + request.kind + " · " + request.summary + " · actions " +
                                  std::to_string(request.allowed_actions.size())) | bold | color(Color::YellowLight));
+    rows.push_back(separator());
+    rows.push_back(text("INTERACTION GRAPH") | bold | color(kAccent));
+    if(!snapshot.has_interactions) rows.push_back(text("No canonical interaction snapshot published.")|color(kMuted));
+    else {
+        rows.push_back(text("revision "+std::to_string(snapshot.interactions.revision)+" · "+std::to_string(snapshot.interactions.nodes.size())+" objects · "+std::to_string(snapshot.interactions.edges.size())+" relations")|color(kMuted));
+        for(const auto& node:snapshot.interactions.nodes){
+            const bool selected=node.node_id==snapshot.selected_interaction_id;
+            auto line=paragraph(std::string(selected?"> ":"  ")+std::string(ui::name(node.kind))+" · "+node.label+" · "+std::string(ui::name(node.state)));
+            if(selected)line=line|bold;rows.push_back(std::move(line));
+            if(selected)rows.push_back(paragraph("    "+node.summary+" · source "+node.source.store+" r"+std::to_string(node.source.revision))|color(kMuted));
+        }
+    }
     return rows;
 }
 

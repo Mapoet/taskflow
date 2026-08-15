@@ -64,6 +64,10 @@ void UIManager::publish_phase4_operations(const Phase4OperationsSnapshot& snapsh
     dispatch_message(std::string(Phase4OperationsProjection::event_type), canonical);
 }
 
+void UIManager::publish_interactions(const ui::InteractionSnapshot& snapshot) {
+    dispatch_message(std::string(ui::interaction_snapshot_event_type), ui::encode(snapshot));
+}
+
 void UIManager::dispatch_final_result(const json& result) {
     std::lock_guard<std::mutex> lock(handlers_mutex_);
     for (auto& h : handlers_) {
