@@ -17,6 +17,13 @@ namespace agent_framework::agent_template
                 return root;
             for (const auto &[key, m] : n.input_mapping.items())
             {
+                if (m.is_object() && m.contains("value"))
+                {
+                    if (m.contains("from") || m.contains("path"))
+                        throw std::runtime_error("literal input mapping cannot also specify from/path: " + key);
+                    out[key] = m.at("value");
+                    continue;
+                }
                 const auto from = m.value("from", "$input"), path = m.value("path", "");
                 const nlohmann::json *source = &root;
                 if (from != "$input")
@@ -108,7 +115,17 @@ namespace agent_framework::agent_template
                     out.error_message = to_string(node.runner);
                     return out;
                 }
-                auto arguments = map_input(node, input, out.node_outputs);
+                nlohmann::json arguments;
+                try
+                {
+                    arguments = map_input(node, input, out.node_outputs);
+                }
+                catch (const std::exception &error)
+                {
+                    out.error_code = "input_mapping_failed";
+                    out.error_message = error.what();
+                    return out;
+                }
                 auto node_session=narrow(s,node);
                 futures.push_back(std::async(std::launch::async, [=, &i]
                                              {RunnerRequest r{i,node_session,node,arguments,"",cancel};RunnerResult result;

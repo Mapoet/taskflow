@@ -71,6 +71,16 @@ void test_stream_isolated_by_session_and_channel() {
     ui.stream_token("a", "answer");
     ui.stream_thinking("a", "summary");
 
+    auto cursor_a=pa->subscribe_sse();
+    auto cursor_b=pa->subscribe_sse();
+    std::string replay_a,replay_b;
+    assert(pa->try_read_sse(cursor_a,replay_a)&&pa->try_read_sse(cursor_b,replay_b));
+    assert(replay_a==replay_b&&replay_a.find("id: 1")!=std::string::npos);
+    assert(pa->try_read_sse(cursor_a,replay_a)&&pa->try_read_sse(cursor_b,replay_b));
+    assert(replay_a==replay_b&&replay_a.find("id: 2")!=std::string::npos);
+    auto reconnect=pa->subscribe_sse(1);assert(pa->try_read_sse(reconnect,replay_a));
+    assert(replay_a.find("id: 2")!=std::string::npos);
+
     std::string chunk;
     assert(pa->try_pop_sse_chunk(chunk));
     assert(chunk.find("\"kind\":\"token\"") != std::string::npos);

@@ -13,6 +13,7 @@
 #include <agent/ui/phase4_operations.hpp>
 
 #include <atomic>
+#include <cstdint>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -182,6 +183,11 @@ public:
      */
     bool try_pop_sse_chunk(std::string& out);
 
+    /** Create a replay cursor. Zero starts at the oldest retained event. */
+    std::uint64_t subscribe_sse(std::uint64_t last_event_id = 0) const;
+    /** Read without consuming events needed by other subscribers. */
+    bool try_read_sse(std::uint64_t& cursor, std::string& out) const;
+
     /**
      * @brief 发送 SSE 事件
      * @param event_type 事件类型
@@ -200,8 +206,10 @@ private:
     std::shared_ptr<WebConnectionInfo> connection_;
     bool active_ = true;
     std::mutex connection_mutex_;
-    std::mutex sse_mutex_;
+    mutable std::mutex sse_mutex_;
     std::deque<std::string> sse_chunks_;
+    std::deque<std::pair<std::uint64_t, std::string>> sse_replay_;
+    std::uint64_t next_sse_event_id_{1};
 
     /**
      * @brief 检查连接状态

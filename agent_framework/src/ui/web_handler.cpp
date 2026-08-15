@@ -5,6 +5,7 @@
 
 #include <agent/ui/ui_manager.hpp>
 
+#include <algorithm>
 #include <utility>
 
 namespace agent_framework {
@@ -83,7 +84,12 @@ bool WebHandler::is_active() const {
 
 void WebHandler::send_sse_event(const std::string& /*event_type*/, const std::string& json_payload) {
     std::lock_guard<std::mutex> lock(sse_mutex_);
-    sse_chunks_.push_back(std::string("data: ") + json_payload + "\n\n");
+    const auto id=next_sse_event_id_++;
+    auto chunk=std::string("id: ")+std::to_string(id)+"\ndata: "+json_payload+"\n\n";
+    sse_chunks_.push_back(chunk);
+    sse_replay_.emplace_back(id,std::move(chunk));
+    constexpr std::size_t kReplayLimit=4096;
+    while(sse_replay_.size()>kReplayLimit)sse_replay_.pop_front();
 }
 
 bool WebHandler::try_pop_sse_chunk(std::string& out) {
@@ -94,6 +100,20 @@ bool WebHandler::try_pop_sse_chunk(std::string& out) {
     out = std::move(sse_chunks_.front());
     sse_chunks_.pop_front();
     return true;
+}
+
+std::uint64_t WebHandler::subscribe_sse(std::uint64_t last_event_id) const {
+    std::lock_guard<std::mutex> lock(sse_mutex_);
+    if(last_event_id)return last_event_id+1;
+    return sse_replay_.empty()?next_sse_event_id_:sse_replay_.front().first;
+}
+
+bool WebHandler::try_read_sse(std::uint64_t& cursor,std::string& out) const {
+    std::lock_guard<std::mutex> lock(sse_mutex_);
+    if(!sse_replay_.empty()&&cursor<sse_replay_.front().first)cursor=sse_replay_.front().first;
+    const auto it=std::find_if(sse_replay_.begin(),sse_replay_.end(),[&](const auto& item){return item.first>=cursor;});
+    if(it==sse_replay_.end())return false;
+    out=it->second;cursor=it->first+1;return true;
 }
 
 void WebHandler::send_ws_message(const json& /*message*/) {}

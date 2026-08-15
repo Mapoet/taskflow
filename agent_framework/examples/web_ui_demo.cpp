@@ -52,9 +52,6 @@ std::atomic<bool> g_agent_busy{false};
 std::mutex g_control_mutex;
 std::shared_ptr<TaskControl> g_active_control;
 
-std::mutex g_sse_slot_mutex;
-bool g_sse_slot_taken = false;
-
 ToolMeta make_add_meta() {
     ToolMeta m;
     m.name = "add";
@@ -633,7 +630,9 @@ int main(int argc, char** argv) {
             {"composition",runtime.composition_report}}.dump(),"application/json");
     });
 
-    svr.Get("/ui/sse", [web_h, &emit_bootstrap](const httplib::Request& req, httplib::Response& res) {
+    // Seed the retained stream once. New clients replay it independently and reconnect with Last-Event-ID.
+    emit_bootstrap();
+    svr.Get("/ui/sse", [web_h](const httplib::Request& req, httplib::Response& res) {
         std::string session = req.get_param_value("session");
         if (session.empty()) {
             session = "default";
@@ -643,28 +642,20 @@ int main(int argc, char** argv) {
             res.set_content(R"({"error":"unknown session"})", "application/json");
             return;
         }
-        {
-            std::lock_guard<std::mutex> lk(g_sse_slot_mutex);
-            if (g_sse_slot_taken) {
-                res.status = 503;
-                res.set_content(R"({"error":"sse slot busy; use one browser tab"})",
-                               "application/json");
-                return;
-            }
-            g_sse_slot_taken = true;
-        }
-        emit_bootstrap();
+        std::uint64_t last_event_id=0;
+        if(const auto value=req.get_header_value("Last-Event-ID");!value.empty())try{last_event_id=std::stoull(value);}catch(...){}
+        const auto initial_cursor=web_h->subscribe_sse(last_event_id);
         res.status = 200;
         res.set_header("Cache-Control", "no-cache");
         res.set_header("Connection", "keep-alive");
         res.set_header("X-Accel-Buffering", "no");
         res.set_chunked_content_provider(
             "text/event-stream",
-            [web_h, last_heartbeat = std::chrono::steady_clock::now()]
+            [web_h, cursor=initial_cursor, last_heartbeat = std::chrono::steady_clock::now()]
             (std::size_t /*offset*/, httplib::DataSink& sink) mutable {
                 if (!sink.is_writable()) return false;
                 std::string chunk;
-                if (web_h->try_pop_sse_chunk(chunk)) {
+                if (web_h->try_read_sse(cursor,chunk)) {
                     sink.write(chunk.data(), chunk.size());
                 } else {
                     const auto now = std::chrono::steady_clock::now();
@@ -677,11 +668,7 @@ int main(int argc, char** argv) {
                     }
                 }
                 return sink.is_writable();
-            },
-            [] {
-                std::lock_guard<std::mutex> lk(g_sse_slot_mutex);
-                g_sse_slot_taken = false;
-            });
+            }, [] {});
     });
 
     // Artifact files are served only from the canonical AGENT_FS_ROOT and only

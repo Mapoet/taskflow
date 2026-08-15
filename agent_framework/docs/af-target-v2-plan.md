@@ -270,6 +270,17 @@
   - 回归测试：现有 Skill、ToolBus、Web、Harness、LTW、Phase 4 测试。
   - UI 如发生变化，启动真实 Web/TUI/ImGui 环境并提交真实截图验收。
 
+  AT8–AT9 closure（2026-08-15）：最终认证口径与逐项证据见
+  `docs/at8-at9-certification.md`。新增单场景 `at8_portable_e2e`，以未经改写且固定摘要的
+  `.claude/skills/portable-build/SKILL.md` 连续驱动 canonical Write/Edit/Bash/CMake/Make/Read/
+  WebFetch，durable approval 暂停后重开 registry 与 ApprovalStore，按完整性快照恢复且前序副作用
+  计数保持 1，最后由 `TaskClosureController` 返回 `CompletedVerified`。Tool runner 同步修复结构化
+  error、timeout 和非零进程退出被误报成功的问题。Web UI SSE 已从破坏性单消费者队列升级为带事件 ID、
+  4096 条有界 replay、独立订阅游标和 Last-Event-ID 恢复的多客户端投影；真实双客户端、重连与页面截图
+  均通过。AT9 安全/生命周期/观测专项 17/17、最终 UI/AgentTemplate/AT8 回归 6/6 通过。
+  因此 AT0–AT9 的代码库内、确定性认证项已闭合；外部 PostgreSQL 多节点 chaos、公共网络依赖和真实生产
+  provider/KMS 仍明确属于部署环境认证，不得由本轮本机证据替代。
+
   建议把本轮重新定义为“Portable Tools & Skills Closure”，不要继续沿用旧 AT0→AT9 已完成的表述，以免与原
   AgentTemplate 阶段混淆。可命名为 AT-V2-PT0 → PT9，但若你希望保持原编号，也可以直接修订现有计划。
 

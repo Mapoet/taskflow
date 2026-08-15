@@ -42,6 +42,11 @@ int main()
     assert(result.receipts.size() == 3);
     assert(result.events.size() == 12);
     assert(result.output.at("executed_by") == "mcp");
+    auto literals=p;literals.nodes[0].input_mapping={{"value",{{"value",41}}},{"label",{{"value","fixed"}}}};
+    auto literal_result=compiler.execute(literals,invocation,session,{{"value",1}});
+    assert(literal_result.ok&&literal_result.node_outputs.at("a").at("value")==42&&literal_result.node_outputs.at("a").at("label")=="fixed");
+    auto ambiguous=literals;ambiguous.nodes[0].input_mapping["value"]={{"value",41},{"from","$input"}};
+    assert(SkillWorkflowCompiler(registry).execute(ambiguous,invocation,session,{{"value",1}}).error_code=="input_mapping_failed");
     auto missing = p;
     missing.nodes[1].runner = SkillRunnerKind::HumanApproval;
     auto limited = std::make_shared<SkillRunnerRegistry>();
@@ -69,6 +74,11 @@ int main()
     tool_request.session.effective_permissions.tools={"Echo"};tool_request.input={{"tool","Echo"},{"arguments",{{"value",7}}}};
     auto tool_result=production_runners->resolve(SkillRunnerKind::LocalCapability)->run(tool_request);
     assert(tool_result.ok&&tool_result.output.at("value")==7&&tool_result.events.size()==4);
+    ToolMeta failed_meta;failed_meta.name="FailedProcess";failed_meta.schema={{"type","object"}};
+    bus->register_local_tool("FailedProcess",[](const json&){return json{{"exit_code",2},{"stderr","failed"}};},failed_meta);
+    tool_request.session.effective_permissions.tools={"FailedProcess"};tool_request.input={{"tool","FailedProcess"},{"arguments",json::object()}};
+    auto failed_process=production_runners->resolve(SkillRunnerKind::LocalCapability)->run(tool_request);
+    assert(!failed_process.ok&&failed_process.error_code=="tool_exit_nonzero"&&failed_process.receipt.terminal_state==RunnerLifecycleState::Failed);
     auto child=std::make_shared<LocalChildTaskBackend>([](const ChildTaskRequest&r){ChildTaskResult x;x.status=ChildTaskStatus::Completed;x.child_id=r.child_id;x.run_id=r.run_id;x.outputs={{"task_completion_verified",true},{"completion_authority","task_closure_controller"}};return x;});
     auto approval_path=(std::filesystem::temp_directory_path()/"agent-template-approval.sqlite3").string();std::filesystem::remove(approval_path);
     approval::SQLiteApprovalStore approval_store(approval_path);
