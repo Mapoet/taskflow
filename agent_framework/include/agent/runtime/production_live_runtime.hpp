@@ -2,6 +2,7 @@
 
 #include <memory>
 #include <mutex>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -33,6 +34,9 @@ struct ProductionRuntimeResources {
     std::vector<std::shared_ptr<void>> lifetime_anchors;
     conversation::TaskPlanningPolicy planning_policy;
     recovery::SQLiteTaskCoordinationJournal* task_coordination_journal{nullptr};
+    std::function<void(const recovery::CorrelatedStateEvent&,
+                       const recovery::TaskCoordinationDecision&)>
+        coordination_observer;
 };
 
 class ProductionLiveRuntime;
@@ -54,6 +58,9 @@ public:
     std::shared_ptr<conversation::TaskControlService> task_control_service() const noexcept {
         return task_control_service_;
     }
+    void set_coordination_observer(
+        std::function<void(const recovery::CorrelatedStateEvent&,
+                           const recovery::TaskCoordinationDecision&)> observer);
     const harness::ProductionBuildReport& report() const noexcept { return report_; }
 
 private:

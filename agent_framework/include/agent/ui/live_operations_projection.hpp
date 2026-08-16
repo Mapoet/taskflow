@@ -10,6 +10,7 @@
 #include "agent/tool_runtime/types.hpp"
 #include "agent/tool_runtime/event_stream.hpp"
 #include "agent/ui/store_backed_operations.hpp"
+#include "agent/recovery/task_state_coordinator.hpp"
 
 namespace agent_framework {
 
@@ -43,6 +44,10 @@ public:
     void observe_invocation(const tool_runtime::InvocationEvent& event);
     /** Project the unified conversation/harness event stream into live Operations. */
     void observe_runtime(const conversation::RuntimeEventEnvelope& event);
+    /** Apply the authoritative correlated Task lifecycle decision. */
+    void observe_task_coordination(
+        const recovery::CorrelatedStateEvent& event,
+        const recovery::TaskCoordinationDecision& decision);
     /** Drain replay/live events from the canonical subscription until timeout or terminal status. */
     std::size_t consume_invocations(tool_runtime::InvocationEventSubscription& subscription,
                                     std::chrono::milliseconds timeout,

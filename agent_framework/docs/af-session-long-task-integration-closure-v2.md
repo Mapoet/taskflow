@@ -219,8 +219,11 @@ bootstrap now routes status through this control plane before TaskOrchestrator, 
 status query from becoming a requirement revision. Five-demo compilation covers the shared
 integration. Task planning now persists a revision-bound ContextProjection manifest containing
 the immutable TaskContract, approved plan, cognition evidence and task understanding, and binds
-its digest plus the typed AcceptanceContract into the durable production task context. Dynamic
-invocation/approval/artifact projection into every later LLM call remains open.
+its digest plus the typed AcceptanceContract into the durable production task context. Every
+subsequent production Harness LLM stage now derives a fresh context digest from the base
+projection plus checkpoint revision, approval, artifact, report, Judge, findings and effect
+settlement state. `RoleRuntime` binds that digest into the durable input digest and rejects a
+production invocation that declares the projection mandatory but omits it.
 
 **Files:**
 
@@ -239,8 +242,10 @@ invocation/approval/artifact projection into every later LLM call remains open.
 - [x] Test that status/output are read-only and create no Task requirement or execution RunLink;
   the UI-facing status response may still have its own Conversation control Turn.
 - [ ] Test steering during model, tool, approval and external wait boundaries.
-- [ ] Externalize oversized results and persist bounded typed references.
-- [ ] Compact twice and compare mandatory-state digest before/after.
+- [x] Externalize oversized results through IncrementalResultStore/ObjectStore and expose only
+  bounded typed chunk/manifest references in the LLM/UI view.
+- [x] Compact twice and compare mandatory-state digest before/after; all mandatory projection
+  kinds are now non-truncatable rather than a hard-coded contract/policy/citation subset.
 - [ ] Test disconnect/reconnect, cancellation propagation and unknown-effect reconciliation.
 
 ## AF-SLTR6 — Unified Operations and UI
@@ -262,11 +267,27 @@ invocation/approval/artifact projection into every later LLM call remains open.
 - One revisioned `OperationsSnapshot` exposes Session/Task/Run/Turn/Plan/Invocation/criteria/partial/artifact/approval/finding/remediation/closure.
 - Four renderers consume the same snapshot digest and action policy.
 
-- [ ] Add snapshot parity and out-of-order replay tests.
-- [ ] Display response, pipeline and verified completion as distinct labels.
+- [x] Add snapshot parity and out-of-order replay tests.
+- [x] Display response, pipeline and verified completion as distinct labels.
 - [ ] Add task commands with identity/policy authorization; disable impossible actions.
-- [ ] Verify live observation update, reconnect replay and restart monotonicity.
-- [ ] Run all four interfaces and capture real Web/TUI/ImGui screenshots.
+- [x] Verify live observation update, reconnect replay and restart monotonicity.
+- [x] Run all four interfaces and capture real Web/TUI/ImGui screenshots.
+
+**Implementation evidence (2026-08-17):** `LiveOperationsProjection` now consumes
+the authoritative `TaskStateCoordinator` decision through a runtime-safe observer
+bound by Web, TUI, ImGui and CLI. Conversation `model_stop` events update only the
+response-delivery axis and can no longer revoke a previously committed
+`TaskClosureController` decision. The canonical additive snapshot exposes
+`response_delivery_state`, `pipeline_state` and semantic `task_closure_state` as
+separate values; all four renderers use that contract. The release-mode test proves
+that a late delivered response preserves `CompletedVerified`, restart replay is
+monotonic, and stale task/Harness revisions are ignored. Actual runtime evidence:
+`docs/assets/ui/sltr6/web-operations.png`,
+`docs/assets/ui/sltr6/tui-operations.png`, and
+`docs/assets/ui/sltr6/imgui-operations.png`; CLI was executed against the same durable
+Web Operations database and rendered the same three axes. TUI content is complete,
+but a short terminal may place the top summary above the initial visible scroll
+region; this is a presentation refinement, not a state-projection loss.
 
 ## AF-SLTR7 — Test infrastructure and certification
 
@@ -278,6 +299,13 @@ complete `phase4-offline` certification passed 98/98 tests; evidence:
 `build-ui/agent_framework/certification/af-sltr-phase4-offline-20260816T150834Z.xml`.
 The focused `phase4-long-task` certification passed 8/8; evidence:
 `build-ui/agent_framework/certification/af-sltr-phase4-long-task-20260816T150532Z.xml`.
+After SLTR6 authority-ordering changes, all 98/98 tests passed again in the local
+ProcessLive-capable environment; evidence:
+`build-ui/agent_framework/certification/af-sltr-phase4-offline-20260816T160800Z.xml`.
+The restricted filesystem/network sandbox run passed 96/98 and rejected localhost
+listener creation for the two remote-queue tests; both then passed outside that
+network sandbox (2/2). This environmental distinction is retained rather than
+rewriting the first run as Passed.
 
 **Files:**
 
@@ -309,12 +337,18 @@ The focused `phase4-long-task` certification passed 8/8; evidence:
 - Modify: `docs/guides/phase-4-status.md`
 - Create: `docs/evidence/af-sltr-traceability.md`
 
-- [ ] Requery current SQLite stores and record immutable counts/time/revision scope.
-- [ ] Map every requirement to source, test, runtime evidence and certification cell.
-- [ ] Remove or correct completion statements contradicted by runtime evidence.
-- [ ] Record Offline/ProcessLive/ProviderLive separately.
-- [ ] Run `rg` checks for stale percentages/claims and `git diff --check`.
+- [x] Requery current SQLite stores and record immutable counts/time/revision scope.
+- [x] Map every requirement to source, test, runtime evidence and certification cell.
+- [x] Remove or correct completion statements contradicted by runtime evidence.
+- [x] Record Offline/ProcessLive/ProviderLive separately.
+- [x] Run `rg` checks for stale percentages/claims and `git diff --check`.
 - [ ] Perform final requirement-by-requirement completion audit; keep Phase/goal open for any missing mandatory evidence.
+
+**Audit evidence (2026-08-17):**
+`docs/evidence/af-sltr-traceability.md` binds current SQLite counts and revisions
+to database SHA-256 values, maps all ten Golden Tasks, records the 98/98 JUnit,
+and separates Offline, localhost/ProcessLive and ProviderLive cells. Historical
+running rows were retained as evidence rather than mutated or reclassified.
 
 ## Continuous execution gate
 

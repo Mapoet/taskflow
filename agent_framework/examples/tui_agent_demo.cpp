@@ -313,6 +313,15 @@ int tui_agent_demo_main(int argc, char** argv) {
         [presentation](const Phase4OperationsSnapshot& snapshot) {
             presentation->observe_operations(snapshot);
         });
+    if(runtime.production_runtime) {
+        std::weak_ptr<LiveOperationsProjection> weak_operations = operations;
+        runtime.production_runtime->set_coordination_observer(
+            [weak_operations](const recovery::CorrelatedStateEvent& event,
+                              const recovery::TaskCoordinationDecision& decision) {
+                if(auto projection = weak_operations.lock())
+                    projection->observe_task_coordination(event, decision);
+            });
+    }
     for (const auto& diagnostic : mcp_boot.diagnostics)
         presentation->add_system_notice("MCP unavailable: " + diagnostic, true);
     for (const auto& service : mcp_boot.skipped_mcp_services)

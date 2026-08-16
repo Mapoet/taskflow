@@ -23,5 +23,25 @@ int main(){using namespace agent_framework;using namespace conversation;
  turn.turn_id="turn-3";turn.run_id="run-3";
  auto suspended=commands.execute({TaskCommandKind::Suspend,turn});assert(suspended.ok);
  assert(tasks.load(turn.identity,turn.task_id)->state==TaskLifecycleState::Suspended);
+ TaskCommandPolicy policy;TaskCommandService secured(tasks,nullptr,&policy);
+ TaskCommandPrincipal principal{"operator",turn.identity,{"task:read","task:write","task:control"},true};
+ TaskCommandRequest secured_status{TaskCommandKind::Status,turn};secured_status.principal=principal;
+ auto authorized_status=secured.execute(secured_status);assert(authorized_status.ok);
+ assert(authorized_status.payload["actions"].is_array());
+ auto cross=principal;cross.identity.tenant_id="other";secured_status.principal=cross;
+ assert(secured.execute(secured_status).error=="task_command_cross_tenant_forbidden");
+ auto read_only=principal;read_only.scopes={"task:read"};
+ TaskCommandRequest forbidden{TaskCommandKind::Cancel,turn};forbidden.principal=read_only;
+ assert(secured.execute(forbidden).error=="task_command_scope_forbidden:task:control");
+ TaskCommandRequest stale{TaskCommandKind::Continue,turn};stale.principal=principal;
+ stale.expected_task_revision=1;assert(secured.execute(stale).error=="task_command_stale_revision");
+ auto current=*tasks.load(turn.identity,turn.task_id);
+ assert(tasks.transition(turn.identity,turn.task_id,current.revision,
+     TaskLifecycleState::Closed,"completed_verified").ok);
+ TaskCommandRequest terminal_continue{TaskCommandKind::Continue,turn};
+ terminal_continue.principal=principal;
+ assert(secured.execute(terminal_continue).error=="task_command_not_allowed_in_state:closed");
+ auto final_status=secured.execute(secured_status={TaskCommandKind::Status,turn});
+ assert(final_status.error=="task_command_authentication_required");
  std::filesystem::remove_all(root,ec);
 }

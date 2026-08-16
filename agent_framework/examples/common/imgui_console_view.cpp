@@ -339,7 +339,9 @@ void render_operations(const UiPresentationSnapshot& s) {
         static_cast<unsigned long long>(ops.plan_revision), ops.updated_at.c_str());
     ImGui::TextWrapped("%s", ops.summary.c_str());
     ImGui::TextColored(ops.task_completion_verified ? kSuccess : operations_color(OperationsStatus::Warning),
-                       "%s", ops.task_completion_verified ? "VERIFIED" : "UNVERIFIED");
+                       "RESPONSE %s  /  PIPELINE %s  /  %s",
+                       ops.response_delivery_state.c_str(), ops.pipeline_state.c_str(),
+                       ops.task_completion_verified ? "VERIFIED" : "UNVERIFIED");
     ImGui::SameLine();
     ImGui::TextColored(kMuted, "closure %s · authority %s · criteria %llu/%llu · progress %lld · stagnant %llu",
         ops.task_closure_state.c_str(), ops.completion_authority.c_str(),

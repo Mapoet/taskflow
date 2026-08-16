@@ -1,3 +1,6 @@
+#ifdef NDEBUG
+#undef NDEBUG
+#endif
 #include <agent/conversation/conversation_engine.hpp>
 #include <agent/conversation/production_bridge.hpp>
 #include <agent/conversation/context_projection.hpp>
@@ -50,6 +53,8 @@ int main()
         {"citation", "cas://citation", "sha256:x", "source", "", 50, true}};
     auto projected = ContextProjector::build(projection);
     assert(projected && !projected->digest.empty());
+    const auto mandatory_before = ContextProjector::mandatory_state_digest(*projected);
+    assert(!mandatory_before.empty());
     CompactBoundaryRecord boundary;
     boundary.identity = projection.identity;
     boundary.turn_id = "turn";
@@ -58,6 +63,13 @@ int main()
     boundary.pre_tokens = 1000;
     boundary.post_tokens = 400;
     assert(ContextProjector::validate_boundary(*projected, boundary));
+    CompactBoundaryRecord second_boundary = boundary;
+    second_boundary.boundary_id = "compact-2";
+    second_boundary.revision = 2;
+    second_boundary.pre_tokens = 400;
+    second_boundary.post_tokens = 200;
+    assert(ContextProjector::validate_boundary(*projected, second_boundary));
+    assert(ContextProjector::mandatory_state_digest(*projected) == mandatory_before);
     projected->segments[0].truncation_reason = "budget";
     assert(!ContextProjector::validate_boundary(*projected, boundary));
     {

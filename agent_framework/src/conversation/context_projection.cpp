@@ -10,6 +10,10 @@ std::optional<ContextProjectionManifest> ContextProjector::build(ContextProjecti
 bool ContextProjector::validate_boundary(const ContextProjectionManifest&before,const CompactBoundaryRecord&b,std::string*e){
  if(b.identity.tenant_id!=before.identity.tenant_id||b.identity.conversation_id!=before.identity.conversation_id||b.turn_id!=before.turn_id||b.revision==0||b.summary_digest.empty()){if(e)*e="compact_boundary_binding_mismatch";return false;}
  if(b.post_tokens>b.pre_tokens){if(e)*e="compact_boundary_token_growth";return false;}
- for(const auto&s:before.segments)if(s.mandatory&&(s.kind=="contract"||s.kind=="policy"||s.kind=="citation")&&!s.truncation_reason.empty()){if(e)*e="mandatory_context_segment_truncated";return false;}
+ for(const auto&s:before.segments)if(s.mandatory&&!s.truncation_reason.empty()){if(e)*e="mandatory_context_segment_truncated";return false;}
  return true;
+}
+std::string ContextProjector::mandatory_state_digest(const ContextProjectionManifest&v){
+ nlohmann::json s=nlohmann::json::array();for(const auto&x:v.segments)if(x.mandatory)s.push_back({{"kind",x.kind},{"reference",x.reference},{"digest",x.digest},{"authority",x.authority}});
+ return contracts::canonical_digest({{"schema","agent.mandatory_context_state/v1"},{"tenant_id",v.identity.tenant_id},{"conversation_id",v.identity.conversation_id},{"profile_revision_digest",v.profile_revision_digest},{"prompt_revision_digest",v.prompt_revision_digest},{"segments",std::move(s)}}).value_or("");
 }}

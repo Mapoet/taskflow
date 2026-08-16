@@ -28,6 +28,35 @@ std::vector<std::string> invocation_ids(const Artifacts& artifacts) {
 std::string digest(const nlohmann::json& value) {
     return contracts::canonical_digest(value).value_or("");
 }
+
+void bind_dynamic_context(contracts::ContractMetadata& metadata,
+                          const HarnessCheckpoint& checkpoint) {
+    if(!checkpoint.metadata.extensions.value(
+           "context_projection_required", false)) return;
+    const auto base = checkpoint.metadata.extensions.value(
+        "context_projection_digest", std::string{});
+    nlohmann::json effects = nlohmann::json::array();
+    for(const auto& effect : checkpoint.outbox)
+        effects.push_back({{"effect_id", effect.effect_id},
+                           {"state", outbox_state_name(effect.state)},
+                           {"receipt_digest", effect.receipt_digest}});
+    const auto dynamic = contracts::canonical_digest({
+        {"schema", "agent.dynamic_context_projection/v1"},
+        {"base_projection_digest", base},
+        {"harness_id", checkpoint.harness_id},
+        {"harness_revision", checkpoint.revision},
+        {"plan_digest", checkpoint.pins.plan_digest},
+        {"approval_decision_id", checkpoint.pins.approval_decision_id},
+        {"artifact_manifest_digest", checkpoint.pins.artifact_manifest_digest},
+        {"acceptance_report_digest", checkpoint.pins.acceptance_report_digest},
+        {"judge_report_digest", checkpoint.pins.judge_report_digest},
+        {"unresolved_findings", checkpoint.unresolved_findings},
+        {"effects", std::move(effects)}}).value_or("");
+    metadata.extensions["context_projection_required"] = true;
+    metadata.extensions["context_projection_base_digest"] = base;
+    metadata.extensions["context_projection_digest"] = dynamic;
+    metadata.extensions["context_projection_revision"] = checkpoint.revision;
+}
 }
 
 std::optional<CognitionWorkflowInput> CallbackProductionWorkflowInputAssembler::cognition(
@@ -77,6 +106,7 @@ std::optional<CognitionWorkflowInput> StoreBackedProductionWorkflowInputAssemble
     }
     CognitionWorkflowInput input;
     input.intake = std::move(*intake); input.subject = subject_;
+    bind_dynamic_context(input.intake.metadata, request.checkpoint);
     input.options.pipeline_id = request.checkpoint.harness_id + ":cognition";
     input.options.approval_decision_id = request.checkpoint.pins.approval_decision_id;
     return input;
@@ -91,6 +121,7 @@ std::optional<MemoryWorkflowAdapterInput> StoreBackedProductionWorkflowInputAsse
         return std::nullopt;
     }
     MemoryWorkflowAdapterInput input; input.input = std::move(*value);
+    bind_dynamic_context(input.input.metadata, request.checkpoint);
     input.options.approval_decision_id = request.checkpoint.pins.approval_decision_id;
     return input;
 }
@@ -110,6 +141,7 @@ std::optional<AssuranceWorkflowInput> StoreBackedProductionWorkflowInputAssemble
     }
     AssuranceWorkflowInput input;
     input.contract = std::move(*contract); input.subject = subject_;
+    bind_dynamic_context(input.contract.metadata, request.checkpoint);
     input.task_context = std::move(*context); input.artifact_manifest = std::move(*artifact);
     input.options.workflow_id = request.checkpoint.harness_id +
         (reverification ? ":reverification" : ":assurance");
@@ -135,6 +167,11 @@ std::optional<RemediationWorkflowInput> StoreBackedProductionWorkflowInputAssemb
     input.current_plan = std::move(*plan); input.contract = std::move(*contract);
     input.report = std::move(*report); input.assurance_checkpoint = std::move(*checkpoint);
     input.inventory = std::move(*inventory); input.subject = subject_;
+    bind_dynamic_context(input.current_plan.metadata, request.checkpoint);
+    bind_dynamic_context(input.contract.metadata, request.checkpoint);
+    bind_dynamic_context(input.report.metadata, request.checkpoint);
+    bind_dynamic_context(input.assurance_checkpoint.metadata, request.checkpoint);
+    bind_dynamic_context(input.inventory.metadata, request.checkpoint);
     input.options.workflow_id = request.checkpoint.harness_id + ":remediation";
     input.options.approval_decision_id = request.checkpoint.pins.approval_decision_id;
     return input;
@@ -148,6 +185,9 @@ std::optional<JudgeWorkflowInput> StoreBackedProductionWorkflowInputAssembler::j
         if(error) *error = "store-backed evaluation suite/runs/datasets missing or identity mismatch";
         return std::nullopt;
     }
+    bind_dynamic_context(input->suite.metadata, request.checkpoint);
+    bind_dynamic_context(input->baseline.metadata, request.checkpoint);
+    bind_dynamic_context(input->candidate.metadata, request.checkpoint);
     input->subject = subject_;
     input->options.workflow_id = request.checkpoint.harness_id + ":judge";
     input->options.approval_decision_id = request.checkpoint.pins.approval_decision_id;

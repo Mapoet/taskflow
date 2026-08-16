@@ -209,10 +209,20 @@ void LiveOperationsProjection::observe_runtime(
         snapshot_.conversation_id = event.conversation_id;
         snapshot_.turn_id = event.turn_id;
         snapshot_.updated_at = event.timestamp.empty() ? timestamp() : event.timestamp;
-        snapshot_.task_completion_verified = false;
-        snapshot_.completion_authority = "none";
         const auto type = event.event_type;
-        if(type == "harness.stage_result") {
+        if(type == "turn_started") {
+            snapshot_.response_delivery_state = "pending";
+            snapshot_.summary = "Conversation turn started";
+        } else if(type == "model_stop") {
+            const auto reason = event.payload.value("reason", std::string("unknown"));
+            const bool answer_present = event.payload.value("answer_present", false);
+            snapshot_.response_delivery_state = reason == "end_turn" && answer_present
+                ? "delivered" : reason == "end_turn" ? "empty" : "failed";
+            snapshot_.summary = "Response delivery: " + snapshot_.response_delivery_state;
+            // A Conversation event reports delivery only. It must never revoke
+            // the semantic closure owned by TaskClosureController.
+        } else if(type == "harness.stage_result") {
+            snapshot_.pipeline_state = "running";
             const auto stage_id = event.payload.value("stage", std::string("unknown"));
             auto stage = std::find_if(snapshot_.stages.begin(), snapshot_.stages.end(),
                 [&](const auto& value) { return value.id == stage_id; });
@@ -261,6 +271,7 @@ void LiveOperationsProjection::observe_runtime(
                                 " (" + outcome + ")";
             project_activity_status(snapshot_, stage->status);
         } else if(type == "harness.harness_completed") {
+            snapshot_.pipeline_state = "completed";
             snapshot_.task_closure_state = "execution_completed_unverified";
             snapshot_.task_closure_reason =
                 "structural harness completion; semantic closure not evaluated";
@@ -270,6 +281,7 @@ void LiveOperationsProjection::observe_runtime(
         } else if(type == "harness.completion_gate_failed" ||
                   type == "harness.stage_port_missing" ||
                   type == "harness.effect_unknown") {
+            snapshot_.pipeline_state = "blocked";
             snapshot_.overall_status = OperationsStatus::Blocked;
             snapshot_.blocker = type;
             snapshot_.summary = "Harness blocked: " + type;
@@ -290,6 +302,66 @@ void LiveOperationsProjection::observe_runtime(
             if(!store_->save(snapshot_, &error))
                 throw std::runtime_error(
                     "cannot persist runtime operations snapshot: " + error);
+        }
+        published = snapshot_;
+        publisher = publisher_;
+    }
+    if(publisher) publisher(published);
+}
+
+void LiveOperationsProjection::observe_task_coordination(
+    const recovery::CorrelatedStateEvent& event,
+    const recovery::TaskCoordinationDecision& decision) {
+    if(event.task_revision == 0 || event.source_event_id.empty() ||
+       decision.digest.empty()) return;
+    Phase4OperationsSnapshot published;
+    Publisher publisher;
+    {
+        std::lock_guard lock(mutex_);
+        auto source = std::find_if(snapshot_.source_revisions.begin(),
+            snapshot_.source_revisions.end(), [](const auto& item) {
+                return item.store == "task_coordination";
+            });
+        if(source != snapshot_.source_revisions.end() &&
+           event.task_revision <= source->revision) return;
+        snapshot_.tenant_id = event.identity.tenant_id;
+        snapshot_.conversation_id = event.identity.conversation_id;
+        snapshot_.task_id = event.task_id;
+        snapshot_.turn_id = event.turn_id;
+        snapshot_.run_id = event.run_id;
+        snapshot_.task_closure_state = decision.closure_state;
+        snapshot_.task_closure_reason = decision.reason_code;
+        snapshot_.task_completion_verified =
+            decision.command == recovery::CoordinationCommand::CloseVerified;
+        snapshot_.completion_authority = snapshot_.task_completion_verified
+            ? "task_closure_controller" : "none";
+        if(snapshot_.task_completion_verified) {
+            snapshot_.overall_status = OperationsStatus::Passed;
+            snapshot_.summary = "Task completion verified";
+            snapshot_.blocker.clear();
+        } else if(decision.command == recovery::CoordinationCommand::ManualReview ||
+                  decision.command == recovery::CoordinationCommand::Fail) {
+            snapshot_.overall_status = OperationsStatus::Blocked;
+            snapshot_.blocker = decision.reason_code;
+            snapshot_.summary = "Task requires intervention: " + decision.reason_code;
+        } else {
+            snapshot_.overall_status = OperationsStatus::Running;
+            snapshot_.summary = decision.command == recovery::CoordinationCommand::VerifyCompletion
+                ? "Execution completed; semantic verification pending"
+                : "Task lifecycle synchronized: " + std::string(recovery::name(decision.command));
+        }
+        OperationsSourceRevision next{"task_coordination", event.task_id,
+            event.task_revision, decision.digest};
+        if(source == snapshot_.source_revisions.end())
+            snapshot_.source_revisions.push_back(next);
+        else *source = next;
+        snapshot_.updated_at = timestamp();
+        snapshot_.snapshot_id = digest(snapshot_);
+        if(store_) {
+            std::string error;
+            if(!store_->save(snapshot_, &error))
+                throw std::runtime_error(
+                    "cannot persist task coordination snapshot: " + error);
         }
         published = snapshot_;
         publisher = publisher_;

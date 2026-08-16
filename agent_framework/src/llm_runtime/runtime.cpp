@@ -54,6 +54,8 @@ std::string input_digest(const RoleInvocationRequest& request, const LLMInput& i
     return contracts::embedded_digest({{"system_prompt",prompt.system_prompt},
         {"user_prompt",prompt.user_prompt},{"context",input.context},{"history",history},
         {"tools",tools},{"memory_view_digest",request.memory_view.view_digest},
+        {"context_projection_digest", request.metadata.extensions.value(
+             "context_projection_digest", std::string{})},
         {"prompt_digest",prompt.prompt_digest}}).value_or("");
 }
 
@@ -201,6 +203,11 @@ RoleInvocationResult RoleRuntime::invoke(
     else if(!profile->memory_view_profile.empty() &&
             (request.memory_view.snapshot_id.empty() || request.memory_view.view_digest.empty()))
         policy_error="memory_view_binding_missing";
+    else if(request.metadata.extensions.value(
+                "context_projection_required", false) &&
+            request.metadata.extensions.value(
+                "context_projection_digest", std::string{}).empty())
+        policy_error="context_projection_binding_missing";
 
     ModelRouteDecision route=router_->route(*profile,request);
     if(!policy_error.empty()) {

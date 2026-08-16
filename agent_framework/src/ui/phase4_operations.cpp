@@ -137,7 +137,7 @@ namespace agent_framework
 
     json Phase4OperationsProjection::to_json(const Phase4OperationsSnapshot &s)
     {
-        json out{{"schema_version", s.schema_version}, {"snapshot_id", s.snapshot_id}, {"tenant_id", s.tenant_id}, {"run_id", s.run_id}, {"task_id", s.task_id}, {"conversation_id",s.conversation_id},{"turn_id",s.turn_id},{"updated_at", s.updated_at}, {"overall_status", status_json(s.overall_status)}, {"plan_revision", s.plan_revision}, {"summary", s.summary}, {"blocker", s.blocker}, {"residual_risk", s.residual_risk}, {"live_certification", s.live_certification}, {"task_closure_state",s.task_closure_state},{"task_closure_reason",s.task_closure_reason},{"completion_authority",s.completion_authority},{"task_completion_verified",s.task_completion_verified},{"progress_delta",s.progress_delta},{"stagnation_count",s.stagnation_count},{"criteria_closed",s.criteria_closed},{"criteria_total",s.criteria_total},{"invocations_compacted",s.invocations_compacted},{"cost_per_closed_criterion",s.cost_per_closed_criterion},{"unknowns", s.unknowns}};
+        json out{{"schema_version", s.schema_version}, {"snapshot_id", s.snapshot_id}, {"tenant_id", s.tenant_id}, {"run_id", s.run_id}, {"task_id", s.task_id}, {"conversation_id",s.conversation_id},{"turn_id",s.turn_id},{"updated_at", s.updated_at}, {"overall_status", status_json(s.overall_status)}, {"plan_revision", s.plan_revision}, {"summary", s.summary}, {"blocker", s.blocker}, {"residual_risk", s.residual_risk}, {"live_certification", s.live_certification}, {"response_delivery_state",s.response_delivery_state},{"pipeline_state",s.pipeline_state},{"task_closure_state",s.task_closure_state},{"task_closure_reason",s.task_closure_reason},{"completion_authority",s.completion_authority},{"task_completion_verified",s.task_completion_verified},{"progress_delta",s.progress_delta},{"stagnation_count",s.stagnation_count},{"criteria_closed",s.criteria_closed},{"criteria_total",s.criteria_total},{"invocations_compacted",s.invocations_compacted},{"cost_per_closed_criterion",s.cost_per_closed_criterion},{"unknowns", s.unknowns}};
         out["stages"] = json::array();
         for (const auto &v : s.stages)
             out["stages"].push_back(json{{"id", v.id}, {"label", v.label}, {"status", status_json(v.status)}, {"revision", v.revision}, {"role", v.role}, {"summary", v.summary}, {"evidence_ids", v.evidence_ids}});
@@ -192,6 +192,10 @@ namespace agent_framework
         s.blocker = bounded(root, "blocker");
         s.residual_risk = bounded(root, "residual_risk");
         s.live_certification = bounded(root, "live_certification");
+        s.response_delivery_state = bounded(root,"response_delivery_state");
+        if(s.response_delivery_state.empty()) s.response_delivery_state="pending";
+        s.pipeline_state = bounded(root,"pipeline_state");
+        if(s.pipeline_state.empty()) s.pipeline_state="running";
         s.task_closure_state = bounded(root,"task_closure_state");
         if(s.task_closure_state.empty()) s.task_closure_state="running";
         s.task_closure_reason = bounded(root,"task_closure_reason");
@@ -323,7 +327,8 @@ namespace agent_framework
         out
             << "  plan=r" << s.plan_revision << "  updated=" << s.updated_at << '\n';
         out << clipped(s.summary, width) << '\n';
-        out << "Closure " << s.task_closure_state << " · "
+        out << "Response " << s.response_delivery_state << " · pipeline "
+            << s.pipeline_state << " · verification " << s.task_closure_state << " · "
             << (s.task_completion_verified ? "VERIFIED" : "UNVERIFIED")
             << " · authority=" << s.completion_authority << " · criteria="
             << s.criteria_closed << '/' << s.criteria_total << " · progress="

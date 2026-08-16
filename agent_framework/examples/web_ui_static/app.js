@@ -277,7 +277,9 @@
     $("ops-empty").hidden = true; $("ops-content").hidden = false;
     $("operations-badge").textContent = statusLabel(snapshot.overall_status);
     $("operations-badge").dataset.state = text(snapshot.overall_status);
-    $("ops-closure").textContent = snapshot.task_completion_verified ? "VERIFIED" : "UNVERIFIED";
+    $("ops-closure").textContent = text(snapshot.response_delivery_state || "pending").toUpperCase() + " / " +
+      text(snapshot.pipeline_state || "running").toUpperCase() + " / " +
+      (snapshot.task_completion_verified ? "VERIFIED" : "UNVERIFIED");
     $("ops-closure").dataset.state = snapshot.task_completion_verified ? "passed" : "warning";
     $("ops-authority").textContent = text(snapshot.task_closure_state || "running") + " · authority: " + text(snapshot.completion_authority || "none");
     const updated = $("ops-updated");

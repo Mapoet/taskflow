@@ -175,6 +175,13 @@ ProductionRuntimeBuildResult ProductionLiveRuntime::build(
     return result;
 }
 
+void ProductionLiveRuntime::set_coordination_observer(
+    std::function<void(const recovery::CorrelatedStateEvent&,
+                       const recovery::TaskCoordinationDecision&)> observer) {
+    std::lock_guard<std::mutex> lock(execute_mutex_);
+    resources_.coordination_observer = std::move(observer);
+}
+
 conversation::HarnessSupportedTurnRuntime::Executor
 ProductionLiveRuntime::response_executor() {
     const auto self = shared_from_this();
@@ -264,6 +271,9 @@ conversation::ModelTurnOutcome ProductionLiveRuntime::execute(
         start.acceptance_contract_digest = plan_result.acceptance_contract_digest;
         start.initial_stage = harness::HarnessStage::PlanApproval;
         start.plan_digest = plan_result.plan_digest;
+        start.metadata.extensions["context_projection_required"] = true;
+        start.metadata.extensions["context_projection_digest"] =
+            plan_result.context_projection_digest;
         start.completed_stage_records = {
             {harness::HarnessStage::Intake, 1, harness::StageOutcome::Succeeded,
              {}, {}, start.intake_digest},
@@ -356,6 +366,8 @@ conversation::ModelTurnOutcome ProductionLiveRuntime::execute(
         std::string coordination_error;
         if(!durable_task_coordinator_->publish(event, decision, &coordination_error))
             outcome.reason = conversation::ModelTurnStopReason::GuardStopped;
+        else if(resources_.coordination_observer)
+            resources_.coordination_observer(event, decision);
     }
     return outcome;
 }

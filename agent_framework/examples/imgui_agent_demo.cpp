@@ -478,6 +478,15 @@ int imgui_agent_demo_main(int argc, char** argv) {
         [presentation](const Phase4OperationsSnapshot& snapshot) {
             presentation->observe_operations(snapshot);
         });
+    if(runtime.production_runtime) {
+        std::weak_ptr<LiveOperationsProjection> weak_operations = operations;
+        runtime.production_runtime->set_coordination_observer(
+            [weak_operations](const recovery::CorrelatedStateEvent& event,
+                              const recovery::TaskCoordinationDecision& decision) {
+                if(auto projection = weak_operations.lock())
+                    projection->observe_task_coordination(event, decision);
+            });
+    }
     auto imgui_handler = std::make_unique<ImGuiHandler>(queue, "default", presentation);
     ImGuiHandler* imgui_h = imgui_handler.get();
 

@@ -372,6 +372,15 @@ int web_ui_demo_main(int argc, char** argv) {
                 ui.publish_phase4_operations(degraded);
             }
         });
+    if(runtime.production_runtime) {
+        std::weak_ptr<LiveOperationsProjection> weak_operations = live_operations;
+        runtime.production_runtime->set_coordination_observer(
+            [weak_operations](const recovery::CorrelatedStateEvent& event,
+                              const recovery::TaskCoordinationDecision& decision) {
+                if(auto projection = weak_operations.lock())
+                    projection->observe_task_coordination(event, decision);
+            });
+    }
     auto approval_store = std::make_shared<approval::SQLiteApprovalStore>(
         (std::filesystem::path(phase4_state_dir_arg) / "approval.sqlite3").string());
     auto approval_executor = std::make_shared<approval::AccountableApprovalExecutor>(

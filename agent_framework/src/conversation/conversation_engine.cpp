@@ -160,7 +160,9 @@ namespace agent_framework::conversation
         stopped.visibility = EventVisibility::User;
         stopped.event_type = "model_stop";
         stopped.timestamp = stamp();
-        stopped.payload = {{"reason", name(o.reason)}, {"task_completion_verified", false}};
+        stopped.payload = {{"reason", name(o.reason)},
+                           {"answer_present", !o.candidate_answer.empty()},
+                           {"task_completion_verified", false}};
         if (!contract_problems.empty())
             stopped.payload["contract_violation"] = true;
         ConversationCommit terminal{c, expected, std::move(pending_messages), {stopped}, {}};

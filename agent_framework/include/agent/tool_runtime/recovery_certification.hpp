@@ -39,6 +39,26 @@ struct SoakReport {
     std::uint64_t iterations{0}, operations{0}, recoveries{0}, failures{0}, seed{0};
     std::size_t concurrency{0}; std::string evidence_digest; bool passed{false};
 };
+
+struct LongTaskOperationalMetrics {
+    std::uint64_t orphan_running{0};
+    std::uint64_t state_divergence{0};
+    std::uint64_t duplicate_effects{0};
+    std::uint64_t empty_completed{0};
+    std::uint64_t resume_attempts{0};
+    std::uint64_t resume_successes{0};
+    std::uint64_t first_progress_p95_ms{0};
+    std::uint64_t heartbeat_interval_p95_ms{0};
+};
+
+struct LongTaskMetricsGate {
+    LongTaskOperationalMetrics metrics;
+    std::vector<std::string> blockers;
+    std::string evidence_digest;
+    bool passed{false};
+};
+
+LongTaskMetricsGate certify_long_task_metrics(const LongTaskOperationalMetrics&);
 using SoakOperation = std::function<bool(std::uint64_t iteration, std::uint64_t random_value)>;
 SoakReport run_recovery_soak(const SoakOptions&, const SoakOperation&);
 struct ProviderLiveOptions { std::string environment_digest,output_path;std::uint64_t iterations{0},seed{1};std::size_t concurrency{1}; };

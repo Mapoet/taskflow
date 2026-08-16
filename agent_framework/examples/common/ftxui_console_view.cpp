@@ -114,7 +114,9 @@ Elements operations_rows(const UiPresentationSnapshot& snapshot) {
                              (ops.turn_id.empty()?"":" · turn "+ops.turn_id) +
                              " · plan r" + std::to_string(ops.plan_revision)) | color(kMuted)}));
     rows.push_back(paragraph(ops.summary));
-    rows.push_back(hbox({text(ops.task_completion_verified ? " VERIFIED " : " UNVERIFIED ") |
+    rows.push_back(hbox({text(" RESPONSE " + ops.response_delivery_state + " · PIPELINE " +
+                             ops.pipeline_state + " · " +
+                             (ops.task_completion_verified ? "VERIFIED " : "UNVERIFIED ")) |
                             bold | color(ops.task_completion_verified ? Color::GreenLight : Color::YellowLight),
                         text(" closure " + ops.task_closure_state + " · authority " +
                              ops.completion_authority + " · criteria " +

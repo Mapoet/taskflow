@@ -1,3 +1,6 @@
+#ifdef NDEBUG
+#undef NDEBUG
+#endif
 #include <cassert>
 #include <memory>
 
@@ -8,7 +11,10 @@ namespace {
 using namespace agent_framework;
 class EmptyRepository final : public harness::ProductionWorkflowInputRepository {
 public:
-    std::optional<planning::TaskIntake> intake(const contracts::ContractIdentity&) override { return {}; }
+    std::optional<planning::TaskIntake> intake_value;
+    std::optional<planning::TaskIntake> intake(const contracts::ContractIdentity&) override {
+        return intake_value;
+    }
     std::optional<memory_v2::workflows::MemoryWorkflowInput> memory_input(
         const contracts::ContractIdentity&, std::string_view) override { return {}; }
     std::optional<assurance::AcceptanceContract> acceptance_contract(
@@ -51,6 +57,33 @@ int main() {
     error.clear(); assert(!store_inputs.assurance(request, false, &error) && !error.empty());
     error.clear(); assert(!store_inputs.remediation(request, &error) && !error.empty());
     error.clear(); assert(!store_inputs.judge(request, &error) && !error.empty());
+
+    planning::TaskIntake intake;
+    intake.metadata = request.checkpoint.metadata;
+    intake.user_goal = "verify dynamic context binding";
+    repository.intake_value = intake;
+    request.checkpoint.harness_id = "dynamic-context";
+    request.checkpoint.revision = 7;
+    request.checkpoint.pins.plan_digest = "sha256:plan";
+    request.checkpoint.pins.approval_decision_id = "approval-1";
+    request.checkpoint.pins.artifact_manifest_digest = "sha256:artifact";
+    request.checkpoint.metadata.extensions["context_projection_required"] = true;
+    request.checkpoint.metadata.extensions["context_projection_digest"] =
+        "sha256:base-projection";
+    error.clear();
+    const auto dynamic = store_inputs.cognition(request, &error);
+    assert(dynamic && error.empty());
+    const auto first_digest = dynamic->intake.metadata.extensions.at(
+        "context_projection_digest").get<std::string>();
+    assert(!first_digest.empty() && first_digest != "sha256:base-projection");
+    assert(dynamic->intake.metadata.extensions.at(
+        "context_projection_base_digest") == "sha256:base-projection");
+    request.checkpoint.revision = 8;
+    request.checkpoint.pins.acceptance_report_digest = "sha256:report";
+    const auto advanced = store_inputs.cognition(request, &error);
+    assert(advanced);
+    assert(advanced->intake.metadata.extensions.at(
+        "context_projection_digest").get<std::string>() != first_digest);
 
     auto store = std::make_shared<llm_runtime::InMemoryLLMRuntimeStore>();
     llm_runtime::LLMInvocationManifest manifest;

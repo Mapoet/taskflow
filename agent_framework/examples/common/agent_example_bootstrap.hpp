@@ -90,6 +90,9 @@ struct LiveRuntimeOptions {
     // Production deployments provide the complete validated composition here.
     // Demo/test deployments leave it empty and use the interactive harness.
     std::shared_ptr<runtime::ProductionRuntimeResources> production_resources;
+    std::shared_ptr<conversation::TaskCommandPolicy> task_command_policy;
+    std::function<std::optional<conversation::TaskCommandPrincipal>(
+        const conversation::ConversationIdentity&)> task_principal_resolver;
 };
 
 struct LiveRuntime {
@@ -108,6 +111,9 @@ struct LiveRuntime {
     conversation::HarnessSupportedTurnRuntime::Executor long_task_executor;
     std::shared_ptr<conversation::TaskClassifier> task_classifier;
     std::shared_ptr<conversation::TaskControlService> task_control_service;
+    std::shared_ptr<conversation::TaskCommandPolicy> task_command_policy;
+    std::function<std::optional<conversation::TaskCommandPrincipal>(
+        const conversation::ConversationIdentity&)> task_principal_resolver;
     std::shared_ptr<runtime::ProductionLiveRuntime> production_runtime;
     bool harness_ready{false};
     bool explicit_legacy_fallback{false};
@@ -185,10 +191,13 @@ inline conversation::TurnResult run_conversation_turn(
                ? active_task->current_run_id
                : request.turn_id);
     if(intent == conversation::TaskInputIntent::StatusQuery) {
-        conversation::TaskCommandService commands(
-            task_registry, runtime.task_control_service.get());
-        const auto status = commands.execute(
-            {conversation::TaskCommandKind::Status, request});
+        conversation::TaskCommandService commands(task_registry,
+            runtime.task_control_service.get(),runtime.task_command_policy.get());
+        conversation::TaskCommandRequest command{
+            conversation::TaskCommandKind::Status, request};
+        if(runtime.task_principal_resolver)
+            command.principal=runtime.task_principal_resolver(identity);
+        const auto status = commands.execute(command);
         const std::string response = status.ok
             ? status.payload.dump(2)
             : nlohmann::json{{"found",false},{"task_id",request.task_id},
@@ -202,27 +211,21 @@ inline conversation::TurnResult run_conversation_turn(
             }, std::move(event_sink));
         return control_engine.start_turn(request);
     }
-    conversation::TaskOrchestrator task_orchestrator(task_registry);
-    const auto task_open = task_orchestrator.open_or_resume(request, intent);
-    if(!task_open.ok) throw std::runtime_error(task_open.error);
-    active_task = task_open.task;
     if(control_only) {
-        std::string response;
-        {
-            if(intent == conversation::TaskInputIntent::CancelTask &&
-               runtime.task_control_service) {
-                const auto cancelled = runtime.task_control_service->cancel(
-                    identity, request.task_id, "cancelled_by_user",
-                    std::chrono::duration_cast<std::chrono::milliseconds>(
-                        std::chrono::system_clock::now().time_since_epoch()).count());
-                if(!cancelled.ok)
-                    throw std::runtime_error("task_cancel_propagation_failed:" +
-                        nlohmann::json(cancelled.errors).dump());
-            }
-            response = "Task " + request.task_id +
-               (intent == conversation::TaskInputIntent::CancelTask
-                    ? " cancellation recorded and propagated." : " suspended.");
-        }
+        conversation::TaskCommandService commands(task_registry,
+            runtime.task_control_service.get(),runtime.task_command_policy.get());
+        conversation::TaskCommandRequest command{
+            intent == conversation::TaskInputIntent::CancelTask
+                ? conversation::TaskCommandKind::Cancel
+                : conversation::TaskCommandKind::Suspend,
+            request, "cancelled_by_user",
+            std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::system_clock::now().time_since_epoch()).count()};
+        if(runtime.task_principal_resolver)
+            command.principal=runtime.task_principal_resolver(identity);
+        const auto controlled=commands.execute(command);
+        if(!controlled.ok) throw std::runtime_error(controlled.error);
+        const std::string response=controlled.payload.dump(2);
         conversation::ConversationEngine control_engine(
             store, [response](const auto&, const auto&) {
                 conversation::ModelTurnOutcome outcome;
@@ -232,6 +235,10 @@ inline conversation::TurnResult run_conversation_turn(
             }, std::move(event_sink));
         return control_engine.start_turn(request);
     }
+    conversation::TaskOrchestrator task_orchestrator(task_registry);
+    const auto task_open = task_orchestrator.open_or_resume(request, intent);
+    if(!task_open.ok) throw std::runtime_error(task_open.error);
+    active_task = task_open.task;
     auto event_forwarder = event_sink;
     auto harness_executor = runtime.harness_turn_executor;
     std::shared_ptr<harness::SQLiteHarnessStore> interactive_harness_store;
@@ -519,6 +526,18 @@ inline LiveRuntime build_live_runtime(const LiveRuntimeOptions& options) {
     runtime.trust_profile = execution_trust_profile_from_env();
     runtime.task_profile = task_execution_profile_from_env();
     runtime.explicit_legacy_fallback = env_truthy("AGENT_LEGACY_REACT_FALLBACK");
+    runtime.task_command_policy = options.task_command_policy
+        ? options.task_command_policy
+        : std::make_shared<conversation::TaskCommandPolicy>();
+    runtime.task_principal_resolver = options.task_principal_resolver;
+    if(!runtime.task_principal_resolver &&
+       runtime.trust_profile != ExecutionTrustProfile::Production) {
+        runtime.task_principal_resolver=[](const conversation::ConversationIdentity& identity)
+            -> std::optional<conversation::TaskCommandPrincipal> {
+            return conversation::TaskCommandPrincipal{"local-interactive-user",identity,
+                {"task:read","task:write","task:control"},true};
+        };
+    }
     if(runtime.trust_profile == ExecutionTrustProfile::Production &&
        runtime.explicit_legacy_fallback)
         throw std::runtime_error("production_legacy_react_fallback_forbidden");

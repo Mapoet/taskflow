@@ -136,6 +136,8 @@ struct Phase4OperationsSnapshot {
     std::string blocker;
     std::string residual_risk;
     std::string live_certification;
+    std::string response_delivery_state{"pending"};
+    std::string pipeline_state{"running"};
     std::string task_closure_state{"running"};
     std::string task_closure_reason;
     std::string completion_authority{"none"};

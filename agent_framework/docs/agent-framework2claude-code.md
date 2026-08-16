@@ -661,8 +661,13 @@ ChildTask/A2A/Skill 子运行时使用能力交集和独立 transcript。父授�
 LLM classifier 负责 task profile，复杂任务进入独立 `LongTaskWorkflow` executor；默认 production
 builder 自建类型化 execution adapter，并在启动时执行 orphan sweep 与 durable timer；
 TaskRunLink、status/output/cancel 和 Operations conversation/task/run/turn identity 已连通。
-这关闭了“live demo 仍只调用一次 ReAct callback”的主要接线缺口。当前剩余认证缺口是
-ProviderLive 5–10 分钟真实 provider/MCP late-result campaign，而不是 Offline 代码路径。
+这关闭了“live demo 仍只调用一次 ReAct callback”的主要接线缺口。AF-SLTR 又把 durable
+LLM TaskPlanning、ContextProjection、preplanned Harness、Assurance/Judge/TaskClosure 和
+TaskStateCoordinator 权威投影接到 Production Live 主链，并修复晚到 Conversation 事件覆盖
+verified closure 的顺序错误。2026-08-17 Phase 4 offline 为 98/98 PASS，四端实际运行已验证
+response/pipeline/verification 三轴。仍开放的不是 Offline correctness，而是统一 task-command
+identity/policy UI action contract、ProcessLive reconnect/crash campaign，以及 ProviderLive 5–10
+分钟真实 provider/MCP late-result/reattach 认证。
 
 建议初期只以 SQLite + 本机多进程作为 correctness baseline；跨主机扩展复用同一 invocation/event contract，替换为 PostgreSQL queue/notification 或消息总线。不要在单机恢复、fencing 和 effect reconciliation 尚未闭环前引入新的分布式执行后端。
 

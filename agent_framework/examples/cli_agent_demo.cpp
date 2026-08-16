@@ -318,6 +318,15 @@ int cli_agent_demo_main(int argc, char** argv) {
         std::make_shared<SQLiteOperationsSnapshotStore>(operations_db_arg);
     auto operations = std::make_shared<LiveOperationsProjection>(
         std::move(initial_operations), operations_store);
+    if(runtime.production_runtime) {
+        std::weak_ptr<LiveOperationsProjection> weak_operations = operations;
+        runtime.production_runtime->set_coordination_observer(
+            [weak_operations](const recovery::CorrelatedStateEvent& event,
+                              const recovery::TaskCoordinationDecision& decision) {
+                if(auto projection = weak_operations.lock())
+                    projection->observe_task_coordination(event, decision);
+            });
+    }
 
     auto exec_line = [&](const std::string& line) -> int {
         if (g_shutdown_requested.load()) {

@@ -1,3 +1,6 @@
+#ifdef NDEBUG
+#undef NDEBUG
+#endif
 #include <cassert>
 #include <filesystem>
 #include <vector>
@@ -116,6 +119,47 @@ int main() {
             return x.store=="conversation_harness_events";
         });
     assert(harness_source!=harness.source_revisions.end()&&harness_source->revision==12);
+
+    recovery::CorrelatedStateEvent coordination;
+    coordination.identity = {"tenant-live", "conversation-live"};
+    coordination.task_id = "task-live"; coordination.turn_id = "turn-live";
+    coordination.run_id = "run-live"; coordination.harness_id = "harness-live";
+    coordination.task_revision = 20; coordination.source_event_id = "closure:20";
+    recovery::TaskCoordinationDecision closing;
+    closing.command = recovery::CoordinationCommand::VerifyCompletion;
+    closing.closure_state = "execution_completed_unverified";
+    closing.reason_code = "semantic_verification_required";
+    closing.digest = "sha256:coordination-20";
+    recovered.observe_task_coordination(coordination, closing);
+    auto coordinated = recovered.snapshot();
+    assert(!coordinated.task_completion_verified);
+    assert(coordinated.summary.find("verification pending") != std::string::npos);
+    auto stale_coordination = coordination; stale_coordination.task_revision = 19;
+    auto stale_decision = closing; stale_decision.digest = "sha256:stale";
+    recovered.observe_task_coordination(stale_coordination, stale_decision);
+    assert(recovered.snapshot().snapshot_id == coordinated.snapshot_id);
+    coordination.task_revision = 21;
+    recovery::TaskCoordinationDecision closed = closing;
+    closed.command = recovery::CoordinationCommand::CloseVerified;
+    closed.task_state = conversation::TaskLifecycleState::Closed;
+    closed.closure_state = "completed_verified";
+    closed.reason_code = "all_mandatory_criteria_verified";
+    closed.terminal = true; closed.digest = "sha256:coordination-21";
+    recovered.observe_task_coordination(coordination, closed);
+    coordinated = recovered.snapshot();
+    assert(coordinated.task_completion_verified);
+    assert(coordinated.completion_authority == "task_closure_controller");
+    assert(coordinated.overall_status == OperationsStatus::Passed);
+    auto delivered = completed_harness;
+    delivered.sequence = 13;
+    delivered.event_type = "model_stop";
+    delivered.payload = {{"reason","end_turn"},{"answer_present",true}};
+    recovered.observe_runtime(delivered);
+    coordinated = recovered.snapshot();
+    assert(coordinated.response_delivery_state == "delivered");
+    assert(coordinated.pipeline_state == "completed");
+    assert(coordinated.task_completion_verified);
+    assert(coordinated.completion_authority == "task_closure_controller");
 
     ToolExecutionEvent retained_active = started;
     retained_active.tool_call_id = "active-must-survive-retention";

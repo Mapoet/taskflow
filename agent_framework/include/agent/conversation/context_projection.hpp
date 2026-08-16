@@ -8,5 +8,7 @@ public:
     static bool validate_boundary(const ContextProjectionManifest& before,
                                   const CompactBoundaryRecord& boundary,
                                   std::string* error=nullptr);
+    static std::string mandatory_state_digest(
+        const ContextProjectionManifest& manifest);
 };
 }

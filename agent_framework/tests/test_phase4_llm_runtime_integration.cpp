@@ -1,3 +1,6 @@
+#ifdef NDEBUG
+#undef NDEBUG
+#endif
 #include <cassert>
 #include <memory>
 #include <stdexcept>
@@ -81,6 +84,24 @@ int main() {
     assert(primary->calls() == 1);
     assert(telemetry_sink->spans().size() == 2);
     assert(audit->events_for_trace("trace-a").size() == 3);
+
+    auto missing_projection = request("invocation-context-missing");
+    missing_projection.metadata.extensions["context_projection_required"] = true;
+    const auto projection_denied = runtime.invoke(missing_projection);
+    assert(!projection_denied.ok &&
+           projection_denied.error_code == "context_projection_binding_missing");
+    assert(primary->calls() == 1 && fallback->calls() == 2);
+    primary->push([] { return output(R"({"ok":true})", 5, 2); });
+    auto bound_projection = request("invocation-context-bound");
+    bound_projection.metadata.extensions["context_projection_required"] = true;
+    bound_projection.metadata.extensions["context_projection_digest"] =
+        "sha256:dynamic-projection-r7";
+    const auto projection_accepted = runtime.invoke(bound_projection);
+    assert(projection_accepted.ok);
+    assert(projection_accepted.manifest.metadata.extensions.at(
+        "context_projection_digest") == "sha256:dynamic-projection-r7");
+    assert(projection_accepted.manifest.input_digest != result.manifest.input_digest);
+    assert(primary->calls() == 2 && fallback->calls() == 2);
 
     // Calibration is checked again after routing a fallback; an approved primary
     // model must not implicitly authorize a different provider/model pair.
