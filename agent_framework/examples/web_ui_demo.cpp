@@ -161,7 +161,8 @@ int run_graph_ui(tf::Executor& executor,
                  UIManager& ui,
                  const std::shared_ptr<TaskControl>& control,
                  const std::shared_ptr<LiveOperationsProjection>& operations,
-                 const example::LiveRuntime& runtime) {
+                 const example::LiveRuntime& runtime,
+                 std::optional<std::uint64_t> expected_task_revision = std::nullopt) {
     GraphExecutor gx;
     ReactCliRunRequest req;
     req.config = cfg;
@@ -197,7 +198,7 @@ int run_graph_ui(tf::Executor& executor,
             [&ui, operations](const conversation::RuntimeEventEnvelope& event) {
                 if(operations) operations->observe_runtime(event);
                 ui.dispatch_message("runtime_event", conversation::encode(event));
-            });
+            }, expected_task_revision);
         if (!turn.error.empty() || turn.outcome.reason != conversation::ModelTurnStopReason::EndTurn) {
             if (control && control->is_cancel_requested()) {
                 ui.dispatch_message("run_cancelled", json{{"message", "Run cancelled by user"}});
@@ -372,6 +373,7 @@ int web_ui_demo_main(int argc, char** argv) {
                 ui.publish_phase4_operations(degraded);
             }
         });
+    example::bind_task_action_observer(runtime, live_operations);
     if(runtime.production_runtime) {
         std::weak_ptr<LiveOperationsProjection> weak_operations = live_operations;
         runtime.production_runtime->set_coordination_observer(
@@ -412,7 +414,8 @@ int web_ui_demo_main(int argc, char** argv) {
     auto state = std::make_shared<internal::AgentThreadState>();
     auto executor = std::make_shared<tf::Executor>();
 
-    auto run_line = [&](const std::string& line) {
+    auto run_line = [&](const std::string& line,
+                        std::optional<std::uint64_t> expected_task_revision = std::nullopt) {
         {
             std::lock_guard<std::mutex> lock(*interaction_mutex);
             const auto ordinal=std::chrono::steady_clock::now().time_since_epoch().count();
@@ -444,7 +447,8 @@ int web_ui_demo_main(int argc, char** argv) {
             return;
         }
         apply_processed_to_agent_state(std::move(proc), ectx, *state);
-        (void)run_graph_ui(*executor, cfg, deps, state, ui, control, live_operations, runtime);
+        (void)run_graph_ui(*executor, cfg, deps, state, ui, control, live_operations,
+                           runtime, expected_task_revision);
         {
             std::lock_guard<std::mutex> lock(g_control_mutex);
             if (g_active_control == control) g_active_control.reset();
@@ -528,14 +532,17 @@ int web_ui_demo_main(int argc, char** argv) {
         try {
             json body = json::parse(req.body);
             std::string prompt = body.at("prompt").get<std::string>();
+            std::optional<std::uint64_t> expected_task_revision;
+            if(body.contains("expected_task_revision"))
+                expected_task_revision=body.at("expected_task_revision").get<std::uint64_t>();
             if (prompt.empty()) {
                 res.status = 400;
                 res.set_content(R"({"error":"empty prompt"})", "application/json");
                 return;
             }
             g_agent_busy = true;
-            std::thread([run_line, prompt]() {
-                run_line(prompt);
+            std::thread([run_line, prompt, expected_task_revision]() {
+                run_line(prompt, expected_task_revision);
                 g_agent_busy = false;
             }).detach();
             res.status = 202;

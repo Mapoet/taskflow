@@ -318,6 +318,7 @@ int cli_agent_demo_main(int argc, char** argv) {
         std::make_shared<SQLiteOperationsSnapshotStore>(operations_db_arg);
     auto operations = std::make_shared<LiveOperationsProjection>(
         std::move(initial_operations), operations_store);
+    example::bind_task_action_observer(runtime, operations);
     if(runtime.production_runtime) {
         std::weak_ptr<LiveOperationsProjection> weak_operations = operations;
         runtime.production_runtime->set_coordination_observer(

@@ -269,7 +269,7 @@ production invocation that declares the projection mandatory but omits it.
 
 - [x] Add snapshot parity and out-of-order replay tests.
 - [x] Display response, pipeline and verified completion as distinct labels.
-- [ ] Add task commands with identity/policy authorization; disable impossible actions.
+- [x] Add task commands with identity/policy authorization; disable impossible actions.
 - [x] Verify live observation update, reconnect replay and restart monotonicity.
 - [x] Run all four interfaces and capture real Web/TUI/ImGui screenshots.
 
@@ -288,6 +288,15 @@ monotonic, and stale task/Harness revisions are ignored. Actual runtime evidence
 Web Operations database and rendered the same three axes. TUI content is complete,
 but a short terminal may place the top summary above the initial visible scroll
 region; this is a presentation refinement, not a state-projection loss.
+
+**Task-command closure evidence (2026-08-17):** `TaskCommandPolicy` requires an
+authenticated actor, exact tenant/conversation identity and command-specific
+`task:read`/`task:write`/`task:control` scopes. Commands reject stale task revisions and
+invalid lifecycle transitions. Shared LiveRuntime is the demo command path; production
+has no implicit principal and fails closed. `phase4.operations.v1` persists authoritative
+`task_actions` with scope, enabled state, disable reason and expected revision. Web
+prepares enabled commands for canonical Conversation submission; TUI/ImGui/CLI render
+the same action contract. Visual evidence: `docs/assets/ui/sltr6/web-task-actions.png`.
 
 ## AF-SLTR7 — Test infrastructure and certification
 

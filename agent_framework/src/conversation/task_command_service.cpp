@@ -1,5 +1,7 @@
 #include "agent/conversation/task_command_service.hpp"
 
+#include <algorithm>
+
 namespace agent_framework::conversation {
 namespace {
 std::string required_scope(TaskCommandKind command) {
@@ -87,6 +89,16 @@ TaskCommandResponse TaskCommandService::execute(const TaskCommandRequest& reques
         if(!response.error.empty())return response;
     }
     auto current=tasks_.load(turn.identity,turn.task_id);
+    const auto attach_actions=[&](nlohmann::json& payload,
+                                  const std::optional<PersistentTask>& task) {
+        if(!policy_||!request.principal)return;
+        nlohmann::json actions=nlohmann::json::array();
+        for(const auto& action:policy_->actions(*request.principal,turn,task))
+            actions.push_back({{"command",name(action.command)},
+                {"required_scope",action.required_scope},{"enabled",action.enabled},
+                {"reason",action.reason}});
+        payload["actions"]=std::move(actions);
+    };
     if(request.expected_task_revision&&
        (!current||current->revision!=*request.expected_task_revision)){
         response.error="task_command_stale_revision";return response;
@@ -103,14 +115,7 @@ TaskCommandResponse TaskCommandService::execute(const TaskCommandRequest& reques
         response.task_revision=task->revision;
         response.payload=controls_?controls_->status(turn.identity,turn.task_id)
             :nlohmann::json{{"found",true},{"task",encode(*task)}};
-        if(policy_&&request.principal){
-            nlohmann::json actions=nlohmann::json::array();
-            for(const auto& action:policy_->actions(*request.principal,turn,task))
-                actions.push_back({{"command",name(action.command)},
-                    {"required_scope",action.required_scope},{"enabled",action.enabled},
-                    {"reason",action.reason}});
-            response.payload["actions"]=std::move(actions);
-        }
+        attach_actions(response.payload,task);
         if(request.command==TaskCommandKind::Output&&response.payload.contains("runs")){
             nlohmann::json output=nlohmann::json::array();
             for(const auto& run:response.payload["runs"])
@@ -118,6 +123,7 @@ TaskCommandResponse TaskCommandService::execute(const TaskCommandRequest& reques
                     if(invocation.contains("partial_output"))output.push_back(invocation["partial_output"]);
             response.payload={{"task_id",turn.task_id},{"outputs",std::move(output)},
                               {"task_revision",task->revision}};
+            attach_actions(response.payload,task);
         }
         response.ok=true;return response;
     }
@@ -153,6 +159,7 @@ TaskCommandResponse TaskCommandService::execute(const TaskCommandRequest& reques
         response.payload["invocations_affected"]=cancelled.affected;
     }
     response.payload["task"]=encode(opened.task);
+    attach_actions(response.payload,tasks_.load(turn.identity,turn.task_id));
     response.ok=true;return response;
 }
 } // namespace agent_framework::conversation

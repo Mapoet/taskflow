@@ -48,6 +48,9 @@ public:
     void observe_task_coordination(
         const recovery::CorrelatedStateEvent& event,
         const recovery::TaskCoordinationDecision& decision);
+    /** Replace UI task capabilities with a policy-authoritative command set. */
+    void observe_task_actions(std::vector<OperationsTaskAction> actions,
+                              std::uint64_t task_revision);
     /** Drain replay/live events from the canonical subscription until timeout or terminal status. */
     std::size_t consume_invocations(tool_runtime::InvocationEventSubscription& subscription,
                                     std::chrono::milliseconds timeout,

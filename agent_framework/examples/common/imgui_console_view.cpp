@@ -352,6 +352,15 @@ void render_operations(const UiPresentationSnapshot& s) {
     if (!ops.blocker.empty()) ImGui::TextColored(kDanger, "BLOCKER  %s", ops.blocker.c_str());
     if (!ops.residual_risk.empty()) ImGui::TextColored(operations_color(OperationsStatus::Warning),
                                                        "RESIDUAL RISK  %s", ops.residual_risk.c_str());
+    if(!ops.task_actions.empty()) {
+        ImGui::TextColored(kMuted,"TASK COMMANDS");
+        for(const auto& action:ops.task_actions) {
+            ImGui::SameLine();
+            ImGui::TextColored(action.enabled ? kSuccess : kMuted,"%s %s@r%llu",
+                action.command.c_str(),action.enabled ? "enabled" : "disabled",
+                static_cast<unsigned long long>(action.expected_task_revision));
+        }
+    }
     ImGui::Separator();
 
     ImGui::TextColored(kAccent, "PLAN / EVIDENCE");

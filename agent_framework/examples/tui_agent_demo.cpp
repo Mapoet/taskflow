@@ -313,6 +313,7 @@ int tui_agent_demo_main(int argc, char** argv) {
         [presentation](const Phase4OperationsSnapshot& snapshot) {
             presentation->observe_operations(snapshot);
         });
+    example::bind_task_action_observer(runtime, operations);
     if(runtime.production_runtime) {
         std::weak_ptr<LiveOperationsProjection> weak_operations = operations;
         runtime.production_runtime->set_coordination_observer(

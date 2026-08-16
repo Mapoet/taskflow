@@ -25,6 +25,7 @@
 #include <agent/harness/store.hpp>
 #include <agent/runtime/production_live_runtime.hpp>
 #include <agent/agent_template/runner.hpp>
+#include <agent/ui/live_operations_projection.hpp>
 
 #include <algorithm>
 #include <atomic>
@@ -93,6 +94,7 @@ struct LiveRuntimeOptions {
     std::shared_ptr<conversation::TaskCommandPolicy> task_command_policy;
     std::function<std::optional<conversation::TaskCommandPrincipal>(
         const conversation::ConversationIdentity&)> task_principal_resolver;
+    std::function<void(const nlohmann::json&, std::uint64_t)> task_action_observer;
 };
 
 struct LiveRuntime {
@@ -114,17 +116,41 @@ struct LiveRuntime {
     std::shared_ptr<conversation::TaskCommandPolicy> task_command_policy;
     std::function<std::optional<conversation::TaskCommandPrincipal>(
         const conversation::ConversationIdentity&)> task_principal_resolver;
+    std::function<void(const nlohmann::json&, std::uint64_t)> task_action_observer;
     std::shared_ptr<runtime::ProductionLiveRuntime> production_runtime;
     bool harness_ready{false};
     bool explicit_legacy_fallback{false};
     nlohmann::json composition_report = nlohmann::json::object();
 };
 
+inline void bind_task_action_observer(
+    LiveRuntime& runtime, const std::shared_ptr<LiveOperationsProjection>& projection) {
+    std::weak_ptr<LiveOperationsProjection> weak = projection;
+    runtime.task_action_observer = [weak](const nlohmann::json& value,
+                                          std::uint64_t revision) {
+        if(!value.is_array()) return;
+        std::vector<OperationsTaskAction> actions;
+        actions.reserve(value.size());
+        for(const auto& item : value) {
+            if(!item.is_object()) continue;
+            OperationsTaskAction action;
+            action.command = item.value("command", "");
+            action.required_scope = item.value("required_scope", "");
+            action.enabled = item.value("enabled", false);
+            action.reason = item.value("reason", "");
+            if(!action.command.empty()) actions.push_back(std::move(action));
+        }
+        if(auto target = weak.lock())
+            target->observe_task_actions(std::move(actions), revision);
+    };
+}
+
 using GraphTurnCallback = std::function<WorkflowResult()>;
 
 inline conversation::TurnResult run_conversation_turn(
     const LiveRuntime& runtime, std::string_view agent_name, std::string input,
-    GraphTurnCallback graph, conversation::RuntimeEventSink event_sink = {}) {
+    GraphTurnCallback graph, conversation::RuntimeEventSink event_sink = {},
+    std::optional<std::uint64_t> expected_task_revision = std::nullopt) {
     if(!runtime.harness_ready && !runtime.explicit_legacy_fallback)
         throw std::runtime_error(
             "harness_unavailable_and_fallback_not_explicit: set AGENT_LEGACY_REACT_FALLBACK=1 "
@@ -190,14 +216,21 @@ inline conversation::TurnResult run_conversation_turn(
         : (active_task && !active_task->current_run_id.empty()
                ? active_task->current_run_id
                : request.turn_id);
+    if(expected_task_revision &&
+       (!active_task || active_task->revision != *expected_task_revision))
+        throw std::runtime_error("task_command_stale_revision");
     if(intent == conversation::TaskInputIntent::StatusQuery) {
         conversation::TaskCommandService commands(task_registry,
             runtime.task_control_service.get(),runtime.task_command_policy.get());
         conversation::TaskCommandRequest command{
             conversation::TaskCommandKind::Status, request};
+        command.expected_task_revision=expected_task_revision;
         if(runtime.task_principal_resolver)
             command.principal=runtime.task_principal_resolver(identity);
         const auto status = commands.execute(command);
+        if(status.ok && runtime.task_action_observer &&
+           status.payload.contains("actions"))
+            runtime.task_action_observer(status.payload["actions"],status.task_revision);
         const std::string response = status.ok
             ? status.payload.dump(2)
             : nlohmann::json{{"found",false},{"task_id",request.task_id},
@@ -221,10 +254,13 @@ inline conversation::TurnResult run_conversation_turn(
             request, "cancelled_by_user",
             std::chrono::duration_cast<std::chrono::milliseconds>(
                 std::chrono::system_clock::now().time_since_epoch()).count()};
+        command.expected_task_revision=expected_task_revision;
         if(runtime.task_principal_resolver)
             command.principal=runtime.task_principal_resolver(identity);
         const auto controlled=commands.execute(command);
         if(!controlled.ok) throw std::runtime_error(controlled.error);
+        if(runtime.task_action_observer && controlled.payload.contains("actions"))
+            runtime.task_action_observer(controlled.payload["actions"],controlled.task_revision);
         const std::string response=controlled.payload.dump(2);
         conversation::ConversationEngine control_engine(
             store, [response](const auto&, const auto&) {
@@ -239,6 +275,19 @@ inline conversation::TurnResult run_conversation_turn(
     const auto task_open = task_orchestrator.open_or_resume(request, intent);
     if(!task_open.ok) throw std::runtime_error(task_open.error);
     active_task = task_open.task;
+    if(runtime.task_action_observer && runtime.task_command_policy &&
+       runtime.task_principal_resolver) {
+        const auto principal = runtime.task_principal_resolver(identity);
+        if(principal) {
+            nlohmann::json actions=nlohmann::json::array();
+            for(const auto& action : runtime.task_command_policy->actions(
+                    *principal, request, active_task))
+                actions.push_back({{"command",conversation::name(action.command)},
+                    {"required_scope",action.required_scope},{"enabled",action.enabled},
+                    {"reason",action.reason}});
+            runtime.task_action_observer(actions,active_task->revision);
+        }
+    }
     auto event_forwarder = event_sink;
     auto harness_executor = runtime.harness_turn_executor;
     std::shared_ptr<harness::SQLiteHarnessStore> interactive_harness_store;
@@ -530,6 +579,7 @@ inline LiveRuntime build_live_runtime(const LiveRuntimeOptions& options) {
         ? options.task_command_policy
         : std::make_shared<conversation::TaskCommandPolicy>();
     runtime.task_principal_resolver = options.task_principal_resolver;
+    runtime.task_action_observer = options.task_action_observer;
     if(!runtime.task_principal_resolver &&
        runtime.trust_profile != ExecutionTrustProfile::Production) {
         runtime.task_principal_resolver=[](const conversation::ConversationIdentity& identity)

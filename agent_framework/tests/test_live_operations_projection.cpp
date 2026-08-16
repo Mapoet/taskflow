@@ -44,11 +44,24 @@ int main() {
     assert(done.source_revisions.back().revision == 2);
     assert(done.snapshot_id != running.snapshot_id);
     assert(published.size() == 2);
-    const auto serialized = Phase4OperationsProjection::to_json(done).dump();
+    projection.observe_task_actions({
+        {"status", "task:read", true, "", 0},
+        {"cancel", "task:control", false, "task_command_scope_forbidden:task:control", 0}},
+        7);
+    auto with_actions = projection.snapshot();
+    assert(with_actions.task_actions.size() == 2);
+    assert(with_actions.task_actions[0].expected_task_revision == 7);
+    projection.observe_task_actions({{"continue", "task:write", true, "", 0}}, 6);
+    assert(projection.snapshot().task_actions.size() == 2); // stale policy view rejected
+    const auto action_roundtrip = Phase4OperationsProjection::from_json(
+        Phase4OperationsProjection::to_json(with_actions));
+    assert(action_roundtrip.task_actions.size() == 2);
+    assert(!action_roundtrip.task_actions[1].enabled);
+    const auto serialized = Phase4OperationsProjection::to_json(with_actions).dump();
     assert(serialized.find("must-not-be-projected") == std::string::npos);
 
     auto replay = store->latest("tenant-live", "run-live");
-    assert(replay && replay->snapshot_id == done.snapshot_id);
+    assert(replay && replay->snapshot_id == with_actions.snapshot_id);
     LiveOperationsProjection recovered(*replay, store);
     ToolExecutionEvent failed = started;
     failed.tool_call_id = "call-2";

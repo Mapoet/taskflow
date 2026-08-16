@@ -38,7 +38,7 @@ Claude Code 的弱点是 Turn 结束容易成为事实上的任务结束；Agent
 | AF-CC4 三链持久化 | `[~]` | Conversation、Run/Harness、Effect 均有独立 Store/digest；已有 Run-Harness saga、CrossStoreCoordinationJournal、Effect reconciliation 与 restart 测试 | Conversation 尚未纳入统一 correlation/coordination boundary；缺全 durable 写点 crash injection、deterministic replay/time-travel 和 orphan reconciliation |
 | AF-CC5 子 Agent 隔离 | `[△]` | ChildTask/A2A 已禁止远端或子任务自报完成直接关闭父任务 | capability intersection、独立 transcript namespace、父取消传播、远端证据本地强复验仍未形成统一内核 |
 | AF-CC6 Streaming/安全调度 | `[△]` | 已有同轮只读工具并行、A2A submit 并行和 Taskflow 执行基础 | 缺 effect/concurrency taxonomy、冲突 DAG、流式提前调度、abort 后 effect 协调和 critical-path 证据 |
-| AF-CC7 Experience/Operations | `[~]` | 五个 LiveRuntime demo 共享 bootstrap/profile；CLI/Web/TUI/ImGui 经公共 Conversation adapter；AgentServer/A2A 接入 ConversationStore；SDK 已有 typed runtime-event callback、cursor 与断线 replay；Operations 明确 candidate/verified | 各端尚未完全统一为同一 Operations snapshot/action contract；Approval 动作、取消、后台通知与跨进程续传仍有入口差异 |
+| AF-CC7 Experience/Operations | `[~]` | 五个 LiveRuntime demo 共享 bootstrap/profile；CLI/Web/TUI/ImGui 经公共 Conversation adapter；AgentServer/A2A 接入 ConversationStore；SDK 已有 typed runtime-event callback、cursor 与断线 replay；Operations 明确 candidate/verified，并统一 task command identity/scope/revision action contract | Approval 动作、执行取消与任务取消、后台通知及跨进程续传仍有入口差异；真实 IdP 与浏览器动作自动化未认证 |
 | AF-CC8 质量/Live | `[~]` | Phase 4 offline 77/77、Phase 3 22/22、A2A 4/4、五 demo 构建通过；已有 Role Live Certification、production bundle/signature/attestation/approval/runner 与 fail-closed negative/restart 测试 | 认证框架存在不等于生产环境已认证；真实 provider/MCP/IdP/KMS/Sandbox 证据与 mandatory live matrix 尚未关闭，不能以 fixture/offline pass 替代 |
 | AF-CC-LTW 长时复杂工具工作流 | `[~]` | LTW0–LTW8 已完成；LTW9 已实现 mandatory recovery contract、no-skip evidence-level gate、crash/fencing/cancel/corruption/busy/schema 场景、确定性 soak runner 与机器可读证据摘要 | LTW9 本地 offline/process correctness 已闭环；真实 provider-live 断线/重连认证与数小时 soak 尚未实际执行，认证状态保持 NotCertified，现状仍不能声称已具备生产级长时自主工作能力 |
 | AF-AT AgentTemplate 综合协作运行时 | `[~]` | AT0–AT9 已落地 versioned Template/Plan/Session/Invocation、SQLite registry、四类 PlanProvider、deterministic validator、8 类 Runner SPI、DAG compiler、统一 AgentRuntime、WorkflowNode/Subflow、replan CAS、TaskClosure completion authority 和 canonical Operations 投影；专项 8/8、相关 UI 12/12 与 Web 实机截图通过 | 主链已形成但完整 production certification 尚缺：具体 MCP/ChildAgent/A2A/durable runner 后端绑定、Conversation 默认入口迁移、真实 provider/live 与 crash/restart soak；故不能仅凭 callback/offline 证据标记 `[x]` |
@@ -636,7 +636,7 @@ ChildTask/A2A/Skill 子运行时使用能力交集和独立 transcript。父授�
 
 ### AF-CC7：统一 Experience/Operations `[~]`
 
-四个交互 demo 已经公共 Conversation adapter，SDK/AgentServer/A2A 已消费 typed runtime event 与 cursor，candidate/verified 区分已存在。剩余退出条件是所有端统一 Operations snapshot/action contract、真实 ApprovalStore 动作、取消/后台通知一致且跨进程断线重连不回退。
+四个交互 demo 已经公共 Conversation adapter，SDK/AgentServer/A2A 已消费 typed runtime event 与 cursor，candidate/verified 区分已存在。task command 的 actor/tenant/conversation/scope/revision 授权和四端 Operations action 投影已统一。剩余退出条件是真实 ApprovalStore 动作、执行取消/任务取消/后台通知一致、真实 IdP 接入，且跨进程断线重连不回退。
 
 ### AF-CC8：质量、故障与生产认证 `[~]`
 

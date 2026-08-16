@@ -272,6 +272,7 @@
     if (value instanceof Node) td.append(value); else td.textContent = text(value);
     row.append(td); return td;
   }
+  let pendingTaskRevision = null;
   function renderOperations(snapshot) {
     if (!snapshot || snapshot.schema_version !== "phase4.operations.v1") return;
     $("ops-empty").hidden = true; $("ops-content").hidden = false;
@@ -293,6 +294,28 @@
     $("ops-live").textContent = text(snapshot.live_certification || "Unknown");
     $("ops-blocker").textContent = text(snapshot.blocker || "No blocker");
     $("ops-summary").textContent = text(snapshot.summary || "");
+
+    const taskActions = $("ops-task-actions"); taskActions.replaceChildren();
+    const commandPrompts = {start:"开始新任务",status:"查看当前任务状态",output:"查看当前任务输出",
+      continue:"继续当前任务",amend:"修改当前任务要求：",suspend:"暂停当前任务",
+      cancel:"取消当前任务",attach:"将本轮附加到当前任务",replan:"重新规划当前任务："};
+    (snapshot.task_actions || []).forEach(function (action) {
+      const button=document.createElement("button");button.type="button";
+      button.className="task-action";button.disabled=!action.enabled;
+      button.textContent=text(action.command).replaceAll("_"," ");
+      button.title=action.enabled
+        ? "Requires " + text(action.required_scope) + " · expected revision " + Number(action.expected_task_revision||0)
+        : text(action.reason||"Unavailable by server policy");
+      button.addEventListener("click",function(){
+        const prompt=$("prompt");prompt.value=commandPrompts[action.command]||text(action.command);
+        pendingTaskRevision=Number(action.expected_task_revision||0)||null;
+        prompt.focus();setStatus("Task command prepared. Review and send through the authorized command path.");
+      });taskActions.append(button);
+    });
+    if(!(snapshot.task_actions||[]).length){
+      const empty=document.createElement("span");empty.className="ops-note";
+      empty.textContent="No authenticated task command capabilities published";taskActions.append(empty);
+    }
 
     const stages = $("ops-stages"); stages.replaceChildren();
     (snapshot.stages || []).forEach(function (stage, index) {
@@ -477,9 +500,10 @@
   async function submitPrompt(prompt) {
     addTurn("user", prompt, false); activeAssistant = null; setBusy(true); setStatus("Submitting task…");
     try {
-      const r = await fetch("/ui/run", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ prompt }) });
+      const body={prompt};if(pendingTaskRevision!==null)body.expected_task_revision=pendingTaskRevision;
+      const r = await fetch("/ui/run", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
       if (r.status !== 202) throw new Error("HTTP " + r.status + " " + await r.text());
-      promptEl.value = ""; setStatus("Agent is working…");
+      promptEl.value = ""; pendingTaskRevision=null; setStatus("Agent is working…");
     } catch (error) { addTurn("system", error.message || error, false); setBusy(false); setRunState("failed"); }
   }
 

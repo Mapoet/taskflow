@@ -217,6 +217,10 @@ h1 { font-size: 19px; } h2 { font-size: 16px; }
 .hitl-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 7px; }
 .hitl-actions button { padding: 8px 11px; border: 1px solid var(--line-strong); border-radius: 4px; background: var(--surface-2); color: var(--text); cursor: pointer; text-transform: capitalize; }
 .hitl-actions button:hover { border-color: var(--accent); }
+.task-action-list { display:flex; flex-wrap:wrap; gap:8px; }
+.task-action { padding:8px 12px; border:1px solid var(--line-strong); border-radius:4px; background:var(--surface-2); color:var(--text); cursor:pointer; text-transform:capitalize; }
+.task-action:hover { border-color:var(--accent); }
+.task-action:disabled { opacity:.42; cursor:not-allowed; border-style:dashed; }
 
 .activity-panel { grid-area: right; min-width: 0; min-height: 0; display: grid; grid-template-rows: auto auto minmax(0,1fr); background: #101419; border-left: 1px solid var(--line); }
 .activity-close { display: none; }

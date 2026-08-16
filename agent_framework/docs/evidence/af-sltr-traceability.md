@@ -41,6 +41,17 @@ converted to Passed by an offline test.
 - CLI consumed the same durable Web Operations database and rendered the same
   three axes.
 
+### Authoritative task-command actions
+
+- `TaskCommandPolicy` enforces authenticated actor identity, exact tenant and
+  conversation match, command scopes, lifecycle legality and revision CAS.
+- Shared LiveRuntime publishes the resulting action set into
+  `phase4.operations.v1`; production has no default principal resolver.
+- Web/TUI/ImGui/CLI consume this persisted contract. Web prepares an action for
+  canonical Conversation submission and does not invoke a parallel mutation path.
+- Targeted command/projection/runtime suite: 6/6 PASS.
+- Real Web screenshot: `docs/assets/ui/sltr6/web-task-actions.png`.
+
 ## Immutable current-store observation
 
 The following is a read-only observation of the existing demo databases, not a

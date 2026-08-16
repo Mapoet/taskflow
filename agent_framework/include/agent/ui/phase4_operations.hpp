@@ -115,6 +115,16 @@ struct OperationsSkillNode {
     std::vector<std::string> artifact_refs;
 };
 
+/** Server-authoritative task command capability.  UIs render this contract and
+ * never infer authorization from the displayed task state. */
+struct OperationsTaskAction {
+    std::string command;
+    std::string required_scope;
+    bool enabled{false};
+    std::string reason;
+    std::uint64_t expected_task_revision{0};
+};
+
 /**
  * Canonical, display-safe Phase 4 control-plane projection.
  *
@@ -158,6 +168,7 @@ struct Phase4OperationsSnapshot {
     std::vector<OperationsSourceRevision> source_revisions;
     std::vector<OperationsAgentTemplate> agent_templates;
     std::vector<OperationsSkillNode> skill_nodes;
+    std::vector<OperationsTaskAction> task_actions;
 };
 
 class Phase4OperationsProjection {

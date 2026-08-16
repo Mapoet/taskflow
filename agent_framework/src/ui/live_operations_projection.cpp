@@ -369,6 +369,33 @@ void LiveOperationsProjection::observe_task_coordination(
     if(publisher) publisher(published);
 }
 
+void LiveOperationsProjection::observe_task_actions(
+    std::vector<OperationsTaskAction> actions, std::uint64_t task_revision) {
+    Phase4OperationsSnapshot published;
+    Publisher publisher;
+    {
+        std::lock_guard lock(mutex_);
+        const auto current = std::find_if(snapshot_.task_actions.begin(),
+            snapshot_.task_actions.end(), [](const auto& action) {
+                return action.expected_task_revision != 0;
+            });
+        if(current != snapshot_.task_actions.end() && task_revision != 0 &&
+           task_revision < current->expected_task_revision) return;
+        for(auto& action : actions) action.expected_task_revision = task_revision;
+        snapshot_.task_actions = std::move(actions);
+        snapshot_.updated_at = timestamp();
+        snapshot_.snapshot_id = digest(snapshot_);
+        if(store_) {
+            std::string error;
+            if(!store_->save(snapshot_, &error))
+                throw std::runtime_error("cannot persist task actions snapshot: " + error);
+        }
+        published = snapshot_;
+        publisher = publisher_;
+    }
+    if(publisher) publisher(published);
+}
+
 std::size_t LiveOperationsProjection::consume_invocations(
     tool_runtime::InvocationEventSubscription& subscription, std::chrono::milliseconds timeout,
     std::size_t limit) {

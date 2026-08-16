@@ -126,6 +126,14 @@ Elements operations_rows(const UiPresentationSnapshot& snapshot) {
                              std::to_string(ops.stagnation_count)) | color(kMuted)}));
     if (!ops.blocker.empty()) rows.push_back(paragraph("BLOCKER  " + ops.blocker) | bold | color(Color::RedLight));
     if (!ops.residual_risk.empty()) rows.push_back(paragraph("RESIDUAL RISK  " + ops.residual_risk) | color(Color::YellowLight));
+    if(!ops.task_actions.empty()) {
+        std::string line="TASK COMMANDS";
+        for(const auto& action:ops.task_actions)
+            line += " · " + action.command + " " +
+                (action.enabled ? "enabled" : "disabled") + "@r" +
+                std::to_string(action.expected_task_revision);
+        rows.push_back(paragraph(line) | color(kMuted));
+    }
     rows.push_back(separator());
     rows.push_back(text("PLAN / EVIDENCE") | bold | color(kAccent));
     for (const auto& stage : ops.stages) {

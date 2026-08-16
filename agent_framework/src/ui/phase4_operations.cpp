@@ -166,6 +166,9 @@ namespace agent_framework
         out["skill_nodes"] = json::array();
         for (const auto &v : s.skill_nodes)
             out["skill_nodes"].push_back(json{{"node_id",v.node_id},{"skill_id",v.skill_id},{"skill_version",v.skill_version},{"runner",v.runner},{"role",v.role},{"state",v.state},{"output_digest",v.output_digest},{"evidence_refs",v.evidence_refs},{"artifact_refs",v.artifact_refs}});
+        out["task_actions"] = json::array();
+        for (const auto &v : s.task_actions)
+            out["task_actions"].push_back(json{{"command",v.command},{"required_scope",v.required_scope},{"enabled",v.enabled},{"reason",v.reason},{"expected_task_revision",v.expected_task_revision}});
         return out;
     }
 
@@ -211,6 +214,15 @@ namespace agent_framework
         if(!std::isfinite(s.cost_per_closed_criterion)||s.cost_per_closed_criterion<0.0 ||
            s.criteria_closed>s.criteria_total) throw std::invalid_argument("invalid closure metrics");
         s.unknowns = strings(root, "unknowns");
+        s.task_actions = objects<OperationsTaskAction>(root, "task_actions", [](const json &v) {
+            OperationsTaskAction x;
+            x.command = bounded(v, "command", true);
+            x.required_scope = bounded(v, "required_scope");
+            x.enabled = v.value("enabled", false);
+            x.reason = bounded(v, "reason");
+            x.expected_task_revision = v.value("expected_task_revision", std::uint64_t{0});
+            return x;
+        });
         s.stages = objects<OperationsStage>(root, "stages", [](const json &v)
                                             {
         OperationsStage x; x.id = bounded(v, "id", true); x.label = bounded(v, "label", true);
@@ -339,6 +351,14 @@ namespace agent_framework
             out << "RESIDUAL RISK: " << clipped(s.residual_risk, width - 15) << '\n';
         out << "Stages " << s.stages.size() << " | Evidence " << s.evidence.size() << " | Memory "
             << s.memory.size() << " | Invocations " << s.invocations.size() << " | HITL " << s.hitl.size() << '\n';
+        if(!s.task_actions.empty()) {
+            out << "Task commands";
+            for(const auto& action:s.task_actions)
+                out << " · " << action.command << '='
+                    << (action.enabled ? "enabled" : "disabled") << "@r"
+                    << action.expected_task_revision;
+            out << '\n';
+        }
         for (const auto &stage : s.stages)
             out << "  [" << status_name(stage.status) << "] " << stage.label << " r" << stage.revision
                 << " · " << clipped(stage.summary, width > 32 ? width - 32 : width) << '\n';
@@ -409,6 +429,12 @@ namespace agent_framework
         s.hitl = {{"HITL-19", "manual_review", OperationsStatus::Pending, "Review recovery boundary and accept or request remediation", "release-arbiter", "2026-08-10T18:00+08:00", {"approve", "request_remediation", "reject"}}};
         s.agent_templates = {{"scientific-research-agent", 3, "sha256:template-demo", "INV-AGENT-42", "hybrid", "conversation", "research-plan", 3, "sha256:plan-demo", "SESSION-42", "sha256:session-demo", "17", "production-2026.08", "task_closure_controller", "architecture_finding_open"}};
         s.skill_nodes = {{"investigate", "web-research", "2.1.0", "mcp", "worker", "succeeded", "sha256:investigation", {"EV-REQ-1"}, {"ART-SEARCH-1"}}, {"verify", "architecture-verifier", "1.4.2", "child_agent", "verifier", "succeeded", "sha256:verification", {"EV-ARCH-7"}, {}}};
+        s.task_actions = {{"status","task:read",true,"",12},
+                          {"continue","task:write",true,"",12},
+                          {"suspend","task:control",true,"",12},
+                          {"cancel","task:control",false,
+                           "task_command_scope_forbidden:task:control",12},
+                          {"replan","task:write",true,"",12}};
         return s;
     }
 
