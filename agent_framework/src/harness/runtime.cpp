@@ -186,11 +186,25 @@ Phase4HarnessRuntime::Phase4HarnessRuntime(HarnessStore& store, HarnessPortRegis
 
 HarnessRunResult Phase4HarnessRuntime::run(const HarnessStart& start,
                                            const HarnessRuntimeOptions& options) {
+    const auto prior_stage_succeeded = [&](HarnessStage stage) {
+        return std::any_of(start.completed_stage_records.begin(),
+                           start.completed_stage_records.end(),
+            [&](const auto& record) {
+                return record.stage == stage &&
+                       record.outcome == StageOutcome::Succeeded &&
+                       !record.output_digest.empty();
+            });
+    };
     if(start.metadata.identity.tenant_id.empty() ||
        start.metadata.identity.task_id.empty() || start.harness_id.empty() ||
        start.intake_digest.empty() || start.acceptance_contract_digest.empty() ||
        start.profile_revision_digest.empty() || start.prompt_revision_digest.empty() ||
-       start.max_remediation_cycles == 0) {
+       start.max_remediation_cycles == 0 ||
+       (start.initial_stage != HarnessStage::Intake &&
+        start.initial_stage != HarnessStage::PlanApproval) ||
+       (start.initial_stage == HarnessStage::PlanApproval &&
+        (start.plan_digest.empty() || !prior_stage_succeeded(HarnessStage::Intake) ||
+         !prior_stage_succeeded(HarnessStage::Cognition)))) {
         return {HarnessState::Failed, {}, "harness_start_invalid",
                 "identity, harness, immutable digests, and positive remediation bound are required"};
     }
@@ -199,13 +213,15 @@ HarnessRunResult Phase4HarnessRuntime::run(const HarnessStart& start,
     checkpoint.harness_id = start.harness_id;
     checkpoint.revision = 1;
     checkpoint.state = HarnessState::Running;
-    checkpoint.next_stage = HarnessStage::Intake;
+    checkpoint.next_stage = start.initial_stage;
     checkpoint.max_remediation_cycles = start.max_remediation_cycles;
     checkpoint.judge_required = start.judge_required;
     checkpoint.pins.intake_digest = start.intake_digest;
+    checkpoint.pins.plan_digest = start.plan_digest;
     checkpoint.pins.acceptance_contract_digest = start.acceptance_contract_digest;
     checkpoint.pins.profile_revision_digest = start.profile_revision_digest;
     checkpoint.pins.prompt_revision_digest = start.prompt_revision_digest;
+    checkpoint.stage_records = start.completed_stage_records;
     checkpoint.updated_at = now_value(options);
     auto commit = store_.create(checkpoint,
         event_for(checkpoint, "harness_created",

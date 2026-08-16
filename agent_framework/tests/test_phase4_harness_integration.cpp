@@ -1,3 +1,6 @@
+#ifdef NDEBUG
+#undef NDEBUG
+#endif
 #include <cassert>
 #include <filesystem>
 
@@ -55,6 +58,35 @@ int main() {
     assert(resumed.state == HarnessState::Completed);
     assert(resumed.checkpoint.pins.approval_decision_id == "approval-plan-v1");
     assert(approval_counters->execute[HarnessStage::PlanApproval] == 2);
+
+    InMemoryHarnessStore preplanned_store;
+    auto preplanned_counters = std::make_shared<PortCounters>();
+    Phase4HarnessRuntime preplanned_runtime(
+        preplanned_store, ports(preplanned_counters, false, true, true));
+    auto preplanned_start = start("harness-preplanned");
+    preplanned_start.initial_stage = HarnessStage::PlanApproval;
+    preplanned_start.plan_digest = "sha256:plan-v1";
+    preplanned_start.completed_stage_records = {
+        {HarnessStage::Intake, 1, StageOutcome::Succeeded,
+         {}, {}, preplanned_start.intake_digest},
+        {HarnessStage::Cognition, 1, StageOutcome::Succeeded,
+         {}, {}, preplanned_start.plan_digest}};
+    const auto preplanned_wait = preplanned_runtime.run(preplanned_start, options);
+    assert(preplanned_wait.state == HarnessState::AwaitingApproval);
+    assert(preplanned_counters->execute[HarnessStage::Intake] == 0);
+    assert(preplanned_counters->execute[HarnessStage::Cognition] == 0);
+    assert(preplanned_wait.checkpoint.pins.plan_digest == "sha256:plan-v1");
+    const auto preplanned_done = preplanned_runtime.resume(
+        "tenant-a", "harness-preplanned", options);
+    assert(preplanned_done.state == HarnessState::Completed);
+    assert(preplanned_counters->execute[HarnessStage::Intake] == 0);
+    assert(preplanned_counters->execute[HarnessStage::Cognition] == 0);
+
+    auto invalid_preplanned = start("harness-preplanned-invalid");
+    invalid_preplanned.initial_stage = HarnessStage::PlanApproval;
+    const auto rejected_preplanned = preplanned_runtime.run(
+        invalid_preplanned, options);
+    assert(rejected_preplanned.error_code == "harness_start_invalid");
 
     InMemoryHarnessStore ambiguous_store;
     auto ambiguous_counters = std::make_shared<PortCounters>();

@@ -1,3 +1,6 @@
+#ifdef NDEBUG
+#undef NDEBUG
+#endif
 #include "agent/distributed/durable_queue.hpp"
 #include "agent/distributed/remote_object_store.hpp"
 #include "agent/distributed/remote_queue.hpp"

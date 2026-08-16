@@ -47,6 +47,9 @@ namespace agent_framework::conversation
                                  std::string * = nullptr) = 0;
         virtual std::optional<TurnCheckpoint> load_turn(const ConversationIdentity &,
                                                         std::string_view turn_id) = 0;
+        virtual std::vector<TurnCheckpoint> list_turns(
+            const ConversationIdentity &, bool nonterminal_only = false,
+            std::size_t limit = 0) = 0;
         virtual bool append_event(RuntimeEventEnvelope, std::string * = nullptr) = 0;
         virtual std::vector<RuntimeEventEnvelope> events(const ConversationIdentity &,
                                                          std::uint64_t after = 0,
@@ -80,6 +83,9 @@ namespace agent_framework::conversation
         std::vector<ConversationMessage> messages(const ConversationIdentity &) override;
         bool commit_turn(TurnCheckpoint, std::uint64_t, std::string *) override;
         std::optional<TurnCheckpoint> load_turn(const ConversationIdentity &, std::string_view) override;
+        std::vector<TurnCheckpoint> list_turns(
+            const ConversationIdentity &, bool nonterminal_only = false,
+            std::size_t limit = 0) override;
         bool append_event(RuntimeEventEnvelope, std::string *) override;
         std::vector<RuntimeEventEnvelope> events(
             const ConversationIdentity &, std::uint64_t after = 0,

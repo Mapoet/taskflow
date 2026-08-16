@@ -49,7 +49,10 @@ namespace agent_framework::conversation
         Cancelled,
         DeadlineExceeded,
         ContextExhausted,
-        MaxIterations
+        MaxIterations,
+        AwaitingInput,
+        AwaitingApproval,
+        AwaitingExternal
     };
     enum class InputDisposition
     {

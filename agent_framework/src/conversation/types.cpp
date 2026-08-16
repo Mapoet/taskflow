@@ -15,7 +15,7 @@ namespace agent_framework::conversation
     std::string_view name(TaskExecutionProfile v) { return choose(v, {"conversation", "read_only_analysis", "artifact_delivery", "code_change", "external_action", "professional"}); }
     std::string_view name(TurnPhase v) { return choose(v, {"pending", "running", "awaiting_tool", "awaiting_input", "interrupted", "completed", "failed"}); }
     std::string_view name(TurnContinuationReason v) { return choose(v, {"initial_request", "tool_results_available", "queued_user_input", "context_compacted", "replan_requested", "clarification_answered", "resume_after_approval", "none"}); }
-    std::string_view name(ModelTurnStopReason v) { return choose(v, {"end_turn", "tool_requested", "guard_stopped", "provider_error", "cancelled", "deadline_exceeded", "context_exhausted", "max_iterations"}); }
+    std::string_view name(ModelTurnStopReason v) { return choose(v, {"end_turn", "tool_requested", "guard_stopped", "provider_error", "cancelled", "deadline_exceeded", "context_exhausted", "max_iterations", "awaiting_input", "awaiting_approval", "awaiting_external"}); }
     std::string_view name(InputDisposition v) { return choose(v, {"interrupt_and_replace", "append_to_current_turn", "queue_next_turn", "control_action", "status_query"}); }
     std::string_view name(InputState v) { return choose(v, {"queued", "consumed", "cancelled"}); }
     nlohmann::json encode(const ConversationMessage &v) { return {{"schema", "agent.conversation_message/v1"}, {"identity", identity(v.identity)}, {"message_id", v.message_id}, {"parent_id", v.parent_id}, {"turn_id", v.turn_id}, {"role", v.role}, {"content", v.content}, {"created_at", v.created_at}, {"sequence", v.sequence}}; }

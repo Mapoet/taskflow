@@ -1112,6 +1112,10 @@ CognitionPipelineResult MultiStageCognitionWorkflow::run(
                 input["current_plan"] = current ? encode(*current) : json::object();
                 input["critic"] = latest_stage(checkpoint, CognitionStage::Critique)->output;
                 input["revision_request"] = options.plan_revision_request;
+            } else if(!options.plan_revision_request.empty()) {
+                const auto current = plans_.current(intake.metadata.identity);
+                input["current_plan"] = current ? encode(*current) : json::object();
+                input["revision_request"] = options.plan_revision_request;
             }
             const auto iteration = revision ? checkpoint.critic_iteration + 1 : 0;
             const auto* artifact = invoke_stage(stage, iteration, input);
@@ -1130,9 +1134,11 @@ CognitionPipelineResult MultiStageCognitionWorkflow::run(
             const auto planning_view = build_view(stage);
             if(!planning_view) break;
             const auto prior = plans_.current(intake.metadata.identity);
-            const std::uint64_t plan_revision = revision
+            const bool superseding = revision ||
+                (!options.plan_revision_request.empty() && prior.has_value());
+            const std::uint64_t plan_revision = superseding
                 ? (prior ? prior->plan_revision + 1 : 2) : 1;
-            const std::string parent_digest = revision && prior
+            const std::string parent_digest = superseding && prior
                 ? encode(*prior).at("canonical_digest").get<std::string>() : "";
             const auto plan = parse_plan(
                 artifact->output.value("plan", json::object()), intake, *understanding,
@@ -1150,7 +1156,7 @@ CognitionPipelineResult MultiStageCognitionWorkflow::run(
                 break;
             }
             PlanningCommitResult plan_commit;
-            if(revision) {
+            if(superseding) {
                 if(!prior) {
                     fail("plan_revision_missing_parent", "revision requires an existing plan");
                     break;

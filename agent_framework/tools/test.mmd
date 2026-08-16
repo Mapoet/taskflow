@@ -1,0 +1,19 @@
+flowchart TD
+    A["🚀 Boost.Geometry 功能验证"] --> B["📐 基础属性"]
+    A --> C["🔧 布尔操作"]
+    A --> D["📍 点关系判断"]
+
+    B --> B1["面积 area() = 16 ✅"]
+    B --> B2["周长 perimeter() = 16 ✅"]
+    B --> B3["质心 centroid() = (2,2) ✅"]
+    B --> B4["点距 distance() = 5 ✅"]
+
+    C --> C1["交集 intersection = 4 ✅"]
+    C --> C2["并集 union = 28 ✅"]
+    C --> C3["差集 difference = 12 ✅"]
+    C --> C4["对称差 = 24 ✅"]
+
+    D --> D1["within 内部点 = true ✅"]
+    D --> D2["within 边界点 = false ✅"]
+    D --> D3["covered_by 边界点 = true ✅"]
+    D --> D4["intersects / disjoint ✅"]

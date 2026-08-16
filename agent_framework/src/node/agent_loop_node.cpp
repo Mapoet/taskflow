@@ -902,8 +902,8 @@ AgentLoopNode::create(
 
         auto append_tool_message = [&](const CallSpec& c, json result) {
             if (log_at_least(LogLevel::Info)) {
-                std::clog << "\n[tool] name=" << c.name << " start\n";
-                std::clog.flush();
+                //std::clog << "\n[tool] name=" << c.name << " start\n";
+                //std::clog.flush();
             }
             apply_per_tool_result_budget(result, ctx_budget_limits, AfTruncationKind::tool_result);
             const bool warn_code =
@@ -916,8 +916,8 @@ AgentLoopNode::create(
             tm.timestamp = std::time(nullptr);
             shared->state->history.push_back(std::move(tm));
             if (log_at_least(LogLevel::Info)) {
-                std::clog << "[tool] name=" << c.name << " done\n";
-                std::clog.flush();
+                //std::clog << "[tool] name=" << c.name << " done\n";
+                //std::clog.flush();
             }
             if (warn_code && log_at_least(LogLevel::Warn)) {
                 const Message& back = shared->state->history.back();

@@ -94,6 +94,11 @@ struct HarnessStart {
     std::string acceptance_contract_digest;
     std::string profile_revision_digest;
     std::string prompt_revision_digest;
+    // A production caller that has already durably completed Intake and
+    // Cognition may resume only at PlanApproval with the immutable plan pin.
+    HarnessStage initial_stage{HarnessStage::Intake};
+    std::string plan_digest;
+    std::vector<HarnessStageRecord> completed_stage_records;
     std::uint64_t max_remediation_cycles{2};
     bool judge_required{true};
 };

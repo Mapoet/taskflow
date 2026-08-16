@@ -1,3 +1,6 @@
+#ifdef NDEBUG
+#undef NDEBUG
+#endif
 #include <cassert>
 #include <stdexcept>
 #include <vector>
@@ -21,6 +24,24 @@ int main() {
     assert(route.path == TurnExecutionPath::LegacyReactFallback);
     route = HarnessSupportedTurnRuntime::route({true, true, true, true}, request.profile);
     assert(route.path == TurnExecutionPath::LongTaskWorkflow);
+    for(const auto profile : {TaskExecutionProfile::Conversation,
+                              TaskExecutionProfile::ReadOnlyAnalysis}) {
+        assert(HarnessSupportedTurnRuntime::route(
+            {true,true,true,true},profile).path==TurnExecutionPath::Harness);
+        assert(HarnessSupportedTurnRuntime::route(
+            {false,false,false,true},profile).path==TurnExecutionPath::LegacyReactFallback);
+    }
+    for(const auto profile : {TaskExecutionProfile::ArtifactDelivery,
+                              TaskExecutionProfile::CodeChange,
+                              TaskExecutionProfile::ExternalAction,
+                              TaskExecutionProfile::Professional}) {
+        assert(HarnessSupportedTurnRuntime::route(
+            {true,true,true,true},profile).path==TurnExecutionPath::LongTaskWorkflow);
+        assert(HarnessSupportedTurnRuntime::route(
+            {true,true,false,true},profile).path==TurnExecutionPath::FailClosed);
+        assert(HarnessSupportedTurnRuntime::route(
+            {false,true,false,true},profile).path==TurnExecutionPath::Harness);
+    }
 
     int harness_calls = 0, fallback_calls = 0;
     std::vector<RuntimeEventEnvelope> events;
@@ -70,4 +91,15 @@ int main() {
         threw = std::string(e.what()) == "production_harness_unavailable";
     }
     assert(threw);
+
+    // Typed durable waits survive the routing boundary unchanged.
+    for(const auto reason : {ModelTurnStopReason::AwaitingInput,
+                             ModelTurnStopReason::AwaitingApproval,
+                             ModelTurnStopReason::AwaitingExternal}) {
+        HarnessSupportedTurnRuntime waiting({true,true,true,false},
+            [reason](const auto&){ModelTurnOutcome out;out.reason=reason;return out;},
+            {},{},[reason](const auto&){ModelTurnOutcome out;out.reason=reason;return out;});
+        request.profile=TaskExecutionProfile::Professional;
+        assert(waiting.execute(request,checkpoint).reason==reason);
+    }
 }

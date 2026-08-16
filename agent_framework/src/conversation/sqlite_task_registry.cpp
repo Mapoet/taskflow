@@ -13,6 +13,7 @@
 #include "agent/internal/sqlite_utils.hpp"
 
 namespace agent_framework::conversation {
+// Task, requirement, run and plan bindings share this transactional store.
 namespace {
 namespace sql = agent_framework::internal::sqlite;
 using json = nlohmann::json;
@@ -136,7 +137,9 @@ void insert_run_link(sqlite3* db, TaskRunLink value) {
     if(value.created_at.empty()) value.created_at = now;
     if(value.updated_at.empty()) value.updated_at = now;
     sql::Statement insert(db,
-        "INSERT INTO task_run_links VALUES(?,?,?,?,?,?,?,?,?)");
+        "INSERT INTO task_run_links(tenant,conversation,task_id,run_id,"
+        "requirement_revision,plan_revision,state,created_at,updated_at,"
+        "plan_digest,task_contract_digest) VALUES(?,?,?,?,?,?,?,?,?,?,?)");
     bind_identity(insert.get(), value.identity);
     sql::bind_text(insert.get(), 3, value.task_id);
     sql::bind_text(insert.get(), 4, value.run_id);
@@ -145,6 +148,8 @@ void insert_run_link(sqlite3* db, TaskRunLink value) {
     sql::bind_text(insert.get(), 7, value.state);
     sql::bind_text(insert.get(), 8, value.created_at);
     sql::bind_text(insert.get(), 9, value.updated_at);
+    sql::bind_text(insert.get(), 10, value.plan_digest);
+    sql::bind_text(insert.get(), 11, value.task_contract_digest);
     if(sql::step(insert.get()) != SQLITE_DONE)
         throw std::runtime_error(sqlite3_errmsg(db));
 }
@@ -285,7 +290,23 @@ void SQLiteTaskRegistry::migrate() {
         "tenant TEXT NOT NULL,conversation TEXT NOT NULL,task_id TEXT NOT NULL,"
         "run_id TEXT NOT NULL,requirement_revision INTEGER NOT NULL,"
         "plan_revision INTEGER NOT NULL,state TEXT NOT NULL,created_at TEXT NOT NULL,"
-        "updated_at TEXT NOT NULL,PRIMARY KEY(tenant,conversation,task_id,run_id))");
+        "updated_at TEXT NOT NULL,plan_digest TEXT NOT NULL DEFAULT '',"
+        "task_contract_digest TEXT NOT NULL DEFAULT '',"
+        "PRIMARY KEY(tenant,conversation,task_id,run_id))");
+    auto add_column = [db](std::string_view name, std::string_view definition) {
+        bool found = false;
+        sql::Statement columns(db, "PRAGMA table_info(task_run_links)");
+        while(sql::step(columns.get()) == SQLITE_ROW)
+            if(sql::column_text(columns.get(), 1) == name) found = true;
+        if(!found) {
+            const auto statement = std::string("ALTER TABLE task_run_links ADD COLUMN ") +
+                                   std::string(definition);
+            sql::exec(db, statement.c_str());
+        }
+    };
+    add_column("plan_digest", "plan_digest TEXT NOT NULL DEFAULT ''");
+    add_column("task_contract_digest",
+               "task_contract_digest TEXT NOT NULL DEFAULT ''");
     sql::exec(db, "CREATE TABLE IF NOT EXISTS conversation_task_events("
         "tenant TEXT NOT NULL,conversation TEXT NOT NULL,task_id TEXT NOT NULL,"
         "sequence INTEGER NOT NULL,task_revision INTEGER NOT NULL,event_type TEXT NOT NULL,"
@@ -468,6 +489,86 @@ TaskMutationResult SQLiteTaskRegistry::bind_run(
     } catch(const std::exception& error) { return {false,0,error.what()}; }
 }
 
+TaskMutationResult SQLiteTaskRegistry::bind_plan(
+    const TaskRunLink& link, std::uint64_t expected) {
+    if(link.task_id.empty() || link.run_id.empty() || link.plan_revision == 0 ||
+       link.plan_digest.empty() || link.task_contract_digest.empty())
+        return {false, 0, "task_plan_binding_contract_invalid"};
+    std::lock_guard lock(mutex_);
+    auto* db = sql::database(db_);
+    try {
+        sql::Transaction transaction(db);
+        sql::Statement old(db,
+            "SELECT task_id,root_turn_id,current_turn_id,current_run_id,parent_task_id,"
+            "state,closure_state,revision,requirement_revision,plan_revision,"
+            "created_at,updated_at,digest FROM conversation_tasks "
+            "WHERE tenant=? AND conversation=? AND task_id=?");
+        bind_identity(old.get(), link.identity);
+        sql::bind_text(old.get(), 3, link.task_id);
+        if(sql::step(old.get()) != SQLITE_ROW) return {false, 0, "task_not_found"};
+        auto task = task_from(old.get(), link.identity);
+        if(task.revision != expected) return {false, task.revision, "task_revision_conflict"};
+        if(link.requirement_revision != 0 &&
+           link.requirement_revision != task.requirement_revision)
+            return {false, task.revision, "task_requirement_revision_conflict"};
+        sql::Statement update_link(db,
+            "UPDATE task_run_links SET requirement_revision=?,plan_revision=?,state=?,"
+            "updated_at=?,plan_digest=?,task_contract_digest=? WHERE tenant=? AND "
+            "conversation=? AND task_id=? AND run_id=? AND plan_revision<?");
+        sql::bind_uint64(update_link.get(), 1, task.requirement_revision);
+        sql::bind_uint64(update_link.get(), 2, link.plan_revision);
+        sql::bind_text(update_link.get(), 3, link.state);
+        sql::bind_text(update_link.get(), 4, stamp());
+        sql::bind_text(update_link.get(), 5, link.plan_digest);
+        sql::bind_text(update_link.get(), 6, link.task_contract_digest);
+        sql::bind_text(update_link.get(), 7, link.identity.tenant_id);
+        sql::bind_text(update_link.get(), 8, link.identity.conversation_id);
+        sql::bind_text(update_link.get(), 9, link.task_id);
+        sql::bind_text(update_link.get(), 10, link.run_id);
+        sql::bind_uint64(update_link.get(), 11, link.plan_revision);
+        if(sql::step(update_link.get()) != SQLITE_DONE || sql::changes(db) != 1)
+            return {false, task.revision, "task_run_plan_revision_conflict"};
+        ++task.revision;
+        task.plan_revision = link.plan_revision;
+        task.current_run_id = link.run_id;
+        task.updated_at = stamp();
+        task.digest = canonical(encode(task));
+        sql::Statement update_task(db,
+            "UPDATE conversation_tasks SET current_run_id=?,revision=?,plan_revision=?,"
+            "updated_at=?,digest=? WHERE tenant=? AND conversation=? AND task_id=? AND revision=?");
+        sql::bind_text(update_task.get(), 1, task.current_run_id);
+        sql::bind_uint64(update_task.get(), 2, task.revision);
+        sql::bind_uint64(update_task.get(), 3, task.plan_revision);
+        sql::bind_text(update_task.get(), 4, task.updated_at);
+        sql::bind_text(update_task.get(), 5, task.digest);
+        sql::bind_text(update_task.get(), 6, task.identity.tenant_id);
+        sql::bind_text(update_task.get(), 7, task.identity.conversation_id);
+        sql::bind_text(update_task.get(), 8, task.task_id);
+        sql::bind_uint64(update_task.get(), 9, expected);
+        if(sql::step(update_task.get()) != SQLITE_DONE || sql::changes(db) != 1)
+            throw std::runtime_error("task_revision_conflict");
+        sql::Statement active(db,
+            "UPDATE conversation_active_tasks SET task_revision=?,updated_at=? "
+            "WHERE tenant=? AND conversation=? AND task_id=?");
+        sql::bind_uint64(active.get(), 1, task.revision);
+        sql::bind_text(active.get(), 2, task.updated_at);
+        sql::bind_text(active.get(), 3, task.identity.tenant_id);
+        sql::bind_text(active.get(), 4, task.identity.conversation_id);
+        sql::bind_text(active.get(), 5, task.task_id);
+        if(sql::step(active.get()) != SQLITE_DONE)
+            throw std::runtime_error(sqlite3_errmsg(db));
+        append_event(db, task, "plan_bound", {{"run_id", link.run_id},
+            {"requirement_revision", task.requirement_revision},
+            {"plan_revision", link.plan_revision},
+            {"plan_digest", link.plan_digest},
+            {"task_contract_digest", link.task_contract_digest}});
+        transaction.commit();
+        return {true, task.revision, {}};
+    } catch(const std::exception& error) {
+        return {false, 0, error.what()};
+    }
+}
+
 std::optional<PersistentTask> SQLiteTaskRegistry::load(
     const ConversationIdentity& identity, std::string_view task_id) {
     std::lock_guard lock(mutex_);
@@ -537,6 +638,14 @@ TaskMutationResult SQLiteTaskRegistry::append_requirement(
         link.requirement_revision = requirement.revision;
         link.run_id = std::string(run_id);
         insert_link(db, link);
+        TaskRunLink revised_run;
+        revised_run.identity = input.identity;
+        revised_run.task_id = input.task_id;
+        revised_run.run_id = std::string(run_id);
+        revised_run.requirement_revision = requirement.revision;
+        revised_run.plan_revision = 0;
+        revised_run.state = "awaiting_plan";
+        insert_run_link(db, revised_run);
         ++task.revision;
         task.requirement_revision = requirement.revision;
         task.current_turn_id = input.turn_id;
@@ -703,14 +812,15 @@ std::vector<TaskRunLink> SQLiteTaskRegistry::runs(
     std::lock_guard lock(mutex_);
     auto* db = sql::database(db_);
     sql::Statement query(db,"SELECT run_id,requirement_revision,plan_revision,state,"
-        "created_at,updated_at FROM task_run_links WHERE tenant=? AND conversation=? "
+        "created_at,updated_at,plan_digest,task_contract_digest FROM task_run_links WHERE tenant=? AND conversation=? "
         "AND task_id=? ORDER BY created_at,run_id");
     bind_identity(query.get(),identity); sql::bind_text(query.get(),3,task_id);
     std::vector<TaskRunLink> result;
     while(sql::step(query.get()) == SQLITE_ROW) result.push_back({identity,std::string(task_id),
         sql::column_text(query.get(),0),sql::column_uint64(query.get(),1),
         sql::column_uint64(query.get(),2),sql::column_text(query.get(),3),
-        sql::column_text(query.get(),4),sql::column_text(query.get(),5)});
+        sql::column_text(query.get(),4),sql::column_text(query.get(),5),
+        sql::column_text(query.get(),6),sql::column_text(query.get(),7)});
     return result;
 }
 

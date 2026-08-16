@@ -175,6 +175,28 @@ void test_tool_receipts_are_delivery() {
     assert(turn.tool_receipt_refs.size() == 1);
 }
 
+void test_prior_turn_receipts_do_not_mask_empty_delivery() {
+    auto fixture = make_fixture(ScriptedAdapter::Mode::AlwaysEmpty);
+    tf::Executor executor(2);
+    GraphExecutor gx;
+    ReactCliRunRequest req;
+    req.config = fixture.config;
+    req.deps = fixture.deps;
+    req.session = std::make_shared<internal::AgentThreadState>();
+    Message prior;
+    prior.role = "tool";
+    prior.content = R"({"ok":true})";
+    prior.tool_call_id = "prior-turn-receipt";
+    req.session->history.push_back(std::move(prior));
+    req.session->initial_user_prompt = "empty after prior tool";
+    req.options.sink.on_final_json = [](const nlohmann::json&) {};
+    const auto wr = gx.run_react_cli_sync(executor, req);
+    assert(!wr.success);
+    assert(wr.outputs.contains("tool_receipt_refs"));
+    assert(wr.outputs["tool_receipt_refs"].empty());
+    assert(wr.outputs.value("model_stop_reason", "") == "empty_delivery");
+}
+
 void test_harness_does_not_leak_code() {
     namespace fs = std::filesystem;
     const auto root = fs::temp_directory_path() /
@@ -207,6 +229,7 @@ int main() {
     test_empty_retry_then_fail();
     test_empty_then_recover();
     test_tool_receipts_are_delivery();
+    test_prior_turn_receipts_do_not_mask_empty_delivery();
     test_harness_does_not_leak_code();
     return 0;
 }

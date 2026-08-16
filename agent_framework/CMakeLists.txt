@@ -302,6 +302,9 @@ if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/conversation/types.cpp)
         src/conversation/harness_turn_adapter.cpp
         src/conversation/task_classifier.cpp
         src/conversation/task_control_service.cpp
+        src/conversation/task_orchestrator.cpp
+        src/conversation/task_planning_service.cpp
+        src/conversation/task_command_service.cpp
         src/conversation/sqlite_task_registry.cpp)
 endif()
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/run/state_machine.cpp)
@@ -345,6 +348,9 @@ endif()
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/harness/production_builder.cpp)
     list(APPEND AGENT_SOURCES src/harness/production_builder.cpp)
     list(APPEND AGENT_SOURCES src/harness/production_boundary_adapters.cpp)
+endif()
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/runtime/production_live_runtime.cpp)
+    list(APPEND AGENT_SOURCES src/runtime/production_live_runtime.cpp)
 endif()
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/execution/artifact_executor.cpp)
     list(APPEND AGENT_SOURCES src/execution/artifact_executor.cpp)
@@ -1005,6 +1011,12 @@ if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/agent/audit.cpp)
 endif()
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/mcp_client/mcp_lifecycle.cpp)
     list(APPEND AGENT_SOURCES src/mcp_client/mcp_lifecycle.cpp)
+endif()
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/recovery/system_state_reconciler.cpp)
+    list(APPEND AGENT_SOURCES src/recovery/system_state_reconciler.cpp)
+endif()
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/recovery/task_state_coordinator.cpp)
+    list(APPEND AGENT_SOURCES src/recovery/task_state_coordinator.cpp)
 endif()
 
 # Public headers mirror src/ modules. Flat include/agent/*.hpp entry points are
@@ -1870,7 +1882,7 @@ if(BUILD_TESTING)
         add_executable(test_phase4_long_task_workflow tests/test_phase4_long_task_workflow.cpp)
         target_link_libraries(test_phase4_long_task_workflow PRIVATE agent_framework)
         add_test(NAME phase4_long_task_workflow COMMAND test_phase4_long_task_workflow)
-        set_tests_properties(phase4_long_task_workflow PROPERTIES LABELS "phase4-offline;offline;phase4-tool-runtime;phase4-durable;phase4-integration;phase4-llm-runtime;phase4-planning;phase4-security")
+        set_tests_properties(phase4_long_task_workflow PROPERTIES LABELS "phase4-offline;offline;phase4-long-task;phase4-tool-runtime;phase4-durable;phase4-integration;phase4-llm-runtime;phase4-planning;phase4-security")
     endif()
     if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_phase4_incremental_result_store.cpp)
         add_executable(test_phase4_incremental_result_store tests/test_phase4_incremental_result_store.cpp)
@@ -2164,7 +2176,7 @@ if(BUILD_TESTING)
         target_link_libraries(test_harness_supported_runtime PRIVATE agent_framework)
         add_test(NAME harness_supported_runtime COMMAND test_harness_supported_runtime)
         set_tests_properties(harness_supported_runtime PROPERTIES
-            LABELS "phase4-harness;phase4-conversation;phase4-integration;phase4-offline;offline")
+            LABELS "phase4-harness;phase4-conversation;phase4-long-task;phase4-integration;phase4-offline;offline")
     endif()
     if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_harness_turn_adapter.cpp)
         add_executable(test_harness_turn_adapter tests/test_harness_turn_adapter.cpp)
@@ -2179,7 +2191,71 @@ if(BUILD_TESTING)
         target_link_libraries(test_empty_delivery PRIVATE agent_framework)
         add_test(NAME empty_delivery COMMAND test_empty_delivery)
         set_tests_properties(empty_delivery PROPERTIES
-            LABELS "phase4-conversation;phase4-offline;offline")
+            LABELS "phase4-conversation;phase4-long-task;phase4-offline;offline")
+    endif()
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_system_state_reconciler.cpp)
+        add_executable(test_system_state_reconciler tests/test_system_state_reconciler.cpp)
+        target_link_libraries(test_system_state_reconciler PRIVATE agent_framework)
+        add_test(NAME system_state_reconciler COMMAND test_system_state_reconciler)
+        set_tests_properties(system_state_reconciler PROPERTIES
+            LABELS "phase4;phase4-offline;phase4-recovery;phase4-integration")
+    endif()
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_task_state_coordinator.cpp)
+        add_executable(test_task_state_coordinator tests/test_task_state_coordinator.cpp)
+        target_link_libraries(test_task_state_coordinator PRIVATE agent_framework)
+        add_test(NAME task_state_coordinator COMMAND test_task_state_coordinator)
+        set_tests_properties(task_state_coordinator PROPERTIES
+            LABELS "phase4;phase4-recovery;phase4-conversation;phase4-long-task;phase4-offline;offline")
+    endif()
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_production_live_runtime.cpp)
+        add_executable(test_production_live_runtime tests/test_production_live_runtime.cpp)
+        target_link_libraries(test_production_live_runtime PRIVATE agent_framework)
+        add_test(NAME production_live_runtime COMMAND test_production_live_runtime)
+        set_tests_properties(production_live_runtime PROPERTIES
+            LABELS "phase4;phase4-production;phase4-conversation;phase4-long-task;phase4-offline;offline")
+    endif()
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_task_orchestrator.cpp)
+        add_executable(test_task_orchestrator tests/test_task_orchestrator.cpp)
+        target_link_libraries(test_task_orchestrator PRIVATE agent_framework)
+        add_test(NAME task_orchestrator COMMAND test_task_orchestrator)
+        set_tests_properties(task_orchestrator PROPERTIES
+            LABELS "phase4;phase4-planning;phase4-conversation;phase4-offline;offline")
+    endif()
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_task_planning_service.cpp)
+        add_executable(test_task_planning_service tests/test_task_planning_service.cpp)
+        target_link_libraries(test_task_planning_service PRIVATE agent_framework)
+        add_test(NAME task_planning_service COMMAND test_task_planning_service)
+        set_tests_properties(task_planning_service PROPERTIES
+            LABELS "phase4;phase4-planning;phase4-conversation;phase4-long-task;phase4-integration;phase4-offline;offline")
+    endif()
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_task_command_service.cpp)
+        add_executable(test_task_command_service tests/test_task_command_service.cpp)
+        target_link_libraries(test_task_command_service PRIVATE agent_framework)
+        add_test(NAME task_command_service COMMAND test_task_command_service)
+        set_tests_properties(task_command_service PROPERTIES
+            LABELS "phase4;phase4-conversation;phase4-long-task;phase4-offline;offline")
+    endif()
+
+    add_custom_target(af_phase4_offline_tests
+        COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/tests/scripts/run_af_sltr_certification.sh
+                ${CMAKE_BINARY_DIR} phase4-offline
+        USES_TERMINAL
+        COMMENT "Build and certify every phase4-offline test")
+    add_custom_target(af_sltr_tests
+        COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/tests/scripts/run_af_sltr_certification.sh
+                ${CMAKE_BINARY_DIR} phase4-long-task
+        USES_TERMINAL
+        COMMENT "Build and certify the AF-SLTR test matrix")
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_conversation_wait_states.cpp)
+        add_executable(test_conversation_wait_states tests/test_conversation_wait_states.cpp)
+        target_link_libraries(test_conversation_wait_states PRIVATE agent_framework)
+        add_test(NAME conversation_wait_states COMMAND test_conversation_wait_states)
+        set_tests_properties(conversation_wait_states PROPERTIES
+            LABELS "phase4;phase4-conversation;phase4-long-task;phase4-offline;offline")
+    endif()
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tools/af_state_reconcile.cpp)
+        add_executable(af_state_reconcile tools/af_state_reconcile.cpp)
+        target_link_libraries(af_state_reconcile PRIVATE agent_framework)
     endif()
     if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_agent_template_contracts.cpp)
         add_executable(test_agent_template_contracts tests/test_agent_template_contracts.cpp)

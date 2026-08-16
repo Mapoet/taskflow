@@ -1,3 +1,6 @@
+#ifdef NDEBUG
+#undef NDEBUG
+#endif
 #include <agent/tool_runtime/typed_adapters.hpp>
 #include <agent/tool_runtime/commit_coordinator.hpp>
 #include <agent/tool_runtime/worker_runtime.hpp>

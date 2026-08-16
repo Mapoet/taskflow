@@ -11,7 +11,11 @@ namespace agent_framework::conversation
             switch (r)
             {
             case ModelTurnStopReason::ToolRequested:
+            case ModelTurnStopReason::AwaitingExternal:
                 return TurnPhase::AwaitingTool;
+            case ModelTurnStopReason::AwaitingInput:
+            case ModelTurnStopReason::AwaitingApproval:
+                return TurnPhase::AwaitingInput;
             case ModelTurnStopReason::EndTurn:
                 return TurnPhase::Completed;
             case ModelTurnStopReason::Cancelled:
@@ -126,7 +130,12 @@ namespace agent_framework::conversation
         }
         auto next = phase_for(o.reason);
         std::string err;
-        if (!TurnStateMachine::transition(c, next, next == TurnPhase::AwaitingTool ? TurnContinuationReason::ToolResultsAvailable : TurnContinuationReason::None, &err))
+        const auto continuation = o.reason == ModelTurnStopReason::AwaitingApproval
+            ? TurnContinuationReason::ResumeAfterApproval
+            : next == TurnPhase::AwaitingTool
+                ? TurnContinuationReason::ToolResultsAvailable
+                : TurnContinuationReason::None;
+        if (!TurnStateMachine::transition(c, next, continuation, &err))
             return {c, o, err};
         std::vector<ConversationMessage> pending_messages;
         if (!o.candidate_answer.empty())

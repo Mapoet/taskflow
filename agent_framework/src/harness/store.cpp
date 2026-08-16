@@ -13,8 +13,7 @@ namespace {
 namespace sqlite = internal::sqlite;
 
 bool terminal(HarnessState state) {
-    return state == HarnessState::AwaitingExternal ||
-           state == HarnessState::Completed || state == HarnessState::Rejected ||
+    return state == HarnessState::Completed || state == HarnessState::Rejected ||
            state == HarnessState::Failed || state == HarnessState::Cancelled ||
            state == HarnessState::ManualReview;
 }
@@ -355,7 +354,8 @@ std::vector<StoredHarnessCheckpoint> SQLiteHarnessStore::list_recoverable(
     auto* db = sqlite::database(db_);
     sqlite::Statement statement(db,
         "SELECT revision,checkpoint_json,checkpoint_digest FROM phase4_harness_checkpoints "
-        "WHERE tenant_id=? AND state IN ('running','awaiting_approval') ORDER BY updated_at LIMIT ?");
+        "WHERE tenant_id=? AND state IN ('running','awaiting_approval','awaiting_external') "
+        "ORDER BY updated_at LIMIT ?");
     sqlite::bind_text(statement.get(), 1, tenant_id);
     sqlite::bind_int64(statement.get(), 2, static_cast<sqlite3_int64>(limit));
     std::vector<StoredHarnessCheckpoint> result;

@@ -1,3 +1,6 @@
+#ifdef NDEBUG
+#undef NDEBUG
+#endif
 #include <agent/tool_runtime/worker_runtime.hpp>
 #include <agent/tool_runtime/state_machine.hpp>
 #include <agent/tool_runtime/progress_protocol.hpp>

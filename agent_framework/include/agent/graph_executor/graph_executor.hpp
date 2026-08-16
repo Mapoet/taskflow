@@ -111,6 +111,9 @@ struct CliAgentTerminalSinkOptions {
     std::string sink_node_name = "CliOutputSink";
     std::function<void(const json&)> on_final_json;
     std::function<void(const std::shared_ptr<internal::AgentThreadState>&)> on_final_state;
+    // Receipts before this history index belong to an earlier turn and must not
+    // make the current turn look deliverable.
+    std::size_t receipt_history_begin{0};
 };
 
 /**

@@ -67,11 +67,24 @@ int main() {
         const auto events = store.events("tenant-a", checkpoint.harness_id);
         assert(events.size() == 2 && events[0].sequence == 1 && events[1].sequence == 2);
         assert(store.list_recoverable("tenant-a", 10).size() == 1);
+
+        auto waiting = next;
+        waiting.revision = 3;
+        waiting.state = HarnessState::AwaitingExternal;
+        waiting.updated_at = "2026-08-11T00:00:02Z";
+        HarnessEvent suspended{waiting.harness_id, 3, 3, "awaiting_external",
+                               {{"provider_operation_id", "remote-1"}}, {},
+                               waiting.updated_at};
+        assert(store.compare_exchange(waiting, 2, suspended));
+        const auto recoverable = store.list_recoverable("tenant-a", 10);
+        assert(recoverable.size() == 1);
+        assert(recoverable.front().checkpoint.state == HarnessState::AwaitingExternal);
     }
     {
         SQLiteHarnessStore recovered((root / "harness.sqlite3").string());
         const auto loaded = recovered.load("tenant-a", checkpoint.harness_id);
-        assert(loaded && loaded->revision == 2);
+        assert(loaded && loaded->revision == 3 &&
+               loaded->checkpoint.state == HarnessState::AwaitingExternal);
     }
     std::filesystem::remove_all(root, error);
     return 0;

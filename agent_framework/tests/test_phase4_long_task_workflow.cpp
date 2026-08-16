@@ -1,3 +1,6 @@
+#ifdef NDEBUG
+#undef NDEBUG
+#endif
 #include <agent/tool_runtime/long_task_workflow.hpp>
 #include <agent/internal/platform_io.hpp>
 #include <cassert>

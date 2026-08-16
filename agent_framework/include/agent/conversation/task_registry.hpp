@@ -83,6 +83,8 @@ struct TaskRunLink {
     std::string state{"active"};
     std::string created_at;
     std::string updated_at;
+    std::string plan_digest;
+    std::string task_contract_digest;
 };
 
 struct TaskMutationResult {
@@ -108,6 +110,8 @@ public:
     virtual TaskMutationResult attach_turn(const TurnTaskLink&,
                                             std::uint64_t expected_task_revision) = 0;
     virtual TaskMutationResult bind_run(const TaskRunLink&,
+                                         std::uint64_t expected_task_revision) = 0;
+    virtual TaskMutationResult bind_plan(const TaskRunLink&,
                                          std::uint64_t expected_task_revision) = 0;
     virtual TaskMutationResult transition(
         const ConversationIdentity&, std::string_view task_id,
@@ -140,6 +144,8 @@ public:
     TaskMutationResult attach_turn(const TurnTaskLink&,
                                     std::uint64_t expected_task_revision) override;
     TaskMutationResult bind_run(const TaskRunLink&,
+                                 std::uint64_t expected_task_revision) override;
+    TaskMutationResult bind_plan(const TaskRunLink&,
                                  std::uint64_t expected_task_revision) override;
     TaskMutationResult transition(
         const ConversationIdentity&, std::string_view task_id,

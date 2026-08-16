@@ -202,6 +202,41 @@ namespace agent_framework::conversation
             return std::nullopt;
         }
     }
+    std::vector<TurnCheckpoint> SQLiteConversationStore::list_turns(
+        const ConversationIdentity &i, bool nonterminal_only, std::size_t limit)
+    {
+        std::lock_guard l(mutex_);
+        auto *db = internal::sqlite::database(db_);
+        std::string sql =
+            "SELECT turn_id,revision,iteration,phase,continuation,last_message_id,"
+            "boundary_digest,digest FROM conversation_turns WHERE tenant=? AND conversation=?";
+        if (nonterminal_only)
+            sql += " AND phase IN ('pending','running','awaiting_tool','awaiting_input','interrupted')";
+        sql += " ORDER BY turn_id";
+        if (limit != 0)
+            sql += " LIMIT ?";
+        Statement q(db, sql.c_str());
+        bind_id(q.get(), i);
+        if (limit != 0)
+            internal::sqlite::bind_uint64(q.get(), 3, limit);
+        std::vector<TurnCheckpoint> out;
+        while (internal::sqlite::step(q.get()) == SQLITE_ROW)
+        {
+            TurnCheckpoint c;
+            c.identity = i;
+            c.turn_id = internal::sqlite::column_text(q.get(), 0);
+            c.revision = internal::sqlite::column_uint64(q.get(), 1);
+            c.iteration = internal::sqlite::column_uint64(q.get(), 2);
+            c.phase = parse_phase(internal::sqlite::column_text(q.get(), 3));
+            c.continuation = parse_cont(internal::sqlite::column_text(q.get(), 4));
+            c.last_message_id = internal::sqlite::column_text(q.get(), 5);
+            c.compact_boundary_digest = internal::sqlite::column_text(q.get(), 6);
+            if (digest(encode(c)) != internal::sqlite::column_text(q.get(), 7))
+                throw std::runtime_error("stored conversation turn is corrupt");
+            out.push_back(std::move(c));
+        }
+        return out;
+    }
     bool SQLiteConversationStore::append_event(RuntimeEventEnvelope v, std::string *e)
     {
         std::lock_guard l(mutex_);

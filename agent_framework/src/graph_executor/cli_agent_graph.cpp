@@ -114,12 +114,13 @@ void append_cli_terminal_sink(workflow::GraphBuilder& builder,
     std::function<void(const json&)> cb = sink.on_final_json;
     std::function<void(const std::shared_ptr<internal::AgentThreadState>&)> cb_state =
         sink.on_final_state;
+    const std::size_t receipt_history_begin = sink.receipt_history_begin;
     auto [sn, st] = builder.create_any_sink(
         sink_name,
         {{loop_name, std::string(internal::kFinalAnswer)},
          {loop_name, std::string(internal::kNextAgentState)},
          {loop_name, std::string(internal::kModelStopReason)}},
-        [cb = std::move(cb), cb_state = std::move(cb_state)](
+        [cb = std::move(cb), cb_state = std::move(cb_state), receipt_history_begin](
             const std::unordered_map<std::string, std::any>& outs) {
             const std::string final_answer =
                 std::any_cast<std::string>(outs.at(std::string(internal::kFinalAnswer)));
@@ -136,7 +137,10 @@ void append_cli_terminal_sink(workflow::GraphBuilder& builder,
                 outs.at(std::string(internal::kModelStopReason)));
             json receipts = json::array();
             if (st_ptr) {
-                for (const auto& message : st_ptr->history) {
+                const std::size_t begin =
+                    std::min(receipt_history_begin, st_ptr->history.size());
+                for (std::size_t i = begin; i < st_ptr->history.size(); ++i) {
+                    const auto& message = st_ptr->history[i];
                     if (message.role == "tool" && message.tool_call_id &&
                         !message.tool_call_id->empty()) {
                         receipts.push_back(*message.tool_call_id);
@@ -206,8 +210,10 @@ void build_cli_agent_graph_with_terminal_sink(
     const CliAgentTerminalSinkOptions& sink,
     std::string_view loop_node_name,
     const CliAgentGraphOptions& graph_options) {
+    CliAgentTerminalSinkOptions scoped_sink = sink;
+    scoped_sink.receipt_history_begin = agent_state ? agent_state->history.size() : 0;
     build_cli_agent_graph_impl(builder, config, deps, agent_state, loop_node_name, graph_options);
-    append_cli_terminal_sink(builder, loop_node_name, sink);
+    append_cli_terminal_sink(builder, loop_node_name, scoped_sink);
 }
 
 void build_cli_agent_graph_with_terminal_sink(
