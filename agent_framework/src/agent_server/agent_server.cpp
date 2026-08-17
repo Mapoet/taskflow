@@ -439,14 +439,45 @@ void AgentServer::run_agent_task_on_executor(const std::string& task_id,
                             : conversation::TaskExecutionProfile::Conversation;
                         turn_request.max_iterations = static_cast<std::uint64_t>(
                             std::max(1, request.config.max_iterations));
+                        auto executor = conversation_turn_executor_;
+                        if(!executor) {
+                            if(trust_profile == ExecutionTrustProfile::Production) {
+                                r.error = "production_conversation_harness_executor_required";
+                                r.status = ExecutionTerminalStatus::Failed;
+                                r.outputs["completion_authority"] = "none";
+                                executor = [&r](const conversation::TurnRequest&,
+                                                const conversation::TurnCheckpoint&) {
+                                    conversation::ModelTurnOutcome stopped;
+                                    stopped.reason = conversation::ModelTurnStopReason::GuardStopped;
+                                    stopped.candidate_answer = *r.error;
+                                    return stopped;
+                                };
+                            } else {
+                                executor = [this, &request, &r](
+                                    const conversation::TurnRequest&,
+                                    const conversation::TurnCheckpoint&) mutable {
+                                    r = graph_executor_->execute_sync(
+                                        *process_executor_, std::move(request));
+                                    return conversation::GraphTurnAdapter::from_execution(r);
+                                };
+                            }
+                        }
                         conversation::ConversationEngine engine(
-                            *conversation_store_,
-                            [this, &request, &r](const conversation::TurnRequest&,
-                                                 const conversation::TurnCheckpoint&) mutable {
-                                r = graph_executor_->execute_sync(*process_executor_, std::move(request));
-                                return conversation::GraphTurnAdapter::from_execution(r);
-                            }, {}, conversation_events_.get());
+                            *conversation_store_, std::move(executor), {},
+                            conversation_events_.get());
                         auto turn = engine.start_turn(turn_request);
+                        if(conversation_turn_executor_) {
+                            r.success = turn.error.empty() &&
+                                turn.outcome.reason == conversation::ModelTurnStopReason::EndTurn;
+                            r.exit_code = r.success ? 0 : 1;
+                            r.status = r.success ? ExecutionTerminalStatus::Completed
+                                                 : ExecutionTerminalStatus::Failed;
+                            r.outputs["final_answer"] = turn.outcome.candidate_answer;
+                            r.outputs["task_completion_verified"] = false;
+                            r.outputs["completion_authority"] = "harness_task_coordinator";
+                            r.committed_revision = turn.checkpoint.revision;
+                            if(!turn.error.empty()) r.error = turn.error;
+                        }
                         if (!turn.error.empty() && !r.error)
                             r.error = turn.error;
                     } else {
@@ -658,6 +689,11 @@ void AgentServer::set_conversation_store(
     conversation_events_ = conversation_store_
         ? std::make_shared<conversation::EventStreamHub>(*conversation_store_)
         : nullptr;
+}
+
+void AgentServer::set_conversation_turn_executor(
+    conversation::TurnExecutor executor) {
+    conversation_turn_executor_ = std::move(executor);
 }
 
 void AgentServer::set_authentication_validator(

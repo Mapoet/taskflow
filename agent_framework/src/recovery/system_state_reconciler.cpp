@@ -6,6 +6,8 @@
 #include <unordered_map>
 
 #include "agent/contracts/contract.hpp"
+#include "agent/tool_runtime/store.hpp"
+#include "agent/toolbus/tool_effect_journal.hpp"
 
 namespace agent_framework::recovery {
 namespace {
@@ -36,6 +38,8 @@ std::string plan_digest(const ReconciliationPlan& plan) {
                             {"disposition", name(finding.disposition)},
                             {"turn_id", finding.turn_id},
                             {"harness_id", finding.harness_id},
+                            {"invocation_id", finding.invocation_id},
+                            {"effect_id", finding.effect_id},
                             {"turn_revision", finding.turn_revision},
                             {"harness_revision", finding.harness_revision},
                             {"reason", finding.reason}});
@@ -73,7 +77,7 @@ ReconciliationPlan SystemStateReconciler::scan(const ReconciliationScope& scope)
             plan.findings.push_back({
                 "conversation_zero_iteration_nonterminal",
                 ReconciliationDisposition::ManualReview,
-                turn.turn_id, {}, turn.revision, 0,
+                turn.turn_id, {}, {}, {}, turn.revision, 0,
                 "nonterminal turn has never crossed a model execution boundary"});
         }
     }
@@ -92,7 +96,7 @@ ReconciliationPlan SystemStateReconciler::scan(const ReconciliationScope& scope)
             plan.findings.push_back({
                 "harness_without_conversation_turn",
                 ReconciliationDisposition::ManualReview,
-                turn_id, checkpoint.harness_id, 0, stored.revision,
+                turn_id, checkpoint.harness_id, {}, {}, 0, stored.revision,
                 "recoverable harness cannot be correlated to a durable turn"});
             continue;
         }
@@ -102,7 +106,7 @@ ReconciliationPlan SystemStateReconciler::scan(const ReconciliationScope& scope)
                 "terminal_conversation_with_recoverable_harness",
                 pending_effect(checkpoint) ? ReconciliationDisposition::ManualReview
                                            : ReconciliationDisposition::FailTerminal,
-                turn_id, checkpoint.harness_id, turn.revision, stored.revision,
+                turn_id, checkpoint.harness_id, {}, {}, turn.revision, stored.revision,
                 pending_effect(checkpoint)
                     ? "pending or unknown execution effect requires reconciliation"
                     : "conversation is terminal while harness is recoverable"});
@@ -110,14 +114,55 @@ ReconciliationPlan SystemStateReconciler::scan(const ReconciliationScope& scope)
             plan.findings.push_back({
                 "unbound_pending_harness_effect",
                 ReconciliationDisposition::ManualReview,
-                turn_id, checkpoint.harness_id, turn.revision, stored.revision,
+                turn_id, checkpoint.harness_id, {}, {}, turn.revision, stored.revision,
                 "pending harness effect has no durable invocation binding"});
+        }
+    }
+    if (invocations_) {
+        for (const auto& invocation : invocations_->recoverable(scope.limit)) {
+            if (invocation.metadata.identity.tenant_id != scope.conversation.tenant_id ||
+                invocation.conversation_id != scope.conversation.conversation_id)
+                continue;
+            if (invocation.adapter_restart_policy == "attach" &&
+                !invocation.external_operation_id.empty()) {
+                plan.findings.push_back({
+                    "attachable_invocation_recoverable",
+                    ReconciliationDisposition::AwaitingExternal,
+                    invocation.turn_id, {}, invocation.invocation_id, {}, 0, 0,
+                    "pinned external operation can be reattached without replay"});
+            }
+        }
+    }
+    if (effects_) {
+        for (const auto& effect : effects_->recoverable()) {
+            if (effect.session_id != scope.conversation.conversation_id) continue;
+            const auto action = effects_->reconciliation_action(effect);
+            if (action == ToolReconciliationAction::Replay ||
+                action == ToolReconciliationAction::Lookup) {
+                plan.findings.push_back({
+                    action == ToolReconciliationAction::Replay
+                        ? "idempotent_effect_replayable" : "external_effect_lookup_required",
+                    ReconciliationDisposition::AwaitingExternal,
+                    {}, {}, {}, effect.idempotency_key, 0, 0,
+                    action == ToolReconciliationAction::Replay
+                        ? "idempotent effect may be replayed under its stable key"
+                        : "external provider state must be queried before settlement"});
+            } else if (action == ToolReconciliationAction::ManualReview ||
+                       action == ToolReconciliationAction::FailClosed) {
+                plan.findings.push_back({
+                    "unknown_non_idempotent_effect",
+                    ReconciliationDisposition::ManualReview,
+                    {}, {}, {}, effect.idempotency_key, 0, 0,
+                    "effect outcome is unknown and replay is not proven safe"});
+            }
         }
     }
     std::sort(plan.findings.begin(), plan.findings.end(), [](const auto& left,
                                                              const auto& right) {
-        return std::tie(left.turn_id, left.harness_id, left.code) <
-               std::tie(right.turn_id, right.harness_id, right.code);
+        return std::tie(left.turn_id, left.harness_id, left.invocation_id,
+                        left.effect_id, left.code) <
+               std::tie(right.turn_id, right.harness_id, right.invocation_id,
+                        right.effect_id, right.code);
     });
     plan.digest = plan_digest(plan);
     return plan;
@@ -132,13 +177,21 @@ ReconciliationApplyResult SystemStateReconciler::apply(
         return result;
     }
     for (const auto& finding : plan.findings) {
-        if (finding.harness_id.empty()) continue;
         if (finding.disposition != ReconciliationDisposition::ManualReview &&
             finding.disposition != ReconciliationDisposition::FailTerminal)
             continue;
         if (finding.disposition == ReconciliationDisposition::ManualReview)
             ++result.manual_review;
         if (dry_run) continue;
+        if (!finding.effect_id.empty()) {
+            if (!effects_ || !effects_->mark_manual_review(
+                    finding.effect_id, "system_reconciliation_required"))
+                result.errors.push_back(finding.effect_id + ":effect_transition_failed");
+            else
+                ++result.changed;
+            continue;
+        }
+        if (finding.harness_id.empty()) continue;
         auto stored = harnesses_.load(plan.scope.conversation.tenant_id,
                                       finding.harness_id);
         if (!stored) {

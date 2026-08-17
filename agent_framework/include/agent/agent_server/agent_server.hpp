@@ -22,6 +22,7 @@
 #include <agent/agent/task_state_machine.hpp>
 #include <agent/graph_executor/graph_executor.hpp>
 #include <agent/session/session_store.hpp>
+#include <agent/conversation/conversation_engine.hpp>
 #include <nlohmann/json.hpp>
 
 namespace tf {
@@ -99,6 +100,7 @@ public:
     void set_graph_executor(std::shared_ptr<GraphExecutor> executor);
     void set_session_store(std::shared_ptr<SessionStore> store);
     void set_conversation_store(std::shared_ptr<conversation::ConversationStore> store);
+    void set_conversation_turn_executor(conversation::TurnExecutor executor);
 
     /**
      * @brief 设置附加认证验证器（在内置 AuthGate 通过后与关系 AND）
@@ -154,6 +156,7 @@ private:
     std::shared_ptr<SessionStore> session_store_;
     std::shared_ptr<conversation::ConversationStore> conversation_store_;
     std::shared_ptr<conversation::EventStreamHub> conversation_events_;
+    conversation::TurnExecutor conversation_turn_executor_;
 
     std::unique_ptr<internal::TaskDispatchQueue> task_queue_;
     std::vector<std::thread> dispatch_workers_;

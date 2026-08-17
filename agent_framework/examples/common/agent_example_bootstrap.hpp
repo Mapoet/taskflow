@@ -647,6 +647,9 @@ inline LiveRuntime build_live_runtime(const LiveRuntimeOptions& options) {
     });
     runtime.skill_runners = agent_template::build_production_toolbus_runners(runtime.toolbus);
     if(options.production_resources) {
+        if(runtime.trust_profile != ExecutionTrustProfile::Production)
+            throw std::runtime_error(
+                "production_resources_require_production_execution_profile");
         auto production = agent_framework::runtime::ProductionLiveRuntime::build(
             *options.production_resources);
         if(!production)
@@ -673,6 +676,8 @@ inline LiveRuntime build_live_runtime(const LiveRuntimeOptions& options) {
             report.composition_manifest_digest;
         runtime.composition_report["production_deployment_manifest_digest"] =
             report.deployment_manifest_digest;
+        runtime.composition_report["production_runtime_readiness"] =
+            runtime.production_runtime->readiness_manifest();
     }
     runtime.composition_report["production_ready"]=runtime.trust_profile==ExecutionTrustProfile::Production&&runtime.harness_ready&&runtime.harness_turn_executor&&runtime.long_task_executor&&runtime.task_control_service&&runtime.composition_report["runner_child"].get<bool>()&&runtime.composition_report["runner_nested"].get<bool>()&&runtime.composition_report["runner_approval"].get<bool>();
     runtime.config.name = options.agent_name;

@@ -34,10 +34,14 @@
 
 ## AF-SLTR0 — Truth baseline and orphan reconciliation
 
-**Implementation evidence (2026-08-16):** deterministic dry-run/apply reconciler,
+**Implementation evidence (2026-08-17):** deterministic dry-run/apply reconciler,
 bounded digest-validated Conversation enumeration, restart-safe `AwaitingExternal`,
-CAS/tamper/restart tests and `af_state_reconcile` are implemented. The current Web
-stores were scanned read-only; no historical effect was replayed or marked complete.
+CAS/tamper/restart tests and `af_state_reconcile` are implemented. Reconciliation now
+uses durable Invocation and Effect evidence: pinned attachable invocations and safe
+idempotent replay are held in `AwaitingExternal`, while unknown non-idempotent effects
+are fail-closed into `ManualReview`. The exact historical-shape test scans 17 findings
+(nine stale Harnesses, five zero-iteration Turns and three tool-lifecycle findings) and
+applies only ten safe transitions; it never infers completed or verified work.
 
 **Files:**
 
@@ -57,7 +61,7 @@ stores were scanned read-only; no historical effect was replayed or marked compl
 - Produce `SystemStateReconciler::apply(const ReconciliationPlan&, ReconciliationPolicy)` using checkpoint CAS and append-only audit events.
 - Classify findings as `Recoverable`, `FailTerminal`, `AwaitingExternal`, or `ManualReview` using Invocation/effect evidence.
 
-- [ ] Add failing tests for nine stale Harness execution checkpoints, five zero-iteration Conversation turns, terminal Conversation/running Harness divergence, unknown side effect and idempotent attachable invocation.
+- [x] Add failing tests for nine stale Harness execution checkpoints, five zero-iteration Conversation turns, terminal Conversation/running Harness divergence, unknown side effect and idempotent attachable invocation.
 - [x] Add bounded store enumeration APIs; validate stored digest before returning records.
 - [x] Implement deterministic scan and plan digest; repeated scans of unchanged stores must be byte-identical.
 - [x] Implement dry-run default and explicit apply; never infer completed/verified.
@@ -71,6 +75,19 @@ Harness runtime, result-view assembler, TaskControl service and deployment lifet
 anchors. Common bootstrap can build and inject its response/long-task executors and
 publishes deployment manifests. Complete positive composition/lifetime certification
 remains open because the deployment-owned store graph fixture is not yet assembled.
+As of 2026-08-17 all five interactive/demo entry points, including `agent_server_demo`,
+enforce the same production readiness gate. `AgentServer` accepts a typed Conversation
+executor and fails closed with `production_conversation_harness_executor_required`
+instead of allowing a production request to fall back to its GraphExecutor. The A2A
+entry point is now wired to the shared response/long-task router; authoritative A2A
+Task/Run creation and closure projection remain part of the open positive fixture.
+The runtime now requires a digest-addressed, 13-node named ownership graph and verifies
+that Task/Run/Harness/Plan/Invocation/result/approval/memory/assurance/judge/telemetry
+anchors own the exact dependency instances. Its readiness manifest reports the
+ownership, dependency, composition and deployment digests plus each runtime service.
+`ProductionRuntimeResources` additionally requires the literal `production` deployment
+profile, while the shared demo bootstrap rejects production resources under demo/test
+execution trust; fixtures can no longer become production-ready by pointer injection.
 
 **Files:**
 
@@ -88,10 +105,10 @@ remains open because the deployment-owned store graph fixture is not yet assembl
 - Expose typed `harness_executor()`, `long_task_executor()`, `task_control_service()` and readiness manifest.
 
 - [ ] Test that production bootstrap creates all three services or fails with exact missing dependency codes.
-- [ ] Test that demo/test profiles are explicit compositions and cannot be mistaken for production-ready.
-- [ ] Build ownership graph for Conversation, Task, Run, Harness, Plan, Invocation, IncrementalResult, Effect, Approval, Memory, Assurance, Judge and telemetry stores.
+- [x] Test that demo/test profiles are explicit compositions and cannot be mistaken for production-ready.
+- [x] Build ownership graph for Conversation, Task, Run, Harness, Plan, Invocation, IncrementalResult, Effect, Approval, Memory, Assurance, Judge and telemetry stores.
 - [x] Wire `DefaultProductionCompositionBuilder` and typed boundary adapters; reject callback-origin production adapters.
-- [ ] Inject the owned runtime into all five demos and AgentServer through the common bootstrap.
+- [x] Inject the owned runtime into all five demos and AgentServer through the common bootstrap.
 - [ ] Add destruction/lifetime, startup recovery and timer-worker tests.
 
 ## AF-SLTR2 — Persistent task planning

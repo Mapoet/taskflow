@@ -7,6 +7,15 @@
 
 namespace agent_framework::runtime {
 namespace {
+const std::vector<std::string>& required_owned_resources() {
+    static const std::vector<std::string> names{
+        "conversation_store", "task_registry", "run_store", "harness_store",
+        "plan_store", "invocation_store", "incremental_result_store",
+        "effect_journal", "approval_store", "memory_store", "assurance_store",
+        "judge_store", "telemetry"};
+    return names;
+}
+
 std::string request_digest(const conversation::HarnessSupportedTurnRequest& request) {
     return contracts::canonical_digest({
         {"schema", "agent.production_turn/v1"},
@@ -59,6 +68,44 @@ conversation::ModelTurnOutcome project(const harness::HarnessRunResult& result) 
 }
 }  // namespace
 
+ProductionOwnershipReport validate_production_runtime_ownership(
+    const ProductionRuntimeResources& resources) {
+    ProductionOwnershipReport report;
+    nlohmann::json manifest = nlohmann::json::object();
+    manifest["schema"] = "agent.production_runtime_ownership/v1";
+    manifest["resources"] = nlohmann::json::array();
+    for(const auto& name : required_owned_resources()) {
+        const auto found = resources.owned_resources.find(name);
+        const bool present = found != resources.owned_resources.end() &&
+                             static_cast<bool>(found->second);
+        manifest["resources"].push_back({{"name", name}, {"owned", present}});
+        if(!present) report.missing.push_back(name);
+    }
+    const auto verify_identity = [&](std::string_view name, const void* expected) {
+        if(!expected) return;
+        const auto found = resources.owned_resources.find(std::string(name));
+        if(found != resources.owned_resources.end() && found->second &&
+           found->second.get() != expected)
+            report.mismatched.emplace_back(name);
+    };
+    const auto& d = resources.dependencies;
+    verify_identity("task_registry", d.task_registry);
+    verify_identity("run_store", d.run_store);
+    verify_identity("harness_store", d.harness_store);
+    verify_identity("plan_store", d.plan_store);
+    verify_identity("invocation_store", d.invocation_store);
+    verify_identity("incremental_result_store", d.incremental_result_store);
+    verify_identity("approval_store", d.approval_store);
+    verify_identity("memory_store", d.memory_store);
+    verify_identity("assurance_store", d.assurance_store);
+    verify_identity("judge_store", d.judge_store);
+    verify_identity("telemetry", d.telemetry.get());
+    report.ready = report.missing.empty() && report.mismatched.empty();
+    if(report.ready)
+        report.manifest_digest = contracts::canonical_digest(manifest).value_or("");
+    return report;
+}
+
 harness::TaskClosureDecision evaluate_production_task_closure(
     harness::ProductionWorkflowInputRepository& repository,
     const contracts::ContractIdentity& identity,
@@ -110,6 +157,7 @@ ProductionLiveRuntime::ProductionLiveRuntime(
     ProductionRuntimeResources resources,
     harness::Phase4HarnessRuntime harness_runtime,
     harness::ProductionBuildReport report,
+    ProductionOwnershipReport ownership,
     std::shared_ptr<tool_runtime::IncrementalResultViewAssembler> result_view,
     std::shared_ptr<conversation::TaskControlService> task_control,
     std::shared_ptr<conversation::TaskPlanningService> task_planning,
@@ -117,6 +165,7 @@ ProductionLiveRuntime::ProductionLiveRuntime(
     : resources_(std::move(resources)),
       harness_runtime_(std::move(harness_runtime)),
       report_(std::move(report)),
+      ownership_report_(std::move(ownership)),
       result_view_(std::move(result_view)),
       task_control_service_(std::move(task_control)),
       task_planning_service_(std::move(task_planning)),
@@ -127,6 +176,18 @@ ProductionRuntimeBuildResult ProductionLiveRuntime::build(
     ProductionRuntimeBuildResult result;
     if(resources.lifetime_anchors.empty()) {
         result.error = "production_runtime_lifetime_anchors_required";
+        return result;
+    }
+    if(resources.deployment_profile != "production") {
+        result.error = "production_runtime_profile_required";
+        return result;
+    }
+    result.ownership = validate_production_runtime_ownership(resources);
+    if(!result.ownership.ready) {
+        result.error = !result.ownership.missing.empty()
+            ? "production_runtime_owned_resource_missing:" + result.ownership.missing.front()
+            : "production_runtime_owned_resource_identity_mismatch:" +
+                result.ownership.mismatched.front();
         return result;
     }
     auto* durable_inputs = dynamic_cast<harness::SQLiteProductionWorkflowInputRepository*>(
@@ -155,6 +216,10 @@ ProductionRuntimeBuildResult ProductionLiveRuntime::build(
             *dependencies.execution_control_store,
             result_view.get());
     }
+    if(!task_control) {
+        result.error = "production_task_control_service_unavailable";
+        return result;
+    }
     if(!durable_inputs) {
         result.error = "production_mutable_input_repository_required";
         return result;
@@ -168,11 +233,29 @@ ProductionRuntimeBuildResult ProductionLiveRuntime::build(
     auto task_coordinator = std::make_shared<recovery::DurableTaskStateCoordinator>(
         *dependencies.task_registry, *resources.task_coordination_journal);
     auto owned = std::shared_ptr<ProductionLiveRuntime>(new ProductionLiveRuntime(
-        std::move(resources), std::move(*runtime), result.report,
+        std::move(resources), std::move(*runtime), result.report, result.ownership,
         std::move(result_view), std::move(task_control), std::move(task_planning),
         std::move(task_coordinator)));
     result.runtime = std::move(owned);
     return result;
+}
+
+nlohmann::json ProductionLiveRuntime::readiness_manifest() const {
+    nlohmann::json manifest{
+        {"schema", "agent.production_live_runtime_readiness/v1"},
+        {"production_ready", report_.ready && ownership_report_.ready &&
+            task_control_service_ && task_planning_service_ && durable_task_coordinator_},
+        {"response_executor", true},
+        {"long_task_executor", true},
+        {"task_control_service", bool(task_control_service_)},
+        {"task_planning_service", bool(task_planning_service_)},
+        {"task_coordinator", bool(durable_task_coordinator_)},
+        {"ownership_manifest_digest", ownership_report_.manifest_digest},
+        {"dependency_manifest_digest", report_.dependency_manifest_digest},
+        {"composition_manifest_digest", report_.composition_manifest_digest},
+        {"deployment_manifest_digest", report_.deployment_manifest_digest}};
+    manifest["canonical_digest"] = contracts::canonical_digest(manifest).value_or("");
+    return manifest;
 }
 
 void ProductionLiveRuntime::set_coordination_observer(

@@ -17,6 +17,31 @@ int main() {
     assert(no_anchors.error == "production_runtime_lifetime_anchors_required");
 
     empty.lifetime_anchors.push_back(std::make_shared<int>(1));
+    auto wrong_profile = ProductionLiveRuntime::build(empty);
+    assert(!wrong_profile);
+    assert(wrong_profile.error == "production_runtime_profile_required");
+    empty.deployment_profile = "production";
+    auto missing_owner = ProductionLiveRuntime::build(empty);
+    assert(!missing_owner);
+    assert(missing_owner.error ==
+           "production_runtime_owned_resource_missing:conversation_store");
+    for(const auto* name : {"conversation_store", "task_registry", "run_store",
+             "harness_store", "plan_store", "invocation_store",
+             "incremental_result_store", "effect_journal", "approval_store",
+             "memory_store", "assurance_store", "judge_store", "telemetry"})
+        empty.owned_resources[name] = std::make_shared<int>(1);
+    const auto ownership = validate_production_runtime_ownership(empty);
+    assert(ownership.ready && ownership.missing.empty());
+    assert(!ownership.manifest_digest.empty());
+    auto registry = std::make_shared<agent_framework::conversation::SQLiteTaskRegistry>(
+        ":memory:");
+    empty.dependencies.task_registry = registry.get();
+    const auto mismatched = validate_production_runtime_ownership(empty);
+    assert(!mismatched.ready && mismatched.mismatched.size() == 1);
+    assert(mismatched.mismatched.front() == "task_registry");
+    empty.owned_resources["task_registry"] = registry;
+    empty.lifetime_anchors.push_back(registry);
+    assert(validate_production_runtime_ownership(empty).ready);
     auto missing = ProductionLiveRuntime::build(std::move(empty));
     assert(!missing);
     assert(missing.error.find("production_dependency_missing") != std::string::npos);

@@ -8,6 +8,9 @@
 #include "agent/conversation/store.hpp"
 #include "agent/harness/store.hpp"
 
+namespace agent_framework { class ToolEffectJournal; }
+namespace agent_framework::tool_runtime { class InvocationStore; }
+
 namespace agent_framework::recovery {
 
 enum class ReconciliationDisposition {
@@ -27,6 +30,8 @@ struct ReconciliationFinding {
     ReconciliationDisposition disposition{ReconciliationDisposition::ManualReview};
     std::string turn_id;
     std::string harness_id;
+    std::string invocation_id;
+    std::string effect_id;
     std::uint64_t turn_revision{0};
     std::uint64_t harness_revision{0};
     std::string reason;
@@ -49,8 +54,11 @@ struct ReconciliationApplyResult {
 class SystemStateReconciler {
 public:
     SystemStateReconciler(conversation::ConversationStore& conversations,
-                          harness::HarnessStore& harnesses)
-        : conversations_(conversations), harnesses_(harnesses) {}
+                          harness::HarnessStore& harnesses,
+                          tool_runtime::InvocationStore* invocations = nullptr,
+                          ToolEffectJournal* effects = nullptr)
+        : conversations_(conversations), harnesses_(harnesses),
+          invocations_(invocations), effects_(effects) {}
 
     ReconciliationPlan scan(const ReconciliationScope& scope) const;
     ReconciliationApplyResult apply(const ReconciliationPlan& plan,
@@ -59,6 +67,8 @@ public:
 private:
     conversation::ConversationStore& conversations_;
     harness::HarnessStore& harnesses_;
+    tool_runtime::InvocationStore* invocations_{nullptr};
+    ToolEffectJournal* effects_{nullptr};
 };
 
 std::string_view name(ReconciliationDisposition disposition) noexcept;

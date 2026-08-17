@@ -147,6 +147,7 @@ int main(int argc, char** argv) {
     example::LiveRuntime runtime;
     try {
         runtime = example::build_live_runtime(options);
+        example::require_harness_supported_execution(runtime);
     } catch(const std::exception& error) {
         std::cerr << "agent_server_demo: Live LLM initialization failed: " << error.what() << "\n"
                   << "Set AGENT_LLM_PROVIDER and its API key (or DEEPSEEK_API_KEY), or use --help.\n";
@@ -161,6 +162,19 @@ int main(int argc, char** argv) {
     const AgentCard card = build_card(card_public_base, jpath, runtime);
     server.register_agent_card(card);
     server.set_execution_profile(example::to_execution_profile(runtime));
+    if(runtime.harness_ready) {
+        auto supported = std::make_shared<conversation::HarnessSupportedTurnRuntime>(
+            conversation::HarnessSupportedRuntimePolicy{
+                runtime.trust_profile == ExecutionTrustProfile::Production,
+                runtime.harness_ready, bool(runtime.long_task_executor),
+                runtime.explicit_legacy_fallback},
+            runtime.harness_turn_executor, conversation::HarnessSupportedTurnRuntime::Executor{},
+            conversation::RuntimeEventSink{}, runtime.long_task_executor);
+        server.set_conversation_turn_executor(
+            [supported](const auto& request, const auto& checkpoint) {
+                return supported->execute(request, checkpoint);
+            });
+    }
     server.set_input_preprocess_toolbus(runtime.toolbus);
     {
         const char* configured = std::getenv("AGENT_CONVERSATION_DB");
