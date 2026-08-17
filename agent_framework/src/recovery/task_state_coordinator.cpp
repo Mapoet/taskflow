@@ -136,6 +136,18 @@ std::string_view name(TaskCoordinationCommandState state) noexcept {
     return "conflict";
 }
 
+std::string_view name(CoordinationBoundary boundary) noexcept {
+    switch(boundary) {
+        case CoordinationBoundary::Conversation: return "conversation";
+        case CoordinationBoundary::Harness: return "harness";
+        case CoordinationBoundary::Run: return "run";
+        case CoordinationBoundary::Invocation: return "invocation";
+        case CoordinationBoundary::Effect: return "effect";
+        case CoordinationBoundary::Closure: return "closure";
+    }
+    return "unknown";
+}
+
 namespace {
 using internal::sqlite::Statement;
 TaskCoordinationCommandState command_state(std::string_view value) {
@@ -238,5 +250,17 @@ bool DurableTaskStateCoordinator::reconcile(std::string_view id,std::string*erro
     const auto changed=tasks_.transition(c->event.identity,c->event.task_id,task->revision,c->decision.task_state,c->decision.closure_state);if(!changed.ok){if(error)*error=changed.error;return false;}return journal_.transition(id,c->journal_revision,TaskCoordinationCommandState::Applied,"task_revision:"+std::to_string(changed.revision),error);
 }
 std::size_t DurableTaskStateCoordinator::reconcile_pending(std::size_t limit){std::size_t n=0;for(const auto&c:journal_.pending(limit)){std::string error;if(reconcile(c.command_id,&error))++n;}return n;}
+
+bool TaskCoordinationPublisher::publish(CoordinationBoundary boundary,
+                                        CorrelatedStateEvent event,
+                                        std::string* error) {
+    if(event.source_event_id.empty()) {
+        if(error) *error = "task_coordination_source_event_required";
+        return false;
+    }
+    event.source_event_id = std::string(name(boundary)) + ":" +
+                            event.source_event_id;
+    return durable_.publish(event, decisions_.observe(event), error);
+}
 
 }  // namespace agent_framework::recovery

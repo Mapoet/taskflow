@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -185,9 +186,12 @@ private:
 
 class CrossStoreCoordinator final : public HarnessCheckpointObserver {
 public:
+    using FaultHook = std::function<bool(std::string_view stage,
+                                         std::string_view participant_id)>;
     CrossStoreCoordinator(SQLiteCoordinationJournal& journal,
                           std::string policy_revision,
-                          std::shared_ptr<HarnessCheckpointObserver> downstream = {});
+                          std::shared_ptr<HarnessCheckpointObserver> downstream = {},
+                          FaultHook fault_hook = {});
     bool register_participant(std::shared_ptr<CrossStoreParticipant> participant);
     bool production_ready(std::vector<std::string>* issues = nullptr) const;
     std::string capability_manifest_digest() const;
@@ -201,6 +205,7 @@ private:
     SQLiteCoordinationJournal& journal_;
     std::string policy_revision_;
     std::shared_ptr<HarnessCheckpointObserver> downstream_;
+    FaultHook fault_hook_;
     mutable std::mutex mutex_;
     std::map<std::string,std::shared_ptr<CrossStoreParticipant>> participants_;
 };

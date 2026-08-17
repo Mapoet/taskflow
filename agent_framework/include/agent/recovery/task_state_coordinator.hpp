@@ -54,6 +54,10 @@ struct TaskCoordinationDecision {
 
 enum class TaskCoordinationCommandState { Pending, Applied, Conflict };
 
+enum class CoordinationBoundary {
+    Conversation, Harness, Run, Invocation, Effect, Closure
+};
+
 struct DurableTaskCoordinationCommand {
     std::string command_id;
     CorrelatedStateEvent event;
@@ -102,7 +106,20 @@ private:
     SQLiteTaskCoordinationJournal& journal_;
 };
 
+class TaskCoordinationPublisher {
+public:
+    TaskCoordinationPublisher(TaskStateCoordinator& decisions,
+                              DurableTaskStateCoordinator& durable)
+        : decisions_(decisions), durable_(durable) {}
+    bool publish(CoordinationBoundary, CorrelatedStateEvent,
+                 std::string* error = nullptr);
+private:
+    TaskStateCoordinator& decisions_;
+    DurableTaskStateCoordinator& durable_;
+};
+
 std::string_view name(CoordinationCommand) noexcept;
 std::string_view name(TaskCoordinationCommandState) noexcept;
+std::string_view name(CoordinationBoundary) noexcept;
 
 }  // namespace agent_framework::recovery

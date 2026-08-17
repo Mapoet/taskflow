@@ -2,8 +2,12 @@
 set -euo pipefail
 
 build_dir="${1:?build directory required}"
+build_dir="$(cd "${build_dir}" && pwd -P)"
 label="${2:-phase4-offline}"
 report_dir="${3:-${build_dir}/agent_framework/certification}"
+if [[ "${report_dir}" != /* ]]; then
+  report_dir="$(pwd -P)/${report_dir}"
+fi
 mkdir -p "${report_dir}"
 
 # CTest names are not build-target names. Most executable tests happen to use

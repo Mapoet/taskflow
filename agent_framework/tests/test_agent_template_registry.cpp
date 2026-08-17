@@ -1,3 +1,6 @@
+#ifdef NDEBUG
+#undef NDEBUG
+#endif
 #include <agent/agent_template/registry.hpp>
 
 #include <cassert>

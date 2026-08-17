@@ -1,9 +1,17 @@
 # AF-SLTR Traceability and Certification Evidence
 
-**Audit time:** 2026-08-16T16:03:59Z (2026-08-17 Asia/Shanghai)  
-**Requirement baseline:** `docs/af-session-long-task-integration-closure-v2.md`  
-**Offline JUnit:** `build-ui/agent_framework/certification/af-sltr-phase4-offline-20260816T160800Z.xml`  
+**Audit time:** 2026-08-17T09:15:45Z (2026-08-17 Asia/Shanghai)
+
+**Requirement baseline:** `docs/af-session-long-task-integration-closure-v2.md`
+
+**Offline JUnit:** `build-ui/agent_framework/certification/af-sltr-phase4-offline-20260817T091545Z.xml`
 **Result:** 98/98 Phase 4 offline tests Passed in a localhost-capable environment.
+
+The JUnit SHA-256 is
+`da5ee4b86549bdee0f1278902c27e3c4f2a09b232fd061bda5e7e883bc80de29`.
+The complete repository Offline regression also passed 119/119. The certification
+runner now canonicalizes relative build/report arguments to absolute paths before
+invoking CTest, preventing evidence from being written below a duplicated build path.
 
 This file distinguishes deterministic correctness, ProcessLive evidence and
 ProviderLive evidence. A missing live cell remains `NotCertified`; it is never
@@ -84,15 +92,12 @@ claim that they were recovered.
 | Localhost remote queue and native mTLS | Passed | `phase4_remote_queue` and `phase4_remote_queue_mtls`; both reject execution in the restricted network sandbox and pass in the localhost-capable environment |
 | ProcessLive Web/TUI/ImGui/CLI projection | Passed | actual screenshots and CLI durable replay above |
 | ProcessLive disconnect/reconnect/crash matrix | Passed | `af-sltr-process-live-20260817T065314Z.json`: two-client replay, Last-Event-ID resume, SIGKILL/restart, stable task identity and Operations revision 6→12; report SHA-256 `2193e949ef17b32559263f7d6788aa0a426cfa84ae5f669be9b57ee185e206c1` |
-| ProviderLive LLM/MCP late-result/reattach | NotCertified | no complete real-provider credential/end-point campaign evidence in this audit |
+| ProviderLive LLM/MCP late-result/reattach | NotCertified | 2026-08-17 environment audit found `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `AGENT_LLM_ENDPOINT`, `AGENT_MCP_ENDPOINT` and `AGENT_A2A_ENDPOINT` absent; blocker SHA-256 `13a0afbe9e1a9ceaf513ce4fc21ab5fa84ce5027ace3b1169cef27cc7917a613` |
 | External OIDC/JWT/KMS task actions | NotCertified | local identity/policy/revision action contract Passed; real external IdP/KMS integration remains unavailable |
 
 ## Open mandatory work
 
-1. Run the remaining fixed-seed crash/steering campaign as one versioned report
-   and record orphan, divergence, duplicate-effect, empty-delivery, first
-   progress and heartbeat metrics.
-2. Run ProviderLive only with real provider/MCP/A2A endpoints and credentials;
+1. Run ProviderLive only with real provider/MCP/A2A endpoints and credentials;
    otherwise retain `NotCertified`.
 
 ## Operational metric gate

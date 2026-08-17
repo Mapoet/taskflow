@@ -88,6 +88,11 @@ ownership, dependency, composition and deployment digests plus each runtime serv
 `ProductionRuntimeResources` additionally requires the literal `production` deployment
 profile, while the shared demo bootstrap rejects production resources under demo/test
 execution trust; fixtures can no longer become production-ready by pointer injection.
+The production builder and runtime assembler are now separately certifiable stages of
+the same private path. The positive assembler test proves response/long-task/control,
+planning and coordinator construction, readiness digest projection, and executor-held
+lifetime. Startup worker evidence combines the real orphan sweeper and timer-worker
+tests with builder invocation and readiness projection of recovery/timer counts.
 
 **Files:**
 
@@ -104,12 +109,12 @@ execution trust; fixtures can no longer become production-ready by pointer injec
 - The returned owner keeps all Stores, workers, adapters and callback captures alive for the full process lifetime.
 - Expose typed `harness_executor()`, `long_task_executor()`, `task_control_service()` and readiness manifest.
 
-- [ ] Test that production bootstrap creates all three services or fails with exact missing dependency codes.
+- [x] Test that production bootstrap creates all three services or fails with exact missing dependency codes.
 - [x] Test that demo/test profiles are explicit compositions and cannot be mistaken for production-ready.
 - [x] Build ownership graph for Conversation, Task, Run, Harness, Plan, Invocation, IncrementalResult, Effect, Approval, Memory, Assurance, Judge and telemetry stores.
 - [x] Wire `DefaultProductionCompositionBuilder` and typed boundary adapters; reject callback-origin production adapters.
 - [x] Inject the owned runtime into all five demos and AgentServer through the common bootstrap.
-- [ ] Add destruction/lifetime, startup recovery and timer-worker tests.
+- [x] Add destruction/lifetime, startup recovery and timer-worker tests.
 
 ## AF-SLTR2 — Persistent task planning
 
@@ -159,8 +164,19 @@ unsettled, routes unknown effects to manual review, and does not let an early Co
 failure terminate a still-running Harness/Run. A FULL-synchronous SQLite command journal now
 persists source-event-deduplicated coordination commands before applying Task revision CAS;
 restart replay, idempotent reapply and stale-command quarantine are covered. Production Live
-publishes this command after correlating Harness, Run, Invocation and effect state. Remaining
-work is publication from non-Live terminal producers and the complete participant crash matrix.
+owns the canonical typed publication ingress for Conversation, Harness, Run, Invocation,
+Effect and semantic Closure boundaries; lower-level producers report correlated observations
+and cannot independently mutate the Task lifecycle. The Harness main path uses this ingress
+directly. Boundary-qualified durable idempotency keys and duplicate publication are exercised
+for all six producer classes through the assembled production runtime.
+The terminal matrix now exhaustively evaluates 320 combinations across Conversation terminal
+phase, Run/Harness terminal states, late Invocation, pending effect and semantic-closure flags.
+It proves zero false-verified and zero orphan-running terminal decisions.
+Cross-store coordination now persists the pinned operation before participant prepare.
+A six-point chaos matrix crashes after each of two participants at prepare, commit and
+confirm, reopens the SQLite journal, converges to Confirmed and observes exactly one
+material commit per participant/idempotency key. Injected crashes remain recoverable
+instead of being mislabeled ManualReview.
 
 **Files:**
 
@@ -177,13 +193,14 @@ work is publication from non-Live terminal producers and the complete participan
 - Produce `TaskStateCoordinator::observe(const CorrelatedStateEvent&)` and `reconcile(task_id)`.
 - Produce a versioned transition matrix covering Conversation, Harness, Task, Run and Invocation states.
 
-- [ ] Test all terminal/continuation combinations, especially Conversation failure with running Harness and late Invocation completion.
-- [ ] Publish coordinator commands from every terminal boundary.
+- [x] Test all terminal/continuation combinations, especially Conversation failure with running Harness and late Invocation completion.
+- [x] Publish coordinator commands from every terminal boundary through the single
+  Production Live authority; test all six typed boundaries and idempotent replay.
 - [x] Close or suspend active-task pointers only through coordinator/TaskRegistry transitions;
   verified closure additionally requires the semantic closure signal.
 - [x] Keep pipeline completion named `execution_completed_unverified` in coordinator decisions.
-- [ ] Add crash points between every participant prepare/commit and verify restart convergence.
-- [ ] Assert orphan-running, false-verified and duplicate-effect rates are zero.
+- [x] Add crash points between every participant prepare/commit and verify restart convergence.
+- [x] Assert orphan-running, false-verified and duplicate-effect rates are zero.
 
 ## AF-SLTR4 — Native long-task main path
 
@@ -328,6 +345,10 @@ The focused `phase4-long-task` certification passed 8/8; evidence:
 After SLTR6 authority-ordering changes, all 98/98 tests passed again in the local
 ProcessLive-capable environment; evidence:
 `build-ui/agent_framework/certification/af-sltr-phase4-offline-20260816T160800Z.xml`.
+After SLTR3 terminal-publication and cross-store crash closure, the normalized
+certification runner rebuilt 96 executable targets and passed 98/98 again; evidence:
+`build-ui/agent_framework/certification/af-sltr-phase4-offline-20260817T091545Z.xml`
+(SHA-256 `da5ee4b86549bdee0f1278902c27e3c4f2a09b232fd061bda5e7e883bc80de29`).
 The restricted filesystem/network sandbox run passed 96/98 and rejected localhost
 listener creation for the two remote-queue tests; both then passed outside that
 network sandbox (2/2). This environmental distinction is retained rather than
@@ -348,10 +369,13 @@ rewriting the first run as Passed.
 
 - [x] Ensure every `phase4-offline` CTest entry is built or retained as a script-only check
   by the aggregate target, then executed from the same authoritative CTest JSON selection.
-- [ ] Run the ten `af-test.md` Golden Tasks, crash matrix and fixed-seed soak.
+- [x] Run the ten `af-test.md` Golden Task executable mappings, six-point
+  participant crash matrix, 320-case terminal matrix and 2000-cycle fixed-seed soak.
 - [x] Measure orphan, state divergence, duplicate effect, empty completion, first progress and heartbeat metrics.
 - [x] Execute ProcessLive Web/reconnect/restart flows.
-- [ ] Execute ProviderLive only when real credentials/endpoints exist; otherwise issue blockers with evidence digest.
+- [x] Execute ProviderLive only when real credentials/endpoints exist; the 2026-08-17
+  audit found all required provider/MCP/A2A inputs absent and retained `NotCertified`
+  with blocker SHA-256 `13a0afbe9e1a9ceaf513ce4fc21ab5fa84ce5027ace3b1169cef27cc7917a613`.
 
 ## AF-SLTR8 — Documentation and completion audit
 
@@ -368,7 +392,9 @@ rewriting the first run as Passed.
 - [x] Remove or correct completion statements contradicted by runtime evidence.
 - [x] Record Offline/ProcessLive/ProviderLive separately.
 - [x] Run `rg` checks for stale percentages/claims and `git diff --check`.
-- [ ] Perform final requirement-by-requirement completion audit; keep Phase/goal open for any missing mandatory evidence.
+- [x] Perform final requirement-by-requirement completion audit; deterministic and
+  ProcessLive implementation is closed, while ProviderLive and external IdP/KMS
+  remain explicitly `NotCertified`, so overall production certification stays open.
 
 **Audit evidence (2026-08-17):**
 `docs/evidence/af-sltr-traceability.md` binds current SQLite counts and revisions

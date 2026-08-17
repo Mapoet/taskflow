@@ -8,6 +8,21 @@
 #include "agent/runtime/production_live_runtime.hpp"
 #include "agent/internal/platform_io.hpp"
 #include "phase4_harness_test_support.hpp"
+#include "phase4_cognition_pipeline_test_support.hpp"
+
+namespace agent_framework::runtime {
+struct ProductionLiveRuntimeTestAccess {
+    static ProductionRuntimeBuildResult assemble(
+        ProductionRuntimeResources resources,
+        harness::Phase4HarnessRuntime runtime,
+        harness::ProductionBuildReport report,
+        ProductionOwnershipReport ownership) {
+        return ProductionLiveRuntime::assemble_validated(
+            std::move(resources), std::move(runtime), std::move(report),
+            std::move(ownership));
+    }
+};
+}
 
 int main() {
     using namespace agent_framework::runtime;
@@ -120,5 +135,137 @@ int main() {
         conversation::TaskExecutionProfile::ArtifactDelivery,
         completed.checkpoint);
     assert(verified.state == harness::TaskTerminalState::CompletedVerified);
+
+    // Positive runtime assembly: the same private assembly stage used by the
+    // production builder must create all services and retain every anchor for
+    // as long as any exported executor remains alive.
+    memory_v2::MemoryProviderRegistry providers;
+    memory_v2::MemoryViewEngine views(providers);
+    planning::InvestigatorRegistry investigators;
+    planning::InMemoryEvidenceStore evidence;
+    planning::InMemoryPlanStore plans;
+    planning::InMemoryCognitionCheckpointStore cognition_checkpoints;
+    phase4_cognition_test::ScriptedStageModel cognition_model;
+    auto cognition = std::make_shared<planning::MultiStageCognitionWorkflow>(
+        views, investigators, evidence, plans, cognition_checkpoints,
+        cognition_model);
+    auto tasks = std::make_shared<conversation::SQLiteTaskRegistry>(
+        (root / "assembly-tasks.sqlite3").string());
+    auto invocations = std::make_shared<tool_runtime::SQLiteInvocationStore>(
+        (root / "assembly-invocations.sqlite3").string());
+    auto controls = std::make_shared<tool_runtime::SQLiteExecutionControlStore>(
+        (root / "assembly-controls.sqlite3").string());
+    auto assembly_inputs =
+        std::make_shared<harness::SQLiteProductionWorkflowInputRepository>(
+            (root / "assembly-inputs.sqlite3").string());
+    auto journal = std::make_shared<recovery::SQLiteTaskCoordinationJournal>(
+        (root / "assembly-coordination.sqlite3").string());
+    auto assembly_harness_store = std::make_shared<harness::InMemoryHarnessStore>();
+    auto assembly_counters = std::make_shared<phase4_harness_test::PortCounters>();
+    harness::Phase4HarnessRuntime assembly_harness(
+        *assembly_harness_store,
+        phase4_harness_test::ports(assembly_counters, false));
+    auto lifetime = std::make_shared<int>(42);
+    std::weak_ptr<int> lifetime_probe = lifetime;
+    ProductionRuntimeResources assembly_resources;
+    assembly_resources.deployment_profile = "production";
+    assembly_resources.dependencies.task_registry = tasks.get();
+    assembly_resources.dependencies.invocation_store = invocations.get();
+    assembly_resources.dependencies.execution_control_store = controls.get();
+    assembly_resources.dependencies.input_repository = assembly_inputs.get();
+    assembly_resources.dependencies.cognition_workflow = cognition.get();
+    assembly_resources.task_coordination_journal = journal.get();
+    assembly_resources.lifetime_anchors = {
+        tasks, invocations, controls, assembly_inputs, journal, cognition,
+        assembly_harness_store, assembly_counters, lifetime};
+    lifetime.reset();
+    harness::ProductionBuildReport assembly_report;
+    assembly_report.ready = true;
+    assembly_report.dependency_manifest_digest = "sha256:dependencies";
+    assembly_report.composition_manifest_digest = "sha256:composition";
+    assembly_report.deployment_manifest_digest = "sha256:deployment";
+    assembly_report.startup_recovery.inspected = 2;
+    assembly_report.startup_recovery.orphaned = 1;
+    assembly_report.startup_recovery.queued_for_reconcile = 1;
+    assembly_report.startup_timers_processed = 3;
+    ProductionOwnershipReport assembly_ownership;
+    assembly_ownership.ready = true;
+    assembly_ownership.manifest_digest = "sha256:ownership";
+    auto assembled = ProductionLiveRuntimeTestAccess::assemble(
+        std::move(assembly_resources), std::move(assembly_harness),
+        assembly_report, assembly_ownership);
+    assert(assembled && assembled.runtime->task_control_service());
+    const auto readiness = assembled.runtime->readiness_manifest();
+    assert(readiness.at("production_ready").get<bool>());
+    assert(readiness.at("response_executor").get<bool>());
+    assert(readiness.at("long_task_executor").get<bool>());
+    assert(readiness.at("startup_recovery").at("orphaned") == 1);
+    assert(readiness.at("startup_timers_processed") == 3);
+    assert(!readiness.at("canonical_digest").get<std::string>().empty());
+
+    // Every native terminal producer enters through the production-owned
+    // publisher.  The boundary becomes part of the durable idempotency key;
+    // no subsystem is allowed to invent an independent Task transition.
+    std::size_t observed_boundaries = 0;
+    assembled.runtime->set_coordination_observer(
+        [&](const recovery::CorrelatedStateEvent&,
+            const recovery::TaskCoordinationDecision&) {
+            ++observed_boundaries;
+        });
+    const recovery::CoordinationBoundary boundaries[] = {
+        recovery::CoordinationBoundary::Conversation,
+        recovery::CoordinationBoundary::Harness,
+        recovery::CoordinationBoundary::Run,
+        recovery::CoordinationBoundary::Invocation,
+        recovery::CoordinationBoundary::Effect,
+        recovery::CoordinationBoundary::Closure};
+    for(std::size_t index = 0; index < std::size(boundaries); ++index) {
+        recovery::CorrelatedStateEvent event;
+        event.identity = {"tenant", "conversation-" + std::to_string(index)};
+        event.task_id = "terminal-task-" + std::to_string(index);
+        event.turn_id = "terminal-turn-" + std::to_string(index);
+        event.run_id = "terminal-run-" + std::to_string(index);
+        event.harness_id = "terminal-harness-" + std::to_string(index);
+        event.task_revision = 1;
+        event.turn_phase = conversation::TurnPhase::AwaitingInput;
+        event.run_state = run::RunState::AwaitingApproval;
+        event.harness_state = harness::HarnessState::AwaitingApproval;
+        event.source_event_id = "native-terminal-1";
+        conversation::PersistentTask task;
+        task.identity = event.identity;
+        task.task_id = event.task_id;
+        task.root_turn_id = event.turn_id;
+        task.current_turn_id = event.turn_id;
+        task.current_run_id = event.run_id;
+        conversation::TaskRequirementRevision requirement;
+        requirement.identity = event.identity;
+        requirement.task_id = event.task_id;
+        requirement.turn_id = event.turn_id;
+        requirement.content = "production terminal publication";
+        conversation::TurnTaskLink link{event.identity, event.turn_id,
+            event.task_id, event.run_id, 1,
+            conversation::TaskInputIntent::InitialRequest};
+        assert(tasks->create(task, requirement, link).ok);
+        std::string publication_error;
+        assert(assembled.runtime->publish_terminal_boundary(
+            boundaries[index], event, &publication_error));
+        assert(assembled.runtime->publish_terminal_boundary(
+            boundaries[index], event, &publication_error));
+        const auto command_id = event.task_id + ":" +
+            std::string(recovery::name(boundaries[index])) +
+            ":native-terminal-1";
+        const auto command = journal->load(command_id);
+        assert(command && command->state ==
+            recovery::TaskCoordinationCommandState::Applied);
+    }
+    assert(observed_boundaries == std::size(boundaries) * 2);
+    auto response = assembled.runtime->response_executor();
+    auto long_task = assembled.runtime->long_task_executor();
+    assembled.runtime.reset();
+    assert(!lifetime_probe.expired());
+    response = {};
+    assert(!lifetime_probe.expired());
+    long_task = {};
+    assert(lifetime_probe.expired());
     std::filesystem::remove_all(root, ec);
 }

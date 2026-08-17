@@ -258,7 +258,7 @@ namespace agent_framework::harness
                 out.push_back(*r);
         return out;
     }
-    CrossStoreCoordinator::CrossStoreCoordinator(SQLiteCoordinationJournal &j, std::string p, std::shared_ptr<HarnessCheckpointObserver> d) : journal_(j), policy_revision_(std::move(p)), downstream_(std::move(d))
+    CrossStoreCoordinator::CrossStoreCoordinator(SQLiteCoordinationJournal &j, std::string p, std::shared_ptr<HarnessCheckpointObserver> d, FaultHook fault_hook) : journal_(j), policy_revision_(std::move(p)), downstream_(std::move(d)), fault_hook_(std::move(fault_hook))
     {
         if (policy_revision_.empty())
             throw std::invalid_argument("coordination policy revision is required");
@@ -313,8 +313,6 @@ namespace agent_framework::harness
             auto pin = p->inspect(o, e);
             if (!pin || pin->participant_id != id || pin->revision == 0 || pin->digest.empty())
                 return false;
-            if (!p->prepare(o, *pin, e))
-                return false;
             o.participants.push_back(*pin);
         }
         if (o.participants.empty())
@@ -344,6 +342,23 @@ namespace agent_framework::harness
             return true;
         if (r.state == CoordinationState::Prepared)
         {
+            for (const auto &pin : r.operation.participants)
+            {
+                auto it = ps.find(pin.participant_id);
+                if (it == ps.end() || !it->second->prepare(r.operation, pin, e))
+                {
+                    journal_.transition(r.operation.operation_id, r.state,
+                        CoordinationState::ManualReview,
+                        e ? *e : "participant prepare failed", nullptr);
+                    return false;
+                }
+                if (fault_hook_ && !fault_hook_("after_prepare", pin.participant_id))
+                {
+                    if(e) *e = "coordination_fault_injected:after_prepare:" +
+                        pin.participant_id;
+                    return false;
+                }
+            }
             if (!journal_.transition(r.operation.operation_id, r.state, CoordinationState::Committing, "", e))
                 return false;
             return reconcile(r.operation.operation_id, e);
@@ -356,6 +371,12 @@ namespace agent_framework::harness
                 if (it == ps.end() || !it->second->commit(r.operation, pin, e))
                 {
                     journal_.transition(r.operation.operation_id, r.state, CoordinationState::ManualReview, e ? *e : "participant commit failed", nullptr);
+                    return false;
+                }
+                if (fault_hook_ && !fault_hook_("after_commit", pin.participant_id))
+                {
+                    if(e) *e = "coordination_fault_injected:after_commit:" +
+                        pin.participant_id;
                     return false;
                 }
             }
@@ -371,6 +392,12 @@ namespace agent_framework::harness
                 if (it == ps.end() || !it->second->confirm(r.operation, pin, e))
                 {
                     journal_.transition(r.operation.operation_id, r.state, CoordinationState::ManualReview, e ? *e : "participant confirmation failed", nullptr);
+                    return false;
+                }
+                if (fault_hook_ && !fault_hook_("after_confirm", pin.participant_id))
+                {
+                    if(e) *e = "coordination_fault_injected:after_confirm:" +
+                        pin.participant_id;
                     return false;
                 }
             }

@@ -202,10 +202,32 @@ ProductionRuntimeBuildResult ProductionLiveRuntime::build(
         if(result.error.empty()) result.error = "production_composition_not_ready";
         return result;
     }
+    return assemble_validated(std::move(resources), std::move(*runtime),
+                              result.report, result.ownership);
+}
+
+ProductionRuntimeBuildResult ProductionLiveRuntime::assemble_validated(
+    ProductionRuntimeResources resources,
+    harness::Phase4HarnessRuntime harness_runtime,
+    harness::ProductionBuildReport report,
+    ProductionOwnershipReport ownership) {
+    ProductionRuntimeBuildResult result;
+    result.report = std::move(report);
+    result.ownership = std::move(ownership);
+    if(!result.report.ready || result.report.deployment_manifest_digest.empty()) {
+        result.error = "production_composition_not_ready";
+        return result;
+    }
+    if(!result.ownership.ready || result.ownership.manifest_digest.empty()) {
+        result.error = "production_runtime_ownership_not_ready";
+        return result;
+    }
     std::shared_ptr<tool_runtime::IncrementalResultViewAssembler> result_view;
     std::shared_ptr<conversation::TaskControlService> task_control;
     std::shared_ptr<conversation::TaskPlanningService> task_planning;
     const auto& dependencies = resources.dependencies;
+    auto* durable_inputs = dynamic_cast<harness::SQLiteProductionWorkflowInputRepository*>(
+        dependencies.input_repository);
     if(dependencies.task_registry && dependencies.invocation_store &&
        dependencies.execution_control_store) {
         if(dependencies.incremental_result_store)
@@ -233,7 +255,7 @@ ProductionRuntimeBuildResult ProductionLiveRuntime::build(
     auto task_coordinator = std::make_shared<recovery::DurableTaskStateCoordinator>(
         *dependencies.task_registry, *resources.task_coordination_journal);
     auto owned = std::shared_ptr<ProductionLiveRuntime>(new ProductionLiveRuntime(
-        std::move(resources), std::move(*runtime), result.report, result.ownership,
+        std::move(resources), std::move(harness_runtime), result.report, result.ownership,
         std::move(result_view), std::move(task_control), std::move(task_planning),
         std::move(task_coordinator)));
     result.runtime = std::move(owned);
@@ -254,6 +276,12 @@ nlohmann::json ProductionLiveRuntime::readiness_manifest() const {
         {"dependency_manifest_digest", report_.dependency_manifest_digest},
         {"composition_manifest_digest", report_.composition_manifest_digest},
         {"deployment_manifest_digest", report_.deployment_manifest_digest}};
+    manifest["startup_recovery"] = {
+        {"inspected", report_.startup_recovery.inspected},
+        {"orphaned", report_.startup_recovery.orphaned},
+        {"queued_for_reconcile", report_.startup_recovery.queued_for_reconcile},
+        {"failures", report_.startup_recovery.failures}};
+    manifest["startup_timers_processed"] = report_.startup_timers_processed;
     manifest["canonical_digest"] = contracts::canonical_digest(manifest).value_or("");
     return manifest;
 }
@@ -263,6 +291,23 @@ void ProductionLiveRuntime::set_coordination_observer(
                        const recovery::TaskCoordinationDecision&)> observer) {
     std::lock_guard<std::mutex> lock(execute_mutex_);
     resources_.coordination_observer = std::move(observer);
+}
+
+bool ProductionLiveRuntime::publish_terminal_boundary(
+    recovery::CoordinationBoundary boundary,
+    recovery::CorrelatedStateEvent event,
+    std::string* error) {
+    if(!durable_task_coordinator_) {
+        if(error) *error = "task_coordination_not_configured";
+        return false;
+    }
+    const auto decision = task_state_coordinator_.observe(event);
+    recovery::TaskCoordinationPublisher publisher(
+        task_state_coordinator_, *durable_task_coordinator_);
+    if(!publisher.publish(boundary, event, error)) return false;
+    if(resources_.coordination_observer)
+        resources_.coordination_observer(event, decision);
+    return true;
 }
 
 conversation::HarnessSupportedTurnRuntime::Executor
@@ -445,12 +490,10 @@ conversation::ModelTurnOutcome ProductionLiveRuntime::execute(
             outcome.reason = conversation::ModelTurnStopReason::GuardStopped;
             outcome.candidate_answer = "execution_completed_without_deliverable";
         }
-        const auto decision = task_state_coordinator_.observe(event);
         std::string coordination_error;
-        if(!durable_task_coordinator_->publish(event, decision, &coordination_error))
+        if(!publish_terminal_boundary(recovery::CoordinationBoundary::Harness,
+                                      event, &coordination_error))
             outcome.reason = conversation::ModelTurnStopReason::GuardStopped;
-        else if(resources_.coordination_observer)
-            resources_.coordination_observer(event, decision);
     }
     return outcome;
 }

@@ -15,6 +15,7 @@
 #include "agent/recovery/task_state_coordinator.hpp"
 
 namespace agent_framework::runtime {
+struct ProductionLiveRuntimeTestAccess;
 
 // Assemble the only semantic completion decision accepted by the production
 // Task coordinator from durable Assurance evidence. Missing, weak or
@@ -79,6 +80,14 @@ public:
     void set_coordination_observer(
         std::function<void(const recovery::CorrelatedStateEvent&,
                            const recovery::TaskCoordinationDecision&)> observer);
+    // Canonical ingress for terminal observations emitted by Conversation,
+    // Harness, Run, Invocation, Effect and Closure producers.  Producers do
+    // not own Task lifecycle decisions; this runtime correlates and journals
+    // them through the single production coordinator.
+    bool publish_terminal_boundary(
+        recovery::CoordinationBoundary boundary,
+        recovery::CorrelatedStateEvent event,
+        std::string* error = nullptr);
     const harness::ProductionBuildReport& report() const noexcept { return report_; }
     const ProductionOwnershipReport& ownership_report() const noexcept {
         return ownership_report_;
@@ -86,6 +95,12 @@ public:
     nlohmann::json readiness_manifest() const;
 
 private:
+    friend struct ProductionLiveRuntimeTestAccess;
+    static ProductionRuntimeBuildResult assemble_validated(
+        ProductionRuntimeResources resources,
+        harness::Phase4HarnessRuntime harness_runtime,
+        harness::ProductionBuildReport report,
+        ProductionOwnershipReport ownership);
     ProductionLiveRuntime(ProductionRuntimeResources resources,
                           harness::Phase4HarnessRuntime harness_runtime,
                           harness::ProductionBuildReport report,
