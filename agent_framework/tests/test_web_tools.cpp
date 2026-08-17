@@ -191,6 +191,12 @@ int main() {
     (void)::setenv("AGENT_WEB_ALLOW_HTTP", "1", 1);
     (void)::setenv("AGENT_TOOL_ALLOWLIST", "", 1);
 
+    namespace fs = std::filesystem;
+    const fs::path root = fs::temp_directory_path() / "agent_web_tools_test";
+    fs::remove_all(root);
+    assert(fs::create_directories(root / "sub"));
+    (void)::setenv("AGENT_FS_ROOT", root.string().c_str(), 1);
+
     httplib::Server srv;
     std::string zip_body = read_all(data_dir + "/minimal_stored.zip");
     assert(!zip_body.empty());
@@ -264,8 +270,11 @@ int main() {
         assert(r["provider"] == "searxng");
         assert(r["results"].size() == 1);
         assert(r["results"][0]["content_status"] == "fetched");
-        assert(r["results"][0]["content"].get<std::string>().find("GNSS-R extracted") !=
-               std::string::npos);
+        const auto content = r["results"][0]["content"].get<std::string>();
+        assert(content.find("GNSS-R") != std::string::npos);
+        assert(content.find("extracted article body") != std::string::npos);
+        assert(content.find("bad()") == std::string::npos);
+        assert(content.find("display:none") == std::string::npos);
         assert(r["content_enrichment"]["attempted"] == 1);
         assert(r["content_enrichment"]["succeeded"] == 1);
         assert(r["content_enrichment"]["failed"] == 0);
@@ -348,11 +357,6 @@ int main() {
         clog_tool_json_for_test("web_rss_feed (loopback)", r);
     }
 
-    namespace fs = std::filesystem;
-    const fs::path root = fs::temp_directory_path() / "agent_web_tools_test";
-    fs::remove_all(root);
-    assert(fs::create_directories(root / "sub"));
-    (void)::setenv("AGENT_FS_ROOT", root.string().c_str(), 1);
     register_builtin_fs_tools_if_configured(bus);
     {
         json r =
