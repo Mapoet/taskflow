@@ -51,11 +51,13 @@
 ## GUI4 — Versioned API and authorized realtime gateway `[~]`
 
 - [~] Add reusable `/api/v1/sessions`, `/runs`, `/commands`, `/events`, `/artifacts` and `/approvals` modules outside demo code; artifact/approval reads are production-scoped, while approval mutations remain intentionally routed through PDP/AccountableApprovalExecutor.
-- [~] Add an authorized SSE fallback with `Last-Event-ID`, retention-floor/head validation and cursor recovery, plus a bounded multi-session event multiplex core; the WebSocket transport adapter remains.
+- [x] Add an authorized SSE fallback with `Last-Event-ID`, retention-floor/head validation and cursor recovery, plus a bounded multi-session event multiplex core and a real websocketpp transport supporting authorized subscribe/update/unsubscribe.
 - [x] Reuse the durable ConversationStore event log as the replay fact source, with role-filtered User/Operations/Audit visibility and scan-safe cursors.
 - [x] Resolve authenticated RuntimeSubject server-side, enforce tenant/organization/project/workspace membership boundaries, and cover the transport with real loopback HTTP/SSE tests.
 - [x] Serve artifact detail only from view-safe Interaction Projection nodes and bind approval detail to Contract identity plus durable Run→Session ownership; never expose arbitrary workspace paths or mutate ApprovalStore directly.
-- [ ] Restore a real websocketpp header dependency before compiling the WebSocket transport; the repository's current `3rd-party/websocketpp` directory is empty and CMake now detects headers rather than accepting an empty directory.
+- [x] Initialize the pinned websocketpp submodule at `4dfe1be74e684acca19ac1cf96cce0df9eac2a2d`; CMake compiles the transport only when the real headers exist. The pinned 0.8.2-era headers are isolated to C++17 translation units while the public framework remains C++20.
+- [x] Verify a real loopback client against the gateway for authenticated subscribe/update/unsubscribe, replay/cursor delivery, oversized-frame rejection, unauthorized handshake rejection and clean shutdown (`session_run_websocket_api`); sustained slow-consumer/backpressure stress remains production certification work.
+- [ ] Bind the versioned API and gateway to the formal Web application composition; the legacy `/ui/*` demo transport is not treated as production parity.
 
 ## GUI5 — Capability Manifest `[~]`
 

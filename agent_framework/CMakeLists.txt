@@ -300,6 +300,19 @@ endif()
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/api/v1/session_run_api.cpp)
     list(APPEND AGENT_SOURCES src/api/v1/session_run_api.cpp src/api/v1/http_routes.cpp
         src/api/v1/event_multiplexer.cpp)
+    if(EXISTS ${WEBSOCKETPP_DIR}/websocketpp/server.hpp)
+        list(APPEND AGENT_SOURCES src/api/v1/websocket_gateway.cpp)
+    endif()
+endif()
+if(EXISTS ${WEBSOCKETPP_DIR}/websocketpp/server.hpp AND
+   EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/api/v1/websocket_gateway.cpp AND
+   CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
+    # websocketpp 0.8.2's template-id constructor syntax is rejected by C++20.
+    # Keep the compatibility boundary isolated; public Agent APIs remain C++20.
+    set_source_files_properties(src/api/v1/websocket_gateway.cpp PROPERTIES
+        COMPILE_OPTIONS "-std=c++17")
+    set_source_files_properties(tests/test_session_run_websocket_api.cpp PROPERTIES
+        COMPILE_OPTIONS "-std=c++17")
 endif()
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/conversation/types.cpp)
     list(APPEND AGENT_SOURCES
@@ -1941,6 +1954,18 @@ if(BUILD_TESTING)
         endif()
         add_test(NAME session_run_http_api COMMAND test_session_run_http_api)
         set_tests_properties(session_run_http_api PROPERTIES
+            LABELS "phase4-offline;offline;phase4-api;phase4-security;phase4-integration;phase4-ui-v2"
+            RUN_SERIAL TRUE TIMEOUT 20)
+    endif()
+    if(EXISTS ${WEBSOCKETPP_DIR}/websocketpp/server.hpp AND
+       EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_session_run_websocket_api.cpp)
+        add_executable(test_session_run_websocket_api tests/test_session_run_websocket_api.cpp)
+        target_link_libraries(test_session_run_websocket_api PRIVATE agent_framework)
+        if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
+            target_compile_options(test_session_run_websocket_api PRIVATE -UNDEBUG)
+        endif()
+        add_test(NAME session_run_websocket_api COMMAND test_session_run_websocket_api)
+        set_tests_properties(session_run_websocket_api PROPERTIES
             LABELS "phase4-offline;offline;phase4-api;phase4-security;phase4-integration;phase4-ui-v2"
             RUN_SERIAL TRUE TIMEOUT 20)
     endif()
