@@ -1,0 +1,11 @@
+export type Session={session_id:string;conversation_id:string;title:string;folder:string;tags:string[];pinned:boolean;state:string;revision:number;updated_at:string}
+export type SessionPage={items:Session[];next_before_sequence:number|null}
+export type Capability={action_id:string;route:string;enabled:boolean;reason:string;expected_revision:number|null;ui_hint:string}
+export type Manifest={session_id:string;authorization_revision:number;session_revision:number;actions:Capability[]}
+export type Run={run_id:string;session_id:string;state:string;revision:number;lease_epoch:number;command_cursor:number;updated_at:string;payload:Record<string,unknown>}
+export type ExecutionSnapshot={task_id:string;run_id:string;turn_id:string;task_revision:number;requirement_revision:number;plan_revision:number;run_revision:number;turn_revision:number;projection_revision:number;event_head:number;snapshot_digest:string}
+export type RuntimeEvent={sequence:number;event_type:string;timestamp:string;turn_id:string;run_id:string;payload:Record<string,unknown>}
+export type DecisionOption={id:string;label:string;description:string}
+export type Decision={decision_id:string;kind:string;state:string;question:string;options:DecisionOption[];selected_option_id:string;revision:number;expires_at_ms:number}
+export type InteractionNode={node_id:string;kind:string;label:string;summary:string;state:string;display:Record<string,unknown>;ref:Record<string,unknown>}
+export type InteractionSnapshot={revision:number;head_sequence:number;runtime_event_head:number;stale:boolean;nodes:InteractionNode[];updated_at:string}

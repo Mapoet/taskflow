@@ -2,6 +2,8 @@
 #include <filesystem>
 
 #include "agent/session/run_supervisor.hpp"
+#include "agent/internal/sqlite_utils.hpp"
+#include <sqlite3.h>
 
 using namespace agent_framework::session;
 
@@ -27,6 +29,7 @@ int main(){
         std::string none;assert(!supervisor.claim_next("worker-d",100,100,&none)&&none=="no_eligible_run");
         auto running=supervisor.mark_running("tenant","r1","worker-a",a->lease_epoch,a->revision);assert(running.ok);
         SessionRunCommand steer{"tenant","s1","r1","steer-1",SessionCommandKind::Steer,{{"input","refine"}}};
+        steer.expected_run_revision=running.revision;
         assert(supervisor.enqueue_command(steer).ok);assert(supervisor.enqueue_command(steer).ok);
         auto changed=steer;changed.payload={{"input","different"}};assert(!supervisor.enqueue_command(changed).ok);
         auto mismatch=steer;mismatch.command_id="bad-parent";mismatch.session_id="wrong";assert(!supervisor.enqueue_command(mismatch).ok);
@@ -35,6 +38,10 @@ int main(){
         auto next=supervisor.claim_next("worker-d",110,100);assert(next&&next->request.run_id=="r4");
         auto running2=supervisor.mark_running("tenant","r2","worker-b",b->lease_epoch,b->revision);assert(running2.ok);
         auto waiting2=supervisor.await_input("tenant","r2","worker-b",b->lease_epoch,running2.revision,200);assert(waiting2.ok);
+        std::string parked;auto unrelated=supervisor.claim_next("worker-new",201,100,&parked);
+        assert(!unrelated||unrelated->request.run_id!="r2");
+        SessionRunCommand resume{"tenant","s2","r2","resume-1",SessionCommandKind::Steer,{{"input","answer"}}};
+        resume.expected_run_revision=waiting2.revision;assert(supervisor.enqueue_command(resume).ok);
         auto takeover=supervisor.claim_next("worker-new",201,100);assert(takeover&&takeover->request.run_id=="r2"&&takeover->lease_epoch==b->lease_epoch+1);
         assert(!supervisor.finish("tenant","r2","worker-b",b->lease_epoch,waiting2.revision,SupervisedRunState::Completed).ok);
     }
@@ -51,5 +58,20 @@ int main(){
         assert(supervisor.claim_next("worker",1,100));std::string error;
         assert(!supervisor.claim_next("worker",1,100,&error)&&error=="no_eligible_run");
     }
+    const auto legacy_path=(std::filesystem::temp_directory_path()/"agent-session-run-legacy.sqlite").string();
+    std::filesystem::remove(legacy_path);sqlite3* legacy=nullptr;
+    assert(sqlite3_open(legacy_path.c_str(),&legacy)==SQLITE_OK);
+    agent_framework::internal::sqlite::exec(legacy,
+        "CREATE TABLE supervised_session_runs(tenant TEXT NOT NULL,organization_id TEXT NOT NULL,"
+        "project_id TEXT NOT NULL,principal_id TEXT NOT NULL,provider_id TEXT NOT NULL,session_id TEXT NOT NULL,"
+        "run_id TEXT NOT NULL,command_id TEXT NOT NULL,payload_json TEXT NOT NULL,state TEXT NOT NULL,"
+        "revision INTEGER NOT NULL,lease_epoch INTEGER NOT NULL,lease_owner TEXT NOT NULL,"
+        "lease_expires_at_ms INTEGER NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,"
+        "PRIMARY KEY(tenant,run_id),UNIQUE(tenant,session_id,command_id));");
+    sqlite3_close(legacy);
+    {SQLiteSessionRunSupervisor migrated(legacy_path);
+        assert(migrated.enqueue(request("legacy-session","legacy-run","legacy-start")).ok);
+        auto run=migrated.load("tenant","legacy-run");assert(run&&run->command_cursor==0);}
     std::filesystem::remove(path);std::filesystem::remove(quota_path);
+    std::filesystem::remove(legacy_path);
 }

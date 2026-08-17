@@ -12,7 +12,9 @@
 namespace agent_framework::session {
 
 enum class SupervisedRunState { Queued, Leased, Running, AwaitingInput, Completed, Failed, Cancelled };
-enum class SessionCommandKind { Start, Steer, Queue, Comment, Fork, Cancel };
+enum class SessionCommandKind {
+    Start, Steer, Queue, Comment, Fork, Cancel, Retry, Reconcile, Escalate
+};
 
 struct SessionRunRequest {
     std::string tenant_id, organization_id, project_id, principal_id, provider_id;
@@ -27,12 +29,16 @@ struct SessionRunCommand {
     nlohmann::json payload=nlohmann::json::object();
     std::uint64_t sequence{0};
     std::string created_at;
+    // Required by versioned production mutations. Kept at the end so the
+    // legacy aggregate wire adapter remains source compatible.
+    std::optional<std::uint64_t> expected_run_revision;
 };
 
 struct SupervisedRun {
     SessionRunRequest request;
     SupervisedRunState state{SupervisedRunState::Queued};
     std::uint64_t revision{1}, lease_epoch{0};
+    std::uint64_t command_cursor{0};
     std::string lease_owner;
     std::uint64_t lease_expires_at_ms{0};
     std::string updated_at;
@@ -69,13 +75,14 @@ public:
         std::uint64_t expires_at_ms);
     RunSupervisorResult await_input(std::string_view tenant,std::string_view run_id,
         std::string_view worker,std::uint64_t lease_epoch,std::uint64_t expected_revision,
-        std::uint64_t expires_at_ms);
+        std::uint64_t expires_at_ms,std::uint64_t command_cursor=0);
     RunSupervisorResult finish(std::string_view tenant,std::string_view run_id,
         std::string_view worker,std::uint64_t lease_epoch,std::uint64_t expected_revision,
-        SupervisedRunState terminal);
+        SupervisedRunState terminal,std::uint64_t command_cursor=0);
     std::optional<SupervisedRun> load(std::string_view tenant,std::string_view run_id);
     std::vector<SessionRunCommand> commands(std::string_view tenant,
-                                            std::string_view run_id);
+                                            std::string_view run_id,
+                                            std::uint64_t after_sequence=0);
 
 private:
     void migrate();void* db_{nullptr};std::string path_;RunSupervisorQuota quota_;std::mutex mutex_;

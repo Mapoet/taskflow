@@ -1,0 +1,191 @@
+openapi: 3.1.0
+info:
+  title: Agent Framework Session and Run API
+  version: 1.0.0
+  description: Authenticated, tenant-scoped Product Session, Run, Decision and replay API.
+servers:
+  - url: /api/v1
+paths:
+  /api/v1/sessions/{session_id}/tasks/{task_id}:
+    get:
+      summary: Get the durable Task, requirement history and Run/Plan bindings
+      parameters:
+        - $ref: '#/components/parameters/SessionId'
+        - name: task_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: Durable Task aggregate }
+        '404': { description: Task not found in Session conversation }
+  /api/v1/sessions/{session_id}/fork:
+    post:
+      summary: Fork a Session into new Session and Conversation identities
+      parameters:
+        - $ref: '#/components/parameters/SessionId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [expected_source_revision, session_id, conversation_id]
+              properties:
+                expected_source_revision: { type: integer, minimum: 1 }
+                session_id: { type: string, minLength: 1 }
+                conversation_id: { type: string, minLength: 1 }
+                title: { type: string }
+                folder: { type: string }
+                tags: { type: array, items: { type: string } }
+                pinned: { type: boolean }
+      responses:
+        '201': { description: Fork created }
+        '409': { description: Source revision conflict }
+  /sessions:
+    get:
+      operationId: listSessions
+      parameters:
+        - {name: search, in: query, schema: {type: string}}
+        - {name: before, in: query, schema: {type: integer, minimum: 0}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100}}
+      responses: {'200': {description: Stable cursor page}}
+    post:
+      operationId: createSession
+      responses: {'201': {description: Session created}, '403': {$ref: '#/components/responses/Forbidden'}}
+  /sessions/{session_id}:
+    get:
+      operationId: getSession
+      parameters: [{$ref: '#/components/parameters/SessionId'}]
+      responses: {'200': {description: Product Session}, '403': {$ref: '#/components/responses/Forbidden'}}
+  /sessions/{session_id}/state:
+    post:
+      operationId: transitionSession
+      parameters: [{$ref: '#/components/parameters/SessionId'}]
+      responses: {'200': {description: Transition committed}, '409': {$ref: '#/components/responses/Conflict'}}
+  /sessions/{session_id}/restore:
+    post:
+      operationId: restoreSession
+      parameters: [{$ref: '#/components/parameters/SessionId'}]
+      responses: {'200': {description: Archived or trashed Session restored}, '409': {$ref: '#/components/responses/Conflict'}}
+  /sessions/{session_id}/purge:
+    post:
+      operationId: purgeSession
+      parameters: [{$ref: '#/components/parameters/SessionId'}]
+      description: Two-phase owner operation; trashed to purge_pending, then explicit permanent confirmation to purged.
+      responses: {'200': {description: Purge lifecycle transition committed}, '409': {$ref: '#/components/responses/Conflict'}}
+  /sessions/{session_id}/data:
+    get:
+      operationId: getSessionData
+      parameters:
+        - {$ref: '#/components/parameters/SessionId'}
+        - {name: after, in: query, schema: {type: integer, minimum: 0}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 500}}
+      responses: {'200': {description: Visibility-filtered Session, event and interaction data page}}
+  /sessions/{session_id}/title:
+    post:
+      operationId: renameSession
+      parameters: [{$ref: '#/components/parameters/SessionId'}]
+      responses: {'200': {description: Revision-aware title update}, '409': {$ref: '#/components/responses/Conflict'}}
+  /sessions/{session_id}/organization:
+    post:
+      operationId: organizeSession
+      parameters: [{$ref: '#/components/parameters/SessionId'}]
+      responses: {'200': {description: Revision-aware folder, tag and pin update}, '409': {$ref: '#/components/responses/Conflict'}}
+  /sessions/{session_id}/members/{principal_id}:
+    post:
+      operationId: putSessionMember
+      parameters:
+        - {$ref: '#/components/parameters/SessionId'}
+        - {name: principal_id, in: path, required: true, schema: {type: string}}
+      responses: {'200': {description: Owner-authorized membership update}, '403': {$ref: '#/components/responses/Forbidden'}}
+  /sessions/{session_id}/events:
+    get:
+      operationId: replayEvents
+      parameters:
+        - {$ref: '#/components/parameters/SessionId'}
+        - {name: after, in: query, schema: {type: integer, minimum: 0}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 500}}
+      responses: {'200': {description: Visibility-filtered durable events}, '410': {description: Cursor expired}}
+  /sessions/{session_id}/events/stream:
+    get:
+      operationId: streamEvents
+      parameters: [{$ref: '#/components/parameters/SessionId'}]
+      responses: {'200': {description: Authorized SSE stream, content: {text/event-stream: {schema: {type: string}}}}}
+  /sessions/{session_id}/capabilities:
+    get:
+      operationId: getCapabilityManifest
+      parameters: [{$ref: '#/components/parameters/SessionId'}]
+      responses: {'200': {description: Server-authoritative action manifest}}
+  /sessions/{session_id}/interactions:
+    get:
+      operationId: getInteractionSnapshot
+      parameters:
+        - {$ref: '#/components/parameters/SessionId'}
+        - {name: visibility, in: query, schema: {type: string, enum: [user, operations, audit], default: user}}
+      responses: {'200': {description: Typed projection with runtime_event_head and stale indicator}, '403': {$ref: '#/components/responses/Forbidden'}}
+  /sessions/{session_id}/tasks/{task_id}/execution-snapshot:
+    get:
+      operationId: getTaskExecutionSnapshot
+      parameters:
+        - {$ref: '#/components/parameters/SessionId'}
+        - {$ref: '#/components/parameters/TaskId'}
+        - {name: run_id, in: query, schema: {type: string}}
+      responses: {'200': {description: Digest-bound authoritative execution revisions}, '409': {$ref: '#/components/responses/Conflict'}}
+  /sessions/{session_id}/decisions/{decision_id}:
+    get:
+      operationId: getDecision
+      parameters: [{$ref: '#/components/parameters/SessionId'}, {$ref: '#/components/parameters/DecisionId'}]
+      responses: {'200': {description: View-safe durable Decision}, '404': {description: Not found}}
+  /sessions/{session_id}/decisions/{decision_id}/answer:
+    post:
+      operationId: answerDecision
+      parameters: [{$ref: '#/components/parameters/SessionId'}, {$ref: '#/components/parameters/DecisionId'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expected_revision, option_id]
+              properties:
+                expected_revision: {type: integer, minimum: 1}
+                option_id: {type: string, minLength: 1, maxLength: 64}
+      responses: {'200': {description: Answer committed}, '409': {$ref: '#/components/responses/Conflict'}, '410': {description: Decision expired}}
+  /runs:
+    post:
+      operationId: enqueueRun
+      responses: {'202': {description: Idempotent Run accepted}, '403': {$ref: '#/components/responses/Forbidden'}}
+  /runs/{run_id}:
+    get:
+      operationId: getRun
+      parameters: [{$ref: '#/components/parameters/RunId'}]
+      responses: {'200': {description: Supervised Run}}
+  /runs/{run_id}/commands:
+    post:
+      operationId: enqueueRunCommand
+      parameters: [{$ref: '#/components/parameters/RunId'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [session_id, command_id, kind, expected_run_revision]
+              properties:
+                session_id: {type: string}
+                command_id: {type: string}
+                kind: {type: string, enum: [steer, queue, comment, fork, cancel, retry, reconcile, escalate]}
+                expected_run_revision: {type: integer, minimum: 1}
+                payload: {type: object}
+      responses: {'202': {description: Idempotent command accepted}, '409': {$ref: '#/components/responses/Conflict'}}
+components:
+  parameters:
+    SessionId: {name: session_id, in: path, required: true, schema: {type: string}}
+    DecisionId: {name: decision_id, in: path, required: true, schema: {type: string}}
+    TaskId: {name: task_id, in: path, required: true, schema: {type: string}}
+    RunId: {name: run_id, in: path, required: true, schema: {type: string}}
+  responses:
+    Forbidden: {description: Authenticated subject lacks scoped membership or role}
+    Conflict: {description: Expected revision or idempotency conflict}

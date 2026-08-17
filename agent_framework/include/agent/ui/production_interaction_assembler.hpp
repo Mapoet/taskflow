@@ -7,6 +7,7 @@
 #include "agent/approval/store.hpp"
 #include "agent/assurance/professional_workflow.hpp"
 #include "agent/conversation/store.hpp"
+#include "agent/decision/decision_store.hpp"
 #include "agent/planning/plan_store.hpp"
 #include "agent/remediation/remediation_workflow.hpp"
 #include "agent/run/store.hpp"
@@ -26,6 +27,7 @@ struct ProductionInteractionQuery {
     std::string turn_id;
     std::string message_id;
     std::string session_id;
+    std::string decision_id;
     std::string approval_id;
     std::string assurance_workflow_id;
     std::string remediation_workflow_id;
@@ -43,6 +45,7 @@ struct ProductionInteractionStores {
     approval::ApprovalStore* approvals{nullptr};
     assurance::AssuranceStore* assurance{nullptr};
     remediation::RemediationStore* remediation{nullptr};
+    decision::DecisionStore* decisions{nullptr};
 };
 
 struct ProductionInteractionResult {

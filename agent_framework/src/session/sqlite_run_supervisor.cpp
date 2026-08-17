@@ -26,7 +26,7 @@ namespace agent_framework::session
         }
         std::optional<SessionCommandKind> command_from(std::string_view s)
         {
-            for (std::size_t i = 0; i < 6; ++i)
+            for (std::size_t i = 0; i < 9; ++i)
             {
                 auto v = static_cast<SessionCommandKind>(i);
                 if (name(v) == s)
@@ -54,9 +54,10 @@ namespace agent_framework::session
             v.lease_expires_at_ms = sql::column_uint64(q, i++);
             v.request.created_at = sql::column_text(q, i++);
             v.updated_at = sql::column_text(q, i++);
+            v.command_cursor = sql::column_uint64(q, i++);
             return v;
         }
-        constexpr const char *cols = "tenant,organization_id,project_id,principal_id,provider_id,session_id,run_id,command_id,payload_json,state,revision,lease_epoch,lease_owner,lease_expires_at_ms,created_at,updated_at";
+        constexpr const char *cols = "tenant,organization_id,project_id,principal_id,provider_id,session_id,run_id,command_id,payload_json,state,revision,lease_epoch,lease_owner,lease_expires_at_ms,created_at,updated_at,command_cursor";
         bool terminal(SupervisedRunState s) { return s == SupervisedRunState::Completed || s == SupervisedRunState::Failed || s == SupervisedRunState::Cancelled; }
     }
     std::string_view name(SupervisedRunState v)
@@ -67,7 +68,9 @@ namespace agent_framework::session
     }
     std::string_view name(SessionCommandKind v)
     {
-        static constexpr std::array<std::string_view, 6> n{"start", "steer", "queue", "comment", "fork", "cancel"};
+        static constexpr std::array<std::string_view, 9> n{
+            "start", "steer", "queue", "comment", "fork", "cancel",
+            "retry", "reconcile", "escalate"};
         auto i = static_cast<std::size_t>(v);
         return i < n.size() ? n[i] : "unknown";
     }
@@ -101,7 +104,9 @@ namespace agent_framework::session
     void SQLiteSessionRunSupervisor::migrate()
     {
         auto *db = sql::database(db_);
-        sql::exec(db, "CREATE TABLE IF NOT EXISTS supervised_session_runs(tenant TEXT NOT NULL,organization_id TEXT NOT NULL,project_id TEXT NOT NULL,principal_id TEXT NOT NULL,provider_id TEXT NOT NULL,session_id TEXT NOT NULL,run_id TEXT NOT NULL,command_id TEXT NOT NULL,payload_json TEXT NOT NULL,state TEXT NOT NULL,revision INTEGER NOT NULL,lease_epoch INTEGER NOT NULL,lease_owner TEXT NOT NULL,lease_expires_at_ms INTEGER NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,PRIMARY KEY(tenant,run_id),UNIQUE(tenant,session_id,command_id))");
+        sql::exec(db, "CREATE TABLE IF NOT EXISTS supervised_session_runs(tenant TEXT NOT NULL,organization_id TEXT NOT NULL,project_id TEXT NOT NULL,principal_id TEXT NOT NULL,provider_id TEXT NOT NULL,session_id TEXT NOT NULL,run_id TEXT NOT NULL,command_id TEXT NOT NULL,payload_json TEXT NOT NULL,state TEXT NOT NULL,revision INTEGER NOT NULL,lease_epoch INTEGER NOT NULL,lease_owner TEXT NOT NULL,lease_expires_at_ms INTEGER NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,command_cursor INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(tenant,run_id),UNIQUE(tenant,session_id,command_id))");
+        if(!sql::table_has_column(db,"supervised_session_runs","command_cursor"))
+            sql::exec(db,"ALTER TABLE supervised_session_runs ADD COLUMN command_cursor INTEGER NOT NULL DEFAULT 0");
         sql::exec(db, "CREATE INDEX IF NOT EXISTS supervised_runs_claim_idx ON supervised_session_runs(state,lease_expires_at_ms,created_at)");
         sql::exec(db, "CREATE TABLE IF NOT EXISTS supervised_session_commands(tenant TEXT NOT NULL,session_id TEXT NOT NULL,run_id TEXT NOT NULL,command_id TEXT NOT NULL,kind TEXT NOT NULL,payload_json TEXT NOT NULL,sequence INTEGER NOT NULL,created_at TEXT NOT NULL,PRIMARY KEY(tenant,session_id,command_id),UNIQUE(tenant,run_id,sequence))");
     }
@@ -125,7 +130,7 @@ namespace agent_framework::session
             }
             if (v.created_at.empty())
                 v.created_at = stamp();
-            sql::Statement ins(db, "INSERT INTO supervised_session_runs VALUES(?,?,?,?,?,?,?,?,?,'queued',1,0,'',0,?,?)");
+            sql::Statement ins(db, "INSERT INTO supervised_session_runs(tenant,organization_id,project_id,principal_id,provider_id,session_id,run_id,command_id,payload_json,state,revision,lease_epoch,lease_owner,lease_expires_at_ms,created_at,updated_at,command_cursor) VALUES(?,?,?,?,?,?,?,?,?,'queued',1,0,'',0,?,?,0)");
             int i = 1;
             for (const auto *s : {&v.tenant_id, &v.organization_id, &v.project_id, &v.principal_id, &v.provider_id, &v.session_id, &v.run_id, &v.command_id})
                 sql::bind_text(ins.get(), i++, *s);
@@ -175,12 +180,28 @@ namespace agent_framework::session
                 return {same, sql::column_uint64(old.get(), 3), 0,
                         same ? "" : "run_command_idempotency_conflict"};
             }
-            sql::Statement parent(db, "SELECT 1 FROM supervised_session_runs WHERE tenant=? AND session_id=? AND run_id=? AND state!='cancelled'");
+            sql::Statement parent(db, "SELECT revision,state FROM supervised_session_runs WHERE tenant=? AND session_id=? AND run_id=?");
             sql::bind_text(parent.get(), 1, c.tenant_id);
             sql::bind_text(parent.get(), 2, c.session_id);
             sql::bind_text(parent.get(), 3, c.run_id);
             if (sql::step(parent.get()) != SQLITE_ROW)
                 return {false, 0, 0, "run_not_found_or_session_mismatch"};
+            const auto current_revision=sql::column_uint64(parent.get(),0);
+            const auto current_state=state_from(sql::column_text(parent.get(),1));
+            if(!current_state)return {false,current_revision,0,"stored_run_state_invalid"};
+            const bool command_allowed=c.kind==SessionCommandKind::Comment||
+                (c.kind==SessionCommandKind::Retry&&*current_state==SupervisedRunState::Failed)||
+                ((c.kind==SessionCommandKind::Reconcile||c.kind==SessionCommandKind::Escalate)&&
+                    (*current_state==SupervisedRunState::Failed||
+                     *current_state==SupervisedRunState::AwaitingInput))||
+                (!terminal(*current_state)&&c.kind!=SessionCommandKind::Retry&&
+                    c.kind!=SessionCommandKind::Reconcile&&c.kind!=SessionCommandKind::Escalate);
+            if(!command_allowed)
+                return {false,current_revision,0,"run_command_invalid_for_state"};
+            if(!c.expected_run_revision)
+                return {false,current_revision,0,"expected_run_revision_required"};
+            if(*c.expected_run_revision!=current_revision)
+                return {false,current_revision,0,"run_revision_conflict"};
             sql::Statement tail(db, "SELECT COALESCE(MAX(sequence),0) FROM supervised_session_commands WHERE tenant=? AND run_id=?");
             sql::bind_text(tail.get(), 1, c.tenant_id);
             sql::bind_text(tail.get(), 2, c.run_id);
@@ -199,6 +220,22 @@ namespace agent_framework::session
             sql::bind_text(ins.get(), 8, c.created_at);
             if (sql::step(ins.get()) != SQLITE_DONE)
                 throw std::runtime_error(sqlite3_errmsg(db));
+            // Awaiting-input is a durable parked state, not an expiring worker
+            // lease. A material command explicitly wakes it and invalidates the
+            // old fencing epoch; comments remain non-executing annotations.
+            if(c.kind!=SessionCommandKind::Comment) {
+                const char* wake_states=(c.kind==SessionCommandKind::Retry)?"state='failed'":
+                    (c.kind==SessionCommandKind::Reconcile||c.kind==SessionCommandKind::Escalate)?
+                        "(state='failed' OR state='awaiting_input')":"state='awaiting_input'";
+                const auto wake_sql=std::string("UPDATE supervised_session_runs SET state='queued',")+
+                    "revision=revision+1,lease_owner='',lease_expires_at_ms=0,updated_at=? "
+                    "WHERE tenant=? AND run_id=? AND "+wake_states;
+                sql::Statement wake(db,wake_sql.c_str());
+                sql::bind_text(wake.get(),1,c.created_at);sql::bind_text(wake.get(),2,c.tenant_id);
+                sql::bind_text(wake.get(),3,c.run_id);
+                if(sql::step(wake.get())!=SQLITE_DONE)
+                    throw std::runtime_error(sqlite3_errmsg(db));
+            }
             tx.commit();
             return {true, c.sequence, 0, {}};
         }
@@ -222,11 +259,11 @@ namespace agent_framework::session
         try
         {
             sql::Transaction tx(db);
-            const auto query = std::string("SELECT ") + cols + " FROM supervised_session_runs WHERE state='queued' OR ((state='leased' OR state='running' OR state='awaiting_input') AND lease_expires_at_ms<?) ORDER BY created_at,run_id LIMIT 128";
+            const auto query = std::string("SELECT ") + cols + " FROM supervised_session_runs WHERE state='queued' OR ((state='leased' OR state='running') AND lease_expires_at_ms<?) ORDER BY created_at,run_id LIMIT 128";
             sql::Statement candidates(db, query.c_str());
             sql::bind_uint64(candidates.get(), 1, now);
             auto active_count = [&](const char *column, const SupervisedRun &candidate, std::string_view value)
-            {auto statement=std::string("SELECT COUNT(*) FROM supervised_session_runs WHERE tenant=? AND ")+column+"=? AND (state='leased' OR state='running' OR state='awaiting_input') AND lease_expires_at_ms>=?";sql::Statement q(db,statement.c_str());sql::bind_text(q.get(),1,candidate.request.tenant_id);sql::bind_text(q.get(),2,value);sql::bind_uint64(q.get(),3,now);sql::step(q.get());return static_cast<std::size_t>(sql::column_uint64(q.get(),0)); };
+            {auto statement=std::string("SELECT COUNT(*) FROM supervised_session_runs WHERE tenant=? AND ")+column+"=? AND (state='leased' OR state='running') AND lease_expires_at_ms>=?";sql::Statement q(db,statement.c_str());sql::bind_text(q.get(),1,candidate.request.tenant_id);sql::bind_text(q.get(),2,value);sql::bind_uint64(q.get(),3,now);sql::step(q.get());return static_cast<std::size_t>(sql::column_uint64(q.get(),0)); };
             while (sql::step(candidates.get()) == SQLITE_ROW)
             {
                 auto run = decode(candidates.get());
@@ -297,36 +334,38 @@ namespace agent_framework::session
             return {false, expected, epoch, sqlite3_errmsg(db)};
         return sql::changes(db) == 1 ? RunSupervisorResult{true, expected + 1, epoch, {}} : RunSupervisorResult{false, expected, epoch, "lease_fence_or_revision_conflict"};
     }
-    RunSupervisorResult SQLiteSessionRunSupervisor::await_input(std::string_view tenant, std::string_view run, std::string_view worker, std::uint64_t epoch, std::uint64_t expected, std::uint64_t expires)
+    RunSupervisorResult SQLiteSessionRunSupervisor::await_input(std::string_view tenant, std::string_view run, std::string_view worker, std::uint64_t epoch, std::uint64_t expected, std::uint64_t expires,std::uint64_t cursor)
     {
         std::lock_guard l(mutex_);
         auto *db = sql::database(db_);
-        sql::Statement q(db, "UPDATE supervised_session_runs SET state='awaiting_input',revision=revision+1,lease_expires_at_ms=?,updated_at=? WHERE tenant=? AND run_id=? AND state='running' AND lease_owner=? AND lease_epoch=? AND revision=?");
+        sql::Statement q(db, "UPDATE supervised_session_runs SET state='awaiting_input',revision=revision+1,lease_expires_at_ms=?,updated_at=?,command_cursor=MAX(command_cursor,?) WHERE tenant=? AND run_id=? AND state='running' AND lease_owner=? AND lease_epoch=? AND revision=?");
         sql::bind_uint64(q.get(), 1, expires);
         sql::bind_text(q.get(), 2, stamp());
-        sql::bind_text(q.get(), 3, tenant);
-        sql::bind_text(q.get(), 4, run);
-        sql::bind_text(q.get(), 5, worker);
-        sql::bind_uint64(q.get(), 6, epoch);
-        sql::bind_uint64(q.get(), 7, expected);
+        sql::bind_uint64(q.get(), 3, cursor);
+        sql::bind_text(q.get(), 4, tenant);
+        sql::bind_text(q.get(), 5, run);
+        sql::bind_text(q.get(), 6, worker);
+        sql::bind_uint64(q.get(), 7, epoch);
+        sql::bind_uint64(q.get(), 8, expected);
         if (sql::step(q.get()) != SQLITE_DONE)
             return {false, expected, epoch, sqlite3_errmsg(db)};
         return sql::changes(db) == 1 ? RunSupervisorResult{true, expected + 1, epoch, {}} : RunSupervisorResult{false, expected, epoch, "lease_fence_or_revision_conflict"};
     }
-    RunSupervisorResult SQLiteSessionRunSupervisor::finish(std::string_view tenant, std::string_view run, std::string_view worker, std::uint64_t epoch, std::uint64_t expected, SupervisedRunState state)
+    RunSupervisorResult SQLiteSessionRunSupervisor::finish(std::string_view tenant, std::string_view run, std::string_view worker, std::uint64_t epoch, std::uint64_t expected, SupervisedRunState state,std::uint64_t cursor)
     {
         if (!terminal(state))
             return {false, expected, epoch, "terminal_state_required"};
         std::lock_guard l(mutex_);
         auto *db = sql::database(db_);
-        sql::Statement q(db, "UPDATE supervised_session_runs SET state=?,revision=revision+1,lease_expires_at_ms=0,updated_at=? WHERE tenant=? AND run_id=? AND (state='leased' OR state='running' OR state='awaiting_input') AND lease_owner=? AND lease_epoch=? AND revision=?");
+        sql::Statement q(db, "UPDATE supervised_session_runs SET state=?,revision=revision+1,lease_expires_at_ms=0,updated_at=?,command_cursor=MAX(command_cursor,?) WHERE tenant=? AND run_id=? AND (state='leased' OR state='running' OR state='awaiting_input') AND lease_owner=? AND lease_epoch=? AND revision=?");
         sql::bind_text(q.get(), 1, name(state));
         sql::bind_text(q.get(), 2, stamp());
-        sql::bind_text(q.get(), 3, tenant);
-        sql::bind_text(q.get(), 4, run);
-        sql::bind_text(q.get(), 5, worker);
-        sql::bind_uint64(q.get(), 6, epoch);
-        sql::bind_uint64(q.get(), 7, expected);
+        sql::bind_uint64(q.get(), 3, cursor);
+        sql::bind_text(q.get(), 4, tenant);
+        sql::bind_text(q.get(), 5, run);
+        sql::bind_text(q.get(), 6, worker);
+        sql::bind_uint64(q.get(), 7, epoch);
+        sql::bind_uint64(q.get(), 8, expected);
         if (sql::step(q.get()) != SQLITE_DONE)
             return {false, expected, epoch, sqlite3_errmsg(db)};
         return sql::changes(db) == 1 ? RunSupervisorResult{true, expected + 1, epoch, {}} : RunSupervisorResult{false, expected, epoch, "lease_fence_or_revision_conflict"};
@@ -342,12 +381,13 @@ namespace agent_framework::session
             return {};
         return decode(q.get());
     }
-    std::vector<SessionRunCommand> SQLiteSessionRunSupervisor::commands(std::string_view tenant, std::string_view run)
+    std::vector<SessionRunCommand> SQLiteSessionRunSupervisor::commands(std::string_view tenant, std::string_view run,std::uint64_t after)
     {
         std::lock_guard l(mutex_);
-        sql::Statement q(sql::database(db_), "SELECT session_id,command_id,kind,payload_json,sequence,created_at FROM supervised_session_commands WHERE tenant=? AND run_id=? ORDER BY sequence");
+        sql::Statement q(sql::database(db_), "SELECT session_id,command_id,kind,payload_json,sequence,created_at FROM supervised_session_commands WHERE tenant=? AND run_id=? AND sequence>? ORDER BY sequence");
         sql::bind_text(q.get(), 1, tenant);
         sql::bind_text(q.get(), 2, run);
+        sql::bind_uint64(q.get(), 3, after);
         std::vector<SessionRunCommand> out;
         while (sql::step(q.get()) == SQLITE_ROW)
         {

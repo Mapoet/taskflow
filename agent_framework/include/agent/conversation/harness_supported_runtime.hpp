@@ -39,6 +39,8 @@ public:
 
     static TurnExecutionDecision route(const HarnessSupportedRuntimePolicy& policy,
                                        TaskExecutionProfile profile);
+    static TurnExecutionDecision route(const HarnessSupportedRuntimePolicy& policy,
+                                       const TurnRequest& request);
     ModelTurnOutcome execute(const TurnRequest& request,
                              const TurnCheckpoint& checkpoint) const;
 

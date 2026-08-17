@@ -102,6 +102,12 @@ namespace agent_framework::conversation
         std::string task_id, run_id;
         // Trusted semantic audit references; neither field grants authority.
         std::string classification_decision_id, clarification_id;
+        // Schema-v4 semantic and policy projections. Strings keep this base wire
+        // type independent from classifier headers and remain forward-compatible.
+        std::string work_shape{"single_turn"}, effect_class{"none"};
+        std::string assurance_tier{"basic"}, promotion_mode{"direct_turn"};
+        std::string planning_depth{"none"}, routing_policy_revision;
+        bool promote_to_task{false}, planning_required{false};
     };
     struct ConversationInput
     {

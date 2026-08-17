@@ -205,15 +205,8 @@ std::optional<TaskInputIntent> task_input_intent(std::string_view text) {
 }
 
 TaskInputIntent classify_task_input(std::string_view input, bool has_active_task) {
+    if(const auto control=explicit_task_control_input(input))return *control;
     const auto value = normalized(input);
-    if(value == "/status" || value == "状态" || value == "进度" ||
-       value == "现在怎么样" || value == "现在结果怎么样了")
-        return TaskInputIntent::StatusQuery;
-    if(value == "/cancel" || value == "取消" || value == "取消任务")
-        return TaskInputIntent::CancelTask;
-    if(value == "/stop" || value == "/suspend" || value == "停止任务" ||
-       value == "暂停" || value == "先停一下")
-        return TaskInputIntent::SuspendTask;
     if(value == "/replan" || value == "重新规划" || value == "换方案")
         return TaskInputIntent::ReplanTask;
     if(value.rfind("/new ", 0) == 0 || value == "/new")
@@ -224,6 +217,17 @@ TaskInputIntent classify_task_input(std::string_view input, bool has_active_task
                                : TaskInputIntent::InitialRequest;
     return has_active_task ? TaskInputIntent::AmendRequirements
                            : TaskInputIntent::InitialRequest;
+}
+
+std::optional<TaskInputIntent> explicit_task_control_input(std::string_view input) {
+    const auto value=normalized(input);
+    if(value=="/status"||value=="状态"||value=="进度"||value=="现在怎么样"||
+       value=="现在结果怎么样了")return TaskInputIntent::StatusQuery;
+    if(value=="/cancel"||value=="取消"||value=="取消任务")
+        return TaskInputIntent::CancelTask;
+    if(value=="/stop"||value=="/suspend"||value=="停止任务"||value=="暂停"||
+       value=="先停一下")return TaskInputIntent::SuspendTask;
+    return std::nullopt;
 }
 
 json encode(const PersistentTask& value) {
@@ -313,11 +317,7 @@ void SQLiteTaskRegistry::migrate() {
         "clarification_id TEXT NOT NULL DEFAULT '',"
         "PRIMARY KEY(tenant,conversation,task_id,run_id))");
     auto add_column = [db](std::string_view name, std::string_view definition) {
-        bool found = false;
-        sql::Statement columns(db, "PRAGMA table_info(task_run_links)");
-        while(sql::step(columns.get()) == SQLITE_ROW)
-            if(sql::column_text(columns.get(), 1) == name) found = true;
-        if(!found) {
+        if(!sql::table_has_column(db,"task_run_links",name)) {
             const auto statement = std::string("ALTER TABLE task_run_links ADD COLUMN ") +
                                    std::string(definition);
             sql::exec(db, statement.c_str());

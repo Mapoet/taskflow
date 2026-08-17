@@ -2,6 +2,12 @@
 
 **Goal:** Sequence AF-Term v2 and GUI v2 so task understanding, Session identity, execution and user-visible evidence form one coherent production system.
 
+> Supersession notice (2026-08-18): the authoritative convergence sequence is now
+> [`af-task-semantics-gui-v3-plan.md`](af-task-semantics-gui-v3-plan.md).
+> This v2 document remains as historical dependency context. In particular, fixed
+> profile confirmation has been superseded by a general dynamic Decision workflow,
+> and planning is no longer derived from `TaskExecutionProfile` alone.
+
 ## Dependency order
 
 ```text

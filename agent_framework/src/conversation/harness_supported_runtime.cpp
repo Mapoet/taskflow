@@ -58,9 +58,24 @@ TurnExecutionDecision HarnessSupportedTurnRuntime::route(
                 : "harness_unavailable_and_fallback_not_explicit"};
 }
 
+TurnExecutionDecision HarnessSupportedTurnRuntime::route(
+    const HarnessSupportedRuntimePolicy& policy,const TurnRequest& request) {
+    // Planning is orthogonal to effect/profile. A complex read-only task uses
+    // the durable workflow, while a direct conversational turn stays on Harness.
+    if(request.planning_required||request.promotion_mode=="long_running_task"||
+       request.promotion_mode=="continuous_task") {
+        if(policy.long_task_ready)
+            return {TurnExecutionPath::LongTaskWorkflow,"semantic_planning_workflow_ready"};
+        if(!policy.production&&policy.harness_ready)
+            return {TurnExecutionPath::Harness,"nonproduction_planning_harness_compatibility"};
+        return {TurnExecutionPath::FailClosed,"planning_workflow_unavailable"};
+    }
+    return route(policy,request.profile);
+}
+
 ModelTurnOutcome HarnessSupportedTurnRuntime::execute(
     const TurnRequest& request, const TurnCheckpoint& checkpoint) const {
-    const auto decision = route(policy_, request.profile);
+    const auto decision = route(policy_, request);
     emit(request, decision.path, decision.reason_code);
     const HarnessSupportedTurnRequest supported{request, checkpoint};
     ModelTurnOutcome outcome;
@@ -108,6 +123,13 @@ void HarnessSupportedTurnRuntime::emit(
                      {"production", policy_.production},
                      {"harness_ready", policy_.harness_ready},
                      {"long_task_ready", policy_.long_task_ready}};
+    event.payload["work_shape"]=request.work_shape;
+    event.payload["effect_class"]=request.effect_class;
+    event.payload["assurance_tier"]=request.assurance_tier;
+    event.payload["promotion_mode"]=request.promotion_mode;
+    event.payload["planning_required"]=request.planning_required;
+    event.payload["planning_depth"]=request.planning_depth;
+    event.payload["routing_policy_revision"]=request.routing_policy_revision;
     events_(event);
 }
 

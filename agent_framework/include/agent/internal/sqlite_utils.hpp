@@ -1,6 +1,8 @@
 #pragma once
 
 #include <stdexcept>
+#include <algorithm>
+#include <cctype>
 #include <cstdint>
 #include <optional>
 #include <limits>
@@ -115,6 +117,23 @@ inline void clear_bindings(sqlite3_stmt* statement) {
 inline std::string column_text(sqlite3_stmt* statement, int index) {
     const auto* value = sqlite3_column_text(statement, index);
     return value ? reinterpret_cast<const char*>(value) : std::string();
+}
+
+inline bool table_has_column(sqlite3* database, std::string_view table,
+                             std::string_view column) {
+    const auto valid_identifier=[](std::string_view value) {
+        return !value.empty() && value.size() <= 128 &&
+            std::all_of(value.begin(),value.end(),[](unsigned char ch) {
+                return std::isalnum(ch) || ch == '_';
+            });
+    };
+    if(!valid_identifier(table)||!valid_identifier(column))
+        throw std::invalid_argument("invalid sqlite identifier");
+    const auto query_text=std::string("PRAGMA table_info(")+std::string(table)+")";
+    Statement query(database,query_text.c_str());
+    while(step(query.get())==SQLITE_ROW)
+        if(column_text(query.get(),1)==column)return true;
+    return false;
 }
 
 class Transaction {

@@ -17,6 +17,8 @@ namespace agent_framework::ui
     enum class InteractionNodeKind
     {
         Message,
+        Understanding,
+        Decision,
         Thinking,
         CognitionStage,
         Plan,
@@ -81,6 +83,7 @@ namespace agent_framework::ui
         std::string tenant_id;
         std::string conversation_id, turn_id, message_id;
         std::string task_id, run_id, harness_id;
+        std::string decision_id;
         std::string plan_id, plan_node_id;
         std::uint64_t plan_revision{0};
         std::string agent_template_id, agent_invocation_id, child_agent_id;

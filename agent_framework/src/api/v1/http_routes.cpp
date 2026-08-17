@@ -34,11 +34,15 @@ std::optional<session::ProductSessionState> session_state(std::string_view value
 }
 
 std::optional<session::SessionCommandKind> command_kind(std::string_view value) {
-    for(std::size_t i=0;i<6;++i) {
+    for(std::size_t i=0;i<9;++i) {
         auto kind=static_cast<session::SessionCommandKind>(i);
         if(session::name(kind)==value) return kind;
     }
     return {};
+}
+std::optional<session::SessionMemberRole> member_role(std::string_view value) {
+    for(std::size_t i=0;i<4;++i){auto role=static_cast<session::SessionMemberRole>(i);
+        if(session::name(role)==value)return role;}return {};
 }
 } // namespace
 
@@ -108,9 +112,42 @@ void register_session_run_routes(httplib::Server& server,SessionRunApi& api,
         auto subject=resolve(request,resolver,response);if(!subject)return;
         send(response,api.get_artifact(*subject,request.matches[1].str(),request.matches[2].str()));
     });
+    server.Get(R"(/api/v1/sessions/([^/]+)/interactions)",[&api,resolver](const auto& request,auto& response) {
+        auto subject=resolve(request,resolver,response);if(!subject)return;
+        auto viewer=ui::InteractionVisibility::User;
+        if(request.has_param("visibility")) {
+            auto parsed=ui::interaction_visibility(request.get_param_value("visibility"));
+            if(!parsed){send(response,{422,{{"error","invalid_interaction_visibility"}}});return;}
+            viewer=*parsed;
+        }
+        send(response,api.get_interactions(*subject,request.matches[1].str(),viewer));
+    });
     server.Get(R"(/api/v1/sessions/([^/]+)/approvals/([^/]+))",[&api,resolver](const auto& request,auto& response) {
         auto subject=resolve(request,resolver,response);if(!subject)return;
         send(response,api.get_approval(*subject,request.matches[1].str(),request.matches[2].str()));
+    });
+    server.Get(R"(/api/v1/sessions/([^/]+)/decisions/([^/]+))",[&api,resolver](const auto& request,auto& response) {
+        auto subject=resolve(request,resolver,response);if(!subject)return;
+        send(response,api.get_decision(*subject,request.matches[1].str(),request.matches[2].str()));
+    });
+    server.Get(R"(/api/v1/sessions/([^/]+)/tasks/([^/]+)/execution-snapshot)",[&api,resolver](const auto& request,auto& response) {
+        auto subject=resolve(request,resolver,response);if(!subject)return;
+        const auto run=request.has_param("run_id")?request.get_param_value("run_id"):std::string{};
+        send(response,api.get_execution_snapshot(*subject,request.matches[1].str(),
+                                                  request.matches[2].str(),run));
+    });
+    server.Get(R"(/api/v1/sessions/([^/]+)/tasks/([^/]+))",[&api,resolver](const auto& request,auto& response) {
+        auto subject=resolve(request,resolver,response);if(!subject)return;
+        send(response,api.get_task(*subject,request.matches[1].str(),request.matches[2].str()));
+    });
+    server.Post(R"(/api/v1/sessions/([^/]+)/decisions/([^/]+)/answer)",[&api,resolver](const auto& request,auto& response) {
+        auto subject=resolve(request,resolver,response);if(!subject)return;
+        try {const auto body=json::parse(request.body);
+            const auto now=static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::system_clock::now().time_since_epoch()).count());
+            send(response,api.answer_decision(*subject,request.matches[1].str(),request.matches[2].str(),
+                body.at("expected_revision"),body.at("option_id").template get<std::string>(),now));
+        } catch(const std::exception& error){send(response,malformed(error));}
     });
     server.Get(R"(/api/v1/sessions/([^/]+)/capabilities)",[&api,resolver](const auto& request,auto& response) {
         auto subject=resolve(request,resolver,response);if(!subject)return;
@@ -129,6 +166,16 @@ void register_session_run_routes(httplib::Server& server,SessionRunApi& api,
             send(response,api.create_session(*subject,std::move(value)));
         } catch(const std::exception& error) { send(response,malformed(error)); }
     });
+    server.Post(R"(/api/v1/sessions/([^/]+)/fork)",[&api,resolver](const auto& request,auto& response) {
+        auto subject=resolve(request,resolver,response);if(!subject)return;
+        try {auto body=json::parse(request.body);session::ProductSession forked;
+            forked.session_id=body.at("session_id");forked.conversation_id=body.at("conversation_id");
+            forked.title=body.value("title",std::string{});forked.folder=body.value("folder",std::string{});
+            forked.tags=body.value("tags",std::vector<std::string>{});forked.pinned=body.value("pinned",false);
+            send(response,api.fork_session(*subject,request.matches[1].str(),
+                body.at("expected_source_revision"),std::move(forked)));}
+        catch(const std::exception& error){send(response,malformed(error));}
+    });
     server.Post(R"(/api/v1/sessions/([^/]+)/state)",[&api,resolver](const auto& request,auto& response) {
         auto subject=resolve(request,resolver,response);if(!subject)return;
         try {
@@ -137,6 +184,47 @@ void register_session_run_routes(httplib::Server& server,SessionRunApi& api,
             send(response,api.transition_session(*subject,request.matches[1].str(),
                                                   body.at("expected_revision"),*state));
         } catch(const std::exception& error) { send(response,malformed(error)); }
+    });
+    server.Post(R"(/api/v1/sessions/([^/]+)/restore)",[&api,resolver](const auto& request,auto& response) {
+        auto subject=resolve(request,resolver,response);if(!subject)return;
+        try {auto body=json::parse(request.body);send(response,api.restore_session(*subject,
+            request.matches[1].str(),body.at("expected_revision")));}
+        catch(const std::exception& error){send(response,malformed(error));}
+    });
+    server.Post(R"(/api/v1/sessions/([^/]+)/purge)",[&api,resolver](const auto& request,auto& response) {
+        auto subject=resolve(request,resolver,response);if(!subject)return;
+        try {auto body=json::parse(request.body);send(response,api.purge_session(*subject,
+            request.matches[1].str(),body.at("expected_revision"),
+            body.value("confirm_permanent",false)));}
+        catch(const std::exception& error){send(response,malformed(error));}
+    });
+    server.Get(R"(/api/v1/sessions/([^/]+)/data)",[&api,resolver](const auto& request,auto& response) {
+        auto subject=resolve(request,resolver,response);if(!subject)return;
+        try {const auto after=request.has_param("after")?std::stoull(request.get_param_value("after")):0;
+            const auto limit=request.has_param("limit")?std::stoull(request.get_param_value("limit")):200;
+            send(response,api.get_session_data(*subject,request.matches[1].str(),after,limit));}
+        catch(const std::exception& error){send(response,malformed(error));}
+    });
+    server.Post(R"(/api/v1/sessions/([^/]+)/title)",[&api,resolver](const auto& request,auto& response) {
+        auto subject=resolve(request,resolver,response);if(!subject)return;
+        try {auto body=json::parse(request.body);send(response,api.rename_session(*subject,
+            request.matches[1].str(),body.at("expected_revision"),body.at("title").template get<std::string>()));}
+        catch(const std::exception& error){send(response,malformed(error));}
+    });
+    server.Post(R"(/api/v1/sessions/([^/]+)/organization)",[&api,resolver](const auto& request,auto& response) {
+        auto subject=resolve(request,resolver,response);if(!subject)return;
+        try {auto body=json::parse(request.body);send(response,api.organize_session(*subject,
+            request.matches[1].str(),body.at("expected_revision"),body.value("folder",std::string{}),
+            body.value("tags",std::vector<std::string>{}),body.value("pinned",false)));}
+        catch(const std::exception& error){send(response,malformed(error));}
+    });
+    server.Post(R"(/api/v1/sessions/([^/]+)/members/([^/]+))",[&api,resolver](const auto& request,auto& response) {
+        auto subject=resolve(request,resolver,response);if(!subject)return;
+        try {auto body=json::parse(request.body);auto parsed=member_role(body.at("role").template get<std::string>());
+            if(!parsed){send(response,{422,{{"error","invalid_session_member_role"}}});return;}
+            send(response,api.put_session_member(*subject,request.matches[1].str(),
+                body.value("expected_member_revision",0ULL),request.matches[2].str(),*parsed));}
+        catch(const std::exception& error){send(response,malformed(error));}
     });
     server.Post("/api/v1/runs",[&api,resolver](const auto& request,auto& response) {
         auto subject=resolve(request,resolver,response);if(!subject)return;
@@ -165,6 +253,8 @@ void register_session_run_routes(httplib::Server& server,SessionRunApi& api,
             value.session_id=body.at("session_id");value.run_id=request.matches[1].str();
             value.command_id=body.at("command_id");value.kind=*kind;
             value.payload=body.value("payload",json::object());
+            if(body.contains("expected_run_revision"))
+                value.expected_run_revision=body.at("expected_run_revision").template get<std::uint64_t>();
             send(response,api.enqueue_command(*subject,std::move(value)));
         } catch(const std::exception& error) { send(response,malformed(error)); }
     });

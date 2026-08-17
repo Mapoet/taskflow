@@ -28,6 +28,7 @@ namespace agent_framework::ui
         }
         constexpr std::array node_names{
             std::pair{InteractionNodeKind::Message, "message"sv}, std::pair{InteractionNodeKind::Thinking, "thinking"sv},
+            std::pair{InteractionNodeKind::Understanding, "understanding"sv}, std::pair{InteractionNodeKind::Decision, "decision"sv},
             std::pair{InteractionNodeKind::CognitionStage, "cognition_stage"sv}, std::pair{InteractionNodeKind::Plan, "plan"sv},
             std::pair{InteractionNodeKind::PlanNode, "plan_node"sv}, std::pair{InteractionNodeKind::MemoryView, "memory_view"sv},
             std::pair{InteractionNodeKind::Agent, "agent"sv}, std::pair{InteractionNodeKind::SkillNode, "skill_node"sv},
@@ -90,7 +91,7 @@ namespace agent_framework::ui
     std::optional<InteractionVisibility> interaction_visibility(std::string_view v) noexcept { return parse_enum(v, visibility_names); }
     std::optional<InteractionObjectState> interaction_object_state(std::string_view v) noexcept { return parse_enum(v, state_names); }
 
-    nlohmann::json encode(const InteractionRef &r) { return {{"tenant_id", r.tenant_id}, {"conversation_id", r.conversation_id}, {"turn_id", r.turn_id}, {"message_id", r.message_id}, {"task_id", r.task_id}, {"run_id", r.run_id}, {"harness_id", r.harness_id}, {"plan_id", r.plan_id}, {"plan_node_id", r.plan_node_id}, {"plan_revision", r.plan_revision}, {"agent_template_id", r.agent_template_id}, {"agent_invocation_id", r.agent_invocation_id}, {"child_agent_id", r.child_agent_id}, {"skill_node_id", r.skill_node_id}, {"tool_invocation_id", r.tool_invocation_id}, {"memory_snapshot_id", r.memory_snapshot_id}, {"memory_view_digest", r.memory_view_digest}, {"approval_id", r.approval_id}, {"evidence_id", r.evidence_id}, {"finding_id", r.finding_id}, {"artifact_id", r.artifact_id}, {"object_revision_digest", r.object_revision_digest}}; }
+    nlohmann::json encode(const InteractionRef &r) { return {{"tenant_id", r.tenant_id}, {"conversation_id", r.conversation_id}, {"turn_id", r.turn_id}, {"message_id", r.message_id}, {"task_id", r.task_id}, {"run_id", r.run_id}, {"harness_id", r.harness_id}, {"decision_id",r.decision_id}, {"plan_id", r.plan_id}, {"plan_node_id", r.plan_node_id}, {"plan_revision", r.plan_revision}, {"agent_template_id", r.agent_template_id}, {"agent_invocation_id", r.agent_invocation_id}, {"child_agent_id", r.child_agent_id}, {"skill_node_id", r.skill_node_id}, {"tool_invocation_id", r.tool_invocation_id}, {"memory_snapshot_id", r.memory_snapshot_id}, {"memory_view_digest", r.memory_view_digest}, {"approval_id", r.approval_id}, {"evidence_id", r.evidence_id}, {"finding_id", r.finding_id}, {"artifact_id", r.artifact_id}, {"object_revision_digest", r.object_revision_digest}}; }
     nlohmann::json encode(const InteractionSourceRevision &s) { return {{"store", s.store}, {"object_id", s.object_id}, {"revision", s.revision}, {"digest", s.digest}}; }
     nlohmann::json encode(const InteractionNode &n)
     {
@@ -129,7 +130,7 @@ namespace agent_framework::ui
 
     std::optional<InteractionRef> decode_interaction_ref(const nlohmann::json &j, std::vector<contracts::ContractIssue> *issues)
     {
-        static const std::set<std::string> allowed = {"tenant_id", "conversation_id", "turn_id", "message_id", "task_id", "run_id", "harness_id", "plan_id", "plan_node_id", "plan_revision", "agent_template_id", "agent_invocation_id", "child_agent_id", "skill_node_id", "tool_invocation_id", "memory_snapshot_id", "memory_view_digest", "approval_id", "evidence_id", "finding_id", "artifact_id", "object_revision_digest"};
+        static const std::set<std::string> allowed = {"tenant_id", "conversation_id", "turn_id", "message_id", "task_id", "run_id", "harness_id", "decision_id", "plan_id", "plan_node_id", "plan_revision", "agent_template_id", "agent_invocation_id", "child_agent_id", "skill_node_id", "tool_invocation_id", "memory_snapshot_id", "memory_view_digest", "approval_id", "evidence_id", "finding_id", "artifact_id", "object_revision_digest"};
         if (!fields(j, allowed, issues))
             return std::nullopt;
         try
@@ -142,6 +143,7 @@ namespace agent_framework::ui
             r.task_id = j.value("task_id", "");
             r.run_id = j.value("run_id", "");
             r.harness_id = j.value("harness_id", "");
+            r.decision_id = j.value("decision_id", "");
             r.plan_id = j.value("plan_id", "");
             r.plan_node_id = j.value("plan_node_id", "");
             r.plan_revision = j.value("plan_revision", std::uint64_t{0});

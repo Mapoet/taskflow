@@ -32,7 +32,9 @@ int main() {
     conversation::SQLiteConversationStore events((root/"events.sqlite").string());
     ui::SQLiteInteractionProjectionStore interactions((root/"interactions.sqlite").string());
     approval::SQLiteApprovalStore approvals((root/"approvals.sqlite").string());
-    api::v1::SessionRunApi api(catalog,supervisor,&events,&interactions,&approvals);
+    decision::SQLiteDecisionStore decisions((root/"decisions.sqlite").string());
+    conversation::SQLiteTaskRegistry tasks((root/"tasks.sqlite").string());
+    api::v1::SessionRunApi api(catalog,supervisor,&events,&interactions,&approvals,&decisions,&tasks);
 
     auto owner=subject();auto created=api.create_session(owner,product());
     assert(created.status==201);
@@ -45,6 +47,7 @@ int main() {
     };
     assert(find_action(owner_capabilities.body,"session.transition").at("enabled")==true);
     assert(find_action(owner_capabilities.body,"approval.decide").at("enabled")==false);
+    assert(find_action(owner_capabilities.body,"decision.answer").at("enabled")==true);
 
     auto outsider=subject("outsider");
     assert(api.get_session(outsider,"session-1").status==403);
@@ -63,18 +66,36 @@ int main() {
     auto viewer_capabilities=api.capabilities(subject("viewer"),"session-1");
     assert(find_action(viewer_capabilities.body,"run.start").at("enabled")==false);
     assert(find_action(viewer_capabilities.body,"events.stream").at("enabled")==true);
+    assert(api.rename_session(subject("viewer"),"session-1",1,"forbidden").status==403);
+    auto renamed=api.rename_session(owner,"session-1",1,"Renamed production session");
+    assert(renamed.ok()&&renamed.body.at("revision")==2);
+    auto organized=api.organize_session(owner,"session-1",2,"Research",{"GNSS"},true);
+    assert(organized.ok()&&organized.body.at("revision")==3);
+    assert(api.put_session_member(subject("operator"),"session-1",0,"new-viewer",
+                                  session::SessionMemberRole::Viewer).status==403);
+    assert(api.put_session_member(owner,"session-1",0,"new-viewer",
+                                  session::SessionMemberRole::Viewer).ok());
 
     session::SessionRunRequest run{"tenant","org","project","operator","provider",
         "session-1","run-1","start-1",{{"prompt","work"}},""};
     assert(api.enqueue_run(subject("viewer"),run).status==403);
     assert(api.enqueue_run(subject("operator"),run).status==202);
     assert(api.enqueue_run(subject("operator"),run).status==202);
+    conversation::PersistentTask task;task.identity={"tenant","conversation-1"};
+    task.task_id="task-1";task.root_turn_id="turn";task.current_turn_id="turn";
+    task.current_run_id="run-1";
+    conversation::TaskRequirementRevision requirement;requirement.turn_id="turn";
+    requirement.content="work";
+    conversation::TurnTaskLink task_link;task_link.turn_id="turn";task_link.run_id="run-1";
+    assert(tasks.create(task,requirement,task_link).ok);
 
     session::SessionRunCommand comment{"tenant","session-1","run-1","comment-1",
         session::SessionCommandKind::Comment,{{"text","note"}}};
+    comment.expected_run_revision=1;
     assert(api.enqueue_command(subject("contributor"),comment).status==202);
     session::SessionRunCommand cancel{"tenant","session-1","run-1","cancel-1",
         session::SessionCommandKind::Cancel,{}};
+    cancel.expected_run_revision=1;
     assert(api.enqueue_command(subject("contributor"),cancel).status==403);
     assert(api.enqueue_command(subject("operator"),cancel).status==202);
     assert(api.get_run(subject("viewer"),"run-1").status==200);
@@ -115,6 +136,18 @@ int main() {
     assert(interactions.commit({projection_event,{artifact},{}},0).ok());
     assert(api.get_artifact(subject("viewer"),"session-1","sha256:artifact").status==200);
     assert(api.get_artifact(outsider,"session-1","sha256:artifact").status==403);
+    auto interaction_view=api.get_interactions(subject("viewer"),"session-1");
+    assert(interaction_view.ok()&&interaction_view.body.at("head_sequence")==1&&
+           interaction_view.body.at("runtime_event_head")==3&&interaction_view.body.at("stale")==true);
+    assert(api.get_interactions(subject("viewer"),"session-1",ui::InteractionVisibility::Audit).status==403);
+    auto task_aggregate=api.get_task(subject("viewer"),"session-1","task-1");
+    assert(task_aggregate.ok()&&task_aggregate.body.at("schema")=="agent.task_aggregate/v1"&&
+           task_aggregate.body.at("requirements").size()==1);
+    assert(api.get_task(outsider,"session-1","task-1").status==403);
+    auto snapshot=api.get_execution_snapshot(subject("viewer"),"session-1","task-1","run-1");
+    assert(snapshot.ok()&&snapshot.body.at("task_revision")==1&&
+           snapshot.body.at("run_revision")==1&&snapshot.body.at("projection_revision")==1);
+    assert(!snapshot.body.at("snapshot_digest").get<std::string>().empty());
 
     approval::ApprovalRequest approval_request;approval_request.metadata.identity.tenant_id="tenant";
     approval_request.metadata.identity.organization_id="org";approval_request.metadata.identity.project_id="project";
@@ -126,14 +159,28 @@ int main() {
     assert(approvals.put_request(approval_request));
     assert(api.get_approval(subject("viewer"),"session-1","approval-1").status==403);
     assert(api.get_approval(subject("contributor"),"session-1","approval-1").status==200);
+    decision::DecisionRequest decision;decision.subject.tenant_id="tenant";
+    decision.subject.session_id="session-1";decision.subject.conversation_id="conversation-1";
+    decision.subject.task_id="task-1";decision.subject.run_id="run-1";decision.subject.turn_id="turn";
+    decision.decision_id="decision-1";decision.question="Choose task scope";
+    decision.options={{"bounded","Bounded","One bounded task",{{"work_shape","bounded_task"}}},
+                      {"long","Long","Comprehensive task",{{"work_shape","long_running_task"}}}};
+    decision.origin_digest="sha256:decision";decision.expires_at_ms=9999999999999ULL;
+    decision.created_at="1";decision.updated_at="1";assert(decisions.create(decision).ok);
+    assert(api.get_decision(subject("viewer"),"session-1","decision-1").status==200);
+    assert(api.answer_decision(subject("viewer"),"session-1","decision-1",1,"bounded",1).status==403);
+    assert(api.answer_decision(subject("contributor"),"session-1","decision-1",1,"bounded",1).status==200);
+    auto replayed=api.answer_decision(subject("contributor"),"session-1","decision-1",1,"bounded",1);
+    assert(replayed.status==200&&replayed.body.at("replayed")==true);
+    assert(api.answer_decision(subject("contributor"),"session-1","decision-1",1,"long",1).status==409);
     api::v1::AuthorizedEventMultiplexer multiplexer(api,2);
     auto multiplexed=multiplexer.poll(subject("viewer"),{{"session-1",0}},10);
     assert(multiplexed.ok&&multiplexed.cursors.at(0).after==3&&multiplexed.frames.size()==1);
     assert(!multiplexer.poll(subject("viewer"),{{"session-1",0},{"session-1",1}},10).ok);
     assert(!multiplexer.poll(outsider,{{"session-1",0}},10).ok);
 
-    auto archived=api.transition_session(owner,"session-1",1,session::ProductSessionState::Archived);
-    assert(archived.ok()&&archived.body.at("revision")==2);
-    assert(api.transition_session(owner,"session-1",1,session::ProductSessionState::Active).status==409);
+    auto archived=api.transition_session(owner,"session-1",3,session::ProductSessionState::Archived);
+    assert(archived.ok()&&archived.body.at("revision")==4);
+    assert(api.transition_session(owner,"session-1",3,session::ProductSessionState::Active).status==409);
     std::filesystem::remove_all(root);
 }

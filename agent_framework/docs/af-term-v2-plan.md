@@ -1,5 +1,11 @@
 # AF Task Semantics v2 Implementation Plan
 
+> **Superseded scope notice (2026-08-18):** TERM0–TERM4 document the implemented
+> v2 migration baseline. Remaining work is governed by
+> [`af-task-semantics-gui-v3-plan.md`](af-task-semantics-gui-v3-plan.md).
+> The v3 target uses relevant LLM-generated Decisions only for material ambiguity;
+> it does not restore the fixed six-profile confirmation UX described by older text.
+
 > **For agentic workers:** Execute tasks in order, keep every change independently testable, and do not let classification grant authority.
 
 **Goal:** Replace keyword-based task escalation with a strict, LLM-driven, durable task-intent and profile-confirmation workflow.
@@ -67,7 +73,7 @@
 - [x] Add a locked 30-case Chinese/English/mixed positive, negative, incremental and confirmation corpus.
 - [~] Enforce zero high-side-effect false positives in the locked gold corpus; real-provider scored evaluation remains TERM7 evidence.
 
-## TERM3 — Durable profile clarification
+## TERM3 — Durable profile clarification (implemented migration baseline)
 
 **Files:**
 
@@ -76,7 +82,8 @@
 - Create `tests/test_task_profile_clarification.cpp`
 - Modify `CMakeLists.txt`
 
-**Produces:** `TaskProfileClarificationStore`, `SQLiteTaskProfileClarificationStore`, CAS transitions and `parse_profile_confirmation`.
+**Produces:** the legacy-compatible v2 profile store. New development must migrate
+to the general Decision contract in AF-TGUI2 rather than extend this schema.
 
 - [x] Define Pending, Confirmed, Exhausted, Expired and Cancelled states.
 - [x] Persist identity, task, recommendation, allowed tokens, attempt count, revision, expiry and decision reference.

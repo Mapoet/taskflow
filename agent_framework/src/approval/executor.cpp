@@ -23,12 +23,6 @@ int risk_rank(std::string_view risk) {
     if(risk == "medium") return 2;
     return 1;
 }
-bool has_column(sqlite3* db, const char* table, std::string_view column) {
-    sqlite::Statement query(db, (std::string("PRAGMA table_info(") + table + ")").c_str());
-    while(sqlite::step(query.get()) == SQLITE_ROW)
-        if(sqlite::column_text(query.get(), 1) == column) return true;
-    return false;
-}
 ApprovalDecision final_decision(const ApprovalRequest& request, const ApprovalReview& review,
                                 Decision decision) {
     ApprovalDecision out;
@@ -72,9 +66,9 @@ AccountableApprovalExecutor::AccountableApprovalExecutor(
         "reason TEXT NOT NULL,decided_at TEXT NOT NULL,reviewer_roles_json TEXT NOT NULL DEFAULT '[]',"
         "identity_attestation TEXT NOT NULL DEFAULT '',PRIMARY KEY(approval_id,vote_revision),"
         "UNIQUE(approval_id,reviewer_id))");
-    if(!has_column(opened, "phase4_approval_votes", "reviewer_roles_json"))
+    if(!sqlite::table_has_column(opened, "phase4_approval_votes", "reviewer_roles_json"))
         sqlite::exec(opened, "ALTER TABLE phase4_approval_votes ADD COLUMN reviewer_roles_json TEXT NOT NULL DEFAULT '[]'");
-    if(!has_column(opened, "phase4_approval_votes", "identity_attestation"))
+    if(!sqlite::table_has_column(opened, "phase4_approval_votes", "identity_attestation"))
         sqlite::exec(opened, "ALTER TABLE phase4_approval_votes ADD COLUMN identity_attestation TEXT NOT NULL DEFAULT ''");
     sqlite::exec(opened, "CREATE TABLE IF NOT EXISTS phase4_delegation_grants("
         "grant_id TEXT PRIMARY KEY,grantor_id TEXT NOT NULL,delegate_id TEXT NOT NULL,"

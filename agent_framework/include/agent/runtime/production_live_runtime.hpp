@@ -13,6 +13,7 @@
 #include "agent/harness/production_builder.hpp"
 #include "agent/harness/task_closure.hpp"
 #include "agent/recovery/task_state_coordinator.hpp"
+#include "agent/session/run_worker.hpp"
 
 namespace agent_framework::runtime {
 struct ProductionLiveRuntimeTestAccess;
@@ -74,6 +75,10 @@ public:
 
     conversation::HarnessSupportedTurnRuntime::Executor response_executor();
     conversation::HarnessSupportedTurnRuntime::Executor long_task_executor();
+    // The only supported bridge from a leased product Run into the production
+    // harness.  Keeping this factory on ProductionLiveRuntime prevents a test
+    // callback from being labelled as a production SessionRunWorker adapter.
+    session::SessionRunWorker::Executor session_run_executor();
     std::shared_ptr<conversation::TaskControlService> task_control_service() const noexcept {
         return task_control_service_;
     }

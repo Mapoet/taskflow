@@ -1,4 +1,5 @@
 #pragma once
+#include <map>
 #include <mutex>
 #include "agent/conversation/types.hpp"
 
@@ -56,6 +57,9 @@ namespace agent_framework::conversation
                                                          std::size_t limit = 0) = 0;
         virtual std::uint64_t last_event_sequence(const ConversationIdentity &) = 0;
         virtual std::uint64_t event_retention_floor(const ConversationIdentity &) = 0;
+        // Empty means the most recent read for this stream was valid. Stores
+        // expose integrity/schema failures separately from a legitimate empty page.
+        virtual std::string event_read_error(const ConversationIdentity &) { return {}; }
         virtual EventCompactionResult compact_events(
             const ConversationIdentity &, const EventRetentionPolicy &,
             distributed::ObjectStore &) = 0;
@@ -92,6 +96,7 @@ namespace agent_framework::conversation
             std::size_t limit = 0) override;
         std::uint64_t last_event_sequence(const ConversationIdentity &) override;
         std::uint64_t event_retention_floor(const ConversationIdentity &) override;
+        std::string event_read_error(const ConversationIdentity &) override;
         EventCompactionResult compact_events(const ConversationIdentity &,
                                              const EventRetentionPolicy &,
                                              distributed::ObjectStore &) override;
@@ -108,6 +113,7 @@ namespace agent_framework::conversation
     private:
         void *db_{nullptr};
         std::mutex mutex_;
+        std::map<std::string,std::string> event_read_errors_;
     };
 
 } // namespace agent_framework::conversation

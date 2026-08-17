@@ -9,6 +9,10 @@
 
 int main() {
     using namespace agent_framework::conversation;
+    assert(explicit_task_control_input("/cancel")==TaskInputIntent::CancelTask);
+    assert(explicit_task_control_input("状态")==TaskInputIntent::StatusQuery);
+    assert(explicit_task_control_input("/stop")==TaskInputIntent::SuspendTask);
+    assert(!explicit_task_control_input("请分析取消机制"));
     const auto path = std::filesystem::temp_directory_path() /
         ("task-orchestrator-" + std::to_string(
             agent_framework::internal::current_process_id()) + ".sqlite3");

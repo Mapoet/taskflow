@@ -180,6 +180,7 @@ std::string_view name(TaskInputIntent);
 std::optional<TaskLifecycleState> task_lifecycle_state(std::string_view);
 std::optional<TaskInputIntent> task_input_intent(std::string_view);
 TaskInputIntent classify_task_input(std::string_view input, bool has_active_task);
+std::optional<TaskInputIntent> explicit_task_control_input(std::string_view input);
 nlohmann::json encode(const PersistentTask&);
 nlohmann::json encode(const TaskRequirementRevision&);
 

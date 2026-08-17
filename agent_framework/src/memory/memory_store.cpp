@@ -927,27 +927,12 @@ namespace agent_framework
             }
             else if (version < kMemorySchemaVersion)
             {
-                const auto has_column = [&](const char *table, const char *column) {
-                    sqlite3_stmt *statement = nullptr;
-                    const auto sql = std::string("PRAGMA table_info(") + table + ")";
-                    sqlite_require(sqlite3_prepare_v2(database, sql.c_str(), -1, &statement, nullptr),
-                                   database, "prepare sqlite column migration");
-                    bool found = false;
-                    while (sqlite::step(statement) == SQLITE_ROW)
-                    {
-                        const auto name = sqlite::column_text(statement, 1);
-                        if (!name.empty() && column == name)
-                            found = true;
-                    }
-                    sqlite3_finalize(statement);
-                    return found;
-                };
                 for (const auto *table : {"memory_events", "memory_messages", "memory_summaries"})
                 {
-                    if (!has_column(table, "tenant"))
+                    if (!sqlite::table_has_column(database, table, "tenant"))
                         execute_sql(std::string("ALTER TABLE ") + table +
                                     " ADD COLUMN tenant TEXT NOT NULL DEFAULT 'default';");
-                    if (!has_column(table, "agent"))
+                    if (!sqlite::table_has_column(database, table, "agent"))
                         execute_sql(std::string("ALTER TABLE ") + table +
                                     " ADD COLUMN agent TEXT NOT NULL DEFAULT 'default';");
                 }

@@ -276,6 +276,8 @@ namespace agent_framework::conversation
         const ConversationIdentity &i, std::uint64_t after, std::size_t limit)
     {
         std::lock_guard l(mutex_);
+        const auto stream_key=i.tenant_id+"\x1f"+i.conversation_id;
+        event_read_errors_.erase(stream_key);
         auto *db = internal::sqlite::database(db_);
         Statement q(db, limit == 0
             ? "SELECT event_json,digest FROM conversation_events WHERE tenant=? AND conversation=? AND sequence>? ORDER BY sequence"
@@ -290,29 +292,32 @@ namespace agent_framework::conversation
             {
                 auto j = nlohmann::json::parse(internal::sqlite::column_text(q.get(), 0));
                 if (digest(j) != internal::sqlite::column_text(q.get(), 1))
-                    return {};
-                RuntimeEventEnvelope v;
-                v.event_id = j.at("event_id");
-                v.tenant_id = j.at("tenant_id");
-                v.conversation_id = j.at("conversation_id");
-                v.turn_id = j.at("turn_id");
-                v.run_id = j.at("run_id");
-                v.sequence = j.at("sequence");
-                v.durability = j.at("durability") == "durable" ? EventDurability::Durable : EventDurability::Ephemeral;
-                v.visibility = static_cast<EventVisibility>(j.at("visibility").get<int>());
-                v.event_type = j.at("event_type");
-                v.timestamp = j.at("timestamp");
-                v.redaction_class = j.at("redaction_class");
-                v.payload = j.at("payload");
-                v.digest = internal::sqlite::column_text(q.get(), 1);
-                o.push_back(std::move(v));
+                    throw std::runtime_error("runtime_event_digest_mismatch");
+                std::string decode_error;
+                auto decoded=decode_runtime_event(j,&decode_error);
+                if(!decoded)throw std::runtime_error(decode_error);
+                if(decoded->tenant_id != i.tenant_id ||
+                   decoded->conversation_id != i.conversation_id)
+                    throw std::runtime_error("runtime_event_scope_mismatch");
+                const auto expected=o.empty()?decoded->sequence:o.back().sequence+1;
+                if(decoded->sequence!=expected)
+                    throw std::runtime_error("runtime_event_reordered_or_duplicate");
+                decoded->digest = internal::sqlite::column_text(q.get(), 1);
+                o.push_back(std::move(*decoded));
             }
-            catch (...)
+            catch (const std::exception& error)
             {
+                event_read_errors_[stream_key]=error.what();
                 return {};
             }
         }
         return o;
+    }
+    std::string SQLiteConversationStore::event_read_error(const ConversationIdentity &i)
+    {
+        std::lock_guard l(mutex_);
+        const auto found=event_read_errors_.find(i.tenant_id+"\x1f"+i.conversation_id);
+        return found==event_read_errors_.end()?std::string{}:found->second;
     }
     std::uint64_t SQLiteConversationStore::last_event_sequence(
         const ConversationIdentity &i)

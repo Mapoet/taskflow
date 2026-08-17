@@ -69,6 +69,53 @@ ProductionInteractionResult assemble_production_interactions(
                     {{"role",it->role},{"text",it->content},{"turn_id",it->turn_id}},InteractionObjectState::Passed,src,it->created_at)); }
         }
     }
+    if(stores.decisions) {
+        auto decision=!q.decision_id.empty()
+            ?stores.decisions->load(q.identity.tenant_id,q.decision_id)
+            :stores.decisions->latest(q.identity.tenant_id,q.session_id,q.conversation_id);
+        if(decision) {
+            if(decision->subject.tenant_id!=q.identity.tenant_id||
+               decision->subject.conversation_id!=q.conversation_id)
+                fail(out,InteractionAssemblerError::IdentityMismatch,"decision scope mismatch");
+            else {
+                base.decision_id=decision->decision_id;
+                auto options=json::array();
+                for(const auto& option:decision->options)options.push_back({
+                    {"id",option.option_id},{"label",option.label},
+                    {"description",option.description},{"semantic_patch",option.semantic_patch}});
+                const auto decision_json=json{{"kind",decision::name(decision->kind)},
+                    {"question",decision->question},{"options",options},
+                    {"selected_option_id",decision->selected_option_id},
+                    {"state",decision::name(decision->state)}};
+                auto src=InteractionSourceRevision{"decision",decision->decision_id,
+                    decision->revision,digest(decision_json)};
+                const auto waiting=decision->state==decision::DecisionState::Pending;
+                const auto understanding_id="understanding:"+decision->decision_id;
+                snapshot.nodes.push_back(node(understanding_id,InteractionNodeKind::Understanding,
+                    base,"Task understanding",decision->question,
+                    {{"decision_kind",decision::name(decision->kind)},
+                     {"selected_option_id",decision->selected_option_id},
+                     {"semantic_patch",decision->selected_option_id.empty()?json::object():
+                        [&](){for(const auto&o:decision->options)if(o.option_id==decision->selected_option_id)return o.semantic_patch;return json::object();}()}},
+                    waiting?InteractionObjectState::Waiting:InteractionObjectState::Passed,src,
+                    decision->updated_at));
+                const auto decision_id="decision:"+decision->decision_id;
+                snapshot.nodes.push_back(node(decision_id,InteractionNodeKind::Decision,base,
+                    "Decision required",decision->question,
+                    {{"kind",decision::name(decision->kind)},{"options",options},
+                     {"selected_option_id",decision->selected_option_id},
+                     {"revision",decision->revision},{"expires_at_ms",decision->expires_at_ms}},
+                    waiting?InteractionObjectState::Waiting:InteractionObjectState::Passed,src,
+                    decision->updated_at));
+                if(!message_node.empty())snapshot.edges.push_back(edge(
+                    "edge:message-understanding:"+decision->decision_id,
+                    InteractionEdgeKind::OriginatedFrom,message_node,understanding_id,src));
+                snapshot.edges.push_back(edge("edge:understanding-decision:"+decision->decision_id,
+                    InteractionEdgeKind::RequestedApproval,understanding_id,decision_id,src));
+                snapshot.source_revisions.push_back(src);
+            }
+        }
+    }
     std::string plan_node;
     if(stores.plans) {
         auto plan=stores.plans->current(q.identity);

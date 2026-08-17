@@ -24,6 +24,14 @@ int main() {
     assert(route.path == TurnExecutionPath::LegacyReactFallback);
     route = HarnessSupportedTurnRuntime::route({true, true, true, true}, request.profile);
     assert(route.path == TurnExecutionPath::LongTaskWorkflow);
+    request.profile=TaskExecutionProfile::ReadOnlyAnalysis;
+    request.planning_required=true;request.promotion_mode="long_running_task";
+    route=HarnessSupportedTurnRuntime::route({true,true,true,false},request);
+    assert(route.path==TurnExecutionPath::LongTaskWorkflow);
+    request.planning_required=false;request.promotion_mode="direct_turn";
+    route=HarnessSupportedTurnRuntime::route({true,true,true,false},request);
+    assert(route.path==TurnExecutionPath::Harness);
+    request.profile=TaskExecutionProfile::Professional;
     for(const auto profile : {TaskExecutionProfile::Conversation,
                               TaskExecutionProfile::ReadOnlyAnalysis}) {
         assert(HarnessSupportedTurnRuntime::route(

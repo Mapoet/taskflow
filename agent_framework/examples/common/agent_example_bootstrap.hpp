@@ -19,10 +19,14 @@
 #include <agent/conversation/harness_turn_adapter.hpp>
 #include <agent/conversation/task_registry.hpp>
 #include <agent/conversation/task_classifier.hpp>
+#include <agent/conversation/task_routing_policy.hpp>
 #include <agent/conversation/task_clarification_coordinator.hpp>
 #include <agent/conversation/task_control_service.hpp>
 #include <agent/conversation/task_command_service.hpp>
 #include <agent/conversation/task_orchestrator.hpp>
+#include <agent/decision/decision_store.hpp>
+#include <agent/decision/task_decision_coordinator.hpp>
+#include <agent/identity/runtime_subject.hpp>
 #include <agent/harness/store.hpp>
 #include <agent/runtime/production_live_runtime.hpp>
 #include <agent/agent_template/runner.hpp>
@@ -200,6 +204,13 @@ namespace agent_framework::example
         conversation::SQLiteConversationStore store(database.string());
         conversation::SQLiteTaskRegistry task_registry(database.string());
         conversation::SQLiteTaskProfileClarificationStore clarification_store(database.string());
+        decision::SQLiteDecisionStore decision_store(database.string());
+        auto runtime_subject=identity::legacy_local_subject(identity.conversation_id,
+                                                            identity.conversation_id);
+        // The legacy adapter supplies the missing organizational dimensions, but
+        // the authoritative conversation tenant must never be silently replaced
+        // with "local" or a durable Decision becomes undiscoverable on resume.
+        runtime_subject.tenant_id=identity.tenant_id;
         const auto invocation_now_ms = static_cast<std::uint64_t>(
             std::chrono::duration_cast<std::chrono::milliseconds>(
                 std::chrono::system_clock::now().time_since_epoch())
@@ -207,9 +218,65 @@ namespace agent_framework::example
         const char *configured_task = std::getenv("AGENT_TASK_ID");
         const char *configured_run = std::getenv("AGENT_RUN_ID");
         auto active_task = task_registry.active(identity);
+        auto pending_decision=decision_store.pending(identity.tenant_id,
+            runtime_subject.session_id,identity.conversation_id);
         auto pending_clarification = clarification_store.pending(identity);
-        if (!pending_clarification)
+        if(!pending_decision&&pending_clarification) {
+            std::string migration_error;
+            if(!decision::migrate_profile_clarification(*pending_clarification,
+                runtime_subject,decision_store,clarification_store,&migration_error))
+                throw std::runtime_error(migration_error);
+            pending_decision=decision_store.pending(identity.tenant_id,
+                runtime_subject.session_id,identity.conversation_id);
+            pending_clarification.reset();
+        }
+        const auto explicit_control =
+            conversation::explicit_task_control_input(request.input);
+        bool cancelled_pending_without_task = false;
+        if (pending_decision && explicit_control &&
+            (*explicit_control == conversation::TaskInputIntent::CancelTask ||
+             *explicit_control == conversation::TaskInputIntent::SuspendTask))
         {
+            const auto cancelled=decision_store.cancel(identity.tenant_id,
+                pending_decision->decision_id,pending_decision->revision);
+            if(!cancelled.ok)
+                throw std::runtime_error("decision_control_cancel_failed:"+cancelled.error);
+            pending_decision.reset();
+            cancelled_pending_without_task=!active_task;
+        }
+        if (pending_clarification && explicit_control &&
+            (*explicit_control == conversation::TaskInputIntent::CancelTask ||
+             *explicit_control == conversation::TaskInputIntent::SuspendTask))
+        {
+            const auto cancelled = clarification_store.cancel(
+                identity, pending_clarification->clarification_id,
+                pending_clarification->revision);
+            if (!cancelled.ok)
+                throw std::runtime_error("clarification_control_cancel_failed:" +
+                                         cancelled.error);
+            pending_clarification.reset();
+            cancelled_pending_without_task = !active_task;
+        }
+        if (!pending_decision && !pending_clarification)
+        {
+            const auto latest_decision=decision_store.latest(identity.tenant_id,
+                runtime_subject.session_id,identity.conversation_id);
+            if(latest_decision&&latest_decision->state==decision::DecisionState::Answered&&
+               latest_decision->selected_option_id==request.input&&
+               invocation_now_ms<=latest_decision->expires_at_ms)
+            {
+                conversation::TurnResult replay;
+                const auto checkpoint=store.load_turn(identity,latest_decision->subject.turn_id);
+                if(!checkpoint)throw std::runtime_error("decision_replay_turn_missing");
+                replay.checkpoint=*checkpoint;
+                replay.outcome.reason=replay.checkpoint.phase==conversation::TurnPhase::Completed
+                    ?conversation::ModelTurnStopReason::EndTurn
+                    :conversation::ModelTurnStopReason::AwaitingInput;
+                for(const auto& message:store.messages(identity))
+                    if(message.turn_id==latest_decision->subject.turn_id&&message.role=="assistant")
+                        replay.outcome.candidate_answer=message.content;
+                return replay;
+            }
             const auto latest = clarification_store.latest(identity);
             std::optional<conversation::TaskExecutionProfile> repeated_profile;
             if (latest)
@@ -235,24 +302,54 @@ namespace agent_framework::example
                 return replay;
             }
         }
-        auto intent = pending_clarification
+        auto intent = explicit_control ? *explicit_control : pending_decision
+                          ? conversation::task_input_intent(pending_decision->resume_payload.value(
+                                "task_intent",std::string("initial_request"))).value_or(
+                                    conversation::TaskInputIntent::InitialRequest)
+                          : pending_clarification
                           ? pending_clarification->task_intent
                           : conversation::classify_task_input(request.input, active_task.has_value());
         bool control_only = intent == conversation::TaskInputIntent::StatusQuery ||
                             intent == conversation::TaskInputIntent::CancelTask ||
                             intent == conversation::TaskInputIntent::SuspendTask;
-        std::optional<conversation::TaskClassification> classification;
-        bool needs_clarification = false;
-        if (!pending_clarification && runtime.task_classifier && !control_only)
+        if (cancelled_pending_without_task)
         {
-            classification = runtime.task_classifier->classify(
-                request.input, active_task.has_value());
+            const std::string response = nlohmann::json{{"status", "decision_cancelled"},
+                {"message", "Pending clarification cancelled; no task run was started."}}.dump(2);
+            conversation::ConversationEngine control_engine(
+                store, [response](const auto &, const auto &)
+                {
+                    conversation::ModelTurnOutcome outcome;
+                    outcome.reason = conversation::ModelTurnStopReason::EndTurn;
+                    outcome.candidate_answer = response;
+                    return outcome;
+                }, std::move(event_sink));
+            return control_engine.start_turn(request);
+        }
+        std::optional<conversation::TaskClassification> classification;
+        std::optional<conversation::TaskClassifierInvocation> classifier_invocation;
+        bool needs_clarification = false;
+        if (!pending_decision && !pending_clarification && runtime.task_classifier && !control_only)
+        {
+            classification = runtime.task_classifier->classify_observed(
+                request.input, active_task.has_value(),[&](const auto& invocation) {
+                    classifier_invocation=invocation;
+                });
             *classification = conversation::apply_task_routing_policy(
                 std::move(*classification), runtime.configured_task_profile, runtime.trust_profile);
             if (!*classification)
                 *classification = conversation::deterministic_task_classification(request.input);
             request.profile = classification->profile;
             request.classification_decision_id = classification->decision_id;
+            const auto route=conversation::decide_task_route(*classification);
+            request.work_shape=std::string(conversation::name(classification->work_shape));
+            request.effect_class=std::string(conversation::name(classification->effect_class));
+            request.assurance_tier=std::string(conversation::name(classification->assurance_tier));
+            request.promotion_mode=std::string(conversation::name(route.promotion));
+            request.planning_depth=std::string(conversation::name(route.planning_depth));
+            request.routing_policy_revision=route.policy_revision;
+            request.promote_to_task=route.promote_to_task;
+            request.planning_required=route.planning_required;
             needs_clarification = classification->requires_confirmation;
             if (!needs_clarification)
             {
@@ -276,7 +373,13 @@ namespace agent_framework::example
                 {"current_revision", current_revision}, {"retryable", true}}.dump()};
         }
         const bool force_new = intent == conversation::TaskInputIntent::StartNewTask;
-        if (pending_clarification)
+        if (pending_decision)
+        {
+            request.turn_id=pending_decision->subject.turn_id;
+            request.task_id=pending_decision->subject.task_id;
+            request.run_id=pending_decision->subject.run_id;
+        }
+        else if (pending_clarification)
         {
             request.task_id = pending_clarification->task_id;
             request.run_id = pending_clarification->run_id;
@@ -304,11 +407,69 @@ namespace agent_framework::example
         // the second interactive turn collide with task_run_links' primary key.
         // Control commands observe/mutate the current Run and deliberately retain
         // it.  An explicit AGENT_RUN_ID remains an operator-owned idempotency key.
-        if (!pending_clarification)
+        if (!pending_decision && !pending_clarification)
             request.run_id = conversation::select_task_run_id(
                 configured_run && *configured_run ? configured_run : "",
                 active_task ? active_task->current_run_id : "", control_only,
                 request.turn_id);
+        runtime_subject.task_id=request.task_id;
+        runtime_subject.run_id=request.run_id;
+        runtime_subject.turn_id=request.turn_id;
+        if(classification) {
+            const auto publish_semantic_event=[&](std::string event_type,nlohmann::json payload) {
+                conversation::RuntimeEventEnvelope event;
+                event.event_id=request.classification_decision_id+":"+event_type;
+                event.tenant_id=identity.tenant_id;event.conversation_id=identity.conversation_id;
+                event.turn_id=request.turn_id;event.run_id=request.run_id;
+                event.sequence=store.last_event_sequence(identity)+1;
+                event.durability=conversation::EventDurability::Durable;
+                event.visibility=conversation::EventVisibility::User;
+                event.event_type=std::move(event_type);event.timestamp=std::to_string(invocation_now_ms);
+                payload["classification_decision_id"]=request.classification_decision_id;
+                payload["task_id"]=request.task_id;payload["run_id"]=request.run_id;
+                event.payload=std::move(payload);std::string error;
+                if(!store.append_event(event,&error))
+                    throw std::runtime_error("task_semantic_event_commit_failed:"+error);
+                if(event_sink)event_sink(event);
+            };
+            publish_semantic_event("task_semantics_decided",{
+                {"state","passed"},{"intent",std::string(conversation::name(classification->intent))},
+                {"work_shape",request.work_shape},{"effect_class",request.effect_class},
+                {"assurance_tier",request.assurance_tier},{"promotion_mode",request.promotion_mode},
+                {"confidence",classification->confidence},{"classifier_id",classification->classifier_id},
+                {"prompt_revision",classification->prompt_version},
+                {"routing_policy_revision",request.routing_policy_revision},
+                {"fallback",classification->classifier_id.find("deterministic")!=std::string::npos}});
+            const auto route=conversation::decide_task_route(*classification);
+            nlohmann::json reasons=nlohmann::json::array();
+            for(const auto& reason:route.reasons)reasons.push_back(reason);
+            publish_semantic_event(request.planning_required?"planning_required":"planning_skipped",{
+                {"state",request.planning_required?"pending":"passed"},
+                {"planning_depth",request.planning_depth},{"reasons",std::move(reasons)},
+                {"requirement_revision",active_task?active_task->requirement_revision:0},
+                {"policy_revision",request.routing_policy_revision}});
+            if(classifier_invocation) {
+                const auto& invocation=*classifier_invocation;
+                nlohmann::json usage=nlohmann::json::object();
+                if(invocation.input_tokens)usage["input_tokens"]=*invocation.input_tokens;
+                if(invocation.output_tokens)usage["output_tokens"]=*invocation.output_tokens;
+                if(invocation.cached_input_tokens)usage["cached_input_tokens"]=*invocation.cached_input_tokens;
+                if(invocation.cost_usd)usage["cost_usd"]=*invocation.cost_usd;
+                publish_semantic_event("llm_invocation_completed",{
+                    {"state",invocation.outcome=="parsed"?"passed":"warning"},
+                    {"summary","Task semantics model invocation completed"},
+                    {"invocation_id",invocation.invocation_id},{"role","task_semantics"},
+                    {"provider",invocation.provider},{"model",invocation.model},
+                    {"deployment_revision",invocation.deployment_revision},
+                    {"prompt_revision",invocation.prompt_revision},
+                    {"memory_view_digest",invocation.memory_view_digest},
+                    {"input_digest",invocation.input_digest},{"output_digest",invocation.output_digest},
+                    {"schema_version",invocation.schema_version},{"latency_ms",invocation.latency_ms},
+                    {"confidence",invocation.confidence},{"fallback",invocation.fallback_used},
+                    {"outcome",invocation.outcome},{"error_code",invocation.error_code},
+                    {"usage",std::move(usage)}});
+            }
+        }
         if (intent == conversation::TaskInputIntent::StatusQuery)
         {
             conversation::TaskCommandService commands(task_registry,
@@ -466,6 +627,22 @@ namespace agent_framework::example
                 return conversation::GraphTurnAdapter::from_workflow(callback());
             },
             event_forwarder, runtime.long_task_executor);
+        if (pending_decision)
+        {
+            decision::TaskDecisionCoordinator coordinator(
+                store,decision_store,task_registry);
+            const auto resumed=coordinator.answer_pending(
+                runtime_subject,request.input,invocation_now_ms,
+                [&supported](const conversation::TurnRequest &restored,
+                             const conversation::TurnCheckpoint &checkpoint)
+                {
+                    return supported.execute(restored,checkpoint);
+                },std::move(event_sink));
+            if(!resumed.handled||!resumed.error.empty())
+                return {resumed.turn.checkpoint,resumed.turn.outcome,
+                    resumed.error.empty()?"decision_resume_not_handled":resumed.error};
+            return resumed.turn;
+        }
         if (pending_clarification)
         {
             conversation::TaskClarificationCoordinator coordinator(
@@ -486,6 +663,13 @@ namespace agent_framework::example
         }
         if (needs_clarification && classification)
         {
+            if(classification->schema_version>=4)
+            {
+                decision::TaskDecisionCoordinator coordinator(
+                    store,decision_store,task_registry);
+                return coordinator.begin(runtime_subject,request,intent,*classification,
+                    invocation_now_ms,15ULL*60ULL*1000ULL,std::move(event_sink));
+            }
             conversation::TaskClarificationCoordinator coordinator(
                 store, clarification_store, task_registry);
             return coordinator.begin(request, intent, *classification, invocation_now_ms,

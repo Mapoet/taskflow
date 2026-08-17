@@ -1,5 +1,11 @@
 # Agent Framework Product GUI v2 Implementation Plan
 
+> **Convergence notice (2026-08-18):** remaining GUI work is executed through
+> [`af-task-semantics-gui-v3-plan.md`](af-task-semantics-gui-v3-plan.md), which
+> connects task semantics, Decisions, planning, Run supervision, projections and
+> the formal workbench as vertical slices. This file remains the GUI capability
+> ledger and must be updated as those slices pass their gates.
+
 > **For agentic workers:** Execute vertical slices in order. A visible control is allowed only when a real authorized server action exists.
 
 **Goal:** Upgrade the fixed-default Web demo into a multi-session, multi-user, observable and auditable Agent workbench.

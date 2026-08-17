@@ -199,6 +199,7 @@ int main() {
     assert(readiness.at("production_ready").get<bool>());
     assert(readiness.at("response_executor").get<bool>());
     assert(readiness.at("long_task_executor").get<bool>());
+    assert(readiness.at("session_run_executor").get<bool>());
     assert(readiness.at("startup_recovery").at("orphaned") == 1);
     assert(readiness.at("startup_timers_processed") == 3);
     assert(!readiness.at("canonical_digest").get<std::string>().empty());
@@ -261,11 +262,20 @@ int main() {
     assert(observed_boundaries == std::size(boundaries) * 2);
     auto response = assembled.runtime->response_executor();
     auto long_task = assembled.runtime->long_task_executor();
+    auto session_run = assembled.runtime->session_run_executor();
+    session::WorkerExecutionContext incomplete;
+    incomplete.run.request.tenant_id = "tenant";
+    incomplete.run.request.run_id = "missing-bindings";
+    incomplete.heartbeat = [](std::uint64_t) { return true; };
+    const auto rejected = session_run(incomplete);
+    assert(rejected.disposition == session::WorkerDisposition::Failed);
+    assert(rejected.diagnostic == "production_run_binding_incomplete");
     assembled.runtime.reset();
     assert(!lifetime_probe.expired());
     response = {};
     assert(!lifetime_probe.expired());
     long_task = {};
+    session_run = {};
     assert(lifetime_probe.expired());
     std::filesystem::remove_all(root, ec);
 }

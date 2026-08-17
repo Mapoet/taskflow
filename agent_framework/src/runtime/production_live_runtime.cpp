@@ -1,5 +1,6 @@
 #include "agent/runtime/production_live_runtime.hpp"
 
+#include <chrono>
 #include <utility>
 
 #include "agent/contracts/contract.hpp"
@@ -269,6 +270,7 @@ nlohmann::json ProductionLiveRuntime::readiness_manifest() const {
             task_control_service_ && task_planning_service_ && durable_task_coordinator_},
         {"response_executor", true},
         {"long_task_executor", true},
+        {"session_run_executor", true},
         {"task_control_service", bool(task_control_service_)},
         {"task_planning_service", bool(task_planning_service_)},
         {"task_coordinator", bool(durable_task_coordinator_)},
@@ -320,6 +322,103 @@ conversation::HarnessSupportedTurnRuntime::Executor
 ProductionLiveRuntime::long_task_executor() {
     const auto self = shared_from_this();
     return [self](const auto& request) { return self->execute(request, true); };
+}
+
+session::SessionRunWorker::Executor ProductionLiveRuntime::session_run_executor() {
+    const auto self = shared_from_this();
+    return [self](session::WorkerExecutionContext& context) {
+        using conversation::ModelTurnStopReason;
+        using session::WorkerDisposition;
+        using session::WorkerExecutionResult;
+
+        for(const auto& command : context.commands)
+            if(command.kind == session::SessionCommandKind::Cancel)
+                return WorkerExecutionResult{WorkerDisposition::Cancelled,
+                                             "cancelled_by_durable_command"};
+
+        const auto& payload = context.run.request.payload;
+        const auto required_string = [&](const char* key) {
+            return payload.contains(key) && payload.at(key).is_string()
+                ? payload.at(key).get<std::string>() : std::string{};
+        };
+        auto conversation_id = required_string("conversation_id");
+        auto task_id = required_string("task_id");
+        auto turn_id = required_string("turn_id");
+        auto input = required_string("input");
+        if(conversation_id.empty() || task_id.empty() || turn_id.empty() || input.empty())
+            return WorkerExecutionResult{WorkerDisposition::Failed,
+                "production_run_binding_incomplete"};
+
+        // Steer/queue commands are durable additions to the current Run input.
+        // Comments remain annotations and never silently change model input.
+        for(const auto& command : context.commands) {
+            if(command.kind != session::SessionCommandKind::Steer &&
+               command.kind != session::SessionCommandKind::Queue) continue;
+            if(command.payload.contains("input") && command.payload.at("input").is_string()) {
+                const auto addition = command.payload.at("input").get<std::string>();
+                if(!addition.empty()) input += "\n\n" + addition;
+            }
+        }
+
+        const auto now_ms = [] {
+            return static_cast<std::uint64_t>(std::chrono::duration_cast<
+                std::chrono::milliseconds>(std::chrono::system_clock::now()
+                .time_since_epoch()).count());
+        };
+        if(!context.heartbeat || !context.heartbeat(now_ms()))
+            return WorkerExecutionResult{WorkerDisposition::Failed,
+                                         "production_run_lease_lost_before_execute"};
+
+        conversation::HarnessSupportedTurnRequest request;
+        request.turn.identity = {context.run.request.tenant_id, conversation_id};
+        request.turn.turn_id = std::move(turn_id);
+        request.turn.task_id = std::move(task_id);
+        request.turn.run_id = context.run.request.run_id;
+        request.turn.input = std::move(input);
+        if(const auto profile = required_string("profile"); !profile.empty()) {
+            const auto parsed = conversation::task_execution_profile(profile);
+            if(!parsed)
+                return WorkerExecutionResult{WorkerDisposition::Failed,
+                                             "production_run_profile_invalid"};
+            request.turn.profile = *parsed;
+        } else {
+            request.turn.profile = conversation::TaskExecutionProfile::Professional;
+        }
+        request.turn.work_shape = payload.value("work_shape", "long_running_task");
+        request.turn.effect_class = payload.value("effect_class", "none");
+        request.turn.assurance_tier = payload.value("assurance_tier", "professional");
+        request.turn.promotion_mode = payload.value("promotion_mode", "long_running_task");
+        request.turn.planning_depth = payload.value("planning_depth", "comprehensive");
+        request.turn.routing_policy_revision = payload.value("routing_policy_revision", "");
+        request.turn.promote_to_task = true;
+        request.turn.planning_required = true;
+        request.checkpoint.identity = request.turn.identity;
+        request.checkpoint.turn_id = request.turn.turn_id;
+        request.checkpoint.revision = payload.value("turn_revision", 0ULL);
+        request.checkpoint.phase = conversation::TurnPhase::Running;
+
+        const auto outcome = self->execute(request, true);
+        if(!context.heartbeat(now_ms()))
+            return WorkerExecutionResult{WorkerDisposition::Failed,
+                                         "production_run_lease_lost_after_execute"};
+        switch(outcome.reason) {
+        case ModelTurnStopReason::EndTurn:
+            return WorkerExecutionResult{WorkerDisposition::Completed, {}};
+        case ModelTurnStopReason::AwaitingInput:
+        case ModelTurnStopReason::AwaitingApproval:
+        case ModelTurnStopReason::AwaitingExternal:
+        case ModelTurnStopReason::ToolRequested:
+            return WorkerExecutionResult{WorkerDisposition::AwaitingInput,
+                                         std::string(conversation::name(outcome.reason))};
+        case ModelTurnStopReason::Cancelled:
+            return WorkerExecutionResult{WorkerDisposition::Cancelled, "cancelled"};
+        default:
+            return WorkerExecutionResult{WorkerDisposition::Failed,
+                outcome.candidate_answer.empty()
+                    ? std::string(conversation::name(outcome.reason))
+                    : outcome.candidate_answer};
+        }
+    };
 }
 
 conversation::ModelTurnOutcome ProductionLiveRuntime::execute(

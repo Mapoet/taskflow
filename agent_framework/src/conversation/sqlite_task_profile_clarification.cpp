@@ -44,7 +44,8 @@ std::vector<std::string> decode_tokens(std::string_view value) {
 std::string encode_options(const std::vector<TaskClarificationOption>& options) {
     auto values=nlohmann::json::array();
     for(const auto& option:options)values.push_back({{"id",option.id},{"label",option.label},
-        {"description",option.description},{"profile",name(option.profile)}});
+        {"description",option.description},{"profile",name(option.profile)},
+        {"semantic_patch",option.semantic_patch}});
     return values.dump();
 }
 
@@ -56,7 +57,8 @@ std::vector<TaskClarificationOption> decode_options(std::string_view value) {
             const auto profile=task_execution_profile(item.at("profile").get<std::string>());
             if(!profile)throw std::runtime_error("stored clarification option profile invalid");
             result.push_back({item.at("id").get<std::string>(),item.at("label").get<std::string>(),
-                item.value("description",std::string{}),*profile});
+                item.value("description",std::string{}),*profile,
+                item.value("semantic_patch",nlohmann::json::object())});
         }
         return result;
     } catch(...) { throw std::runtime_error("stored clarification options invalid"); }
@@ -154,10 +156,8 @@ void SQLiteTaskProfileClarificationStore::migrate() {
         "expires_at_ms INTEGER NOT NULL,state TEXT NOT NULL,created_at TEXT NOT NULL,"
         "updated_at TEXT NOT NULL,PRIMARY KEY(tenant,conversation,clarification_id))");
     auto add_column=[db](std::string_view column,std::string_view definition){
-        bool found=false;sql::Statement columns(db,"PRAGMA table_info(task_profile_clarifications)");
-        while(sql::step(columns.get())==SQLITE_ROW)
-            if(sql::column_text(columns.get(),1)==column)found=true;
-        if(!found){const auto statement=std::string("ALTER TABLE task_profile_clarifications ADD COLUMN ")+std::string(definition);sql::exec(db,statement.c_str());}
+        if(!sql::table_has_column(db,"task_profile_clarifications",column)){
+            const auto statement=std::string("ALTER TABLE task_profile_clarifications ADD COLUMN ")+std::string(definition);sql::exec(db,statement.c_str());}
     };
     add_column("turn_id","turn_id TEXT NOT NULL DEFAULT ''");
     add_column("run_id","run_id TEXT NOT NULL DEFAULT ''");
