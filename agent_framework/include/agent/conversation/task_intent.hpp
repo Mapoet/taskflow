@@ -5,6 +5,8 @@
 #include <string_view>
 #include <vector>
 
+#include "agent/conversation/task_registry.hpp"
+
 #include "agent/conversation/types.hpp"
 
 namespace agent_framework::conversation {
@@ -32,5 +34,7 @@ struct TaskIntentDecision {
     // Semantic routing never grants authority; PDP/Approval/Tool policy own it.
     bool grants_authority{false};
 };
+
+TaskInputIntent task_input_intent(TaskIntentKind, bool has_active_task);
 
 } // namespace agent_framework::conversation

@@ -64,6 +64,8 @@ public:
         const ConversationIdentity&, std::string_view clarification_id) = 0;
     virtual std::optional<TaskProfileClarification> pending(
         const ConversationIdentity&) = 0;
+    virtual std::optional<TaskProfileClarification> latest(
+        const ConversationIdentity&) = 0;
     virtual ClarificationMutationResult answer(
         const ConversationIdentity&, std::string_view clarification_id,
         std::uint64_t expected_revision, std::string_view answer,
@@ -87,6 +89,8 @@ public:
     std::optional<TaskProfileClarification> load(
         const ConversationIdentity&, std::string_view clarification_id) override;
     std::optional<TaskProfileClarification> pending(
+        const ConversationIdentity&) override;
+    std::optional<TaskProfileClarification> latest(
         const ConversationIdentity&) override;
     ClarificationMutationResult answer(
         const ConversationIdentity&, std::string_view clarification_id,

@@ -101,6 +101,16 @@ int main() {
         assert(linked_runs.size() == 2 && linked_runs[0].run_id == "run-1" &&
                linked_runs[1].run_id == "run-2" &&
                linked_runs[1].state == "awaiting_plan");
+        auto annotated=registry.annotate_run_decisions(
+            identity,"task-1","run-2","classification-2","clarification-2");
+        assert(annotated.ok);
+        assert(registry.annotate_run_decisions(
+            identity,"task-1","run-2","classification-2","clarification-2").ok);
+        assert(!registry.annotate_run_decisions(
+            identity,"task-1","run-2","different","clarification-2").ok);
+        linked_runs=registry.runs(identity,"task-1");
+        assert(linked_runs[1].classification_decision_id=="classification-2"&&
+               linked_runs[1].clarification_id=="clarification-2");
         TaskRunLink first_plan{identity, "task-1", "run-2", 2, 1, "planned"};
         first_plan.plan_digest = "sha256:plan-1";
         first_plan.task_contract_digest = "sha256:task-contract-2";

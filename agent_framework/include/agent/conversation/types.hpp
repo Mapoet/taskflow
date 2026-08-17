@@ -100,6 +100,8 @@ namespace agent_framework::conversation
         std::uint64_t max_iterations{10}, max_input_tokens{0}, max_output_tokens{0};
         // A conversation may contain several turns for one task/run.
         std::string task_id, run_id;
+        // Trusted semantic audit references; neither field grants authority.
+        std::string classification_decision_id, clarification_id;
     };
     struct ConversationInput
     {

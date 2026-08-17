@@ -61,11 +61,11 @@
 
 **Produces:** prompt `llm-task-classifier-v2` and a reproducible multilingual evaluation corpus.
 
-- [ ] Encode negation, scope, imperative-versus-mention, mixed intent, word boundaries, bilingual input and uncertainty rules in the system prompt.
-- [ ] Require requested, negated, mention-only, scope and ambiguity evidence.
-- [ ] Treat `has_active_task=true` as incremental intent classification.
-- [ ] Add at least the complete positive, negative and confirmation cases from `af-term.md`.
-- [ ] Enforce zero high-side-effect false positives and a versioned evaluation report.
+- [x] Encode negation, scope, imperative-versus-mention, mixed intent, word boundaries, bilingual input and uncertainty rules in the system prompt.
+- [x] Require requested, negated, mention-only, scope and ambiguity evidence.
+- [x] Treat `has_active_task=true` as incremental intent classification and map the typed result into Task Orchestrator intent.
+- [x] Add a locked 30-case Chinese/English/mixed positive, negative, incremental and confirmation corpus.
+- [~] Enforce zero high-side-effect false positives in the locked gold corpus; real-provider scored evaluation remains TERM7 evidence.
 
 ## TERM3 — Durable profile clarification
 
@@ -99,12 +99,12 @@
 
 **Produces:** intent-aware task routing and `AwaitingInput` clarification/resume.
 
-- [ ] Route continue/add/narrow/replan into the active Task; route pause/cancel/status to control services.
-- [ ] Create a new Task only for `NewTask`.
-- [ ] Persist clarification before returning AwaitingInput.
-- [ ] Resume through an idempotent command after confirmation.
-- [ ] Link classification and clarification decisions to TaskRunLink.
-- [ ] Verify no duplicate Task/Run after retries or restart.
+- [x] Route typed continue/add/narrow/replan into the active Task; retain explicit pause/cancel/status control routing.
+- [x] Create a new Task only for typed `NewTask`/explicit new intent.
+- [x] Persist clarification before returning AwaitingInput.
+- [x] Resume the original Turn through `ClarificationAnswered` after confirmation, including process reopen.
+- [x] Link classification and clarification decision identifiers to TaskRunLink audit metadata with immutable/idempotent annotation.
+- [x] Verify no duplicate Task/Run after confirmation and restart, including concurrent cross-connection confirmation and repeated post-confirmation command replay.
 
 ## TERM5–TERM7 — Observability, UI and Live certification
 

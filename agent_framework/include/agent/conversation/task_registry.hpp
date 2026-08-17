@@ -85,6 +85,8 @@ struct TaskRunLink {
     std::string updated_at;
     std::string plan_digest;
     std::string task_contract_digest;
+    std::string classification_decision_id;
+    std::string clarification_id;
 };
 
 struct TaskMutationResult {
@@ -113,6 +115,10 @@ public:
                                          std::uint64_t expected_task_revision) = 0;
     virtual TaskMutationResult bind_plan(const TaskRunLink&,
                                          std::uint64_t expected_task_revision) = 0;
+    virtual TaskMutationResult annotate_run_decisions(
+        const ConversationIdentity&, std::string_view task_id,
+        std::string_view run_id, std::string_view classification_decision_id,
+        std::string_view clarification_id) = 0;
     virtual TaskMutationResult transition(
         const ConversationIdentity&, std::string_view task_id,
         std::uint64_t expected_revision, TaskLifecycleState,
@@ -147,6 +153,10 @@ public:
                                  std::uint64_t expected_task_revision) override;
     TaskMutationResult bind_plan(const TaskRunLink&,
                                  std::uint64_t expected_task_revision) override;
+    TaskMutationResult annotate_run_decisions(
+        const ConversationIdentity&, std::string_view task_id,
+        std::string_view run_id, std::string_view classification_decision_id,
+        std::string_view clarification_id) override;
     TaskMutationResult transition(
         const ConversationIdentity&, std::string_view task_id,
         std::uint64_t expected_revision, TaskLifecycleState,

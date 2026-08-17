@@ -45,6 +45,9 @@ struct SessionListQuery {
     std::optional<ProductSessionState> state{ProductSessionState::Active};
     std::uint64_t before_sequence{0};
     std::size_t limit{50};
+    std::string organization_id;
+    std::string project_id;
+    std::string workspace_id;
 };
 
 struct SessionListPage {

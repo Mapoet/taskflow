@@ -153,7 +153,8 @@ void insert_run_link(sqlite3* db, TaskRunLink value) {
     sql::Statement insert(db,
         "INSERT INTO task_run_links(tenant,conversation,task_id,run_id,"
         "requirement_revision,plan_revision,state,created_at,updated_at,"
-        "plan_digest,task_contract_digest) VALUES(?,?,?,?,?,?,?,?,?,?,?)");
+        "plan_digest,task_contract_digest,classification_decision_id,clarification_id) "
+        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)");
     bind_identity(insert.get(), value.identity);
     sql::bind_text(insert.get(), 3, value.task_id);
     sql::bind_text(insert.get(), 4, value.run_id);
@@ -164,6 +165,8 @@ void insert_run_link(sqlite3* db, TaskRunLink value) {
     sql::bind_text(insert.get(), 9, value.updated_at);
     sql::bind_text(insert.get(), 10, value.plan_digest);
     sql::bind_text(insert.get(), 11, value.task_contract_digest);
+    sql::bind_text(insert.get(), 12, value.classification_decision_id);
+    sql::bind_text(insert.get(), 13, value.clarification_id);
     if(sql::step(insert.get()) != SQLITE_DONE)
         throw std::runtime_error(sqlite3_errmsg(db));
 }
@@ -306,6 +309,8 @@ void SQLiteTaskRegistry::migrate() {
         "plan_revision INTEGER NOT NULL,state TEXT NOT NULL,created_at TEXT NOT NULL,"
         "updated_at TEXT NOT NULL,plan_digest TEXT NOT NULL DEFAULT '',"
         "task_contract_digest TEXT NOT NULL DEFAULT '',"
+        "classification_decision_id TEXT NOT NULL DEFAULT '',"
+        "clarification_id TEXT NOT NULL DEFAULT '',"
         "PRIMARY KEY(tenant,conversation,task_id,run_id))");
     auto add_column = [db](std::string_view name, std::string_view definition) {
         bool found = false;
@@ -321,6 +326,9 @@ void SQLiteTaskRegistry::migrate() {
     add_column("plan_digest", "plan_digest TEXT NOT NULL DEFAULT ''");
     add_column("task_contract_digest",
                "task_contract_digest TEXT NOT NULL DEFAULT ''");
+    add_column("classification_decision_id",
+               "classification_decision_id TEXT NOT NULL DEFAULT ''");
+    add_column("clarification_id", "clarification_id TEXT NOT NULL DEFAULT ''");
     sql::exec(db, "CREATE TABLE IF NOT EXISTS conversation_task_events("
         "tenant TEXT NOT NULL,conversation TEXT NOT NULL,task_id TEXT NOT NULL,"
         "sequence INTEGER NOT NULL,task_revision INTEGER NOT NULL,event_type TEXT NOT NULL,"
@@ -678,6 +686,47 @@ TaskMutationResult SQLiteTaskRegistry::bind_plan(
     }
 }
 
+TaskMutationResult SQLiteTaskRegistry::annotate_run_decisions(
+    const ConversationIdentity& identity, std::string_view task_id,
+    std::string_view run_id, std::string_view classification_id,
+    std::string_view clarification_id) {
+    if(identity.tenant_id.empty() || identity.conversation_id.empty() ||
+       task_id.empty() || run_id.empty() || classification_id.empty())
+        return {false,0,"task_run_decision_contract_invalid"};
+    std::lock_guard lock(mutex_);auto* db=sql::database(db_);
+    try {
+        sql::Transaction transaction(db);
+        sql::Statement existing(db,
+            "SELECT classification_decision_id,clarification_id FROM task_run_links "
+            "WHERE tenant=? AND conversation=? AND task_id=? AND run_id=?");
+        bind_identity(existing.get(),identity);sql::bind_text(existing.get(),3,task_id);
+        sql::bind_text(existing.get(),4,run_id);
+        if(sql::step(existing.get())!=SQLITE_ROW)
+            return {false,0,"task_run_link_not_found"};
+        const auto stored_classification=sql::column_text(existing.get(),0);
+        const auto stored_clarification=sql::column_text(existing.get(),1);
+        if((!stored_classification.empty()&&stored_classification!=classification_id)||
+           (!stored_clarification.empty()&&stored_clarification!=clarification_id))
+            return {false,0,"task_run_decision_conflict"};
+        if(stored_classification==classification_id&&
+           stored_clarification==clarification_id)
+            return {true,0,{}};
+        sql::Statement update(db,
+            "UPDATE task_run_links SET classification_decision_id=?,clarification_id=?,"
+            "updated_at=? WHERE tenant=? AND conversation=? AND task_id=? AND run_id=? "
+            "AND (classification_decision_id='' OR classification_decision_id=?) "
+            "AND (clarification_id='' OR clarification_id=?)");
+        sql::bind_text(update.get(),1,classification_id);sql::bind_text(update.get(),2,clarification_id);
+        sql::bind_text(update.get(),3,stamp());sql::bind_text(update.get(),4,identity.tenant_id);
+        sql::bind_text(update.get(),5,identity.conversation_id);sql::bind_text(update.get(),6,task_id);
+        sql::bind_text(update.get(),7,run_id);sql::bind_text(update.get(),8,classification_id);
+        sql::bind_text(update.get(),9,clarification_id);
+        if(sql::step(update.get())!=SQLITE_DONE||sql::changes(db)!=1)
+            return {false,0,"task_run_decision_conflict"};
+        transaction.commit();return {true,0,{}};
+    } catch(const std::exception& error) { return {false,0,mutation_error(error.what())}; }
+}
+
 std::optional<PersistentTask> SQLiteTaskRegistry::load(
     const ConversationIdentity& identity, std::string_view task_id) {
     std::lock_guard lock(mutex_);
@@ -939,7 +988,8 @@ std::vector<TaskRunLink> SQLiteTaskRegistry::runs(
     std::lock_guard lock(mutex_);
     auto* db = sql::database(db_);
     sql::Statement query(db,"SELECT run_id,requirement_revision,plan_revision,state,"
-        "created_at,updated_at,plan_digest,task_contract_digest FROM task_run_links WHERE tenant=? AND conversation=? "
+        "created_at,updated_at,plan_digest,task_contract_digest,classification_decision_id,"
+        "clarification_id FROM task_run_links WHERE tenant=? AND conversation=? "
         "AND task_id=? ORDER BY created_at,run_id");
     bind_identity(query.get(),identity); sql::bind_text(query.get(),3,task_id);
     std::vector<TaskRunLink> result;
@@ -947,7 +997,8 @@ std::vector<TaskRunLink> SQLiteTaskRegistry::runs(
         sql::column_text(query.get(),0),sql::column_uint64(query.get(),1),
         sql::column_uint64(query.get(),2),sql::column_text(query.get(),3),
         sql::column_text(query.get(),4),sql::column_text(query.get(),5),
-        sql::column_text(query.get(),6),sql::column_text(query.get(),7)});
+        sql::column_text(query.get(),6),sql::column_text(query.get(),7),
+        sql::column_text(query.get(),8),sql::column_text(query.get(),9)});
     return result;
 }
 

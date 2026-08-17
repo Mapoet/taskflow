@@ -1,6 +1,8 @@
 #include <cassert>
 #include <filesystem>
 #include <string>
+#include <barrier>
+#include <thread>
 
 #include "agent/conversation/task_profile_clarification.hpp"
 
@@ -81,6 +83,23 @@ int main() {
         assert(store.create(exhausted).ok);
         auto result = store.answer(identity, exhausted.clarification_id, 1, "no", 2);
         assert(!result.ok && result.state == ProfileClarificationState::Exhausted);
+    }
+    TaskProfileClarification raced = value;
+    raced.clarification_id = "clarification-race";
+    raced.decision_id = "decision-race";
+    {
+        SQLiteTaskProfileClarificationStore setup(path);
+        assert(setup.create(raced).ok);
+    }
+    {
+        SQLiteTaskProfileClarificationStore first(path), second(path);
+        ClarificationMutationResult a,b;std::barrier ready(3);
+        std::thread one([&]{ready.arrive_and_wait();a=first.answer(
+            identity,raced.clarification_id,1,"professional",3);});
+        std::thread two([&]{ready.arrive_and_wait();b=second.answer(
+            identity,raced.clarification_id,1,"conversation",3);});
+        ready.arrive_and_wait();one.join();two.join();
+        assert(static_cast<int>(a.ok)+static_cast<int>(b.ok)==1);
     }
     std::filesystem::remove(path);
 }

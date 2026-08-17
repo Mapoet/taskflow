@@ -90,10 +90,10 @@ endif()
 
 # websocketpp (Header-Only)
 set(WEBSOCKETPP_DIR ${THIRD_PARTY_DIR}/websocketpp)
-if(EXISTS ${WEBSOCKETPP_DIR})
+if(EXISTS ${WEBSOCKETPP_DIR}/websocketpp/server.hpp)
     # websocketpp is header-only, just add include path
 else()
-    message(WARNING "websocketpp not found in ${WEBSOCKETPP_DIR}. Run: git submodule update --init --recursive")
+    message(STATUS "websocketpp headers not found in ${WEBSOCKETPP_DIR}; WebSocket transport disabled")
 endif()
 
 # ExprTk (Header-Only, mathematical expression parse/eval — MIT)
@@ -181,7 +181,7 @@ if(EXISTS ${HTTPLIB_DIR}/httplib.hpp OR EXISTS ${HTTPLIB_DIR}/httplib.h)
     include_directories(${HTTPLIB_DIR})
 endif()
 
-if(EXISTS ${WEBSOCKETPP_DIR})
+if(EXISTS ${WEBSOCKETPP_DIR}/websocketpp/server.hpp)
     include_directories(${WEBSOCKETPP_DIR})
 endif()
 
@@ -293,6 +293,13 @@ if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/identity/runtime_subject.cpp)
 endif()
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/session/sqlite_session_catalog.cpp)
     list(APPEND AGENT_SOURCES src/session/sqlite_session_catalog.cpp)
+endif()
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/session/sqlite_run_supervisor.cpp)
+    list(APPEND AGENT_SOURCES src/session/sqlite_run_supervisor.cpp)
+endif()
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/api/v1/session_run_api.cpp)
+    list(APPEND AGENT_SOURCES src/api/v1/session_run_api.cpp src/api/v1/http_routes.cpp
+        src/api/v1/event_multiplexer.cpp)
 endif()
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/conversation/types.cpp)
     list(APPEND AGENT_SOURCES
@@ -1905,6 +1912,38 @@ if(BUILD_TESTING)
         set_tests_properties(product_session_catalog PROPERTIES
             LABELS "phase4-offline;offline;phase4-durable;phase4-security;phase4-integration")
     endif()
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_session_run_supervisor.cpp)
+        add_executable(test_session_run_supervisor tests/test_session_run_supervisor.cpp)
+        target_link_libraries(test_session_run_supervisor PRIVATE agent_framework)
+        if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
+            target_compile_options(test_session_run_supervisor PRIVATE -UNDEBUG)
+        endif()
+        add_test(NAME session_run_supervisor COMMAND test_session_run_supervisor)
+        set_tests_properties(session_run_supervisor PROPERTIES
+            LABELS "phase4-offline;offline;phase4-durable;phase4-security;phase4-integration;phase4-ui-v2"
+            RUN_SERIAL TRUE)
+    endif()
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_session_run_api.cpp)
+        add_executable(test_session_run_api tests/test_session_run_api.cpp)
+        target_link_libraries(test_session_run_api PRIVATE agent_framework)
+        if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
+            target_compile_options(test_session_run_api PRIVATE -UNDEBUG)
+        endif()
+        add_test(NAME session_run_api COMMAND test_session_run_api)
+        set_tests_properties(session_run_api PROPERTIES
+            LABELS "phase4-offline;offline;phase4-api;phase4-security;phase4-integration;phase4-ui-v2")
+    endif()
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_session_run_http_api.cpp)
+        add_executable(test_session_run_http_api tests/test_session_run_http_api.cpp)
+        target_link_libraries(test_session_run_http_api PRIVATE agent_framework)
+        if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
+            target_compile_options(test_session_run_http_api PRIVATE -UNDEBUG)
+        endif()
+        add_test(NAME session_run_http_api COMMAND test_session_run_http_api)
+        set_tests_properties(session_run_http_api PROPERTIES
+            LABELS "phase4-offline;offline;phase4-api;phase4-security;phase4-integration;phase4-ui-v2"
+            RUN_SERIAL TRUE TIMEOUT 20)
+    endif()
     if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_task_profile_clarification.cpp)
         add_executable(test_task_profile_clarification
             tests/test_task_profile_clarification.cpp)
@@ -1926,6 +1965,20 @@ if(BUILD_TESTING)
         add_test(NAME task_clarification_coordinator COMMAND test_task_clarification_coordinator)
         set_tests_properties(task_clarification_coordinator PROPERTIES
             LABELS "phase4-offline;offline;phase4-conversation;phase4-durable;phase4-integration;phase4-security")
+    endif()
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_live_runtime_task_clarification.cpp)
+        add_executable(test_live_runtime_task_clarification
+            tests/test_live_runtime_task_clarification.cpp)
+        target_include_directories(test_live_runtime_task_clarification PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/examples ${_agent_cli11_include})
+        target_link_libraries(test_live_runtime_task_clarification PRIVATE agent_framework)
+        if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
+            target_compile_options(test_live_runtime_task_clarification PRIVATE -UNDEBUG)
+        endif()
+        add_test(NAME live_runtime_task_clarification COMMAND test_live_runtime_task_clarification)
+        set_tests_properties(live_runtime_task_clarification PROPERTIES
+            LABELS "phase4-offline;offline;phase4-conversation;phase4-durable;phase4-integration;phase4-security"
+            RUN_SERIAL TRUE)
     endif()
     if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_task_control_service.cpp)
         add_executable(test_task_control_service tests/test_task_control_service.cpp)

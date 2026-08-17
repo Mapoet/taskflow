@@ -41,24 +41,27 @@
 - [ ] Migrate legacy default data without conflating checkpoint rows.
 - [~] Test tenant/membership visibility, cursor stability, reopen recovery and stale CAS; endpoint authorization and concurrent race stress remain.
 
-## GUI3 — Run Supervisor and scheduler
+## GUI3 — Run Supervisor and scheduler `[~]`
 
-- [ ] Replace `g_agent_busy` with per-session active Run state and durable command queues.
-- [ ] Support steer, queue, comment and fork semantics.
-- [ ] Add organization/user/project/provider quotas, lease and fencing.
-- [ ] Prove three-session parallelism, browser detach, restart recovery and idempotent side effects.
+- [~] A SQLite durable per-session Run state and command queue now exists; replacing the Web demo's `g_agent_busy` awaits GUI4 endpoint integration.
+- [~] Persist typed start/steer/queue/comment/fork/cancel commands with parent Run/Session validation and payload-exact idempotency; executor-side application remains.
+- [x] Add tenant-scoped organization/user/project/provider quotas, lease renewal, AwaitingInput lease, epoch fencing and stale-worker rejection.
+- [~] Prove three-session parallelism, restart recovery, lease takeover and command idempotency; browser detach and side-effect executor integration remain.
 
-## GUI4 — Versioned API and authorized realtime gateway
+## GUI4 — Versioned API and authorized realtime gateway `[~]`
 
-- [ ] Add `/api/v1/sessions`, `/runs`, `/commands`, `/events`, `/artifacts` and `/approvals` modules outside demo code.
-- [ ] Add authorized WebSocket multiplex with SSE fallback and cursor recovery.
-- [ ] Reuse the existing durable Event Subscription/Replay fact source.
+- [~] Add reusable `/api/v1/sessions`, `/runs`, `/commands`, `/events`, `/artifacts` and `/approvals` modules outside demo code; artifact/approval reads are production-scoped, while approval mutations remain intentionally routed through PDP/AccountableApprovalExecutor.
+- [~] Add an authorized SSE fallback with `Last-Event-ID`, retention-floor/head validation and cursor recovery, plus a bounded multi-session event multiplex core; the WebSocket transport adapter remains.
+- [x] Reuse the durable ConversationStore event log as the replay fact source, with role-filtered User/Operations/Audit visibility and scan-safe cursors.
+- [x] Resolve authenticated RuntimeSubject server-side, enforce tenant/organization/project/workspace membership boundaries, and cover the transport with real loopback HTTP/SSE tests.
+- [x] Serve artifact detail only from view-safe Interaction Projection nodes and bind approval detail to Contract identity plus durable Run→Session ownership; never expose arbitrary workspace paths or mutate ApprovalStore directly.
+- [ ] Restore a real websocketpp header dependency before compiling the WebSocket transport; the repository's current `3rd-party/websocketpp` directory is empty and CMake now detects headers rather than accepting an empty directory.
 
-## GUI5 — Capability Manifest
+## GUI5 — Capability Manifest `[~]`
 
-- [ ] Publish action ID, route, required scope, enabled state, reason, expected revision and UI hint.
-- [ ] Cover composer, lifecycle, task control, approval, Skill/MCP and artifact actions.
-- [ ] Remove or relabel every nonfunctional pseudo-control.
+- [x] Publish a versioned per-Session manifest with action ID, route, required role, enabled state, reason, expected revision and UI hint.
+- [~] Cover Session lifecycle, Run start/steer/queue/comment/fork/cancel, Event replay/stream, artifact view and approval view/decision; composer and Skill/MCP management remain.
+- [~] Mark unbound accountable approval mutation explicitly disabled (`accountable_executor_required`); formal Web shell consumption and pseudo-control removal remain GUI6.
 
 ## GUI6 — Formal Web shell
 

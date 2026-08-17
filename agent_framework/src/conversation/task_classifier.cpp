@@ -86,6 +86,26 @@ std::string_view name(EffectClass value) {
     return "none";
 }
 
+TaskInputIntent task_input_intent(TaskIntentKind value,bool active) {
+    switch(value) {
+        case TaskIntentKind::NewTask:return active?TaskInputIntent::StartNewTask:
+            TaskInputIntent::InitialRequest;
+        case TaskIntentKind::Continue:return active?TaskInputIntent::ContinueTask:
+            TaskInputIntent::InitialRequest;
+        case TaskIntentKind::AddRequirement:
+        case TaskIntentKind::NarrowScope:return active?TaskInputIntent::AmendRequirements:
+            TaskInputIntent::InitialRequest;
+        case TaskIntentKind::Replan:return active?TaskInputIntent::ReplanTask:
+            TaskInputIntent::InitialRequest;
+        case TaskIntentKind::Pause:return TaskInputIntent::SuspendTask;
+        case TaskIntentKind::Cancel:return TaskInputIntent::CancelTask;
+        case TaskIntentKind::StatusQuery:return TaskInputIntent::StatusQuery;
+        case TaskIntentKind::ProfileConfirmation:return active?
+            TaskInputIntent::AmendRequirements:TaskInputIntent::InitialRequest;
+    }
+    return TaskInputIntent::InitialRequest;
+}
+
 LLMTaskClassifier::LLMTaskClassifier(std::shared_ptr<LLMClient> client,std::string provider)
     :client_(std::move(client)),provider_(std::move(provider)) {
     if(!client_)throw std::invalid_argument("LLM task classifier requires client");
@@ -130,6 +150,8 @@ TaskClassification LLMTaskClassifier::parse(std::string_view response) {
         if(out.confidence<0.0||out.confidence>1.0)return failure("classifier_confidence_invalid");
         out.classifier_id="llm-task-classifier-v2";out.prompt_version="task-routing-v2";
         out.decision_id=next_decision_id();out.grants_authority=false;
+        out.requires_confirmation=out.confidence<=0.60||
+            !out.linguistic_evidence.ambiguities.empty();
         return out;
     } catch(const json::exception&) { return failure("classifier_output_not_strict_json"); }
       catch(const std::exception&) { return failure("classifier_parse_failed"); }
@@ -162,11 +184,9 @@ TaskClassification deterministic_task_classification(std::string_view input) {
 TaskClassification apply_task_routing_policy(TaskClassification model,
     std::optional<TaskExecutionProfile> configured,ExecutionTrustProfile trust) {
     if(configured) {
-        model.error.clear();model.profile=*configured;
+        model.profile=*configured;
         model.long_running=*configured!=TaskExecutionProfile::Conversation&&
             *configured!=TaskExecutionProfile::ReadOnlyAnalysis;
-        model.confidence=1.0;model.rationale="deployment configured task profile";
-        model.classifier_id="deployment-task-profile-v1";model.requires_confirmation=false;
         model.grants_authority=false;
     }
     if(!model)return model;

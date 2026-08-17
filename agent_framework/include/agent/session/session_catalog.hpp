@@ -13,6 +13,8 @@ public:
     virtual std::optional<ProductSession> get(std::string_view tenant,
                                               std::string_view session) = 0;
     virtual SessionListPage list(const SessionListQuery&) = 0;
+    virtual std::optional<SessionMember> member(std::string_view tenant,
+        std::string_view session, std::string_view principal) = 0;
     virtual SessionMutationResult rename(std::string_view tenant,
         std::string_view session, std::uint64_t expected, std::string_view title) = 0;
     virtual SessionMutationResult organize(std::string_view tenant,
@@ -34,6 +36,8 @@ public:
     SessionMutationResult create(ProductSession) override;
     std::optional<ProductSession> get(std::string_view, std::string_view) override;
     SessionListPage list(const SessionListQuery&) override;
+    std::optional<SessionMember> member(std::string_view, std::string_view,
+        std::string_view) override;
     SessionMutationResult rename(std::string_view, std::string_view,
         std::uint64_t, std::string_view) override;
     SessionMutationResult organize(std::string_view, std::string_view,

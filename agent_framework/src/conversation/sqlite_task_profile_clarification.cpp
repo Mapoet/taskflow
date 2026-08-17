@@ -120,7 +120,8 @@ SQLiteTaskProfileClarificationStore::~SQLiteTaskProfileClarificationStore() {
 }
 
 void SQLiteTaskProfileClarificationStore::migrate() {
-    sql::exec(sql::database(db_),
+    auto* db=sql::database(db_);
+    sql::exec(db,
         "CREATE TABLE IF NOT EXISTS task_profile_clarifications("
         "tenant TEXT NOT NULL,conversation TEXT NOT NULL,clarification_id TEXT NOT NULL,"
         "task_id TEXT NOT NULL,decision_id TEXT NOT NULL,turn_id TEXT NOT NULL,"
@@ -129,7 +130,17 @@ void SQLiteTaskProfileClarificationStore::migrate() {
         "attempt_count INTEGER NOT NULL,max_attempts INTEGER NOT NULL,revision INTEGER NOT NULL,"
         "expires_at_ms INTEGER NOT NULL,state TEXT NOT NULL,created_at TEXT NOT NULL,"
         "updated_at TEXT NOT NULL,PRIMARY KEY(tenant,conversation,clarification_id))");
-    sql::exec(sql::database(db_),
+    auto add_column=[db](std::string_view column,std::string_view definition){
+        bool found=false;sql::Statement columns(db,"PRAGMA table_info(task_profile_clarifications)");
+        while(sql::step(columns.get())==SQLITE_ROW)
+            if(sql::column_text(columns.get(),1)==column)found=true;
+        if(!found){const auto statement=std::string("ALTER TABLE task_profile_clarifications ADD COLUMN ")+std::string(definition);sql::exec(db,statement.c_str());}
+    };
+    add_column("turn_id","turn_id TEXT NOT NULL DEFAULT ''");
+    add_column("run_id","run_id TEXT NOT NULL DEFAULT ''");
+    add_column("task_intent","task_intent TEXT NOT NULL DEFAULT 'initial_request'");
+    sql::exec(db,"UPDATE task_profile_clarifications SET state='cancelled' WHERE state='pending' AND (turn_id='' OR run_id='')");
+    sql::exec(db,
         "CREATE INDEX IF NOT EXISTS task_profile_clarification_pending_idx ON "
         "task_profile_clarifications(tenant,conversation,state,created_at)");
 }
@@ -207,6 +218,18 @@ std::optional<TaskProfileClarification> SQLiteTaskProfileClarificationStore::pen
     bind_identity(statement.get(), identity);
     if(sql::step(statement.get()) != SQLITE_ROW) return std::nullopt;
     return decode(statement.get(), identity);
+}
+
+std::optional<TaskProfileClarification> SQLiteTaskProfileClarificationStore::latest(
+    const ConversationIdentity& identity) {
+    std::lock_guard lock(mutex_);
+    const auto query=std::string("SELECT ")+select_columns+
+        " FROM task_profile_clarifications WHERE tenant=? AND conversation=? "
+        "ORDER BY created_at DESC,clarification_id DESC LIMIT 1";
+    sql::Statement statement(sql::database(db_),query.c_str());
+    bind_identity(statement.get(),identity);
+    if(sql::step(statement.get())!=SQLITE_ROW)return std::nullopt;
+    return decode(statement.get(),identity);
 }
 
 ClarificationMutationResult SQLiteTaskProfileClarificationStore::answer(
