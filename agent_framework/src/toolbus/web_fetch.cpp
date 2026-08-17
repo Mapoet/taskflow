@@ -4,12 +4,12 @@
  */
 
 #include <agent/toolbus/web_http.hpp>
+#include <agent/internal/html_text.hpp>
 
 #include <algorithm>
 #include <cctype>
 #include <cstdlib>
 #include <map>
-#include <regex>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -157,17 +157,18 @@ json do_web_fetch_impl(const json& j) {
     if (ct_base == "text/html") {
         if (j.contains("extract_mode") && j["extract_mode"].is_string() &&
             j["extract_mode"].get<std::string>() == "main_text") {
-            // 极简：去标签近似正文（契约：启发式）
-            std::string t = hres.body;
-            try {
-                t = std::regex_replace(t, std::regex("<script[^>]*>[\\s\\S]*?</script>", std::regex::icase),
-                                        "");
-                t = std::regex_replace(t, std::regex("<style[^>]*>[\\s\\S]*?</style>", std::regex::icase),
-                                        "");
-                t = std::regex_replace(t, std::regex("<[^>]+>"), " ");
-            } catch (...) {
+            internal::HtmlTextLimits limits;
+            limits.max_input_bytes = cfg.max_body_bytes;
+            limits.max_output_bytes = std::min<std::size_t>(cfg.max_body_bytes, 131072U);
+            limits.max_tag_bytes = 16384U;
+            limits.max_operations = std::max<std::size_t>(limits.max_input_bytes * 8U, 65536U);
+            auto extracted = internal::extract_html_text(hres.body, limits);
+            if (!extracted.error_code.empty()) {
+                return web_tool_error(extracted.error_code);
             }
-            out["text"] = t;
+            out["text"] = std::move(extracted.text);
+            out["parse_truncated"] = extracted.truncated;
+            out["parsed_bytes"] = extracted.scanned_bytes;
         } else {
             if (!utf8_validate(hres.body)) {
                 out["html_base64_note"] = "non_utf8_returned_as_truncated_raw";

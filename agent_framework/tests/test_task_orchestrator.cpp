@@ -29,15 +29,28 @@ int main() {
     assert(planned.ok);
     auto task = registry.load(initial.identity, "task-1");
     assert(task && task->plan_revision == 1);
-    assert(!orchestrator.bind_plan(binding, task->revision).ok);
+    assert(orchestrator.bind_plan(binding, task->revision).ok);
+
+    assert(select_task_run_id("", "run-active", false, "turn-next") ==
+           "turn-next");
+    assert(select_task_run_id("", "run-active", true, "turn-status") ==
+           "run-active");
+    assert(select_task_run_id("run-configured", "run-active", false,
+                              "turn-next") == "run-configured");
 
     TurnRequest continuation = initial;
     continuation.turn_id = "turn-2";
     continuation.input = "continue";
-    continuation.run_id = "run-2";
+    continuation.run_id = select_task_run_id(
+        "", task->current_run_id, false, continuation.turn_id);
+    assert(continuation.run_id == "turn-2");
     auto continued = orchestrator.open_or_resume(
         continuation, TaskInputIntent::ContinueTask);
     assert(continued.ok && continued.task.requirement_revision == 2);
+    const auto replayed = orchestrator.open_or_resume(
+        continuation, TaskInputIntent::ContinueTask);
+    assert(replayed.ok && replayed.task.revision == continued.task.revision);
+    assert(registry.requirements(initial.identity, "task-1").size() == 2);
 
     TurnRequest status = continuation;
     status.turn_id = "turn-status";

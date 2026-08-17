@@ -6,6 +6,14 @@
 
 namespace agent_framework::conversation {
 
+// Select the durable Run identity for an interactive turn. Executable turns
+// get a fresh default Run; control-only turns retain the active Run. A
+// non-empty configured id is an explicit caller-owned idempotency key.
+std::string select_task_run_id(std::string_view configured_run_id,
+                               std::string_view active_run_id,
+                               bool control_only,
+                               std::string_view turn_id);
+
 struct TaskOpenResult {
     bool ok{false};
     PersistentTask task;

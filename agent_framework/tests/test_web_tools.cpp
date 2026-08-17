@@ -201,15 +201,31 @@ int main() {
     srv.Get("/search", [&](const httplib::Request& req, httplib::Response& res) {
         assert(req.has_param("q"));
         assert(req.get_param_value("format") == "json");
-        json body = {{"results",
-                      json::array({{{"title", "Local result"},
-                                    {"url", "http://127.0.0.1:" + std::to_string(port) + "/article"},
-                                    {"content", "Search snippet"}}})}};
+        json results = json::array({{{"title", "Local result"},
+                                     {"url", "http://127.0.0.1:" + std::to_string(port) + "/article"},
+                                     {"content", "Search snippet"}}});
+        if (req.get_param_value("q") == "mixed") {
+            results.push_back({{"title", "Malformed result"},
+                               {"url", "http://127.0.0.1:" + std::to_string(port) + "/oversized-tag"},
+                               {"content", "must fail in isolation"}});
+        }
+        json body = {{"results", std::move(results)}};
         res.set_content(body.dump(), "application/json");
     });
     srv.Get("/article", [&](const httplib::Request&, httplib::Response& res) {
-        res.set_content("<html><body><main>GNSS-R extracted article body</main></body></html>",
+        res.set_content("<html><head><style>.hidden{display:none}</style><script>bad()</script></head>"
+                        "<body><main>GNSS-R &amp; extracted article body</main></body></html>",
                         "text/html; charset=utf-8");
+    });
+    srv.Get("/oversized-tag", [&](const httplib::Request&, httplib::Response& res) {
+        res.set_content("<div " + std::string(20000, 'x') + ">must not be returned</div>",
+                        "text/html; charset=utf-8");
+    });
+    srv.Get("/adversarial", [&](const httplib::Request&, httplib::Response& res) {
+        std::string body = "<html><script data-x='" + std::string(60000, 'a') + "'>";
+        body += std::string(60000, '<');
+        body += "</script><body>safe tail</body></html>";
+        res.set_content(body, "text/html; charset=utf-8");
     });
     port = srv.bind_to_any_port("127.0.0.1");
     assert(port > 0);
@@ -252,7 +268,39 @@ int main() {
                std::string::npos);
         assert(r["content_enrichment"]["attempted"] == 1);
         assert(r["content_enrichment"]["succeeded"] == 1);
+        assert(r["content_enrichment"]["failed"] == 0);
         clog_tool_json_for_test("web_search (SearXNG + content)", r);
+    }
+
+    {
+        json r = bus.call_tool("web_search",
+                               json{{"query", "mixed"}, {"max_results", 3},
+                                    {"content_max_bytes", 65536}}).get();
+        assert(!r.contains("error"));
+        assert(r["results"].size() == 2);
+        assert(r["results"][0]["content_status"] == "fetched");
+        assert(r["results"][1]["content_status"] == "failed");
+        assert(r["results"][1]["content_error"]["code"] == "html_tag_too_large");
+        assert(r["content_enrichment"]["succeeded"] == 1);
+        assert(r["content_enrichment"]["failed"] == 1);
+        assert(r["content_enrichment"]["failure_isolation"] == "per_url");
+    }
+
+    {
+        json r = bus.call_tool("web_fetch",
+                               json{{"url", "http://127.0.0.1:" + std::to_string(port) + "/adversarial"},
+                                    {"max_bytes", 131072}, {"extract_mode", "main_text"}}).get();
+        assert(r.contains("error"));
+        assert(r["error"]["code"] == "html_tag_too_large");
+    }
+
+    {
+        std::string adversarial = "<a class=\"result__a\" href=\"https://example.com/a\">";
+        adversarial += std::string(200000, '<');
+        adversarial += "title</a><a class=\"result__snippet\">snippet</a>";
+        const auto parsed = parse_duckduckgo_html_results(adversarial, 10);
+        assert(parsed.size() == 1);
+        assert(parsed[0].url == "https://example.com/a");
     }
 
     {

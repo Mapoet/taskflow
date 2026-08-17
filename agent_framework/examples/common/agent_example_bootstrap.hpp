@@ -211,11 +211,15 @@ inline conversation::TurnResult run_conversation_turn(
             std::to_string(serial.fetch_add(1, std::memory_order_relaxed));
         active_task.reset();
     }
-    request.run_id = configured_run && *configured_run
-        ? configured_run
-        : (active_task && !active_task->current_run_id.empty()
-               ? active_task->current_run_id
-               : request.turn_id);
+    // A non-control turn creates a new executable requirement revision and
+    // therefore needs a new Run identity.  Reusing current_run_id here made
+    // the second interactive turn collide with task_run_links' primary key.
+    // Control commands observe/mutate the current Run and deliberately retain
+    // it.  An explicit AGENT_RUN_ID remains an operator-owned idempotency key.
+    request.run_id = conversation::select_task_run_id(
+        configured_run && *configured_run ? configured_run : "",
+        active_task ? active_task->current_run_id : "", control_only,
+        request.turn_id);
     if(expected_task_revision &&
        (!active_task || active_task->revision != *expected_task_revision))
         throw std::runtime_error("task_command_stale_revision");

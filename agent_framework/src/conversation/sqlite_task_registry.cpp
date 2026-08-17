@@ -40,6 +40,20 @@ std::string normalized(std::string_view input) {
     return value;
 }
 
+std::string mutation_error(std::string_view error) {
+    if(error.find("UNIQUE constraint failed: task_run_links") != std::string_view::npos)
+        return "task_run_link_conflict";
+    if(error.find("UNIQUE constraint failed: task_turn_links") != std::string_view::npos)
+        return "task_turn_idempotency_conflict";
+    if(error.find("UNIQUE constraint failed: task_requirement_revisions") !=
+       std::string_view::npos)
+        return "task_requirement_revision_conflict";
+    if(error.find("UNIQUE constraint failed: conversation_tasks") !=
+       std::string_view::npos)
+        return "task_create_idempotency_conflict";
+    return std::string(error);
+}
+
 void bind_identity(sqlite3_stmt* statement, const ConversationIdentity& identity) {
     sql::bind_text(statement, 1, identity.tenant_id);
     sql::bind_text(statement, 2, identity.conversation_id);
@@ -325,6 +339,40 @@ TaskMutationResult SQLiteTaskRegistry::create(
     auto* db = sql::database(db_);
     try {
         sql::Transaction transaction(db);
+        sql::Statement existing(db,
+            "SELECT task_id,root_turn_id,current_turn_id,current_run_id,parent_task_id,"
+            "state,closure_state,revision,requirement_revision,plan_revision,"
+            "created_at,updated_at,digest FROM conversation_tasks WHERE tenant=? "
+            "AND conversation=? AND task_id=?");
+        bind_identity(existing.get(), task.identity);
+        sql::bind_text(existing.get(), 3, task.task_id);
+        if(sql::step(existing.get()) == SQLITE_ROW) {
+            const auto stored = task_from(existing.get(), task.identity);
+            sql::Statement replay(db,
+                "SELECT r.turn_id,r.content,r.intent,l.run_id FROM "
+                "task_requirement_revisions r JOIN task_turn_links l ON "
+                "l.tenant=r.tenant AND l.conversation=r.conversation AND "
+                "l.task_id=r.task_id AND l.requirement_revision=r.revision AND "
+                "l.turn_id=r.turn_id "
+                "WHERE r.tenant=? AND r.conversation=? AND r.task_id=? AND "
+                "r.revision=1");
+            bind_identity(replay.get(), task.identity);
+            sql::bind_text(replay.get(), 3, task.task_id);
+            const auto expected_intent = requirement.intent ==
+                    TaskInputIntent::StartNewTask
+                ? TaskInputIntent::StartNewTask
+                : TaskInputIntent::InitialRequest;
+            const bool exact = sql::step(replay.get()) == SQLITE_ROW &&
+                stored.root_turn_id == task.root_turn_id &&
+                sql::column_text(replay.get(), 0) == requirement.turn_id &&
+                sql::column_text(replay.get(), 1) == requirement.content &&
+                sql::column_text(replay.get(), 2) == name(expected_intent) &&
+                sql::column_text(replay.get(), 3) == task.current_run_id;
+            return exact
+                ? TaskMutationResult{true, stored.revision, {}}
+                : TaskMutationResult{false, stored.revision,
+                                     "task_create_idempotency_conflict"};
+        }
         const auto now = stamp();
         if(task.created_at.empty()) task.created_at = now;
         if(task.updated_at.empty()) task.updated_at = now;
@@ -384,7 +432,7 @@ TaskMutationResult SQLiteTaskRegistry::create(
         transaction.commit();
         return {true, task.revision, {}};
     } catch(const std::exception& error) {
-        return {false, 0, error.what()};
+        return {false, 0, mutation_error(error.what())};
     }
 }
 
@@ -405,6 +453,20 @@ TaskMutationResult SQLiteTaskRegistry::attach_turn(
         sql::bind_text(old.get(), 3, link.task_id);
         if(sql::step(old.get()) != SQLITE_ROW) return {false, 0, "task_not_found"};
         auto task = task_from(old.get(), link.identity);
+        sql::Statement replay(db,
+            "SELECT task_id,run_id,intent FROM task_turn_links WHERE tenant=? "
+            "AND conversation=? AND turn_id=?");
+        bind_identity(replay.get(), link.identity);
+        sql::bind_text(replay.get(), 3, link.turn_id);
+        if(sql::step(replay.get()) == SQLITE_ROW) {
+            const bool exact = sql::column_text(replay.get(), 0) == link.task_id &&
+                sql::column_text(replay.get(), 1) == link.run_id &&
+                sql::column_text(replay.get(), 2) == name(link.intent);
+            return exact
+                ? TaskMutationResult{true, task.revision, {}}
+                : TaskMutationResult{false, task.revision,
+                                     "task_turn_idempotency_conflict"};
+        }
         if(task.revision != expected) return {false, task.revision, "task_revision_conflict"};
         auto stored_link = link;
         stored_link.requirement_revision = task.requirement_revision;
@@ -442,7 +504,7 @@ TaskMutationResult SQLiteTaskRegistry::attach_turn(
              {"intent", name(link.intent)}});
         transaction.commit();
         return {true, task.revision, {}};
-    } catch(const std::exception& error) { return {false, 0, error.what()}; }
+    } catch(const std::exception& error) { return {false, 0, mutation_error(error.what())}; }
 }
 
 TaskMutationResult SQLiteTaskRegistry::bind_run(
@@ -461,6 +523,27 @@ TaskMutationResult SQLiteTaskRegistry::bind_run(
         bind_identity(old.get(), link.identity); sql::bind_text(old.get(), 3, link.task_id);
         if(sql::step(old.get()) != SQLITE_ROW) return {false, 0, "task_not_found"};
         auto task = task_from(old.get(), link.identity);
+        sql::Statement replay(db,
+            "SELECT requirement_revision,plan_revision,state,plan_digest,"
+            "task_contract_digest FROM task_run_links WHERE tenant=? AND "
+            "conversation=? AND task_id=? AND run_id=?");
+        bind_identity(replay.get(), link.identity);
+        sql::bind_text(replay.get(), 3, link.task_id);
+        sql::bind_text(replay.get(), 4, link.run_id);
+        if(sql::step(replay.get()) == SQLITE_ROW) {
+            const auto requirement_revision = link.requirement_revision == 0
+                ? task.requirement_revision : link.requirement_revision;
+            const bool exact = sql::column_uint64(replay.get(), 0) ==
+                    requirement_revision &&
+                sql::column_uint64(replay.get(), 1) == link.plan_revision &&
+                sql::column_text(replay.get(), 2) == link.state &&
+                sql::column_text(replay.get(), 3) == link.plan_digest &&
+                sql::column_text(replay.get(), 4) == link.task_contract_digest;
+            return exact
+                ? TaskMutationResult{true, task.revision, {}}
+                : TaskMutationResult{false, task.revision,
+                                     "task_run_link_conflict"};
+        }
         if(task.revision != expected) return {false, task.revision, "task_revision_conflict"};
         auto stored = link;
         stored.requirement_revision = task.requirement_revision;
@@ -486,7 +569,7 @@ TaskMutationResult SQLiteTaskRegistry::bind_run(
         append_event(db, task, "run_bound", {{"run_id",link.run_id},
             {"plan_revision",link.plan_revision},{"state",link.state}});
         transaction.commit(); return {true,task.revision,{}};
-    } catch(const std::exception& error) { return {false,0,error.what()}; }
+    } catch(const std::exception& error) { return {false,0,mutation_error(error.what())}; }
 }
 
 TaskMutationResult SQLiteTaskRegistry::bind_plan(
@@ -507,6 +590,32 @@ TaskMutationResult SQLiteTaskRegistry::bind_plan(
         sql::bind_text(old.get(), 3, link.task_id);
         if(sql::step(old.get()) != SQLITE_ROW) return {false, 0, "task_not_found"};
         auto task = task_from(old.get(), link.identity);
+        sql::Statement replay(db,
+            "SELECT requirement_revision,plan_revision,state,plan_digest,"
+            "task_contract_digest FROM task_run_links WHERE tenant=? AND "
+            "conversation=? AND task_id=? AND run_id=?");
+        bind_identity(replay.get(), link.identity);
+        sql::bind_text(replay.get(), 3, link.task_id);
+        sql::bind_text(replay.get(), 4, link.run_id);
+        if(sql::step(replay.get()) == SQLITE_ROW) {
+            const auto stored_requirement = sql::column_uint64(replay.get(), 0);
+            const auto stored_plan = sql::column_uint64(replay.get(), 1);
+            const auto stored_state = sql::column_text(replay.get(), 2);
+            const auto stored_plan_digest = sql::column_text(replay.get(), 3);
+            const auto stored_contract_digest = sql::column_text(replay.get(), 4);
+            if(stored_plan == link.plan_revision) {
+                const bool exact = stored_requirement == task.requirement_revision &&
+                    stored_state == link.state &&
+                    stored_plan_digest == link.plan_digest &&
+                    stored_contract_digest == link.task_contract_digest;
+                return exact
+                    ? TaskMutationResult{true, task.revision, {}}
+                    : TaskMutationResult{false, task.revision,
+                                         "task_run_plan_digest_conflict"};
+            }
+            if(stored_plan > link.plan_revision)
+                return {false, task.revision, "task_run_plan_revision_stale"};
+        }
         if(task.revision != expected) return {false, task.revision, "task_revision_conflict"};
         if(link.requirement_revision != 0 &&
            link.requirement_revision != task.requirement_revision)
@@ -565,7 +674,7 @@ TaskMutationResult SQLiteTaskRegistry::bind_plan(
         transaction.commit();
         return {true, task.revision, {}};
     } catch(const std::exception& error) {
-        return {false, 0, error.what()};
+        return {false, 0, mutation_error(error.what())};
     }
 }
 
@@ -622,6 +731,24 @@ TaskMutationResult SQLiteTaskRegistry::append_requirement(
         sql::bind_text(old.get(), 3, input.task_id);
         if(sql::step(old.get()) != SQLITE_ROW) return {false, 0, "task_not_found"};
         auto task = task_from(old.get(), input.identity);
+        sql::Statement replay(db,
+            "SELECT l.task_id,l.run_id,l.intent,r.content FROM task_turn_links l "
+            "JOIN task_requirement_revisions r ON r.tenant=l.tenant AND "
+            "r.conversation=l.conversation AND r.task_id=l.task_id AND "
+            "r.revision=l.requirement_revision WHERE l.tenant=? AND "
+            "l.conversation=? AND l.turn_id=?");
+        bind_identity(replay.get(), input.identity);
+        sql::bind_text(replay.get(), 3, input.turn_id);
+        if(sql::step(replay.get()) == SQLITE_ROW) {
+            const bool exact = sql::column_text(replay.get(), 0) == input.task_id &&
+                sql::column_text(replay.get(), 1) == run_id &&
+                sql::column_text(replay.get(), 2) == name(input.intent) &&
+                sql::column_text(replay.get(), 3) == input.content;
+            return exact
+                ? TaskMutationResult{true, task.revision, {}}
+                : TaskMutationResult{false, task.revision,
+                                     "task_turn_idempotency_conflict"};
+        }
         if(task.revision != expected) return {false, task.revision, "task_revision_conflict"};
         TaskRequirementRevision requirement = input;
         requirement.revision = task.requirement_revision + 1;
@@ -684,7 +811,7 @@ TaskMutationResult SQLiteTaskRegistry::append_requirement(
         transaction.commit();
         return {true, task.revision, {}};
     } catch(const std::exception& error) {
-        return {false, 0, error.what()};
+        return {false, 0, mutation_error(error.what())};
     }
 }
 
@@ -751,7 +878,7 @@ TaskMutationResult SQLiteTaskRegistry::transition(
         transaction.commit();
         return {true, task.revision, {}};
     } catch(const std::exception& error) {
-        return {false, 0, error.what()};
+        return {false, 0, mutation_error(error.what())};
     }
 }
 

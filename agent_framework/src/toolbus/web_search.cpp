@@ -60,19 +60,35 @@ void enrich_results(json& response, const json& args) {
     }
     max_bytes = std::max(1024, std::min(max_bytes, 262144));
     int succeeded = 0;
+    int failed = 0;
     for (int i = 0; i < top_k; ++i) {
         auto& item = response["results"][static_cast<std::size_t>(i)];
         if (!item.contains("url") || !item["url"].is_string()) {
             item["content_status"] = "invalid_url";
             continue;
         }
-        const json fetched = do_web_fetch({{"url", item["url"]},
-                                           {"max_bytes", max_bytes},
-                                           {"extract_mode", "main_text"},
-                                           {"accept", "text/html,text/plain,application/json"}});
+        json fetched;
+        try {
+            fetched = do_web_fetch({{"url", item["url"]},
+                                    {"max_bytes", max_bytes},
+                                    {"extract_mode", "main_text"},
+                                    {"accept", "text/html,text/plain,application/json"}});
+        } catch (const std::exception& e) {
+            item["content_status"] = "failed";
+            item["content_error"] = {{"code", "content_enrichment_exception"},
+                                     {"message", std::string(e.what()).substr(0, 256)}};
+            ++failed;
+            continue;
+        } catch (...) {
+            item["content_status"] = "failed";
+            item["content_error"] = {{"code", "content_enrichment_exception"}};
+            ++failed;
+            continue;
+        }
         if (fetched.contains("error")) {
             item["content_status"] = "failed";
             item["content_error"] = fetched["error"];
+            ++failed;
             continue;
         }
         item["content_status"] = "fetched";
@@ -85,12 +101,14 @@ void enrich_results(json& response, const json& args) {
             item["content"] = fetched["json"].dump();
         } else {
             item["content_status"] = "unsupported_media_type";
+            ++failed;
             continue;
         }
         ++succeeded;
     }
     response["content_enrichment"] =
-        {{"enabled", true}, {"attempted", top_k}, {"succeeded", succeeded}, {"max_bytes_per_url", max_bytes}};
+        {{"enabled", true}, {"attempted", top_k}, {"succeeded", succeeded}, {"failed", failed},
+         {"max_bytes_per_url", max_bytes}, {"failure_isolation", "per_url"}};
 }
 
 } // namespace

@@ -31,6 +31,15 @@ heartbeat 且 P95 间隔 5000 ms，以及本样本中 orphan/divergence/duplicat
 empty-completion 均为 0；SSE heartbeat 也由不符合门槛的 1 秒修正为 5 秒。
 该结果仅认证 localhost ProcessLive，不覆盖真实 ProviderLive 或多主机 HA。
 
+**2026-08-17 RIR 增量**：修复交互第二轮复用 `current_run_id` 与
+`task_run_links` 主键冲突的问题。非控制 Turn 默认以自身 Turn ID 建立新 Run，控制命令
+继续绑定当前 Run；显式 `AGENT_RUN_ID` 作为调用方幂等键。Task create、requirement append、
+Turn attach、Run bind 和 Plan bind 均已实现 exact-replay success、different-payload typed
+conflict，SQLite UNIQUE 文本不再泄漏到 UI。双线程 CAS、commit-response-loss、重复摘要和
+回滚无残行测试通过；五个二进制构建通过，相关回归 9/9、全库 Offline 119/119、Phase 4
+Offline 98/98。证据见 [`af-rir-task-registry-idempotency.md`](../evidence/af-rir-task-registry-idempotency.md)
+与真实 Web 截图 [`rir-task-run-idempotency.png`](../assets/ui/rir-task-run-idempotency.png)。
+
 ## 1. 状态语义
 
 | 标记 | 含义 | 允许的证据 |

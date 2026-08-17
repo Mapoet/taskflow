@@ -8,6 +8,7 @@
 
 #include <agent/toolbus/web_http.hpp>
 #include <agent/toolbus/web_search_ddg.hpp>
+#include <agent/internal/html_text.hpp>
 
 #include <algorithm>
 #include <chrono>
@@ -17,7 +18,6 @@
 #include <ctime>
 #include <mutex>
 #include <iostream>
-#include <regex>
 #include <string_view>
 #include <thread>
 
@@ -126,11 +126,70 @@ std::string html_decode_basic(std::string s) {
 }
 
 std::string strip_html_tags(const std::string& input) {
-    try {
-        return std::regex_replace(input, std::regex("<[^>]*>"), "");
-    } catch (...) {
-        return input;
+    return internal::strip_html_tags_bounded(input, 16384U);
+}
+
+char ascii_lower_local(char c) {
+    return c >= 'A' && c <= 'Z' ? static_cast<char>(c - 'A' + 'a') : c;
+}
+
+std::string ascii_lower_copy(std::string_view value) {
+    std::string out(value);
+    std::transform(out.begin(), out.end(), out.begin(), ascii_lower_local);
+    return out;
+}
+
+std::size_t html_tag_end(std::string_view html, std::size_t begin) {
+    char quote = 0;
+    for (std::size_t i = begin; i < html.size(); ++i) {
+        const char c = html[i];
+        if (quote) {
+            if (c == quote) quote = 0;
+        } else if (c == '\'' || c == '"') {
+            quote = c;
+        } else if (c == '>') {
+            return i;
+        }
     }
+    return std::string_view::npos;
+}
+
+std::string html_attribute(std::string_view tag, std::string_view wanted) {
+    const std::string lower = ascii_lower_copy(tag);
+    std::size_t p = 1;
+    while (p < tag.size() && !std::isspace(static_cast<unsigned char>(tag[p])) && tag[p] != '>') ++p;
+    while (p < tag.size()) {
+        while (p < tag.size() && std::isspace(static_cast<unsigned char>(tag[p]))) ++p;
+        const std::size_t name_begin = p;
+        while (p < tag.size() && (std::isalnum(static_cast<unsigned char>(tag[p])) ||
+                                  tag[p] == '_' || tag[p] == '-' || tag[p] == ':')) ++p;
+        if (p == name_begin) { ++p; continue; }
+        const std::string_view name(lower.data() + name_begin, p - name_begin);
+        while (p < tag.size() && std::isspace(static_cast<unsigned char>(tag[p]))) ++p;
+        if (p >= tag.size() || tag[p] != '=') continue;
+        ++p;
+        while (p < tag.size() && std::isspace(static_cast<unsigned char>(tag[p]))) ++p;
+        if (p >= tag.size()) break;
+        const char quote = (tag[p] == '\'' || tag[p] == '"') ? tag[p++] : 0;
+        const std::size_t value_begin = p;
+        if (quote) while (p < tag.size() && tag[p] != quote) ++p;
+        else while (p < tag.size() && !std::isspace(static_cast<unsigned char>(tag[p])) && tag[p] != '>') ++p;
+        if (name == wanted) return std::string(tag.substr(value_begin, p - value_begin));
+        if (quote && p < tag.size()) ++p;
+    }
+    return {};
+}
+
+bool class_has_token(std::string_view classes, std::string_view token) {
+    const std::string lower = ascii_lower_copy(classes);
+    std::size_t p = 0;
+    while (p < lower.size()) {
+        while (p < lower.size() && std::isspace(static_cast<unsigned char>(lower[p]))) ++p;
+        const std::size_t begin = p;
+        while (p < lower.size() && !std::isspace(static_cast<unsigned char>(lower[p]))) ++p;
+        if (std::string_view(lower).substr(begin, p - begin) == token) return true;
+    }
+    return false;
 }
 
 std::string url_decode_component(const std::string& enc) {
@@ -275,25 +334,42 @@ std::vector<WebSearchHit> parse_duckduckgo_html_results(std::string_view html, i
     if (max_results <= 0 || html.empty()) {
         return results;
     }
-    const std::string html_s(html);
-    try {
-        // ECMAScript (std::regex) has no reliable (?s); use [\s\S] to span newlines.
-        const std::regex result_block(
-            R"re(<a[^>]*class="[^"]*result__a[^"]*"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)</a>[\s\S]*?<a[^>]*class="[^"]*result__snippet[^"]*"[^>]*>([\s\S]*?)</a>)re",
-            std::regex::icase);
-        auto begin = std::sregex_iterator(html_s.begin(), html_s.end(), result_block);
-        auto end = std::sregex_iterator();
-        for (auto it = begin; it != end && static_cast<int>(results.size()) < max_results; ++it) {
-            WebSearchHit h;
-            h.url = unwrap_ddg_redirect_url((*it)[1].str());
-            h.title = strip_html_tags(html_decode_basic((*it)[2].str()));
-            h.snippet = strip_html_tags(html_decode_basic((*it)[3].str()));
-            trim_inplace_str(h.title);
-            trim_inplace_str(h.snippet);
-            results.push_back(std::move(h));
+    // Provider HTML is untrusted. This parser is iterative and linear; no std::regex recursion.
+    const std::string lower = ascii_lower_copy(html);
+    std::size_t cursor = 0;
+    WebSearchHit pending;
+    bool have_pending = false;
+    while (cursor < html.size() && static_cast<int>(results.size()) < max_results) {
+        const auto open = lower.find("<a", cursor);
+        if (open == std::string::npos) break;
+        if (open + 2 < lower.size() && !std::isspace(static_cast<unsigned char>(lower[open + 2])) &&
+            lower[open + 2] != '>') {
+            cursor = open + 2;
+            continue;
         }
-    } catch (...) {
-        return {};
+        const auto tag_close = html_tag_end(html, open + 2);
+        if (tag_close == std::string_view::npos || tag_close - open > 16384U) break;
+        const auto close = lower.find("</a", tag_close + 1);
+        if (close == std::string::npos) break;
+        const auto close_end = html.find('>', close + 3);
+        if (close_end == std::string_view::npos) break;
+        const auto tag = html.substr(open, tag_close - open + 1);
+        const std::string classes = html_attribute(tag, "class");
+        const auto body = html.substr(tag_close + 1, close - tag_close - 1);
+        if (class_has_token(classes, "result__a")) {
+            pending = {};
+            pending.url = unwrap_ddg_redirect_url(html_decode_basic(html_attribute(tag, "href")));
+            pending.title = html_decode_basic(strip_html_tags(std::string(body)));
+            trim_inplace_str(pending.title);
+            have_pending = !pending.url.empty();
+        } else if (have_pending && class_has_token(classes, "result__snippet")) {
+            pending.snippet = html_decode_basic(strip_html_tags(std::string(body)));
+            trim_inplace_str(pending.snippet);
+            results.push_back(std::move(pending));
+            pending = {};
+            have_pending = false;
+        }
+        cursor = close_end + 1;
     }
     return results;
 }

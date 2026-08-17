@@ -9,6 +9,15 @@ bool is_control(TaskInputIntent intent) {
 }
 }
 
+std::string select_task_run_id(std::string_view configured_run_id,
+                               std::string_view active_run_id,
+                               bool control_only,
+                               std::string_view turn_id) {
+    if(!configured_run_id.empty()) return std::string(configured_run_id);
+    if(control_only && !active_run_id.empty()) return std::string(active_run_id);
+    return std::string(turn_id);
+}
+
 TaskOpenResult TaskOrchestrator::open_or_resume(
     const TurnRequest& request, TaskInputIntent intent) {
     TaskOpenResult result;
