@@ -1,5 +1,9 @@
 # 任务档位分类：语言文字歧义与 LLM 决策方案
 
+> 实施状态：可执行 v2 闭环计划维护于
+> [`af-term-v2-plan.md`](af-term-v2-plan.md)。本文保留为需求与问题基线，
+> 避免把设计意图误写成已验证实现。
+
 **文档性质**：问题记录与后续实现约束（本文不修改源码）  
 **对象**：`src/conversation/task_classifier.cpp`  
 **关联**：`af-session-long-task-integration-plan.md` AF-SLT4（LLM TaskClassifier + deterministic policy gate）  

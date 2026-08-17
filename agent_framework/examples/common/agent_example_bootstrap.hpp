@@ -19,6 +19,7 @@
 #include <agent/conversation/harness_turn_adapter.hpp>
 #include <agent/conversation/task_registry.hpp>
 #include <agent/conversation/task_classifier.hpp>
+#include <agent/conversation/task_clarification_coordinator.hpp>
 #include <agent/conversation/task_control_service.hpp>
 #include <agent/conversation/task_command_service.hpp>
 #include <agent/conversation/task_orchestrator.hpp>
@@ -108,6 +109,8 @@ struct LiveRuntime {
     ExecutionTrustProfile trust_profile{ExecutionTrustProfile::Demo};
     conversation::TaskExecutionProfile task_profile{
         conversation::TaskExecutionProfile::Conversation};
+    // nullopt means no deployment override; an explicit "conversation" is a real override.
+    std::optional<conversation::TaskExecutionProfile> configured_task_profile;
     BootstrapResult bootstrap;
     conversation::HarnessSupportedTurnRuntime::Executor harness_turn_executor;
     conversation::HarnessSupportedTurnRuntime::Executor long_task_executor;
@@ -178,28 +181,22 @@ inline conversation::TurnResult run_conversation_turn(
         static_cast<std::uint64_t>(std::max(1, runtime.config.max_iterations))};
     conversation::SQLiteConversationStore store(database.string());
     conversation::SQLiteTaskRegistry task_registry(database.string());
+    conversation::SQLiteTaskProfileClarificationStore clarification_store(database.string());
     const char* configured_task = std::getenv("AGENT_TASK_ID");
     const char* configured_run = std::getenv("AGENT_RUN_ID");
     auto active_task = task_registry.active(identity);
-    const auto intent = conversation::classify_task_input(
-        request.input, active_task.has_value());
+    auto pending_clarification = clarification_store.pending(identity);
+    auto intent = pending_clarification
+        ? pending_clarification->task_intent
+        : conversation::classify_task_input(request.input, active_task.has_value());
     const bool control_only = intent == conversation::TaskInputIntent::StatusQuery ||
         intent == conversation::TaskInputIntent::CancelTask ||
         intent == conversation::TaskInputIntent::SuspendTask;
-    if(runtime.task_classifier && !control_only) {
-        auto classification=runtime.task_classifier->classify(
-            request.input,active_task.has_value());
-        classification=conversation::apply_task_routing_policy(
-            std::move(classification),runtime.task_profile,runtime.trust_profile);
-        if(!classification) {
-            if(runtime.trust_profile==ExecutionTrustProfile::Production)
-                throw std::runtime_error("task_classification_failed:"+classification.error);
-            classification=conversation::deterministic_task_classification(request.input);
-        }
-        request.profile=classification.profile;
-    }
     const bool force_new = intent == conversation::TaskInputIntent::StartNewTask;
-    if(configured_task && *configured_task) {
+    if(pending_clarification) {
+        request.task_id=pending_clarification->task_id;
+        request.run_id=pending_clarification->run_id;
+    } else if(configured_task && *configured_task) {
         request.task_id = configured_task;
         auto selected = task_registry.load(identity, request.task_id);
         if(selected) active_task = std::move(selected);
@@ -216,10 +213,23 @@ inline conversation::TurnResult run_conversation_turn(
     // the second interactive turn collide with task_run_links' primary key.
     // Control commands observe/mutate the current Run and deliberately retain
     // it.  An explicit AGENT_RUN_ID remains an operator-owned idempotency key.
-    request.run_id = conversation::select_task_run_id(
-        configured_run && *configured_run ? configured_run : "",
-        active_task ? active_task->current_run_id : "", control_only,
-        request.turn_id);
+    if(!pending_clarification)
+        request.run_id = conversation::select_task_run_id(
+            configured_run && *configured_run ? configured_run : "",
+            active_task ? active_task->current_run_id : "", control_only,
+            request.turn_id);
+    std::optional<conversation::TaskClassification> classification;
+    bool needs_clarification=false;
+    if(!pending_clarification && runtime.task_classifier && !control_only) {
+        classification=runtime.task_classifier->classify(
+            request.input,active_task.has_value());
+        *classification=conversation::apply_task_routing_policy(
+            std::move(*classification),runtime.configured_task_profile,runtime.trust_profile);
+        if(!*classification)
+            *classification=conversation::deterministic_task_classification(request.input);
+        request.profile=classification->profile;
+        needs_clarification=classification->requires_confirmation;
+    }
     if(expected_task_revision &&
        (!active_task || active_task->revision != *expected_task_revision))
         throw std::runtime_error("task_command_stale_revision");
@@ -276,10 +286,13 @@ inline conversation::TurnResult run_conversation_turn(
         return control_engine.start_turn(request);
     }
     conversation::TaskOrchestrator task_orchestrator(task_registry);
-    const auto task_open = task_orchestrator.open_or_resume(request, intent);
-    if(!task_open.ok) throw std::runtime_error(task_open.error);
-    active_task = task_open.task;
-    if(runtime.task_action_observer && runtime.task_command_policy &&
+    if(!pending_clarification && !needs_clarification) {
+        const auto task_open = task_orchestrator.open_or_resume(request, intent);
+        if(!task_open.ok) throw std::runtime_error(task_open.error);
+        active_task = task_open.task;
+    }
+    if(active_task && !pending_clarification && !needs_clarification &&
+       runtime.task_action_observer && runtime.task_command_policy &&
        runtime.task_principal_resolver) {
         const auto principal = runtime.task_principal_resolver(identity);
         if(principal) {
@@ -351,6 +364,31 @@ inline conversation::TurnResult run_conversation_turn(
         [callback = std::move(graph)](const auto&) mutable {
             return conversation::GraphTurnAdapter::from_workflow(callback());
         }, event_forwarder, runtime.long_task_executor);
+    if(pending_clarification) {
+        conversation::TaskClarificationCoordinator coordinator(
+            store,clarification_store,task_registry);
+        const auto resumed=coordinator.answer_pending(
+            identity,request.input,
+            static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::system_clock::now().time_since_epoch()).count()),
+            [&supported](const conversation::TurnRequest& restored,
+                         const conversation::TurnCheckpoint& checkpoint) {
+                return supported.execute(restored,checkpoint);
+            },std::move(event_sink));
+        if(!resumed.handled||!resumed.error.empty())
+            return {resumed.turn.checkpoint,resumed.turn.outcome,
+                    resumed.error.empty()?"clarification_resume_not_handled":resumed.error};
+        return resumed.turn;
+    }
+    if(needs_clarification && classification) {
+        conversation::TaskClarificationCoordinator coordinator(
+            store,clarification_store,task_registry);
+        const auto now_ms=static_cast<std::uint64_t>(
+            std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::system_clock::now().time_since_epoch()).count());
+        return coordinator.begin(request,intent,*classification,now_ms,
+                                 15ULL*60ULL*1000ULL,std::move(event_sink));
+    }
     conversation::ConversationEngine engine(
         store,
         [&supported](const conversation::TurnRequest& request,
@@ -378,6 +416,16 @@ inline conversation::TaskExecutionProfile task_execution_profile_from_env() {
         "AGENT_TASK_PROFILE must be one of: conversation, read_only_analysis, "
         "artifact_delivery, code_change, external_action, professional");
     return *parsed;
+}
+
+inline std::optional<conversation::TaskExecutionProfile> configured_task_profile_from_env() {
+    const char* raw=std::getenv("AGENT_TASK_PROFILE");
+    if(!raw||!*raw)return std::nullopt;
+    auto parsed=conversation::task_execution_profile(raw);
+    if(!parsed)throw std::invalid_argument(
+        "AGENT_TASK_PROFILE must be one of: conversation, read_only_analysis, "
+        "artifact_delivery, code_change, external_action, professional");
+    return parsed;
 }
 
 inline void require_harness_supported_execution(const LiveRuntime& runtime) {
@@ -578,6 +626,7 @@ inline LiveRuntime build_live_runtime(const LiveRuntimeOptions& options) {
     LiveRuntime runtime;
     runtime.trust_profile = execution_trust_profile_from_env();
     runtime.task_profile = task_execution_profile_from_env();
+    runtime.configured_task_profile = configured_task_profile_from_env();
     runtime.explicit_legacy_fallback = env_truthy("AGENT_LEGACY_REACT_FALLBACK");
     runtime.task_command_policy = options.task_command_policy
         ? options.task_command_policy

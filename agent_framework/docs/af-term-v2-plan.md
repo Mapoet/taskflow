@@ -27,11 +27,11 @@
 
 **Produces:** `TaskIntentKind`, `TaskIntentDecision`, `TaskClassificationEnvelope`, optional deployment override, and explicit statement that authorization is downstream.
 
-- [ ] Add intent kinds for new, continue, add requirement, narrow scope, replan, pause, cancel, status and profile confirmation.
-- [ ] Separate `ExecutionProfileSuggestion` from `EffectClass` and authorization.
-- [ ] Replace the ambiguous `Conversation == no override` API with `std::optional<TaskExecutionProfile>`.
-- [ ] Add JSON round-trip and non-escalation tests.
-- [ ] Run `cmake --build build-ui --target test_task_classifier -j2` and the matching CTest.
+- [x] Add intent kinds for new, continue, add requirement, narrow scope, replan, pause, cancel, status and profile confirmation.
+- [x] Separate `ExecutionProfileSuggestion` from `EffectClass` and authorization.
+- [x] Replace the ambiguous `Conversation == no override` API with `std::optional<TaskExecutionProfile>`.
+- [x] Add JSON round-trip and non-escalation tests.
+- [x] Run `cmake --build build-ui --target test_task_classifier -j2` and the matching CTest.
 
 ## TERM1 — Strict structured output
 
@@ -45,11 +45,11 @@
 
 **Produces:** `parse_task_classification_v2(std::string_view)` with exact required fields, bounded strings, runtime-owned classifier metadata and stable error codes.
 
-- [ ] Write failing tests for fenced JSON, multiple objects, trailing prose, missing/unknown fields, invalid enum/confidence, spoofed classifier ID and oversized output.
-- [ ] Implement exact JSON parsing; do not extract the first/last brace range.
-- [ ] Validate schema version, intent, profile, long-running recommendation, confidence, rationale and linguistic evidence.
-- [ ] Stamp classifier and prompt revisions in trusted runtime code.
-- [ ] Run focused tests and `git diff --check`.
+- [x] Write failing tests for fenced JSON, multiple objects, trailing prose, missing/unknown fields, invalid enum/confidence, spoofed classifier ID and oversized output.
+- [x] Implement exact JSON parsing; do not extract the first/last brace range.
+- [x] Validate schema version, intent, profile, long-running recommendation, confidence, rationale and linguistic evidence.
+- [x] Stamp classifier and prompt revisions in trusted runtime code.
+- [x] Run focused tests and `git diff --check`.
 
 ## TERM2 — LLM linguistic cognition v2
 
@@ -78,11 +78,13 @@
 
 **Produces:** `TaskProfileClarificationStore`, `SQLiteTaskProfileClarificationStore`, CAS transitions and `parse_profile_confirmation`.
 
-- [ ] Define Pending, Confirmed, Exhausted, Expired and Cancelled states.
-- [ ] Persist identity, task, recommendation, allowed tokens, attempt count, revision, expiry and decision reference.
-- [ ] Accept exactly one canonical token; reject negated, multiple and free-form answers.
-- [ ] Stop after three failed attempts and remain Conversation.
-- [ ] Test concurrent confirmation, expiry and process reopen/recovery.
+- [x] Define Pending, Confirmed, Exhausted, Expired and Cancelled states.
+- [x] Persist identity, task, recommendation, allowed tokens, attempt count, revision, expiry and decision reference.
+- [x] Accept exactly one canonical token (`conversation`, `read_only_analysis`,
+  `artifact_delivery`, `code_change`, `external_action`, `professional`); reject
+  negated, multiple and free-form answers.
+- [x] Stop after three failed attempts and remain Conversation.
+- [~] Test expiry and process reopen/recovery; cross-process CAS race stress remains in TERM4.
 
 ## TERM4 — Conversation, task and run integration
 

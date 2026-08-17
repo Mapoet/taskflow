@@ -288,6 +288,12 @@ endif()
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/run/types.cpp)
     list(APPEND AGENT_SOURCES src/run/types.cpp)
 endif()
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/identity/runtime_subject.cpp)
+    list(APPEND AGENT_SOURCES src/identity/runtime_subject.cpp)
+endif()
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/session/sqlite_session_catalog.cpp)
+    list(APPEND AGENT_SOURCES src/session/sqlite_session_catalog.cpp)
+endif()
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/conversation/types.cpp)
     list(APPEND AGENT_SOURCES
         src/conversation/types.cpp
@@ -301,6 +307,8 @@ if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/conversation/types.cpp)
         src/conversation/harness_supported_runtime.cpp
         src/conversation/harness_turn_adapter.cpp
         src/conversation/task_classifier.cpp
+        src/conversation/sqlite_task_profile_clarification.cpp
+        src/conversation/task_clarification_coordinator.cpp
         src/conversation/task_control_service.cpp
         src/conversation/task_orchestrator.cpp
         src/conversation/task_planning_service.cpp
@@ -1858,9 +1866,66 @@ if(BUILD_TESTING)
     if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_task_classifier.cpp)
         add_executable(test_task_classifier tests/test_task_classifier.cpp)
         target_link_libraries(test_task_classifier PRIVATE agent_framework)
+        if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
+            target_compile_options(test_task_classifier PRIVATE -UNDEBUG)
+        endif()
         add_test(NAME task_classifier COMMAND test_task_classifier)
         set_tests_properties(task_classifier PROPERTIES
             LABELS "phase4-offline;offline;phase4-conversation;phase4-llm-runtime;phase4-integration")
+    endif()
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_task_classifier_eval.cpp)
+        add_executable(test_task_classifier_eval tests/test_task_classifier_eval.cpp)
+        target_link_libraries(test_task_classifier_eval PRIVATE agent_framework)
+        target_compile_definitions(test_task_classifier_eval PRIVATE
+            AGENT_TASK_CLASSIFIER_CORPUS="${CMAKE_CURRENT_SOURCE_DIR}/tests/data/task-classification-v2.jsonl")
+        if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
+            target_compile_options(test_task_classifier_eval PRIVATE -UNDEBUG)
+        endif()
+        add_test(NAME task_classifier_eval COMMAND test_task_classifier_eval)
+        set_tests_properties(task_classifier_eval PROPERTIES
+            LABELS "phase4-offline;offline;phase4-conversation;phase4-llm-runtime;phase4-eval")
+    endif()
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_runtime_subject.cpp)
+        add_executable(test_runtime_subject tests/test_runtime_subject.cpp)
+        target_link_libraries(test_runtime_subject PRIVATE agent_framework)
+        if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
+            target_compile_options(test_runtime_subject PRIVATE -UNDEBUG)
+        endif()
+        add_test(NAME runtime_subject COMMAND test_runtime_subject)
+        set_tests_properties(runtime_subject PROPERTIES
+            LABELS "phase4-offline;offline;phase4-security;phase4-integration")
+    endif()
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_product_session_catalog.cpp)
+        add_executable(test_product_session_catalog tests/test_product_session_catalog.cpp)
+        target_link_libraries(test_product_session_catalog PRIVATE agent_framework)
+        if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
+            target_compile_options(test_product_session_catalog PRIVATE -UNDEBUG)
+        endif()
+        add_test(NAME product_session_catalog COMMAND test_product_session_catalog)
+        set_tests_properties(product_session_catalog PROPERTIES
+            LABELS "phase4-offline;offline;phase4-durable;phase4-security;phase4-integration")
+    endif()
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_task_profile_clarification.cpp)
+        add_executable(test_task_profile_clarification
+            tests/test_task_profile_clarification.cpp)
+        target_link_libraries(test_task_profile_clarification PRIVATE agent_framework)
+        if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
+            target_compile_options(test_task_profile_clarification PRIVATE -UNDEBUG)
+        endif()
+        add_test(NAME task_profile_clarification COMMAND test_task_profile_clarification)
+        set_tests_properties(task_profile_clarification PROPERTIES
+            LABELS "phase4-offline;offline;phase4-conversation;phase4-durable;phase4-security")
+    endif()
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_task_clarification_coordinator.cpp)
+        add_executable(test_task_clarification_coordinator
+            tests/test_task_clarification_coordinator.cpp)
+        target_link_libraries(test_task_clarification_coordinator PRIVATE agent_framework)
+        if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
+            target_compile_options(test_task_clarification_coordinator PRIVATE -UNDEBUG)
+        endif()
+        add_test(NAME task_clarification_coordinator COMMAND test_task_clarification_coordinator)
+        set_tests_properties(task_clarification_coordinator PROPERTIES
+            LABELS "phase4-offline;offline;phase4-conversation;phase4-durable;phase4-integration;phase4-security")
     endif()
     if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_task_control_service.cpp)
         add_executable(test_task_control_service tests/test_task_control_service.cpp)

@@ -16,29 +16,30 @@
 - Every command is idempotent and revision-aware.
 - Every UI batch requires real-browser screenshots at desktop, tablet and mobile widths.
 
-## GUI0 — Identity/lifecycle RFC and capability inventory
+## GUI0 — Identity/lifecycle RFC and capability inventory `[~]`
 
-- [ ] Freeze object definitions, state machines, error codes and evidence levels.
+- [x] Freeze object definitions, state machines, error codes and evidence levels in `gui-identity-lifecycle-rfc.md`.
 - [ ] Map every visible control to an action, detail route, configuration route or explicit read-only label.
 - [ ] Define Legacy adapter lifetime and prohibit new `/ui/*` features.
 
-## GUI1 — Unified RuntimeSubject
+## GUI1 — Unified RuntimeSubject `[~]`
 
 **Files:** create `include/agent/identity/runtime_subject.hpp`, adapters and propagation tests.
 
-- [ ] Carry tenant, organization, principal, project, workspace, session, conversation, task, run, turn, agent and auth revision through API, event, tool, memory, approval and artifact boundaries.
-- [ ] Reject missing or inconsistent identity at production boundaries.
-- [ ] Retain a typed Legacy adapter only for migrated local data.
+- [x] Define tenant, organization, principal, project, workspace, session, conversation, task, run, turn, agent and auth revision in one typed subject.
+- [x] Reject missing or inconsistent identity at the typed production boundary.
+- [x] Retain a typed Legacy adapter only for migrated local data.
+- [ ] Propagate the subject through every API, event, tool, memory, approval and artifact adapter.
 
-## GUI2 — Product Session Catalog
+## GUI2 — Product Session Catalog `[~]`
 
 **Files:** create `session/catalog_types.hpp`, `session/session_catalog.hpp`, SQLite repository, membership repository and list projection.
 
-- [ ] Implement create/get/list/search/rename/tag/pin/move.
-- [ ] Implement archive/trash/restore and asynchronous purge request.
-- [ ] Implement stable cursor pagination, revision CAS and membership roles.
+- [x] Implement create/get/list/search/rename/tag/pin/move repository operations.
+- [x] Implement archive/trash/restore and asynchronous purge lifecycle state.
+- [x] Implement stable sequence cursor pagination, revision CAS and membership roles.
 - [ ] Migrate legacy default data without conflating checkpoint rows.
-- [ ] Test permissions, cursor stability, reopen recovery and concurrent CAS.
+- [~] Test tenant/membership visibility, cursor stability, reopen recovery and stale CAS; endpoint authorization and concurrent race stress remain.
 
 ## GUI3 — Run Supervisor and scheduler
 

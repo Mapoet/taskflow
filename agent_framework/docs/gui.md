@@ -1,5 +1,10 @@
 # Agent Framework GUI 重构建议与实施计划
 
+> 实施状态：可执行升级计划维护于 [`gui-v2-plan.md`](gui-v2-plan.md)，
+> 联合顺序见 [`af-term-gui-integration-plan.md`](af-term-gui-integration-plan.md)，
+> 已冻结的身份/生命周期语义见
+> [`gui-identity-lifecycle-rfc.md`](gui-identity-lifecycle-rfc.md)。本文保留为产品需求与缺口基线。
+
 > 审核日期：2026-08-17
 >
 > 目标：把 Agent Framework（下文简称 AF）从“单 Demo 会话 + 运行态看板”升级为可管理、可协作、可并行、可审计的多用户 Agent 工作台。
