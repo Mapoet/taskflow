@@ -14,6 +14,12 @@ public:
         value.profile=agent_framework::conversation::TaskExecutionProfile::CodeChange;
         value.effect_class=agent_framework::conversation::EffectClass::WorkspaceWrite;
         value.confidence=.5;value.requires_confirmation=true;
+        value.clarification=agent_framework::conversation::TaskClarificationProposal{
+            "Do you want an explanation or an implementation?",{
+                {"explain","Explain only","Do not edit files",
+                 agent_framework::conversation::TaskExecutionProfile::ReadOnlyAnalysis},
+                {"implement","Implement and test","Edit the parser and run tests",
+                 agent_framework::conversation::TaskExecutionProfile::CodeChange}}};
         value.decision_id="live-runtime-decision";return value;
     }
 };
@@ -36,10 +42,10 @@ int main(){
     auto waiting=example::run_conversation_turn(runtime,"clarification-demo","modify parser",graph);
     assert(waiting.error.empty()&&waiting.checkpoint.phase==conversation::TurnPhase::AwaitingInput);
     assert(calls==0);
-    auto resumed=example::run_conversation_turn(runtime,"clarification-demo","code_change",graph);
+    auto resumed=example::run_conversation_turn(runtime,"clarification-demo","implement",graph);
     assert(resumed.error.empty()&&resumed.checkpoint.phase==conversation::TurnPhase::Completed);
     assert(calls==1);
-    auto replay=example::run_conversation_turn(runtime,"clarification-demo","code_change",graph);
+    auto replay=example::run_conversation_turn(runtime,"clarification-demo","implement",graph);
     assert(replay.error.empty()&&replay.checkpoint.turn_id==resumed.checkpoint.turn_id&&
            replay.checkpoint.phase==conversation::TurnPhase::Completed&&calls==1);
     conversation::SQLiteTaskRegistry tasks(path);auto active=tasks.active({"tenant","conversation"});

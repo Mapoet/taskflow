@@ -41,6 +41,27 @@ std::vector<std::string> decode_tokens(std::string_view value) {
     catch(...) { throw std::runtime_error("stored clarification tokens invalid"); }
 }
 
+std::string encode_options(const std::vector<TaskClarificationOption>& options) {
+    auto values=nlohmann::json::array();
+    for(const auto& option:options)values.push_back({{"id",option.id},{"label",option.label},
+        {"description",option.description},{"profile",name(option.profile)}});
+    return values.dump();
+}
+
+std::vector<TaskClarificationOption> decode_options(std::string_view value) {
+    std::vector<TaskClarificationOption> result;
+    if(value.empty())return result;
+    try {
+        for(const auto& item:nlohmann::json::parse(value)) {
+            const auto profile=task_execution_profile(item.at("profile").get<std::string>());
+            if(!profile)throw std::runtime_error("stored clarification option profile invalid");
+            result.push_back({item.at("id").get<std::string>(),item.at("label").get<std::string>(),
+                item.value("description",std::string{}),*profile});
+        }
+        return result;
+    } catch(...) { throw std::runtime_error("stored clarification options invalid"); }
+}
+
 std::optional<ProfileClarificationState> state_from(std::string_view value) {
     for(std::size_t i = 0; i < 5; ++i) {
         const auto state = static_cast<ProfileClarificationState>(i);
@@ -70,6 +91,8 @@ TaskProfileClarification decode(sqlite3_stmt* row,
     value.state = *state_from(sql::column_text(row, 13));
     value.created_at = sql::column_text(row, 14);
     value.updated_at = sql::column_text(row, 15);
+    value.question = sql::column_text(row, 16);
+    value.options = decode_options(sql::column_text(row, 17));
     return value;
 }
 
@@ -77,7 +100,7 @@ constexpr const char* select_columns =
     "clarification_id,task_id,decision_id,turn_id,run_id,task_intent,"
     "recommended_profile,selected_profile,allowed_tokens_json,attempt_count,"
     "max_attempts,revision,expires_at_ms,state,"
-    "created_at,updated_at";
+    "created_at,updated_at,question,options_json";
 }  // namespace
 
 std::string_view name(ProfileClarificationState value) {
@@ -139,7 +162,10 @@ void SQLiteTaskProfileClarificationStore::migrate() {
     add_column("turn_id","turn_id TEXT NOT NULL DEFAULT ''");
     add_column("run_id","run_id TEXT NOT NULL DEFAULT ''");
     add_column("task_intent","task_intent TEXT NOT NULL DEFAULT 'initial_request'");
+    add_column("question","question TEXT NOT NULL DEFAULT ''");
+    add_column("options_json","options_json TEXT NOT NULL DEFAULT '[]'");
     sql::exec(db,"UPDATE task_profile_clarifications SET state='cancelled' WHERE state='pending' AND (turn_id='' OR run_id='')");
+    sql::exec(db,"UPDATE task_profile_clarifications SET state='cancelled' WHERE state='pending' AND (question='' OR options_json='[]')");
     sql::exec(db,
         "CREATE INDEX IF NOT EXISTS task_profile_clarification_pending_idx ON "
         "task_profile_clarifications(tenant,conversation,state,created_at)");
@@ -150,7 +176,8 @@ ClarificationMutationResult SQLiteTaskProfileClarificationStore::create(
     if(value.identity.tenant_id.empty() || value.identity.conversation_id.empty() ||
        value.clarification_id.empty() || value.decision_id.empty() ||
        value.turn_id.empty() || value.run_id.empty() || value.task_id.empty() ||
-       value.allowed_tokens.empty() || value.max_attempts == 0 ||
+       value.question.empty() || value.options.size()<2 || value.allowed_tokens.empty() ||
+       value.max_attempts == 0 ||
        value.expires_at_ms == 0)
         return {false, 0, value.state, "clarification_contract_invalid"};
     std::lock_guard lock(mutex_);
@@ -172,7 +199,10 @@ ClarificationMutationResult SQLiteTaskProfileClarificationStore::create(
         value.attempt_count = 0;
         value.state = ProfileClarificationState::Pending;
         sql::Statement insert(db,
-            "INSERT INTO task_profile_clarifications VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
+            "INSERT INTO task_profile_clarifications(tenant,conversation,clarification_id,task_id,"
+            "decision_id,turn_id,run_id,task_intent,recommended_profile,selected_profile,"
+            "allowed_tokens_json,attempt_count,max_attempts,revision,expires_at_ms,state,created_at,"
+            "updated_at,question,options_json) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
         bind_identity(insert.get(), value.identity);
         sql::bind_text(insert.get(), 3, value.clarification_id);
         sql::bind_text(insert.get(), 4, value.task_id);
@@ -190,6 +220,8 @@ ClarificationMutationResult SQLiteTaskProfileClarificationStore::create(
         sql::bind_text(insert.get(), 16, name(value.state));
         sql::bind_text(insert.get(), 17, value.created_at);
         sql::bind_text(insert.get(), 18, value.updated_at);
+        sql::bind_text(insert.get(), 19, value.question);
+        sql::bind_text(insert.get(), 20, encode_options(value.options));
         if(sql::step(insert.get()) != SQLITE_DONE) throw std::runtime_error(sqlite3_errmsg(db));
         transaction.commit();
         return {true, 1, value.state, {}};
@@ -252,7 +284,8 @@ ClarificationMutationResult SQLiteTaskProfileClarificationStore::answer(
         if(current.state != ProfileClarificationState::Pending)
             return {false, current.revision, current.state, "clarification_not_pending"};
 
-        auto confirmation = parse_profile_confirmation(input);
+        const auto selected_option=std::find_if(current.options.begin(),current.options.end(),
+            [&](const auto& option){return option.id==input;});
         auto next_state = ProfileClarificationState::Pending;
         std::string selected;
         std::uint32_t attempts = current.attempt_count;
@@ -260,9 +293,7 @@ ClarificationMutationResult SQLiteTaskProfileClarificationStore::answer(
         if(now_ms >= current.expires_at_ms) {
             next_state = ProfileClarificationState::Expired;
             error = "clarification_expired";
-        } else if(!confirmation ||
-                  std::find(current.allowed_tokens.begin(), current.allowed_tokens.end(),
-                            std::string(name(*confirmation.profile))) == current.allowed_tokens.end()) {
+        } else if(selected_option==current.options.end()) {
             ++attempts;
             next_state = attempts >= current.max_attempts
                 ? ProfileClarificationState::Exhausted
@@ -272,7 +303,7 @@ ClarificationMutationResult SQLiteTaskProfileClarificationStore::answer(
                 : "profile_confirmation_requires_one_allowed_token";
         } else {
             next_state = ProfileClarificationState::Confirmed;
-            selected = std::string(name(*confirmation.profile));
+            selected = std::string(name(selected_option->profile));
         }
         sql::Statement update(db,
             "UPDATE task_profile_clarifications SET selected_profile=?,attempt_count=?,"

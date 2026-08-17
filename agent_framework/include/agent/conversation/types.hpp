@@ -129,6 +129,7 @@ namespace agent_framework::conversation
         std::string candidate_answer;
         std::vector<std::string> tool_receipt_refs;
         std::optional<std::string> clarification;
+        nlohmann::json clarification_options = nlohmann::json::array();
         bool task_completion_verified{false};
     };
     struct RuntimeEventEnvelope

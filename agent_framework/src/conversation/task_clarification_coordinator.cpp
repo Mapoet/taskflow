@@ -1,21 +1,29 @@
 #include "agent/conversation/task_clarification_coordinator.hpp"
 
 #include <array>
+#include <algorithm>
 #include <chrono>
 #include <thread>
 
 namespace agent_framework::conversation {
 namespace {
-std::vector<std::string> profile_tokens() {
-    std::vector<std::string> result;
-    for(std::size_t i=0;i<6;++i)
-        result.emplace_back(name(static_cast<TaskExecutionProfile>(i)));
-    return result;
+std::optional<TaskExecutionProfile> selected_profile(
+    const TaskProfileClarification& clarification,std::string_view option_id) {
+    const auto found=std::find_if(clarification.options.begin(),clarification.options.end(),
+        [&](const auto& option){return option.id==option_id;});
+    return found==clarification.options.end()?std::nullopt:
+        std::optional<TaskExecutionProfile>(found->profile);
 }
-std::string question(TaskExecutionProfile recommended) {
-    return "Please confirm one execution profile exactly: conversation, "
-        "read_only_analysis, artifact_delivery, code_change, external_action, "
-        "professional. Recommended: " + std::string(name(recommended));
+std::string retry_question(std::string_view question,std::uint32_t attempts,
+                           std::uint32_t maximum) {
+    return std::string(question)+" Attempts remaining: "+
+        std::to_string(maximum-attempts)+".";
+}
+json encode_options(const std::vector<TaskClarificationOption>& options) {
+    auto result=json::array();
+    for(const auto& option:options)result.push_back({{"id",option.id},{"label",option.label},
+        {"description",option.description}});
+    return result;
 }
 }
 
@@ -27,15 +35,22 @@ TurnResult TaskClarificationCoordinator::begin(
     value.identity=request.identity;value.clarification_id=classification.decision_id;
     value.task_id=request.task_id;value.decision_id=classification.decision_id;
     value.turn_id=request.turn_id;value.run_id=request.run_id;value.task_intent=intent;
-    value.recommended_profile=classification.profile;value.allowed_tokens=profile_tokens();
+    if(!classification.clarification||classification.clarification->options.size()<2)
+        return {{}, {}, "clarification_proposal_missing"};
+    value.recommended_profile=classification.profile;
+    value.question=classification.clarification->question;
+    value.options=classification.clarification->options;
+    for(const auto& option:value.options)value.allowed_tokens.push_back(option.id);
     value.expires_at_ms=now_ms+ttl_ms;value.created_at=std::to_string(now_ms);
     value.updated_at=value.created_at;
     const auto created=clarifications_.create(value);
     if(!created.ok)return {{},{},"clarification_create_failed:"+created.error};
-    const auto prompt=question(classification.profile);
-    ConversationEngine engine(conversations_,[prompt](const auto&,const auto&){
+    const auto prompt=value.question;
+    const auto options=encode_options(value.options);
+    ConversationEngine engine(conversations_,[prompt,options](const auto&,const auto&){
         ModelTurnOutcome outcome;outcome.reason=ModelTurnStopReason::AwaitingInput;
-        outcome.clarification=prompt;outcome.candidate_answer=prompt;return outcome;
+        outcome.clarification=prompt;outcome.clarification_options=options;
+        outcome.candidate_answer=prompt;return outcome;
     },std::move(sink));
     return engine.start_turn(request);
 }
@@ -47,9 +62,8 @@ ClarificationResumeResult TaskClarificationCoordinator::answer_pending(
     auto pending=clarifications_.pending(identity);
     if(!pending) {
         const auto latest=clarifications_.latest(identity);
-        const auto replay=parse_profile_confirmation(answer);
-        if(latest&&latest->state==ProfileClarificationState::Confirmed&&replay&&
-           latest->selected_profile==replay.profile) {
+        if(latest&&latest->state==ProfileClarificationState::Confirmed&&
+           latest->selected_profile==selected_profile(*latest,answer)) {
             result.handled=true;result.resumed=true;
             const auto checkpoint=conversations_.load_turn(identity,latest->turn_id);
             if(checkpoint)result.turn.checkpoint=*checkpoint;
@@ -62,12 +76,11 @@ ClarificationResumeResult TaskClarificationCoordinator::answer_pending(
     if(!mutation.ok && (mutation.error=="clarification_revision_conflict"||
                         mutation.error=="clarification_not_pending"||
                         mutation.error.find("locked")!=std::string::npos)) {
-        const auto replay=parse_profile_confirmation(answer);
         for(int attempt=0;attempt<100;++attempt) {
             try {
                 const auto current=clarifications_.load(identity,pending->clarification_id);
-                if(current&&current->state==ProfileClarificationState::Confirmed&&replay&&
-                   current->selected_profile==replay.profile) {
+                if(current&&current->state==ProfileClarificationState::Confirmed&&
+                   current->selected_profile==selected_profile(*current,answer)) {
                     const auto checkpoint=conversations_.load_turn(identity,pending->turn_id);
                     if(checkpoint)result.turn.checkpoint=*checkpoint;
                     result.resumed=true;
@@ -77,9 +90,18 @@ ClarificationResumeResult TaskClarificationCoordinator::answer_pending(
             std::this_thread::sleep_for(std::chrono::milliseconds(5));
         }
     }
-    if(!mutation.ok&&mutation.state!=ProfileClarificationState::Exhausted&&
-       mutation.state!=ProfileClarificationState::Expired) {
-        result.error="clarification_answer_failed:"+mutation.error;
+    if(!mutation.ok&&mutation.state==ProfileClarificationState::Pending) {
+        const auto current=clarifications_.load(identity,pending->clarification_id);
+        const auto prompt=retry_question(pending->question,
+            current?current->attempt_count:pending->attempt_count,
+            current?current->max_attempts:pending->max_attempts);
+        if(const auto checkpoint=conversations_.load_turn(identity,pending->turn_id))
+            result.turn.checkpoint=*checkpoint;
+        result.turn.outcome.reason=ModelTurnStopReason::AwaitingInput;
+        result.turn.outcome.clarification=prompt;
+        if(current)result.turn.outcome.clarification_options=encode_options(current->options);
+        else result.turn.outcome.clarification_options=encode_options(pending->options);
+        result.turn.outcome.candidate_answer=prompt;
         return result;
     }
     TurnRequest request;request.identity=identity;request.turn_id=pending->turn_id;

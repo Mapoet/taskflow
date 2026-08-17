@@ -41,7 +41,12 @@ int main(){using namespace agent_framework;using namespace conversation;
  TaskCommandRequest forbidden{TaskCommandKind::Cancel,turn};forbidden.principal=read_only;
  assert(secured.execute(forbidden).error=="task_command_scope_forbidden:task:control");
  TaskCommandRequest stale{TaskCommandKind::Continue,turn};stale.principal=principal;
- stale.expected_task_revision=1;assert(secured.execute(stale).error=="task_command_stale_revision");
+ stale.expected_task_revision=1;auto stale_result=secured.execute(stale);
+ assert(stale_result.error=="task_command_stale_revision");
+ assert(stale_result.task_revision==tasks.load(turn.identity,turn.task_id)->revision);
+ assert(stale_result.payload["expected_revision"]==1);
+ assert(stale_result.payload["current_revision"]==stale_result.task_revision);
+ assert(stale_result.payload["retryable"]==true);
  auto current=*tasks.load(turn.identity,turn.task_id);
  assert(tasks.transition(turn.identity,turn.task_id,current.revision,
      TaskLifecycleState::Closed,"completed_verified").ok);

@@ -16,6 +16,9 @@ int main(){
     request.task_id="task-1";request.run_id="run-1";
     TaskClassification weak;weak.profile=TaskExecutionProfile::CodeChange;
     weak.decision_id="decision-1";weak.requires_confirmation=true;weak.confidence=.5;
+    weak.clarification=TaskClarificationProposal{"Do you want analysis or implementation?",{
+        {"analyze","Analyze only","Do not modify files",TaskExecutionProfile::ReadOnlyAnalysis},
+        {"implement","Implement and test","Modify the parser",TaskExecutionProfile::CodeChange}}};
     {
         SQLiteConversationStore conversations(path);SQLiteTaskRegistry tasks(path);
         SQLiteTaskProfileClarificationStore clarifications(path);
@@ -23,12 +26,19 @@ int main(){
         auto waiting=coordinator.begin(request,TaskInputIntent::InitialRequest,weak,100,1000);
         assert(waiting.error.empty()&&waiting.checkpoint.phase==TurnPhase::AwaitingInput);
         assert(!tasks.active(identity));
+        auto retry=coordinator.answer_pending(identity,"please change code",150,
+            [](const TurnRequest&,const TurnCheckpoint&){assert(false);return ModelTurnOutcome{};});
+        assert(retry.handled&&!retry.resumed&&retry.error.empty());
+        assert(retry.turn.outcome.reason==ModelTurnStopReason::AwaitingInput);
+        assert(retry.turn.outcome.candidate_answer.find("Attempts remaining: 2")!=std::string::npos);
+        auto pending=clarifications.pending(identity);
+        assert(pending&&pending->attempt_count==1&&pending->revision==2);
     }
     {
         SQLiteConversationStore conversations(path);SQLiteTaskRegistry tasks(path);
         SQLiteTaskProfileClarificationStore clarifications(path);
         TaskClarificationCoordinator coordinator(conversations,clarifications,tasks);
-        int calls=0;auto resumed=coordinator.answer_pending(identity,"code_change",200,
+        int calls=0;auto resumed=coordinator.answer_pending(identity,"implement",200,
             [&calls](const TurnRequest& restored,const TurnCheckpoint&){++calls;
                 assert(restored.input=="modify the parser");assert(restored.task_id=="task-1");
                 assert(restored.run_id=="run-1");assert(restored.profile==TaskExecutionProfile::CodeChange);
@@ -66,9 +76,9 @@ int main(){
             std::this_thread::sleep_for(std::chrono::milliseconds(25));
             ModelTurnOutcome out;out.reason=ModelTurnStopReason::EndTurn;return out;};
         std::thread one([&]{ready.arrive_and_wait();a=first.answer_pending(
-            identity,"code_change",200,executor);});
+            identity,"implement",200,executor);});
         std::thread two([&]{ready.arrive_and_wait();b=second.answer_pending(
-            identity,"code_change",200,executor);});
+            identity,"implement",200,executor);});
         ready.arrive_and_wait();one.join();two.join();
         assert(a.handled&&b.handled&&a.error.empty()&&b.error.empty());
         assert(executions==1);

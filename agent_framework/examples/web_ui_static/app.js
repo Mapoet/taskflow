@@ -10,6 +10,8 @@
   const stopBtn = $("stop");
   const composer = $("composer");
   const tools = new Map();
+  const renderedClarifications = new Set();
+  const renderedRevisionConflicts = new Set();
   const markdown = window.markdownit({ html: false, linkify: true, typographer: false });
   const renderTimers = new WeakMap();
   const MAX_MARKDOWN_BYTES = 256 * 1024;
@@ -24,6 +26,9 @@
   let turnCount = 0;
   let interactionSnapshot = null;
   let selectedInteraction = null;
+  let currentTaskRevision = 0;
+  let pendingTaskCommand = null;
+  let lastSubmittedPrompt = "";
 
   if (window.mermaid) {
     window.mermaid.initialize({ startOnLoad: false, securityLevel: "strict", theme: "dark" });
@@ -205,6 +210,34 @@
     activeAssistant = null;
   }
 
+  function showTaskClarification(payload) {
+    const clarificationId = text(payload.clarification_id);
+    if (clarificationId && renderedClarifications.has(clarificationId)) {
+      setBusy(false); setRunState("awaiting_input"); return;
+    }
+    if (clarificationId) renderedClarifications.add(clarificationId);
+    finishAssistant();
+    const turn = addTurn("assistant", payload.message || "Please clarify how you want to proceed.", false);
+    turn.article.classList.add("clarification-turn");
+    const choices = document.createElement("div"); choices.className = "profile-choices";
+    (payload.options || []).forEach(function (option) {
+      const button = document.createElement("button"); button.type = "button";
+      button.className = "profile-choice"; button.dataset.optionId = text(option.id);
+      const label = document.createElement("strong"); label.textContent = text(option.label);
+      button.append(label);
+      if (option.description) {
+        const description = document.createElement("span");
+        description.textContent = text(option.description); button.append(description);
+      }
+      button.addEventListener("click", function () {
+        promptEl.value = text(option.id); promptEl.focus(); composer.requestSubmit();
+      });
+      choices.append(button);
+    });
+    turn.body.append(choices); setBusy(false); setRunState("awaiting_input");
+    setStatus("Choose one option to clarify the task");
+  }
+
   function toolKey(payload) { return text(payload.tool_call_id || payload.id || payload.tool_name || ("tool-" + tools.size)); }
   function updateTool(type, payload) {
     const key = toolKey(payload); let entry = tools.get(key);
@@ -285,7 +318,13 @@
     $("ops-authority").textContent = text(snapshot.task_closure_state || "running") + " · authority: " + text(snapshot.completion_authority || "none");
     const updated = $("ops-updated");
     if (updated) updated.textContent = text(snapshot.updated_at || "—");
-    $("ops-revision").textContent = "r" + Number(snapshot.plan_revision || 0);
+    $("ops-revision").textContent = "plan r" + Number(snapshot.plan_revision || 0);
+    const publishedTaskRevision = Math.max(0, ...(snapshot.task_actions || []).map(function(action) {
+      return Number(action.expected_task_revision || 0);
+    }));
+    if (publishedTaskRevision) currentTaskRevision = Math.max(currentTaskRevision, publishedTaskRevision);
+    $("task-revision").textContent = "task r" + currentTaskRevision;
+    $("conversation-task-revision").textContent = "task r" + currentTaskRevision;
     $("ops-run").textContent = "task " + text(snapshot.task_id || "—") +
       " · run " + text(snapshot.run_id || "—") +
       " · turn " + text(snapshot.turn_id || "—");
@@ -309,6 +348,7 @@
       button.addEventListener("click",function(){
         const prompt=$("prompt");prompt.value=commandPrompts[action.command]||text(action.command);
         pendingTaskRevision=Number(action.expected_task_revision||0)||null;
+        pendingTaskCommand=text(action.command);
         prompt.focus();setStatus("Task command prepared. Review and send through the authorized command path.");
       });taskActions.append(button);
     });
@@ -442,7 +482,36 @@
     else if (type === "artifact") addArtifact(payload);
     else if (type === "run_cancelled") {
       finishAssistant(); addTurn("system", payload.message || "Run cancelled", false); setBusy(false); setRunState("cancelled");
-    } else if (type === "mcp_status") {
+    } else if (type === "task_clarification") showTaskClarification(payload);
+    else if (type === "task_revision_conflict") {
+      finishAssistant(); setBusy(false); setRunState("conflict");
+      const expected=Number(payload.expected_revision||0);
+      const current=Number(payload.current_revision||0);
+      currentTaskRevision=Math.max(currentTaskRevision,current);
+      const revisionEl=$("task-revision");if(revisionEl)revisionEl.textContent="task r"+current;
+      $("conversation-task-revision").textContent="task r"+current;
+      const conflictKey=text(payload.task_id)+":"+expected+":"+current;
+      if(renderedRevisionConflicts.has(conflictKey))return;
+      renderedRevisionConflicts.add(conflictKey);
+      const notice=addTurn("system","任务状态已更新：命令基于 task r"+expected+
+        "，当前为 task r"+current+"。该命令未执行，请检查最新状态后重新提交。",false);
+      notice.article.classList.add("revision-conflict");
+      const safeRetry=pendingTaskCommand==="status"||pendingTaskCommand==="output";
+      const retryPrompt=lastSubmittedPrompt;pendingTaskRevision=null;pendingTaskCommand=null;
+      setStatus("Task revision changed; refreshed current state");
+      loadOperationsSnapshot().then(function(){
+        if(!safeRetry||!retryPrompt)return;
+        setStatus("Task revision refreshed; retrying read-only command…");setBusy(true);
+        setTimeout(async function(){
+          try {
+            const response=await fetch("/ui/run",{method:"POST",headers:{"Content-Type":"application/json"},
+              body:JSON.stringify({prompt:retryPrompt,expected_task_revision:currentTaskRevision})});
+            if(response.status!==202)throw new Error("HTTP "+response.status+" "+await response.text());
+          } catch(error) { addTurn("system","只读命令自动重试失败："+text(error.message||error),false);setBusy(false);setRunState("failed"); }
+        },250);
+      }).catch(function(){ setStatus("Task revision changed; latest revision shown from conflict response"); });
+    }
+    else if (type === "mcp_status") {
       const notice = addTurn("system", payload.message || "MCP status changed", false);
       if (payload.level === "error") notice.article.classList.add("error");
     }
@@ -458,12 +527,12 @@
       else if (activeAssistant && !activeAssistant.rawAnswer && o.final_answer) activeAssistant.rawAnswer = text(o.final_answer);
       const summary = text(o.displayable_reasoning || o.reasoning_summary || "");
       if (activeAssistant && !activeAssistant.rawThinking && summary) appendThinking(summary);
-      finishAssistant(); setBusy(false); setRunState("completed"); setStatus("Run completed");
+      finishAssistant(); setBusy(false); setRunState("completed"); setStatus("Run completed");pendingTaskCommand=null;
     } else if (o.kind === "error") {
       const message = o.message || "Unknown error";
       if (activeAssistant && activeAssistant.rawAnswer.includes(message)) activeAssistant.article.classList.add("error");
       else addTurn("system", message, false);
-      finishAssistant(); setBusy(false); setRunState("failed"); setStatus("Run failed");
+      finishAssistant(); setBusy(false); setRunState("failed"); setStatus("Run failed");pendingTaskCommand=null;
     } else if (o.kind === "aux") handleAux(o);
   }
   function loadOperationsSnapshot() {
@@ -498,6 +567,7 @@
   }
 
   async function submitPrompt(prompt) {
+    lastSubmittedPrompt=prompt;
     addTurn("user", prompt, false); activeAssistant = null; setBusy(true); setStatus("Submitting task…");
     try {
       const body={prompt};if(pendingTaskRevision!==null)body.expected_task_revision=pendingTaskRevision;

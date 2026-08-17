@@ -210,11 +210,15 @@ namespace agent_framework::example
         auto pending_clarification = clarification_store.pending(identity);
         if (!pending_clarification)
         {
-            const auto confirmation = conversation::parse_profile_confirmation(request.input);
             const auto latest = clarification_store.latest(identity);
-            if (confirmation && latest &&
+            std::optional<conversation::TaskExecutionProfile> repeated_profile;
+            if (latest)
+                for (const auto &option : latest->options)
+                    if (option.id == request.input)
+                        repeated_profile = option.profile;
+            if (latest && repeated_profile &&
                 latest->state == conversation::ProfileClarificationState::Confirmed &&
-                latest->selected_profile == confirmation.profile &&
+                latest->selected_profile == repeated_profile &&
                 invocation_now_ms <= latest->expires_at_ms)
             {
                 conversation::TurnResult replay;
@@ -259,6 +263,18 @@ namespace agent_framework::example
                                intent == conversation::TaskInputIntent::SuspendTask;
             }
         }
+        // A UI task command is pinned to the active task revision. Validate that
+        // pin before classification can route the text as a new task; otherwise
+        // a stale command could incorrectly report current_revision=0.
+        if (expected_task_revision &&
+            (!active_task || active_task->revision != *expected_task_revision))
+        {
+            const auto current_revision = active_task ? active_task->revision : 0;
+            return {{}, {}, nlohmann::json{{"code", "task_command_stale_revision"},
+                {"task_id", active_task ? active_task->task_id : request.task_id},
+                {"expected_revision", *expected_task_revision},
+                {"current_revision", current_revision}, {"retryable", true}}.dump()};
+        }
         const bool force_new = intent == conversation::TaskInputIntent::StartNewTask;
         if (pending_clarification)
         {
@@ -293,9 +309,6 @@ namespace agent_framework::example
                 configured_run && *configured_run ? configured_run : "",
                 active_task ? active_task->current_run_id : "", control_only,
                 request.turn_id);
-        if (expected_task_revision &&
-            (!active_task || active_task->revision != *expected_task_revision))
-            throw std::runtime_error("task_command_stale_revision");
         if (intent == conversation::TaskInputIntent::StatusQuery)
         {
             conversation::TaskCommandService commands(task_registry,
@@ -338,7 +351,8 @@ namespace agent_framework::example
                 command.principal = runtime.task_principal_resolver(identity);
             const auto controlled = commands.execute(command);
             if (!controlled.ok)
-                throw std::runtime_error(controlled.error);
+                return {{}, {}, controlled.payload.empty()
+                    ? controlled.error : controlled.payload.dump()};
             if (runtime.task_action_observer && controlled.payload.contains("actions"))
                 runtime.task_action_observer(controlled.payload["actions"], controlled.task_revision);
             const std::string response = controlled.payload.dump(2);

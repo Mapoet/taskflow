@@ -11,8 +11,20 @@
 
 namespace agent_framework::conversation {
 
+struct TaskClarificationOption {
+    std::string id;
+    std::string label;
+    std::string description;
+    TaskExecutionProfile profile{TaskExecutionProfile::Conversation};
+};
+
+struct TaskClarificationProposal {
+    std::string question;
+    std::vector<TaskClarificationOption> options;
+};
+
 struct TaskClassification {
-    int schema_version{2};
+    int schema_version{3};
     TaskIntentKind intent{TaskIntentKind::NewTask};
     TaskExecutionProfile profile{TaskExecutionProfile::Conversation};
     EffectClass effect_class{EffectClass::None};
@@ -23,6 +35,7 @@ struct TaskClassification {
     std::string prompt_version;
     std::string decision_id;
     LinguisticEvidence linguistic_evidence;
+    std::optional<TaskClarificationProposal> clarification;
     bool requires_confirmation{false};
     bool grants_authority{false};
     std::string error;

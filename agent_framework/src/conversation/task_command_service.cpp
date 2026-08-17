@@ -101,7 +101,12 @@ TaskCommandResponse TaskCommandService::execute(const TaskCommandRequest& reques
     };
     if(request.expected_task_revision&&
        (!current||current->revision!=*request.expected_task_revision)){
-        response.error="task_command_stale_revision";return response;
+        response.error="task_command_stale_revision";
+        response.task_revision=current?current->revision:0;
+        response.payload={{"code",response.error},{"task_id",turn.task_id},
+            {"expected_revision",*request.expected_task_revision},
+            {"current_revision",response.task_revision},{"retryable",true}};
+        return response;
     }
     if(!state_allows(request.command,current)){
         response.error=current?"task_command_not_allowed_in_state:"+

@@ -30,6 +30,8 @@ struct TaskProfileClarification {
     TaskInputIntent task_intent{TaskInputIntent::InitialRequest};
     TaskExecutionProfile recommended_profile{TaskExecutionProfile::Conversation};
     std::optional<TaskExecutionProfile> selected_profile;
+    std::string question;
+    std::vector<TaskClarificationOption> options;
     std::vector<std::string> allowed_tokens;
     std::uint32_t attempt_count{0};
     std::uint32_t max_attempts{3};

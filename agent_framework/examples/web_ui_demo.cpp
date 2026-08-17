@@ -199,6 +199,25 @@ int run_graph_ui(tf::Executor& executor,
                 if(operations) operations->observe_runtime(event);
                 ui.dispatch_message("runtime_event", conversation::encode(event));
             }, expected_task_revision);
+        if(!turn.error.empty()) {
+            try {
+                const auto conflict=json::parse(turn.error);
+                if(conflict.is_object()&&
+                   conflict.value("code",std::string{})=="task_command_stale_revision") {
+                    ui.dispatch_message("task_revision_conflict",conflict);
+                    return 0;
+                }
+            } catch(const json::exception&) {}
+        }
+        if(turn.error.empty()&&turn.outcome.reason==conversation::ModelTurnStopReason::AwaitingInput&&
+           turn.outcome.clarification&& !turn.outcome.clarification->empty()) {
+            json payload=json::object();
+            payload["message"]=*turn.outcome.clarification;
+            payload["clarification_id"]=turn.checkpoint.turn_id;
+            payload["options"]=turn.outcome.clarification_options;
+            ui.dispatch_message("task_clarification",payload);
+            return 0;
+        }
         if (!turn.error.empty() || turn.outcome.reason != conversation::ModelTurnStopReason::EndTurn) {
             if (control && control->is_cancel_requested()) {
                 ui.dispatch_message("run_cancelled", json{{"message", "Run cancelled by user"}});

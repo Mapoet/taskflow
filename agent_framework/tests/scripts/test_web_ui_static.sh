@@ -64,6 +64,15 @@ grep -Fq 'tool_execution_observer' "${CPP}"
 grep -Fq 'svr.Get(R"(/ui/files/(.*))"' "${CPP}"
 grep -Fq 'fs_resolve_under_root' "${CPP}"
 grep -Fq 'X-Content-Type-Options' "${CPP}"
+grep -Fq 'task_clarification' "${JS}"
+grep -Fq 'payload.options' "${JS}"
+grep -Fq 'task_revision_conflict' "${JS}"
+grep -Fq 'current_revision' "${JS}"
+grep -Fq 'renderedRevisionConflicts' "${JS}"
+grep -Fq 'retrying read-only command' "${JS}"
+grep -Fq 'id="task-revision"' "${HTML}"
+grep -Fq 'id="conversation-task-revision"' "${HTML}"
+grep -Fq 'profile-choice' "${CSS}"
 
 if grep -Eq 'innerHTML|insertAdjacentHTML|document\.write' "${JS}"; then
     printf 'unsafe HTML insertion found\n' >&2

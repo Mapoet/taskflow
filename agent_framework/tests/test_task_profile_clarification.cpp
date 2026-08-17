@@ -29,7 +29,12 @@ int main() {
     value.turn_id = "turn-1";
     value.run_id = "run-1";
     value.recommended_profile = TaskExecutionProfile::Professional;
-    value.allowed_tokens = {"conversation", "professional"};
+    value.question = "How should this task be handled?";
+    value.options = {{"discuss", "Discuss only", "No external action",
+                      TaskExecutionProfile::Conversation},
+                     {"deliver", "Complete professionally", "Produce the requested result",
+                      TaskExecutionProfile::Professional}};
+    value.allowed_tokens = {"discuss", "deliver"};
     value.max_attempts = 3;
     value.expires_at_ms = 5000;
     value.created_at = "1000";
@@ -54,10 +59,10 @@ int main() {
         auto recovered = reopened.pending(identity);
         assert(recovered && recovered->attempt_count == 2 && recovered->revision == 3);
         auto confirmed = reopened.answer(identity, value.clarification_id, 3,
-                                         " professional ", 2002);
+                                         "deliver", 2002);
         assert(confirmed.ok && confirmed.state == ProfileClarificationState::Confirmed);
         auto replay = reopened.answer(identity, value.clarification_id, 3,
-                                      "professional", 2003);
+                                      "deliver", 2003);
         assert(!replay.ok && replay.error == "clarification_revision_conflict");
         assert(!reopened.pending(identity));
     }
@@ -70,7 +75,7 @@ int main() {
         SQLiteTaskProfileClarificationStore store(path);
         assert(store.create(expired).ok);
         auto result = store.answer(identity, expired.clarification_id, 1,
-                                   "professional", 10);
+                                   "deliver", 10);
         assert(!result.ok && result.state == ProfileClarificationState::Expired);
     }
 
@@ -95,9 +100,9 @@ int main() {
         SQLiteTaskProfileClarificationStore first(path), second(path);
         ClarificationMutationResult a,b;std::barrier ready(3);
         std::thread one([&]{ready.arrive_and_wait();a=first.answer(
-            identity,raced.clarification_id,1,"professional",3);});
+            identity,raced.clarification_id,1,"deliver",3);});
         std::thread two([&]{ready.arrive_and_wait();b=second.answer(
-            identity,raced.clarification_id,1,"conversation",3);});
+            identity,raced.clarification_id,1,"discuss",3);});
         ready.arrive_and_wait();one.join();two.join();
         assert(static_cast<int>(a.ok)+static_cast<int>(b.ok)==1);
     }

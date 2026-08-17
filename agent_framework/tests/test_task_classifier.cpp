@@ -4,12 +4,13 @@
 
 namespace {
 nlohmann::json valid() {
-    return {{"schema_version",2},{"intent","new_task"},{"profile","code_change"},
+    return {{"schema_version",3},{"intent","new_task"},{"profile","code_change"},
         {"effect_class","workspace_write"},{"long_running",true},{"confidence",0.93},
         {"rationale","explicit repository modification"},
         {"linguistic_evidence",{{"requested_actions",nlohmann::json::array({"modify repository"})},
             {"negated_actions",nlohmann::json::array()},{"mention_only",nlohmann::json::array()},
-            {"scope_constraints",nlohmann::json::array()},{"ambiguities",nlohmann::json::array()}}}};
+            {"scope_constraints",nlohmann::json::array()},{"ambiguities",nlohmann::json::array()}}},
+        {"clarification",nullptr}};
 }
 }
 
@@ -17,11 +18,11 @@ int main() {
     using namespace agent_framework;
     using namespace agent_framework::conversation;
     auto parsed=LLMTaskClassifier::parse(valid().dump());
-    assert(parsed&&parsed.schema_version==2&&parsed.intent==TaskIntentKind::NewTask);
+    assert(parsed&&parsed.schema_version==3&&parsed.intent==TaskIntentKind::NewTask);
     assert(parsed.profile==TaskExecutionProfile::CodeChange&&parsed.long_running);
     assert(parsed.effect_class==EffectClass::WorkspaceWrite&&parsed.confidence==0.93);
-    assert(parsed.classifier_id=="llm-task-classifier-v2"&&
-           parsed.prompt_version=="task-routing-v2"&&!parsed.grants_authority);
+    assert(parsed.classifier_id=="llm-task-classifier-v3"&&
+           parsed.prompt_version=="task-routing-v3"&&!parsed.grants_authority);
     assert(task_input_intent(TaskIntentKind::Continue,true)==TaskInputIntent::ContinueTask);
     assert(task_input_intent(TaskIntentKind::NewTask,true)==TaskInputIntent::StartNewTask);
     assert(task_input_intent(TaskIntentKind::NarrowScope,true)==TaskInputIntent::AmendRequirements);
@@ -36,9 +37,16 @@ int main() {
     auto bad_confidence=valid();bad_confidence["confidence"]=1.1;
     assert(!LLMTaskClassifier::parse(bad_confidence.dump()));
     auto uncertain=valid();uncertain["confidence"]=0.55;
-    assert(LLMTaskClassifier::parse(uncertain.dump()).requires_confirmation);
+    assert(!LLMTaskClassifier::parse(uncertain.dump()).requires_confirmation);
     auto ambiguous=valid();ambiguous["linguistic_evidence"]["ambiguities"]={"unclear target"};
-    assert(LLMTaskClassifier::parse(ambiguous.dump()).requires_confirmation);
+    ambiguous["clarification"]={{"question","Which outcome do you want?"},{"options",{
+        {{"id","explain"},{"label","Explain only"},{"description","Do not edit files"},
+         {"profile","read_only_analysis"}},
+        {{"id","implement"},{"label","Implement it"},{"description","Edit and test"},
+         {"profile","code_change"}}}}};
+    auto clarification=LLMTaskClassifier::parse(ambiguous.dump());
+    assert(clarification.requires_confirmation&&clarification.clarification&&
+           clarification.clarification->options.size()==2);
     auto bad_evidence=valid();bad_evidence["linguistic_evidence"]["ambiguities"]="none";
     assert(!LLMTaskClassifier::parse(bad_evidence.dump()));
     auto too_large=valid();too_large["rationale"]=std::string(513,'x');
@@ -49,7 +57,7 @@ int main() {
                            "把登录接口实现并补测试","delete production data"}) {
         auto safe=deterministic_task_classification(input);
         assert(safe&&safe.profile==TaskExecutionProfile::Conversation&&!safe.long_running);
-        assert(safe.requires_confirmation&&!safe.grants_authority&&safe.confidence==0.0);
+        assert(!safe.requires_confirmation&&!safe.grants_authority&&safe.confidence==0.0);
     }
 
     auto configured=apply_task_routing_policy(parsed,TaskExecutionProfile::Professional,
@@ -66,6 +74,6 @@ int main() {
     assert(!invalid_with_profile); // profile override never replaces intent cognition
     auto weak=deterministic_task_classification("分析问题");
     weak=apply_task_routing_policy(weak,std::nullopt,ExecutionTrustProfile::Production);
-    assert(!weak&&weak.error=="production_task_classification_confidence_too_low"&&
-           weak.requires_confirmation);
+    assert(weak&&weak.profile==TaskExecutionProfile::Conversation&&
+           !weak.requires_confirmation);
 }
