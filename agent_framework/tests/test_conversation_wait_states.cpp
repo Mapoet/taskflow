@@ -33,11 +33,25 @@ int main() {
     const auto input = run("turn-input", ModelTurnStopReason::AwaitingInput);
     assert(input.error.empty() && input.checkpoint.phase == TurnPhase::AwaitingInput);
     assert(input.checkpoint.continuation == TurnContinuationReason::None);
+    TurnRequest input_steer{identity,"turn-input","refined target",
+                            TaskExecutionProfile::CodeChange,4};
+    assert(ConversationEngine(store,{}).submit_user_input(
+        input_steer,InputDisposition::AppendToCurrentTurn));
     const auto approval = run("turn-approval", ModelTurnStopReason::AwaitingApproval);
     assert(approval.error.empty() && approval.checkpoint.phase == TurnPhase::AwaitingInput);
     assert(approval.checkpoint.continuation == TurnContinuationReason::ResumeAfterApproval);
+    TurnRequest approval_steer{identity,"turn-approval","approval context",
+                               TaskExecutionProfile::CodeChange,4};
+    assert(ConversationEngine(store,{}).submit_user_input(
+        approval_steer,InputDisposition::AppendToCurrentTurn));
     const auto external = run("turn-external", ModelTurnStopReason::AwaitingExternal);
     assert(external.error.empty() && external.checkpoint.phase == TurnPhase::AwaitingTool);
     assert(external.checkpoint.continuation == TurnContinuationReason::ToolResultsAvailable);
+    TurnRequest external_steer{identity,"turn-external","external result annotation",
+                               TaskExecutionProfile::CodeChange,4};
+    assert(ConversationEngine(store,{}).submit_user_input(
+        external_steer,InputDisposition::AppendToCurrentTurn));
+    const auto steered=store.inputs(identity,InputState::Consumed);
+    assert(steered.size()==3);
     std::filesystem::remove(path, error);
 }

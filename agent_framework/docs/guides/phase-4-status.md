@@ -21,6 +21,16 @@ ProviderLive 5–10 分钟 provider/MCP campaign 因当前环境无可用完整�
 `NotCertified`；Operations task-command 已统一 identity/policy/revision action contract，
 不得据此宣告 Production Live 完成。
 
+**2026-08-17 ProcessLive 增量**：真实 `web_ui_demo` campaign 已完成双 SSE 客户端
+一致 replay、`Last-Event-ID` 续接、SIGKILL 崩溃、同一 SQLite/Operations Store 重启恢复，
+Task identity 保持稳定且 source revision 从 6 单调推进至 12。版本化报告为
+`build-ui/agent_framework/certification/af-sltr-process-live-20260817T065314Z.json`
+（SHA-256 `2193e949ef17b32559263f7d6788aa0a426cfa84ae5f669be9b57ee185e206c1`）。
+该 campaign 同时记录：resume 1/1、首 progress P95 上界 2021 ms、两个真实
+heartbeat 且 P95 间隔 5000 ms，以及本样本中 orphan/divergence/duplicate-effect/
+empty-completion 均为 0；SSE heartbeat 也由不符合门槛的 1 秒修正为 5 秒。
+该结果仅认证 localhost ProcessLive，不覆盖真实 ProviderLive 或多主机 HA。
+
 ## 1. 状态语义
 
 | 标记 | 含义 | 允许的证据 |

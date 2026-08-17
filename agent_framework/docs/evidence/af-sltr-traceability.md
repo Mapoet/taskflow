@@ -83,19 +83,16 @@ claim that they were recovered.
 | Offline correctness | Passed | 98/98 JUnit above |
 | Localhost remote queue and native mTLS | Passed | `phase4_remote_queue` and `phase4_remote_queue_mtls`; both reject execution in the restricted network sandbox and pass in the localhost-capable environment |
 | ProcessLive Web/TUI/ImGui/CLI projection | Passed | actual screenshots and CLI durable replay above |
-| ProcessLive disconnect/reconnect/crash matrix | NotCertified | no single signed campaign report yet |
+| ProcessLive disconnect/reconnect/crash matrix | Passed | `af-sltr-process-live-20260817T065314Z.json`: two-client replay, Last-Event-ID resume, SIGKILL/restart, stable task identity and Operations revision 6→12; report SHA-256 `2193e949ef17b32559263f7d6788aa0a426cfa84ae5f669be9b57ee185e206c1` |
 | ProviderLive LLM/MCP late-result/reattach | NotCertified | no complete real-provider credential/end-point campaign evidence in this audit |
-| External OIDC/JWT/KMS task actions | NotCertified | unified task-command identity/policy action contract remains open |
+| External OIDC/JWT/KMS task actions | NotCertified | local identity/policy/revision action contract Passed; real external IdP/KMS integration remains unavailable |
 
 ## Open mandatory work
 
-1. Implement and test the unified task-command authorization/action-policy
-   contract across all four interfaces; impossible actions must be disabled by
-   canonical state, not UI heuristics.
-2. Run the fixed-seed crash/steering/reconnect campaign as one versioned report
+1. Run the remaining fixed-seed crash/steering campaign as one versioned report
    and record orphan, divergence, duplicate-effect, empty-delivery, first
    progress and heartbeat metrics.
-3. Run ProviderLive only with real provider/MCP/A2A endpoints and credentials;
+2. Run ProviderLive only with real provider/MCP/A2A endpoints and credentials;
    otherwise retain `NotCertified`.
 
 ## Operational metric gate
@@ -106,5 +103,8 @@ duplicate-effect or empty-completed count; resume success below 99%; P95 first
 progress above 10 seconds; and P95 heartbeat outside 5–15 seconds. The positive
 and seven-failure negative contracts pass in `phase4_recovery_certification`.
 This is the metric acceptance mechanism, not fabricated production
-measurements: ProcessLive/ProviderLive values remain missing until a campaign
-collector supplies real observations.
+measurements. The localhost ProcessLive campaign now records a bounded sample:
+zero observed orphan/divergence/duplicate-effect/empty-completion events, resume
+1/1, first-progress P95 upper bound 2021 ms, and two observed heartbeats with
+5000 ms P95 interval. These values pass the gate for this campaign only; they are
+not a substitute for a statistically meaningful ProviderLive/production soak.

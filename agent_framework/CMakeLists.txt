@@ -2235,6 +2235,15 @@ if(BUILD_TESTING)
         set_tests_properties(task_command_service PROPERTIES
             LABELS "phase4;phase4-conversation;phase4-long-task;phase4-offline;offline")
     endif()
+    if(TARGET web_ui_demo AND EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/scripts/test_af_sltr_process_live.sh)
+        add_test(NAME af_sltr_process_live
+            COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/tests/scripts/test_af_sltr_process_live.sh
+                    $<TARGET_FILE:web_ui_demo>
+                    ${CMAKE_BINARY_DIR}/agent_framework/certification)
+        set_tests_properties(af_sltr_process_live PROPERTIES
+            LABELS "phase4;phase4-long-task;phase4-process-live;process-live"
+            RUN_SERIAL TRUE TIMEOUT 45)
+    endif()
 
     add_custom_target(af_phase4_offline_tests
         COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/tests/scripts/run_af_sltr_certification.sh

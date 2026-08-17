@@ -133,6 +133,20 @@ int main()
     assert(meaningful.llm_invoked && model.calls == 1);
     auto duplicate = workflow.step("workflow", 52);
     assert(!duplicate.llm_invoked && model.calls == 1);
+    // Directly certify the non-happy-path observation triggers used by the
+    // production wait/observe/replan loop.
+    LongTaskCheckpoint stalled=*store.load("workflow");
+    stalled.watches["inv"].last_information_gain_ms=1;
+    assert(ObservationClassifier({100,0.8}).classify(stalled,{},101).trigger==
+           ReplanTrigger::Stall);
+    auto budgeted=stalled;budgeted.watches["inv"].last_information_gain_ms=0;
+    budgeted.limit.tool_calls=10;budgeted.consumed.tool_calls=8;
+    assert(ObservationClassifier({100,0.8}).classify(budgeted,{},101).trigger==
+           ReplanTrigger::BudgetDeviation);
+    InvocationEvent approval_event;approval_event.invocation_id="inv";
+    approval_event.sequence=10000;approval_event.event_type="approval_required";
+    assert(ObservationClassifier({100,0.8}).classify(
+        stalled,{approval_event},101).trigger==ReplanTrigger::ApprovalOrInput);
     InvocationEventStreamHub hub(inv);
     const auto timed = workflow.wait_and_step("workflow", hub,
                                               std::chrono::milliseconds(1), 52);

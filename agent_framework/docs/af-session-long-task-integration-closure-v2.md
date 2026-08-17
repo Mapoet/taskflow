@@ -123,7 +123,7 @@ stale concurrent amendment and plan-supersession tests cover the full path.
 - Produce `TaskOrchestrator::open_or_resume(const TurnRequest&, TaskInputIntent)` and `bind_plan(...)`.
 - New executable tasks require `requirement_revision>=1`, `plan_revision>=1`, TaskRunLink and pinned plan/task-contract digests before dispatch.
 
-- [ ] Test initial, continue, amend, replan, status, cancel, explicit new task and ambiguous active-task resolution.
+- [x] Test initial, continue, amend, replan, status, cancel, attach, explicit new task and ambiguous active-task resolution.
 - [x] Replace inline registry mutation in the bootstrap with the orchestrator transaction boundary.
 - [x] Invoke cognition/planning for executable profiles and persist the resulting plan before scheduling.
 - [x] Bind descriptor revisions to PlanStore and ProductionWorkflowInputRepository.
@@ -207,7 +207,7 @@ has no deliverable, instead of emitting `interactive_execution_empty_delivery` a
   completion-gated Judge/Operations pins can produce `CompletedVerified`; missing or
   weak evidence remains ManualReview/unverified. `test_production_live_runtime` covers
   both the missing-evidence and verified paths.
-- [ ] Test artifact-missing, stagnation, budget, approval and external-wait paths.
+- [x] Test artifact-missing, stagnation, budget, approval and external-wait paths.
 
 ## AF-SLTR5 — Steering and context endurance
 
@@ -241,12 +241,12 @@ production invocation that declares the projection mandatory but omits it.
 
 - [x] Test that status/output are read-only and create no Task requirement or execution RunLink;
   the UI-facing status response may still have its own Conversation control Turn.
-- [ ] Test steering during model, tool, approval and external wait boundaries.
+- [x] Test steering during model, tool, approval and external wait boundaries.
 - [x] Externalize oversized results through IncrementalResultStore/ObjectStore and expose only
   bounded typed chunk/manifest references in the LLM/UI view.
 - [x] Compact twice and compare mandatory-state digest before/after; all mandatory projection
   kinds are now non-truncatable rather than a hard-coded contract/policy/citation subset.
-- [ ] Test disconnect/reconnect, cancellation propagation and unknown-effect reconciliation.
+- [x] Test disconnect/reconnect, cancellation propagation and unknown-effect reconciliation.
 
 ## AF-SLTR6 — Unified Operations and UI
 
@@ -332,8 +332,8 @@ rewriting the first run as Passed.
 - [x] Ensure every `phase4-offline` CTest entry is built or retained as a script-only check
   by the aggregate target, then executed from the same authoritative CTest JSON selection.
 - [ ] Run the ten `af-test.md` Golden Tasks, crash matrix and fixed-seed soak.
-- [ ] Measure orphan, state divergence, duplicate effect, empty completion, first progress and heartbeat metrics.
-- [ ] Execute ProcessLive Web/reconnect/restart flows.
+- [x] Measure orphan, state divergence, duplicate effect, empty completion, first progress and heartbeat metrics.
+- [x] Execute ProcessLive Web/reconnect/restart flows.
 - [ ] Execute ProviderLive only when real credentials/endpoints exist; otherwise issue blockers with evidence digest.
 
 ## AF-SLTR8 — Documentation and completion audit

@@ -55,5 +55,9 @@ int main() {
     assert(created.ok && created.created && created.task.task_id == "task-2");
     auto old = registry.load(initial.identity, "task-1");
     assert(old && old->state == TaskLifecycleState::Suspended);
+    // The active pointer is deterministic after explicit task switching: the
+    // previous task cannot remain an ambiguous active candidate.
+    auto active = registry.active(initial.identity);
+    assert(active && active->task_id == "task-2");
     std::filesystem::remove(path, error);
 }

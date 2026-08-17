@@ -782,7 +782,7 @@ int web_ui_demo_main(int argc, char** argv) {
                     sink.write(chunk.data(), chunk.size());
                 } else {
                     const auto now = std::chrono::steady_clock::now();
-                    if (now - last_heartbeat >= std::chrono::seconds(1)) {
+                    if (now - last_heartbeat >= std::chrono::seconds(5)) {
                         static constexpr char heartbeat[] = ": heartbeat\n\n";
                         sink.write(heartbeat, sizeof(heartbeat) - 1);
                         last_heartbeat = now;
