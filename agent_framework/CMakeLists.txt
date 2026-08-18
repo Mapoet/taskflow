@@ -303,6 +303,7 @@ if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/session/sqlite_run_supervisor.cpp)
 endif()
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/api/v1/session_run_api.cpp)
     list(APPEND AGENT_SOURCES src/api/v1/session_run_api.cpp src/api/v1/http_routes.cpp
+        src/api/v1/runtime_settings_api.cpp
         src/api/v1/event_multiplexer.cpp)
     if(EXISTS ${WEBSOCKETPP_DIR}/websocketpp/server.hpp)
         list(APPEND AGENT_SOURCES src/api/v1/websocket_gateway.cpp)
@@ -907,6 +908,9 @@ endif()
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/ui/presentation_model.cpp)
     list(APPEND AGENT_SOURCES src/ui/presentation_model.cpp)
 endif()
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/ui/native_workbench.cpp)
+    list(APPEND AGENT_SOURCES src/ui/native_workbench.cpp)
+endif()
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/ui/phase4_operations.cpp)
     list(APPEND AGENT_SOURCES src/ui/phase4_operations.cpp)
 endif()
@@ -1462,7 +1466,8 @@ if(AGENT_BUILD_WEB_UI)
                 target_compile_options(web_ui_demo PRIVATE /std:c++20)
             endif()
             target_compile_definitions(web_ui_demo PRIVATE
-                "AGENT_WEB_UI_STATIC_ROOT=\"${CMAKE_CURRENT_SOURCE_DIR}/examples/web_ui_static\"")
+                "AGENT_WEB_UI_STATIC_ROOT=\"${CMAKE_CURRENT_SOURCE_DIR}/web/dist\""
+                "AGENT_WEB_UI_LEGACY_STATIC_ROOT=\"${CMAKE_CURRENT_SOURCE_DIR}/examples/web_ui_static\"")
             message(STATUS "WP2.U: web_ui_demo target enabled (AGENT_BUILD_WEB_UI=ON)")
         endif()
     else()
@@ -1483,6 +1488,14 @@ endforeach()
 
 # 测试（WP1.1 LLM 轻量单测，无第三方框架）
 if(BUILD_TESTING)
+    # This suite uses assert() as its test primitive. Release builds define
+    # NDEBUG globally; without an explicit undefine both the checks and any
+    # side-effecting expressions inside assert() disappear from the binary.
+    if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
+        add_compile_options(-UNDEBUG)
+    elseif(MSVC)
+        add_compile_options(/UNDEBUG)
+    endif()
     if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_phase4_operations_ui.cpp)
         add_executable(test_phase4_operations_ui tests/test_phase4_operations_ui.cpp)
         target_link_libraries(test_phase4_operations_ui PRIVATE agent_framework)
@@ -1944,13 +1957,22 @@ if(BUILD_TESTING)
         add_executable(test_task_semantics_eval tests/test_task_semantics_eval.cpp)
         target_link_libraries(test_task_semantics_eval PRIVATE agent_framework)
         target_compile_definitions(test_task_semantics_eval PRIVATE
-            AGENT_TASK_SEMANTICS_CORPUS="${CMAKE_CURRENT_SOURCE_DIR}/tests/data/task-semantics-v4.jsonl")
+            AGENT_TASK_SEMANTICS_CORPUS="${CMAKE_CURRENT_SOURCE_DIR}/tests/data/task-semantics-v4.jsonl"
+            AGENT_TASK_SEMANTICS_REPORT="${CMAKE_CURRENT_BINARY_DIR}/certification/af-tgui-task-semantics-offline.json")
         if(NOT MSVC)
             target_compile_options(test_task_semantics_eval PRIVATE -UNDEBUG)
         endif()
         add_test(NAME task_semantics_eval COMMAND test_task_semantics_eval)
         set_tests_properties(task_semantics_eval PROPERTIES
             LABELS "phase4;phase4-eval;phase4-conversation;offline")
+    endif()
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/provider_live_task_semantics.cpp)
+        add_executable(provider_live_task_semantics
+            tests/provider_live_task_semantics.cpp)
+        target_link_libraries(provider_live_task_semantics PRIVATE agent_framework)
+        if(NOT MSVC)
+            target_compile_options(provider_live_task_semantics PRIVATE -UNDEBUG)
+        endif()
     endif()
     if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_runtime_subject.cpp)
         add_executable(test_runtime_subject tests/test_runtime_subject.cpp)
@@ -2004,6 +2026,25 @@ if(BUILD_TESTING)
         set_tests_properties(session_run_api PROPERTIES
             LABELS "phase4-offline;offline;phase4-api;phase4-security;phase4-integration;phase4-ui-v2")
     endif()
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_runtime_settings_api.cpp)
+        add_executable(test_runtime_settings_api tests/test_runtime_settings_api.cpp)
+        target_link_libraries(test_runtime_settings_api PRIVATE agent_framework)
+        if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
+            target_compile_options(test_runtime_settings_api PRIVATE -UNDEBUG)
+        endif()
+        add_test(NAME runtime_settings_api COMMAND test_runtime_settings_api)
+        set_tests_properties(runtime_settings_api PROPERTIES LABELS "phase4;phase4-api;phase4-ui-v2;offline")
+    endif()
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_native_workbench.cpp)
+        add_executable(test_native_workbench tests/test_native_workbench.cpp)
+        target_link_libraries(test_native_workbench PRIVATE agent_framework)
+        if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
+            target_compile_options(test_native_workbench PRIVATE -UNDEBUG)
+        endif()
+        add_test(NAME native_workbench COMMAND test_native_workbench)
+        set_tests_properties(native_workbench PROPERTIES
+            LABELS "phase4;phase4-ui-v2;native-ui;offline")
+    endif()
     if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_session_run_http_api.cpp)
         add_executable(test_session_run_http_api tests/test_session_run_http_api.cpp)
         target_link_libraries(test_session_run_http_api PRIVATE agent_framework)
@@ -2020,6 +2061,16 @@ if(BUILD_TESTING)
         target_link_libraries(workbench_runtime_server PRIVATE agent_framework)
         target_compile_definitions(workbench_runtime_server PRIVATE
             AGENT_WORKBENCH_DIST="${CMAKE_CURRENT_SOURCE_DIR}/web/dist")
+        find_program(AGENT_CHROME_EXECUTABLE NAMES google-chrome chromium chromium-browser)
+        if(AGENT_CHROME_EXECUTABLE AND
+           EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/scripts/test_workbench_browser_live.sh)
+            add_test(NAME workbench_browser_live
+                COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/tests/scripts/test_workbench_browser_live.sh
+                    $<TARGET_FILE:workbench_runtime_server> ${AGENT_CHROME_EXECUTABLE})
+            set_tests_properties(workbench_browser_live PROPERTIES
+                LABELS "phase4-browser-live;browser-live;phase4-ui-v2"
+                RUN_SERIAL TRUE TIMEOUT 120)
+        endif()
     endif()
     if(EXISTS ${WEBSOCKETPP_DIR}/websocketpp/server.hpp AND
        EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_session_run_websocket_api.cpp)

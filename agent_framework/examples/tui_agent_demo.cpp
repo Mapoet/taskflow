@@ -9,6 +9,7 @@
 #include "common/agent_example_bootstrap.hpp"
 #include "common/phase4_operations_bootstrap.hpp"
 #include "common/ftxui_console_view.hpp"
+#include "common/native_workbench_bootstrap.hpp"
 
 #include <agent/agent/execution_context.hpp>
 #include <agent/agent/task_state_machine.hpp>
@@ -154,7 +155,8 @@ int run_graph_ui(tf::Executor& executor,
                  const std::shared_ptr<TaskControl>& control,
                  const std::shared_ptr<UiPresentationModel>& presentation,
                  const std::shared_ptr<LiveOperationsProjection>& operations,
-                 const example::LiveRuntime& runtime) {
+                 const example::LiveRuntime& runtime,
+                 std::string_view conversation_scope) {
     GraphExecutor gx;
     ReactCliRunRequest req;
     req.config = cfg;
@@ -180,7 +182,8 @@ int run_graph_ui(tf::Executor& executor,
     };
     try {
         WorkflowResult wr{};
-        auto turn = example::run_conversation_turn(runtime, "tui_agent_demo",
+        auto turn = example::run_conversation_turn(runtime,
+            conversation_scope.empty() ? "tui_agent_demo" : std::string(conversation_scope),
             state->initial_user_prompt,
             [&] { wr = gx.run_react_cli_sync(executor, req); return wr; },
             [operations](const conversation::RuntimeEventEnvelope& event) {
@@ -213,6 +216,7 @@ int tui_agent_demo_main(int argc, char** argv) {
     std::string skills_root_arg;
     std::string skill_authoring_root_arg;
     std::string operations_db_arg;
+    std::string workbench_state_dir_arg;
     std::string operations_tenant_arg{"demo-tenant"};
     std::string operations_run_arg{"run-orbit-042"};
     int max_iterations = -1;
@@ -237,6 +241,8 @@ int tui_agent_demo_main(int argc, char** argv) {
     app.add_option("--operations-db", operations_db_arg, "Operations snapshot SQLite database");
     app.add_option("--operations-tenant", operations_tenant_arg, "Operations tenant identity");
     app.add_option("--operations-run", operations_run_arg, "Operations run identity");
+    app.add_option("--workbench-state-dir", workbench_state_dir_arg,
+                   "Durable native Session and settings directory");
     app.add_flag("-v,--verbose", verbose, "AGENT_LOG_LEVEL=debug");
     CLI11_PARSE(app, argc, argv);
 
@@ -283,15 +289,36 @@ int tui_agent_demo_main(int argc, char** argv) {
                            runtime.memory_compaction_llm};
     AgentConfig cfg = runtime.config;
 
+    const char* fs_root = std::getenv("AGENT_FS_ROOT");
+    auto native_workbench = example::build_native_workbench({
+        workbench_state_dir_arg, "tui_agent_demo",
+        provider_arg.empty() ? "openai" : provider_arg,
+        cfg.model_config.model_name, skills_root_arg, cursor_mcp_json_arg,
+        fs_root ? fs_root : "", !skip_cursor_mcp, !no_skills});
+    if (const char* initial_view = std::getenv("AGENT_UI_INITIAL_VIEW"); initial_view)
+        (void)example::apply_native_initial_view(native_workbench.controller, initial_view);
+
     std::clog << "[tui_agent_demo] starting fullscreen TUI (FTXUI 7.0.1 / UTF-8)...\n" << std::flush;
 
     auto presentation = std::make_shared<UiPresentationModel>();
     const char* provider_env = std::getenv("AGENT_LLM_PROVIDER");
-    presentation->set_runtime_metadata("orbital-analysis",
+    presentation->set_runtime_metadata(native_workbench.controller->snapshot().selected_session_id,
                                        provider_env && *provider_env ? provider_env : "OpenAI",
                                        cfg.model_config.model_name.empty() ? "provider default" : cfg.model_config.model_name,
                                        skip_cursor_mcp ? "Core tools ready" :
                                        mcp_boot.diagnostics.empty() ? "MCP connected" : "MCP partial");
+    if (demo_state) {
+        presentation->load_demo_state();
+        presentation->set_runtime_metadata(
+            native_workbench.controller->snapshot().selected_session_id,
+            provider_env && *provider_env ? provider_env : "OpenAI",
+            cfg.model_config.model_name.empty() ? "provider default" : cfg.model_config.model_name,
+            skip_cursor_mcp ? "Core tools ready" :
+                mcp_boot.diagnostics.empty() ? "MCP connected" : "MCP partial");
+        presentation->add_system_notice(
+            "终端自动换行验证：GNSS掩星电离层建模数据同化轨道与气象卫星连续中文，"
+            "https://example.invalid/research/gnss-ro/very/long/path/without/manual-breaks");
+    }
     std::shared_ptr<SQLiteOperationsSnapshotStore> operations_store;
     Phase4OperationsSnapshot initial_operations;
     if (demo_state) {
@@ -397,7 +424,8 @@ int tui_agent_demo_main(int argc, char** argv) {
             if (!active.empty()) state->active_skill_id = active;
         }
         apply_processed_to_agent_state(std::move(proc), ectx, *state);
-        (void)run_graph_ui(executor, cfg, deps, state, ui, control, presentation, operations, runtime);
+        (void)run_graph_ui(executor, cfg, deps, state, ui, control, presentation, operations,
+                           runtime, native_workbench.controller->snapshot().selected_session_id);
         {
             std::lock_guard<std::mutex> lock(control_mutex);
             if (active_control == control) active_control.reset();
@@ -450,10 +478,20 @@ int tui_agent_demo_main(int argc, char** argv) {
         g_shutdown.store(true);
         cancel_active();
     };
+    callbacks.on_session_change = [&](const ui::NativeWorkbenchSnapshot& workbench) {
+        presentation->reset();
+        presentation->set_runtime_metadata(
+            workbench.selected_session_id,
+            provider_env && *provider_env ? provider_env : "OpenAI",
+            cfg.model_config.model_name.empty() ? "provider default" : cfg.model_config.model_name,
+            skip_cursor_mcp ? "Core tools ready" :
+                mcp_boot.diagnostics.empty() ? "MCP connected" : "MCP partial");
+        state = std::make_shared<internal::AgentThreadState>();
+    };
     example::FtxuiConsoleView view(
         [tui_h] { return tui_h->presentation_snapshot(); },
         skill_status_provider,
-        std::move(callbacks));
+        std::move(callbacks), native_workbench.controller);
     view_ptr = &view;
 
     if (!prompt_arg.empty()) launch_line(prompt_arg);

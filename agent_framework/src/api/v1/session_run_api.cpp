@@ -219,6 +219,32 @@ ApiResult SessionRunApi::enqueue_run(const identity::RuntimeSubject& subject,
     if(request.tenant_id!=subject.tenant_id||request.organization_id!=subject.organization_id||
        request.project_id!=subject.project_id||request.principal_id!=subject.principal_id)
         return denied("run_scope_mismatch");
+    const auto product=catalog_.get(subject.tenant_id,request.session_id);
+    if(!product)return denied("session_not_found",404);
+    if(!request.payload.is_object())return denied("run_payload_object_required",422);
+    if(request.payload.contains("conversation_id")&&
+       (!request.payload.at("conversation_id").is_string()||
+        request.payload.at("conversation_id").get<std::string>()!=product->conversation_id))
+        return denied("run_conversation_scope_mismatch",403);
+    request.payload["conversation_id"]=product->conversation_id;
+    if(!request.payload.contains("input")&&request.payload.contains("prompt")&&
+       request.payload.at("prompt").is_string())
+        request.payload["input"]=request.payload.at("prompt");
+    if(!request.payload.contains("input")||!request.payload.at("input").is_string()||
+       request.payload.at("input").get_ref<const std::string&>().empty())
+        return denied("run_input_required",422);
+    // The API, rather than the browser, owns durable correlation identifiers.  These
+    // bindings are the minimum contract required by ProductionLiveRuntime's typed
+    // SessionRunWorker executor and remain stable under idempotent Start replay.
+    if(!request.payload.contains("task_id"))
+        request.payload["task_id"]="task-"+request.run_id;
+    if(!request.payload.contains("turn_id"))
+        request.payload["turn_id"]="turn-"+request.command_id;
+    if(!request.payload.at("task_id").is_string()||
+       request.payload.at("task_id").get_ref<const std::string&>().empty()||
+       !request.payload.at("turn_id").is_string()||
+       request.payload.at("turn_id").get_ref<const std::string&>().empty())
+        return denied("run_task_turn_binding_invalid",422);
     return run_mutation(supervisor_.enqueue(std::move(request)));
 }
 
@@ -423,10 +449,16 @@ ApiResult SessionRunApi::get_session_data(const identity::RuntimeSubject& subjec
     std::string_view session_id,std::uint64_t after,std::size_t limit) {
     auto product=get_session(subject,session_id);
     if(!product.ok())return product;
+    const auto conversation_id=product.body.value("conversation_id",std::string{});
     auto replay=replay_events(subject,session_id,after,limit);
     if(!replay.ok())return replay;
     json body={{"schema","agent.session_data_page/v1"},{"session",std::move(product.body)},
         {"events",std::move(replay.body)}};
+    json messages=json::array();
+    if(events_)
+        for(const auto& message:events_->messages({subject.tenant_id,conversation_id}))
+            messages.push_back(conversation::encode(message));
+    body["messages"]=std::move(messages);
     if(interactions_) {
         const auto projected=get_interactions(subject,session_id,ui::InteractionVisibility::User);
         body["interactions"]=projected.ok()?projected.body:json(nullptr);

@@ -78,6 +78,7 @@ int main()
         ConversationEngine engine(store, [&](const TurnRequest &, const TurnCheckpoint &)
                                   {++calls;ModelTurnOutcome o;o.reason=calls==1?ModelTurnStopReason::ToolRequested:ModelTurnStopReason::EndTurn;o.tool_receipt_refs=calls==1?std::vector<std::string>{"receipt"}:std::vector<std::string>{};o.candidate_answer=calls==1?"calling":"candidate";return o; });
         TurnRequest r{{"tenant", "conversation"}, "turn-1", "hello", TaskExecutionProfile::ReadOnlyAnalysis, 10};
+        r.run_id = "run-1";
         auto first = engine.start_turn(r);
         assert(first.error.empty() && first.checkpoint.phase == TurnPhase::AwaitingTool && !first.outcome.task_completion_verified);
         auto second = engine.continue_turn(r, TurnContinuationReason::ToolResultsAvailable);
@@ -86,6 +87,7 @@ int main()
         assert(messages.size() == 3 && messages[1].parent_id == messages[0].message_id);
         auto events = store.events(r.identity);
         assert(events.size() == 3 && events.back().sequence == 3);
+        for (const auto& event : events) assert(event.run_id == "run-1");
         assert(!engine.start_turn(r).error.empty());
         assert(engine.classify_input("/status") == InputDisposition::StatusQuery);
 

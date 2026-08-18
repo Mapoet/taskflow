@@ -20,6 +20,15 @@ InteractionObjectState state(const nlohmann::json& payload) {
     if(value=="blocked")return InteractionObjectState::Blocked;
     if(value=="warning")return InteractionObjectState::Warning;
     if(value=="superseded")return InteractionObjectState::Superseded;
+    const auto reason=payload.value("reason",std::string{});
+    if(reason=="end_turn")return InteractionObjectState::Passed;
+    if(reason=="awaiting_input"||reason=="awaiting_approval"||
+       reason=="awaiting_external"||reason=="tool_requested")
+        return InteractionObjectState::Waiting;
+    if(reason=="provider_error"||reason=="guard_stopped"||
+       reason=="deadline_exceeded"||reason=="context_exhausted"||
+       reason=="max_iterations")
+        return InteractionObjectState::Failed;
     return InteractionObjectState::Running;
 }
 

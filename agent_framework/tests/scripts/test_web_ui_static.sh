@@ -57,6 +57,8 @@ if grep -Eq 'g_agent_busy|g_active_control|g_control_mutex' "${CPP}"; then
     exit 1
 fi
 grep -Fq 'svr.Post("/ui/operations/hitl"' "${CPP}"
+grep -Fq 'X-Agent-Legacy-Authority' "${CPP}"
+grep -Fq 'rel=\"successor-version\"' "${CPP}"
 grep -Fq 'svr.Get("/ui/operations/snapshot"' "${CPP}"
 grep -Fq 'svr.Get("/ui/interactions/snapshot"' "${CPP}"
 grep -Fq 'svr.Get("/ui/interactions/events"' "${CPP}"

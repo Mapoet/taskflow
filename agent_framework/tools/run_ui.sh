@@ -26,6 +26,7 @@ Options:
   --fs-root PATH           Filesystem jail root (default: agent_framework/tools)
   --skills-root PATH       Installed/read-only Skill root (default: ~/.codex/skills)
   --skill-authoring-root PATH  Writable root for /skills create
+  --workbench-state-dir PATH  Durable TUI/ImGui Session and settings directory
   --no-skills              Disable Skill discovery and management
   --env-file PATH          Source a trusted local environment file
   --provider NAME          openai or anthropic
@@ -93,6 +94,7 @@ CURSOR_MCP_JSON=""
 DEFAULT_SKILLS_ROOT="${HOME}/.codex/skills"
 SKILLS_ROOT="${AGENT_SKILLS_DIR:-}"
 SKILL_AUTHORING_ROOT="${AGENT_SKILL_AUTHORING_DIR:-}"
+WORKBENCH_STATE_DIR="${AGENT_NATIVE_UI_STATE_DIR:-}"
 NO_SKILLS=0
 NO_CURSOR_MCP=0
 DEMO_STATE=0
@@ -117,6 +119,8 @@ while (($#)); do
         --skills-root=*) SKILLS_ROOT="${1#*=}"; shift ;;
         --skill-authoring-root) (($# >= 2)) || die "--skill-authoring-root requires a path"; SKILL_AUTHORING_ROOT="$2"; shift 2 ;;
         --skill-authoring-root=*) SKILL_AUTHORING_ROOT="${1#*=}"; shift ;;
+        --workbench-state-dir) (($# >= 2)) || die "--workbench-state-dir requires a path"; WORKBENCH_STATE_DIR="$2"; shift 2 ;;
+        --workbench-state-dir=*) WORKBENCH_STATE_DIR="${1#*=}"; shift ;;
         --no-skills) NO_SKILLS=1; shift ;;
         --env-file) (($# >= 2)) || die "--env-file requires a path"; shift 2 ;;
         --env-file=*) shift ;;
@@ -264,6 +268,9 @@ case "${UI}" in
     web)
         TARGET=web_ui_demo
         CMAKE_UI_OPTION=-DAGENT_BUILD_WEB_UI=ON
+        if ((NO_BUILD == 0)); then
+            command -v npm >/dev/null 2>&1 || die "npm is required to build the formal Web Workbench"
+        fi
         ;;
 esac
 BINARY="${BUILD_DIR}/agent_framework/${TARGET}"
@@ -277,6 +284,10 @@ CONFIGURE_CMD=(cmake -S "${REPO_ROOT}" -B "${BUILD_DIR}"
     "${CMAKE_UI_OPTION}"
     -DBUILD_TESTING=ON)
 BUILD_CMD=(cmake --build "${BUILD_DIR}" --target "${TARGET}" --parallel "${BUILD_JOBS}")
+WEB_BUILD_CMD=()
+if [[ "${UI}" == web ]]; then
+    WEB_BUILD_CMD=(npm --prefix "${REPO_ROOT}/agent_framework/web" run build)
+fi
 RUN_CMD=("${BINARY}")
 [[ "${UI}" != web ]] || RUN_CMD+=(--port "${PORT}")
 [[ -z "${PROMPT}" ]] || RUN_CMD+=(--prompt "${PROMPT}")
@@ -284,6 +295,10 @@ RUN_CMD=("${BINARY}")
 [[ -z "${CURSOR_MCP_JSON}" ]] || RUN_CMD+=(--cursor-mcp-json "${CURSOR_MCP_JSON}")
 [[ -z "${SKILLS_ROOT}" || ${NO_SKILLS} -ne 0 ]] || RUN_CMD+=(--skills-root "${SKILLS_ROOT}")
 [[ -z "${SKILL_AUTHORING_ROOT}" ]] || RUN_CMD+=(--skill-authoring-root "${SKILL_AUTHORING_ROOT}")
+if [[ -n "${WORKBENCH_STATE_DIR}" ]]; then
+    [[ "${UI}" != web ]] || die "--workbench-state-dir is only valid with --ui tui or imgui"
+    RUN_CMD+=(--workbench-state-dir "${WORKBENCH_STATE_DIR}")
+fi
 ((NO_SKILLS == 0)) || RUN_CMD+=(--no-skills)
 ((NO_CURSOR_MCP == 0)) || RUN_CMD+=(--no-cursor-mcp)
 ((DEMO_STATE == 0)) || RUN_CMD+=(--demo-state)
@@ -308,6 +323,7 @@ printf '  web/expr/draw: %s/%s/%s\n' "${AGENT_WEB_ENABLE}" "${AGENT_EXPR_ENABLE}
 printf '  skills catalog: %s\n' "${AGENT_SKILL_INJECT_CATALOG}"
 printf '  skills root: %s\n' "$([[ ${NO_SKILLS} -eq 1 ]] && printf disabled || printf '%s' "${AGENT_SKILLS_DIR:-${DEFAULT_SKILLS_ROOT}}")"
 printf '  skill authoring: %s\n' "${AGENT_SKILL_AUTHORING_DIR:-disabled}"
+[[ "${UI}" == web ]] || printf '  workbench state: %s\n' "${WORKBENCH_STATE_DIR:-.agent-framework/native-workbench}"
 printf '  Cursor MCP: %s\n' "$([[ ${NO_CURSOR_MCP} -eq 1 ]] && printf disabled || printf enabled)"
 printf '  demo state: %s\n' "$([[ ${DEMO_STATE} -eq 1 ]] && printf enabled || printf disabled)"
 printf '  MCP timeout: %s ms\n' "${AGENT_MCP_REQUEST_TIMEOUT_MS}"
@@ -319,6 +335,7 @@ printf '  API credential: configured (redacted)\n'
 if ((DRY_RUN)); then
     ((RECONFIGURE == 0)) || print_command cmake -E remove_directory "${BUILD_DIR}"
     if ((NO_BUILD == 0)); then
+        ((${#WEB_BUILD_CMD[@]} == 0)) || print_command "${WEB_BUILD_CMD[@]}"
         print_command "${CONFIGURE_CMD[@]}"
         print_command "${BUILD_CMD[@]}"
     fi
@@ -333,6 +350,7 @@ fi
 
 if ((NO_BUILD == 0)); then
     ((RECONFIGURE == 0)) || cmake -E remove_directory "${BUILD_DIR}"
+    ((${#WEB_BUILD_CMD[@]} == 0)) || "${WEB_BUILD_CMD[@]}"
     "${CONFIGURE_CMD[@]}"
     "${BUILD_CMD[@]}"
 fi

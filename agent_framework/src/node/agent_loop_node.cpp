@@ -243,9 +243,13 @@ AgentLoopNode::create(
         if (incoming) {
             *shared->state = *incoming;
         }
-        auto history_has_tool_receipt = [shared]() {
+        const std::size_t receipt_history_begin =
+            shared->state ? shared->state->history.size() : 0;
+        auto history_has_tool_receipt = [shared, receipt_history_begin]() {
             if (!shared->state) return false;
-            for (const auto& message : shared->state->history) {
+            for (std::size_t index = receipt_history_begin;
+                 index < shared->state->history.size(); ++index) {
+                const auto& message = shared->state->history[index];
                 if (message.role == "tool" && message.tool_call_id &&
                     !message.tool_call_id->empty()) {
                     return true;

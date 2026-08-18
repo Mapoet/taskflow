@@ -18,7 +18,7 @@ int main()
     auto report = certify_recovery("sha256:env", RecoveryEvidenceLevel::Offline, [](RecoveryScenario s)
                                    {RecoveryCell c;c.scenario=s;c.executed=true;c.passed=true;c.operations=1;c.evidence_digest="sha256:evidence";return c; });
     assert(!report.certified);
-    assert(report.blockers.size() == 3); // process-live + two provider-live cells cannot skip-as-pass
+    assert(report.blockers.size() == 6); // two process-live + four provider/MCP-live cells cannot skip-as-pass
     auto certified = certify_recovery("sha256:env", RecoveryEvidenceLevel::ProviderLive, [](RecoveryScenario s)
                                       { return RecoveryCell{s, RecoveryEvidenceLevel::Offline, true, true, true, {}, "sha256:e", 1, 0}; });
     assert(certified.certified && certified.cells.size() == mandatory_recovery_scenarios().size());

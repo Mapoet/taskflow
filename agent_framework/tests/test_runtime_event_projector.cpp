@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <cassert>
 #include <filesystem>
 #include "agent/ui/runtime_event_projector.hpp"
@@ -24,16 +25,19 @@ int main() {
     append(4,"llm_invocation_completed",{{"task_id","task"},{"invocation_id","llm-1"},
         {"summary","semantic classifier completed"},{"provider","provider"},{"model","model"},
         {"raw_prompt","must not project"}});
+    append(5,"model_stop",{{"task_id","task"},{"reason","end_turn"}});
     ui::RuntimeEventInteractionProjector projector(source,target);
-    auto first=projector.synchronize(identity);assert(first.ok&&first.applied==4&&first.runtime_head==4&&first.projection_head==4);
-    auto again=projector.synchronize(identity);assert(again.ok&&again.applied==0&&again.projection_head==4);
+    auto first=projector.synchronize(identity);assert(first.ok&&first.applied==5&&first.runtime_head==5&&first.projection_head==5);
+    auto again=projector.synchronize(identity);assert(again.ok&&again.applied==0&&again.projection_head==5);
     auto user=target.snapshot("tenant","conversation",ui::InteractionVisibility::User);
-    assert(user&&user->head_sequence==4&&user->revision==4&&user->nodes.size()==3);
+    assert(user&&user->head_sequence==5&&user->revision==5&&user->nodes.size()==4);
     for(const auto& node:user->nodes)assert(!node.display.contains("raw_prompt"));
-    assert(user->nodes.back().kind==ui::InteractionNodeKind::Agent);
-    assert(user->nodes.back().ref.agent_invocation_id=="llm-1");
+    const auto stopped=std::find_if(user->nodes.begin(),user->nodes.end(),[](const auto& node) {
+        return node.label=="model_stop";
+    });
+    assert(stopped!=user->nodes.end()&&stopped->state==ui::InteractionObjectState::Passed);
     auto operations=target.snapshot("tenant","conversation",ui::InteractionVisibility::Operations);
-    assert(operations&&operations->nodes.size()==4);
+    assert(operations&&operations->nodes.size()==5);
 
     // A second tenant/conversation sharing the same physical repositories must
     // never observe or advance the first projection cursor.
@@ -52,6 +56,6 @@ int main() {
     assert(isolated_snapshot&&isolated_snapshot->nodes.size()==1);
     assert(isolated_snapshot->nodes.front().ref.task_id=="task-b");
     auto unchanged=target.snapshot("tenant","conversation",ui::InteractionVisibility::User);
-    assert(unchanged&&unchanged->head_sequence==4&&unchanged->nodes.size()==3);
+    assert(unchanged&&unchanged->head_sequence==5&&unchanged->nodes.size()==4);
     std::filesystem::remove_all(root);
 }

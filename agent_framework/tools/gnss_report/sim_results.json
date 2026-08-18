@@ -1,0 +1,96 @@
+{
+  "base_time": "2026-08-15T14:55:12Z",
+  "end_time": "2026-08-15T20:55:12Z",
+  "mjd_start": 61267.621666666586,
+  "mjd_end": 61267.871666666586,
+  "gps_week": 2431,
+  "gps_seconds": 572112.0,
+  "station": {
+    "name": "Sanya",
+    "lon": 109.5,
+    "lat": 18.25,
+    "alt": 30.0
+  },
+  "geo_sat": {
+    "id": "C01",
+    "orbit": "GEO",
+    "lon": 140.0,
+    "alt_km": 35786.0
+  },
+  "leo_sat": {
+    "id": "C2E1",
+    "orbit": "LEO",
+    "alt_km": 817.0,
+    "incl": 98.7,
+    "period_min": 101.2
+  },
+  "min_occultation_angle": 30.51740724607138,
+  "min_occultation_time": "20:03:12",
+  "leo_visibility_count": 9,
+  "occultation_events": [],
+  "leo_visibility_sample": [
+    {
+      "time": "20:01:12",
+      "elev": 12.64,
+      "az": 123.17,
+      "dist_km": 2215.0,
+      "occ_angle": 36.87
+    },
+    {
+      "time": "20:02:12",
+      "elev": 17.22,
+      "az": 114.0,
+      "dist_km": 1941.4,
+      "occ_angle": 32.2
+    },
+    {
+      "time": "20:03:12",
+      "elev": 21.64,
+      "az": 101.61,
+      "dist_km": 1727.6,
+      "occ_angle": 30.52
+    },
+    {
+      "time": "20:04:12",
+      "elev": 24.84,
+      "az": 85.66,
+      "dist_km": 1598.7,
+      "occ_angle": 35.03
+    },
+    {
+      "time": "20:05:12",
+      "elev": 25.47,
+      "az": 67.59,
+      "dist_km": 1576.5,
+      "occ_angle": 45.45
+    },
+    {
+      "time": "20:06:12",
+      "elev": 23.2,
+      "az": 50.5,
+      "dist_km": 1665.4,
+      "occ_angle": 58.11
+    },
+    {
+      "time": "20:07:12",
+      "elev": 19.14,
+      "az": 36.67,
+      "dist_km": 1849.4,
+      "occ_angle": 70.02
+    },
+    {
+      "time": "20:08:12",
+      "elev": 14.55,
+      "az": 26.35,
+      "dist_km": 2103.1,
+      "occ_angle": 80.07
+    },
+    {
+      "time": "20:09:12",
+      "elev": 10.14,
+      "az": 18.78,
+      "dist_km": 2403.8,
+      "occ_angle": 88.24
+    }
+  ]
+}

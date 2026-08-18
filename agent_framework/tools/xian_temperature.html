@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>西安全年气温变化图</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: "PingFang SC", "Microsoft YaHei", Arial, sans-serif;
+    background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+    min-height: 100vh;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    padding: 20px;
+  }
+  .card {
+    background: #fff;
+    border-radius: 16px;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.15);
+    padding: 30px 35px 35px;
+    max-width: 900px;
+    width: 100%;
+  }
+  h1 {
+    text-align: center;
+    font-size: 24px;
+    color: #2c3e50;
+    margin-bottom: 6px;
+  }
+  .subtitle {
+    text-align: center;
+    color: #7f8c8d;
+    font-size: 14px;
+    margin-bottom: 25px;
+  }
+  .chart-container {
+    position: relative;
+    width: 100%;
+    height: 420px;
+  }
+  svg { width: 100%; height: 100%; display: block; }
+
+  /* 坐标轴 */
+  .axis-line { stroke: #bdc3c7; stroke-width: 1; }
+  .tick-text { fill: #7f8c8d; font-size: 12px; }
+  .tick-line { stroke: #ecf0f1; stroke-width: 1; stroke-dasharray: 4 4; }
+
+  /* 数据线 */
+  .temp-line {
+    fill: none;
+    stroke: #e74c3c;
+    stroke-width: 3;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+  .temp-area {
+    fill: url(#gradArea);
+    stroke: none;
+  }
+  .point {
+    fill: #e74c3c;
+    stroke: #fff;
+    stroke-width: 2;
+    cursor: pointer;
+    transition: r 0.2s;
+  }
+  .point:hover { r: 7; }
+
+  /* 工具提示 */
+  .tooltip {
+    position: absolute;
+    background: rgba(44, 62, 80, 0.95);
+    color: #fff;
+    padding: 8px 12px;
+    border-radius: 8px;
+    font-size: 13px;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.2s;
+    white-space: nowrap;
+    z-index: 10;
+  }
+
+  /* 图例 */
+  .legend { display: flex; justify-content: center; gap: 20px; margin-top: 18px; }
+  .legend-item { display: flex; align-items: center; gap: 6px; font-size: 13px; color: #2c3e50; }
+  .legend-dot { width: 14px; height: 14px; border-radius: 50%; }
+
+  /* 数据表格 */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 25px;
+    font-size: 13px;
+  }
+  th, td {
+    padding: 8px 6px;
+    text-align: center;
+    border-bottom: 1px solid #ecf0f1;
+  }
+  th { background: #f8f9fa; color: #2c3e50; font-weight: 600; }
+  td:first-child { font-weight: 600; color: #34495e; }
+</style>
+</head>
+<body>
+
+<div class="card">
+  <h1>🌡️ 西安全年气温变化</h1>
+  <p class="subtitle">各月平均气温（℃）· 数据来源：中国气象局多年平均值</p>
+
+  <div class="chart-container">
+    <svg id="chart" viewBox="0 0 800 420" preserveAspectRatio="xMidYMid meet">
+      <defs>
+        <linearGradient id="gradArea" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#e74c3c" stop-opacity="0.35"/>
+          <stop offset="100%" stop-color="#e74c3c" stop-opacity="0.02"/>
+        </linearGradient>
+      </defs>
+    </svg>
+    <div class="tooltip" id="tooltip"></div>
+  </div>
+
+  <div class="legend">
+    <div class="legend-item"><span class="legend-dot" style="background:#e74c3c;"></span>平均气温（℃）</div>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th>月份</th>
+        <th>1月</th><th>2月</th><th>3月</th><th>4月</th><th>5月</th><th>6月</th>
+        <th>7月</th><th>8月</th><th>9月</th><th>10月</th><th>11月</th><th>12月</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>平均气温(℃)</td>
+        <td>-0.5</td><td>2.5</td><td>8.5</td><td>15.0</td><td>20.5</td><td>25.0</td>
+        <td>27.0</td><td>25.5</td><td>20.0</td><td>14.0</td><td>6.5</td><td>0.5</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<script>
+(function() {
+  // 数据：西安各月平均气温（℃）
+  const months = ['1月','2月','3月','4月','5月','6月','7月','8月','9月','10月','11月','12月'];
+  const temps  = [-0.5, 2.5, 8.5, 15.0, 20.5, 25.0, 27.0, 25.5, 20.0, 14.0, 6.5, 0.5];
+
+  const svg = document.getElementById('chart');
+  const tooltip = document.getElementById('tooltip');
+  const W = 800, H = 420;
+  const margin = { top: 30, right: 40, bottom: 45, left: 50 };
+  const plotW = W - margin.left - margin.right;
+  const plotH = H - margin.top - margin.bottom;
+
+  // 坐标范围
+  const minTemp = -5, maxTemp = 30;
+  const x = i => margin.left + (i / (months.length - 1)) * plotW;
+  const y = t => margin.top + ((maxTemp - t) / (maxTemp - minTemp)) * plotH;
+
+  // 绘制横向网格线与Y轴刻度
+  const yTicks = [-5, 0, 5, 10, 15, 20, 25, 30];
+  yTicks.forEach(t => {
+    // 网格线
+    const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    line.setAttribute('x1', margin.left);
+    line.setAttribute('y1', y(t));
+    line.setAttribute('x2', W - margin.right);
+    line.setAttribute('y2', y(t));
+    line.setAttribute('class', 'tick-line');
+    svg.appendChild(line);
+    // 刻度标签
+    const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    text.setAttribute('x', margin.left - 10);
+    text.setAttribute('y', y(t) + 4);
+    text.setAttribute('text-anchor', 'end');
+    text.setAttribute('class', 'tick-text');
+    text.textContent = t + '°';
+    svg.appendChild(text);
+  });
+
+  // 绘制X轴刻度（月份）
+  months.forEach((m, i) => {
+    const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    text.setAttribute('x', x(i));
+    text.setAttribute('y', H - margin.bottom + 22);
+    text.setAttribute('text-anchor', 'middle');
+    text.setAttribute('class', 'tick-text');
+    text.textContent = m;
+    svg.appendChild(text);
+  });
+
+  // 绘制面积（渐变填充）
+  let areaPath = `M ${x(0)} ${y(temps[0])}`;
+  for (let i = 1; i < temps.length; i++) {
+    areaPath += ` L ${x(i)} ${y(temps[i])}`;
+  }
+  areaPath += ` L ${x(temps.length-1)} ${y(minTemp)} L ${x(0)} ${y(minTemp)} Z`;
+  const area = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  area.setAttribute('d', areaPath);
+  area.setAttribute('class', 'temp-area');
+  svg.appendChild(area);
+
+  // 绘制折线
+  let linePath = `M ${x(0)} ${y(temps[0])}`;
+  for (let i = 1; i < temps.length; i++) {
+    linePath += ` L ${x(i)} ${y(temps[i])}`;
+  }
+  const line = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  line.setAttribute('d', linePath);
+  line.setAttribute('class', 'temp-line');
+  svg.appendChild(line);
+
+  // 绘制数据点 + 交互
+  temps.forEach((t, i) => {
+    const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+    circle.setAttribute('cx', x(i));
+    circle.setAttribute('cy', y(t));
+    circle.setAttribute('r', 4.5);
+    circle.setAttribute('class', 'point');
+    circle.addEventListener('mouseenter', () => {
+      tooltip.style.opacity = 1;
+      tooltip.innerHTML = `${months[i]}：${t}℃`;
+      // 定位tooltip（相对svg容器）
+      const rect = svg.getBoundingClientRect();
+      tooltip.style.left = (x(i) / W * rect.width + 10) + 'px';
+      tooltip.style.top  = (y(t) / H * rect.height - 20) + 'px';
+    });
+    circle.addEventListener('mouseleave', () => {
+      tooltip.style.opacity = 0;
+    });
+    svg.appendChild(circle);
+  });
+
+  // 坐标轴主线
+  const axisX = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+  axisX.setAttribute('x1', margin.left); axisX.setAttribute('y1', H - margin.bottom);
+  axisX.setAttribute('x2', W - margin.right); axisX.setAttribute('y2', H - margin.bottom);
+  axisX.setAttribute('class', 'axis-line');
+  svg.appendChild(axisX);
+
+  const axisY = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+  axisY.setAttribute('x1', margin.left); axisY.setAttribute('y1', margin.top);
+  axisY.setAttribute('x2', margin.left); axisY.setAttribute('y2', H - margin.bottom);
+  axisY.setAttribute('class', 'axis-line');
+  svg.appendChild(axisY);
+})();
+</script>
+
+</body>
+</html>

@@ -34,7 +34,7 @@ namespace agent_framework::conversation
         e.tenant_id = r.identity.tenant_id;
         e.conversation_id = r.identity.conversation_id;
         e.turn_id = r.turn_id;
-        e.run_id = r.turn_id;
+        e.run_id = r.run_id.empty() ? r.turn_id : r.run_id;
         e.sequence = prior + 1;
         e.durability = d;
         e.visibility = v;
@@ -72,7 +72,7 @@ namespace agent_framework::conversation
         started.tenant_id = r.identity.tenant_id;
         started.conversation_id = r.identity.conversation_id;
         started.turn_id = r.turn_id;
-        started.run_id = r.turn_id;
+        started.run_id = r.run_id.empty() ? r.turn_id : r.run_id;
         started.durability = EventDurability::Durable;
         started.visibility = EventVisibility::Operations;
         started.event_type = "turn_started";
@@ -155,7 +155,7 @@ namespace agent_framework::conversation
         stopped.tenant_id = r.identity.tenant_id;
         stopped.conversation_id = r.identity.conversation_id;
         stopped.turn_id = r.turn_id;
-        stopped.run_id = r.turn_id;
+        stopped.run_id = r.run_id.empty() ? r.turn_id : r.run_id;
         stopped.durability = EventDurability::Durable;
         stopped.visibility = EventVisibility::User;
         stopped.event_type = "model_stop";
@@ -279,7 +279,7 @@ namespace agent_framework::conversation
         }
         RuntimeEventEnvelope event;
         event.turn_id = normalized.turn_id;
-        event.run_id = normalized.turn_id;
+        event.run_id = normalized.run_id.empty() ? normalized.turn_id : normalized.run_id;
         event.durability = EventDurability::Durable;
         event.visibility = EventVisibility::Operations;
         event.event_type = "user_input_queued";

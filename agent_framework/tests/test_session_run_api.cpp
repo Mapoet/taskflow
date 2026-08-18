@@ -84,6 +84,15 @@ int main() {
     assert(api.enqueue_run(subject("viewer"),run).status==403);
     assert(api.enqueue_run(subject("operator"),run).status==202);
     assert(api.enqueue_run(subject("operator"),run).status==202);
+    const auto promoted_run=supervisor.load("tenant","run-1");
+    assert(promoted_run&&promoted_run->request.payload.at("conversation_id")=="conversation-1");
+    assert(promoted_run->request.payload.at("task_id")=="task-run-1"&&
+           promoted_run->request.payload.at("turn_id")=="turn-start-1"&&
+           promoted_run->request.payload.at("input")=="work");
+    auto forged_conversation=run;forged_conversation.run_id="run-forged";
+    forged_conversation.command_id="start-forged";
+    forged_conversation.payload["conversation_id"]="conversation-2";
+    assert(api.enqueue_run(subject("operator"),forged_conversation).status==403);
     conversation::PersistentTask task;task.identity={"tenant","conversation-1"};
     task.task_id="task-1";task.root_turn_id="turn";task.current_turn_id="turn";
     task.current_run_id="run-1";
@@ -144,6 +153,10 @@ int main() {
     append(1,conversation::EventVisibility::Internal);
     append(2,conversation::EventVisibility::User);
     append(3,conversation::EventVisibility::Operations);
+    conversation::ConversationMessage message;
+    message.identity={"tenant","conversation-1"};message.message_id="message-1";
+    message.turn_id="turn";message.role="assistant";message.content="durable answer";
+    message.created_at="now";message.sequence=1;assert(events.append_message(message,nullptr));
     auto viewer_events=api.replay_events(subject("viewer"),"session-1",0,10);
     assert(viewer_events.ok()&&viewer_events.body.at("items").size()==1&&viewer_events.body.at("next_cursor")==3);
     auto operator_events=api.replay_events(subject("operator"),"session-1",0,10);
@@ -151,6 +164,9 @@ int main() {
     auto first_scan=api.replay_events(subject("viewer"),"session-1",0,1);
     assert(first_scan.body.at("items").empty()&&first_scan.body.at("next_cursor")==1&&first_scan.body.at("has_more")==true);
     assert(api.replay_events(subject("viewer"),"session-1",4,10).status==409);
+    const auto session_data=api.get_session_data(subject("viewer"),"session-1",0,10);
+    assert(session_data.ok()&&session_data.body.at("messages").size()==1&&
+           session_data.body.at("messages").at(0).at("content")=="durable answer");
 
     ui::InteractionRef ref;ref.tenant_id="tenant";ref.conversation_id="conversation-1";
     ref.turn_id="turn";ref.task_id="task-1";ref.run_id="run-1";ref.artifact_id="sha256:artifact";

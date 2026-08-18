@@ -2,10 +2,12 @@
 #define AGENT_EXAMPLES_IMGUI_CONSOLE_VIEW_HPP
 
 #include <agent/ui/presentation_model.hpp>
+#include <agent/ui/native_workbench.hpp>
 
 #include <cstddef>
 #include <cstdint>
 #include <string>
+#include <memory>
 
 namespace agent_framework::example {
 
@@ -32,7 +34,8 @@ void clear_imgui_artifact_textures();
 ImGuiConsoleAction render_scientific_console(const UiPresentationSnapshot& snapshot,
                                              const ImGuiSkillStatus& skills,
                                              char* input, std::size_t input_size,
-                                             bool agent_busy);
+                                             bool agent_busy,
+                                             const std::shared_ptr<ui::NativeWorkbenchController>& workbench = {});
 
 } // namespace agent_framework::example
 

@@ -25,6 +25,13 @@
 #include <agent/ui/interaction_projection_store.hpp>
 #include <agent/agent/user_input_preprocessor.hpp>
 #include <agent/approval/executor.hpp>
+#include <agent/api/v1/http_routes.hpp>
+#include <agent/api/v1/runtime_settings_api.hpp>
+#include <agent/conversation/store.hpp>
+#include <agent/planning/plan_store.hpp>
+#include <agent/session/run_worker.hpp>
+#include <agent/session/session_catalog.hpp>
+#include <agent/ui/runtime_event_projector.hpp>
 
 #include <httplib.hpp>
 
@@ -44,6 +51,9 @@
 
 #ifndef AGENT_WEB_UI_STATIC_ROOT
 #define AGENT_WEB_UI_STATIC_ROOT "."
+#endif
+#ifndef AGENT_WEB_UI_LEGACY_STATIC_ROOT
+#define AGENT_WEB_UI_LEGACY_STATIC_ROOT "."
 #endif
 
 namespace {
@@ -227,7 +237,9 @@ int run_graph_ui(tf::Executor& executor,
                  const std::shared_ptr<LiveOperationsProjection>& operations,
                  const example::LiveRuntime& runtime,
                  const std::string& session_id,
-                 std::optional<std::uint64_t> expected_task_revision = std::nullopt) {
+                 std::optional<std::uint64_t> expected_task_revision = std::nullopt,
+                 const example::ConversationTurnBinding& binding = {},
+                 conversation::RuntimeEventSink canonical_event_sink = {}) {
     GraphExecutor gx;
     ReactCliRunRequest req;
     req.config = cfg;
@@ -263,10 +275,12 @@ int run_graph_ui(tf::Executor& executor,
         auto turn = example::run_conversation_turn(runtime, "web_ui_demo",
             state->initial_user_prompt,
             [&] { wr = gx.run_react_cli_sync(executor, req); return wr; },
-            [&ui, operations, session_id](const conversation::RuntimeEventEnvelope& event) {
+            [&ui, operations, session_id,
+             canonical_event_sink](const conversation::RuntimeEventEnvelope& event) {
                 if(operations) operations->observe_runtime(event);
                 ui.dispatch_message(session_id, "runtime_event", conversation::encode(event));
-            }, expected_task_revision);
+                if(canonical_event_sink) canonical_event_sink(event);
+            }, expected_task_revision, binding);
         if(!turn.error.empty()) {
             try {
                 const auto conflict=json::parse(turn.error);
@@ -429,6 +443,94 @@ int web_ui_demo_main(int argc, char** argv) {
     auto interaction_mutex = std::make_shared<std::mutex>();
     auto interaction_store=std::make_shared<ui::SQLiteInteractionProjectionStore>(
         (std::filesystem::path(phase4_state_dir_arg)/"interactions.sqlite3").string());
+    const auto workbench_database =
+        (std::filesystem::path(phase4_state_dir_arg) / "workbench.sqlite3").string();
+    auto session_catalog = std::make_shared<session::SQLiteSessionCatalog>(workbench_database);
+    auto run_supervisor =
+        std::make_shared<session::SQLiteSessionRunSupervisor>(workbench_database);
+    auto conversation_events =
+        std::make_shared<conversation::SQLiteConversationStore>(workbench_database);
+    auto canonical_tasks =
+        std::make_shared<conversation::SQLiteTaskRegistry>(workbench_database);
+    auto canonical_decisions =
+        std::make_shared<decision::SQLiteDecisionStore>(workbench_database);
+    auto canonical_planning = std::make_shared<planning::SQLitePlanningStore>(
+        workbench_database, planning::SQLitePlanningStoreOptions{3000, false});
+    const auto* configured_api_key=std::getenv("AGENT_LLM_API_KEY");
+    if(!configured_api_key||!*configured_api_key)configured_api_key=std::getenv("OPENAI_API_KEY");
+    const auto* configured_fs_root=std::getenv("AGENT_FS_ROOT");
+    json settings_defaults={
+        {"provider.id",provider_arg.empty()?"default":provider_arg},
+        {"provider.model",cfg.model_config.model_name},
+        {"provider.endpoint",""},
+        {"provider.credentials_configured",configured_api_key&&*configured_api_key},
+        {"mcp.enabled",!no_cursor_mcp},{"mcp.registry",cursor_mcp_json_arg},
+        {"skills.enabled",!skills_root_arg.empty()},{"skills.root",skills_root_arg},
+        {"sandbox.mode","workspace"},{"sandbox.root",configured_fs_root?configured_fs_root:""},
+        {"workspace.directory",std::filesystem::current_path().string()},
+        {"planning.depth","comprehensive"},{"memory.strategy","adaptive"},
+        {"assurance.tier","professional"},{"judge.mode","required"},
+        {"logging.level","info"},{"logging.redaction",true},
+        {"observability.enabled",true},{"appearance.theme","dark"},
+        {"appearance.language","zh-CN"}};
+    auto runtime_settings=std::make_shared<api::v1::RuntimeSettingsStore>(
+        (std::filesystem::path(phase4_state_dir_arg)/"runtime-settings.sqlite3").string(),
+        std::move(settings_defaults));
+    auto canonical_interactions =
+        std::make_shared<ui::SQLiteInteractionProjectionStore>(
+            (std::filesystem::path(phase4_state_dir_arg) /
+             "workbench-interactions.sqlite3").string());
+    auto runtime_projector = std::make_shared<ui::RuntimeEventInteractionProjector>(
+        *conversation_events, *canonical_interactions);
+
+    session::ProductSession default_session;
+    default_session.tenant_id = operations_tenant_arg;
+    default_session.organization_id = "local";
+    default_session.project_id = "taskflow";
+    default_session.workspace_id = "agent-framework";
+    default_session.session_id = "default";
+    default_session.conversation_id = "default";
+    default_session.owner_principal_id = "local-user";
+    default_session.title = "Agent Framework Workbench";
+    default_session.folder = "Local workspace";
+    default_session.tags = {"harness", "live"};
+    const auto session_created = session_catalog->create(default_session);
+    if (!session_created.ok)
+        throw std::runtime_error("workbench_default_session_failed:" + session_created.error);
+    identity::RuntimeSubject workbench_subject;
+    workbench_subject.tenant_id = default_session.tenant_id;
+    workbench_subject.organization_id = default_session.organization_id;
+    workbench_subject.project_id = default_session.project_id;
+    workbench_subject.workspace_id = default_session.workspace_id;
+    workbench_subject.principal_id = default_session.owner_principal_id;
+    workbench_subject.session_id = default_session.session_id;
+    workbench_subject.conversation_id = default_session.conversation_id;
+    workbench_subject.agent_id = "web_ui_demo";
+    workbench_subject.authorization_revision = 1;
+    workbench_subject.authenticated = true;
+    const conversation::ConversationIdentity default_conversation{
+        default_session.tenant_id, default_session.conversation_id};
+    if (conversation_events->last_event_sequence(default_conversation) == 0) {
+        conversation::RuntimeEventEnvelope ready;
+        ready.event_id = "workbench-session-ready";
+        ready.tenant_id = default_conversation.tenant_id;
+        ready.conversation_id = default_conversation.conversation_id;
+        ready.turn_id = "workbench-bootstrap";
+        ready.sequence = 1;
+        ready.durability = conversation::EventDurability::Durable;
+        ready.visibility = conversation::EventVisibility::User;
+        ready.event_type = "session_ready";
+        ready.timestamp = std::to_string(std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count());
+        ready.payload = {{"state", "passed"},
+                         {"summary", "Harness-supported Workbench is ready"}};
+        std::string ready_error;
+        if (!conversation_events->append_event(std::move(ready), &ready_error))
+            throw std::runtime_error("workbench_ready_event_failed:" + ready_error);
+    }
+    if (const auto projected = runtime_projector->synchronize(default_conversation);
+        !projected.ok)
+        throw std::runtime_error("workbench_initial_projection_failed:" + projected.error);
     auto persist_interactions=[interaction_store,interaction_mutex](const ui::InteractionSnapshot& projected){
         std::lock_guard<std::mutex> lock(*interaction_mutex);
         return ui::commit_interaction_projection(*interaction_store, projected, 4);
@@ -503,7 +605,8 @@ int web_ui_demo_main(int argc, char** argv) {
 
     auto run_line = [&](const std::string& line,
                         const LegacyUiSessionRuns::Lease& lease,
-                        std::optional<std::uint64_t> expected_task_revision = std::nullopt) {
+                        std::optional<std::uint64_t> expected_task_revision = std::nullopt,
+                        example::ConversationTurnBinding binding = {}) {
         LegacyUiRunCompletion completion(session_runs, lease);
         {
             std::lock_guard<std::mutex> lock(*interaction_mutex);
@@ -528,12 +631,20 @@ int web_ui_demo_main(int argc, char** argv) {
             for (const auto& v : proc.tier_a_violations) {
                 ui.dispatch_error(lease.session_id, v);
             }
-            return;
+            return 1;
         }
         apply_processed_to_agent_state(std::move(proc), ectx, *state);
         tf::Executor executor;
-        (void)run_graph_ui(executor, cfg, deps, state, ui, control, live_operations,
-                           runtime, lease.session_id, expected_task_revision);
+        auto synchronize = [runtime_projector](
+                               const conversation::RuntimeEventEnvelope& event) {
+            const auto result = runtime_projector->synchronize(
+                {event.tenant_id, event.conversation_id});
+            if (!result.ok)
+                std::cerr << "[workbench_projection] " << result.error << '\n';
+        };
+        return run_graph_ui(executor, cfg, deps, state, ui, control, live_operations,
+                            runtime, lease.session_id, expected_task_revision,
+                            binding, std::move(synchronize));
     };
 
     const char* provider_env = std::getenv("AGENT_LLM_PROVIDER");
@@ -604,9 +715,110 @@ int web_ui_demo_main(int argc, char** argv) {
         }
     }
 
+    api::v1::SessionRunApi workbench_api(
+        *session_catalog, *run_supervisor, conversation_events.get(), canonical_interactions.get(),
+        approval_store.get(), canonical_decisions.get(), canonical_tasks.get(),
+        canonical_planning.get(), canonical_planning.get());
+    session::SessionRunWorker workbench_worker(
+        *run_supervisor, "web-workbench-worker", 10ULL * 60ULL * 1000ULL,
+        [&, session_runs, session_catalog, canonical_decisions,
+         runtime_projector](session::WorkerExecutionContext& context) {
+            using session::WorkerDisposition;
+            using session::WorkerExecutionResult;
+            for (const auto& command : context.commands)
+                if (command.kind == session::SessionCommandKind::Cancel)
+                    return WorkerExecutionResult{WorkerDisposition::Cancelled,
+                                                 "cancelled_by_durable_command"};
+            const auto product = session_catalog->get(
+                context.run.request.tenant_id, context.run.request.session_id);
+            if (!product)
+                return WorkerExecutionResult{WorkerDisposition::Failed,
+                                             "workbench_session_not_found"};
+            const auto& payload = context.run.request.payload;
+            auto input = payload.value("input", std::string{});
+            for (const auto& command : context.commands) {
+                if (command.kind != session::SessionCommandKind::Steer &&
+                    command.kind != session::SessionCommandKind::Queue)
+                    continue;
+                const auto addition = command.payload.value(
+                    "input", command.payload.value("option_id", std::string{}));
+                if (!addition.empty()) input = addition;
+            }
+            const auto task_id = payload.value("task_id", std::string{});
+            const auto turn_id = payload.value("turn_id", std::string{});
+            if (input.empty() || task_id.empty() || turn_id.empty())
+                return WorkerExecutionResult{WorkerDisposition::Failed,
+                                             "workbench_run_binding_incomplete"};
+            if (context.heartbeat) {
+                const auto now = static_cast<std::uint64_t>(
+                    std::chrono::duration_cast<std::chrono::milliseconds>(
+                        std::chrono::system_clock::now().time_since_epoch()).count());
+                if (!context.heartbeat(now))
+                    return WorkerExecutionResult{WorkerDisposition::Failed,
+                                                 "workbench_run_lease_lost"};
+            }
+            const auto lease = session_runs->begin(product->session_id,
+                                                   context.run.request.run_id);
+            if (!lease)
+                return WorkerExecutionResult{WorkerDisposition::Failed,
+                                             "workbench_session_execution_busy"};
+            example::ConversationTurnBinding binding;
+            binding.database = workbench_database;
+            binding.identity = conversation::ConversationIdentity{
+                context.run.request.tenant_id, product->conversation_id};
+            binding.session_id = product->session_id;
+            binding.turn_id = turn_id;
+            binding.task_id = task_id;
+            binding.run_id = context.run.request.run_id;
+            const int exit_code = run_line(input, *lease, std::nullopt, std::move(binding));
+            const auto projected = runtime_projector->synchronize(
+                {context.run.request.tenant_id, product->conversation_id});
+            if (!projected.ok)
+                return WorkerExecutionResult{WorkerDisposition::Failed,
+                    "workbench_projection_failed:" + projected.error};
+            if (const auto pending = canonical_decisions->pending(
+                    context.run.request.tenant_id, product->session_id,
+                    product->conversation_id);
+                pending && pending->subject.run_id == context.run.request.run_id)
+                return WorkerExecutionResult{WorkerDisposition::AwaitingInput,
+                                             "decision_pending"};
+            return exit_code == 0
+                ? WorkerExecutionResult{WorkerDisposition::Completed, {}}
+                : WorkerExecutionResult{WorkerDisposition::Failed,
+                                        "harness_supported_execution_failed"};
+        });
+    std::jthread workbench_worker_thread([&](std::stop_token stop) {
+        while (!stop.stop_requested()) {
+            const auto now = static_cast<std::uint64_t>(
+                std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::system_clock::now().time_since_epoch()).count());
+            const auto tick = workbench_worker.tick(now);
+            if (!tick.error.empty() && tick.claimed)
+                std::cerr << "[workbench_worker] run=" << tick.run_id
+                          << " error=" << tick.error << '\n';
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+    });
+
     httplib::Server svr;
+    const api::v1::RuntimeSubjectResolver workbench_subject_resolver=
+        [workbench_subject](const httplib::Request&)
+            -> std::optional<identity::RuntimeSubject> { return workbench_subject; };
+    api::v1::register_session_run_routes(svr,workbench_api,workbench_subject_resolver);
+    api::v1::register_runtime_settings_routes(svr,*runtime_settings,workbench_subject_resolver);
+
+    // Compatibility writes remain temporarily available until the formal Workbench is
+    // backed by the same production resource graph.  Make the authority boundary visible
+    // to every caller during the parity-observation window.
+    const auto mark_legacy_write=[](httplib::Response& response,std::string_view successor) {
+        response.set_header("Deprecation","true");
+        response.set_header("Sunset","Wed, 30 Sep 2026 00:00:00 GMT");
+        response.set_header("Link",("<"+std::string(successor)+">; rel=\"successor-version\"").c_str());
+        response.set_header("X-Agent-Legacy-Authority","compatibility-only");
+    };
 
     svr.Post("/ui/run", [&](const httplib::Request& req, httplib::Response& res) {
+        mark_legacy_write(res,"/api/v1/runs");
         try {
             json body = json::parse(req.body);
             std::string prompt = body.at("prompt").get<std::string>();
@@ -646,6 +858,7 @@ int web_ui_demo_main(int argc, char** argv) {
     });
 
     svr.Post("/ui/cancel", [&](const httplib::Request& req, httplib::Response& res) {
+        mark_legacy_write(res,"/api/v1/runs/{run_id}/commands");
         std::string session_id = "default";
         std::optional<std::string> run_id;
         if (!req.body.empty()) {
@@ -672,6 +885,7 @@ int web_ui_demo_main(int argc, char** argv) {
     });
 
     svr.Post("/ui/operations/hitl", [&](const httplib::Request& req, httplib::Response& res) {
+        mark_legacy_write(res,"/api/v1/sessions/{session_id}/approvals/{approval_id}");
         if (!demo_state) {
             res.status = 409;
             res.set_content(R"({"error":"no accountable HITL executor is attached to this run"})",
@@ -940,6 +1154,12 @@ int web_ui_demo_main(int argc, char** argv) {
         res.set_content(bytes, mime.c_str());
     });
 
+    const std::string legacy_mount = AGENT_WEB_UI_LEGACY_STATIC_ROOT;
+    if (!svr.set_mount_point("/legacy", legacy_mount.c_str())) {
+        std::cerr << "[web_ui_demo] legacy set_mount_point failed for "
+                  << legacy_mount << "\n";
+        return 1;
+    }
     const std::string mount = AGENT_WEB_UI_STATIC_ROOT;
     if (!svr.set_mount_point("/", mount.c_str())) {
         std::cerr << "[web_ui_demo] set_mount_point failed for " << mount << "\n";

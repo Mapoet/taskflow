@@ -1521,3 +1521,44 @@ AF 应保留并强化自己的核心差异：Execution IR、Runner、Receipt/Rec
 - 配置公司、用户、项目、工作区与 Session；
 - 解释每次运行使用了哪些数据、记忆、Agent、Skill、权限和版本；
 - 在失败、断线、重启和长时间运行后继续收敛到可验证结果。
+
+## 22. 2026-08-18 AF-NUI0–NUI7 原生界面对齐闭环
+
+TUI 与 ImGui 已从各自维护的静态控制台布局迁移到同一套原生 Workbench
+信息架构：Session rail、Run strip、Conversation/Understanding/Plan/Memory/Files/
+Approval/Evidence 上下文导航、Tool Activity、Profile 和 System Settings。两端共用
+`NativeWorkbenchController`，后者直接连接 `SessionRunApi` 与
+`RuntimeSettingsStore`，因此会话重命名、回收、恢复、两阶段永久清除和设置变更均使用
+服务端权威 revision/CAS，而不是仅修改本地 UI 状态。
+
+原生 Session 切换现在同时更新 `RuntimeSubject` 和 harness-supported conversation
+scope，并重置当前界面的瞬时 presentation/thread state，避免新任务继续写入上一个
+Session 的 Conversation。System Settings 展示与正式 Web Workbench 相同的完整配置域：
+Provider/Model、MCP、Skills、工具沙箱、工作目录、规划深度、记忆策略、
+Assurance/Judge、日志、Observability、主题和语言；只读凭据状态不回显密钥，动态项与
+需要重启的项明确区分。`tools/run_ui.sh` 新增 `--workbench-state-dir`，便于原生界面
+使用隔离、持久的 Session/Settings 数据目录。
+
+TUI 文本渲染不再依赖空格或 UTF-8 字节数断行。`wrap_terminal_text` 使用 FTXUI 的
+glyph 分段和 terminal display width，覆盖连续中文、CJK 宽字符、emoji、组合字符、
+显式换行与无断点长 URL；Conversation、Tool arguments/results、Operations、Memory、
+LLM invocation、HITL 与设置值统一使用该路径。宽终端使用 Session/主上下文/Activity
+三栏；中等和紧凑终端按可用列数降级，不再把固定三栏强塞入小窗口。
+
+离线验证覆盖 presentation、Markdown assembler、operations、Session API、settings
+CAS、原生控制器、TUI Unicode wrap、ImGui/TUI handler、launcher 与 rich renderer，
+13/13 通过。真实运行验证在隔离 SQLite 目录和 Xvfb 显示服务器中启动了 Release
+`tui_agent_demo` 与 `imgui_agent_demo`，并人工检查 Conversation 与 Settings 状态。
+
+| 证据 | SHA-256 | 视觉检查 |
+|---|---|---|
+| `docs/evidence/screenshots/af-nui/imgui-conversation.png` | `3573e799ee4d9fc05c1835a3d43eec8d095b0a815871d3460f9c08e86d9789ea` | 通过；Session、Run、七类上下文、Markdown Conversation 与 Tool Activity 同屏且无裁切 |
+| `docs/evidence/screenshots/af-nui/imgui-settings.png` | `ea19dfa07a8d2f956397e6076895a9d84ee3e21c5a9fd6cdb0361063528a91bc` | 通过；revision、授权版本、typed fields、只读凭据与 restart 标记可见 |
+| `docs/evidence/screenshots/af-nui/tui-conversation.png` | `74886827c44628937dd8118754f65012ec3179c8e4882b573b64270039a629ed` | 通过；宽屏三栏、Session/身份入口和连续中文/长 URL 自动换行可见 |
+| `docs/evidence/screenshots/af-nui/tui-settings.png` | `67e29b275d38736bb1cecb9962604a2d5e1c8fa8e633b188e5b061022424decd` | 通过；所有主要设置组在终端内可滚动查看，无水平溢出 |
+| `docs/evidence/screenshots/af-nui/imgui-before-after.png` | `196efa2cd30465e5a586ef695ee38c4795c7be986a7e53275de6f8327f9b8c3f` | 基线/当前并排；从三个技术 tab 升级为 Session-first Workbench |
+| `docs/evidence/screenshots/af-nui/tui-before-after.png` | `21eb4fce0fe18909c2bd9adbd949cad6f6d2c4df9fa21273c57011a470055abf` | 基线/当前并排；增加 Session、Run、上下文导航、身份/设置并验证 wrap |
+
+本阶段闭合的是原生界面的管理入口、信息架构和单进程 durable state，不把截图或离线
+测试外推为生产多用户认证。TUI/ImGui 仍是本地原生客户端；组织级 OIDC、跨节点
+Session 并发、外部部署策略和 ProviderLive 认证继续沿用 Phase 4 对应证据等级。

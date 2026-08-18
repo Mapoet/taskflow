@@ -10,10 +10,18 @@
   },
   "dependencies": {
     "@tanstack/react-query": "^5.85.5",
+    "katex": "^0.18.4",
+    "mermaid": "^11.16.1",
     "react": "^19.1.1",
-    "react-dom": "^19.1.1"
+    "react-dom": "^19.1.1",
+    "react-markdown": "^10.1.0",
+    "rehype-highlight": "^7.0.2",
+    "rehype-katex": "^7.0.1",
+    "remark-gfm": "^4.0.1",
+    "remark-math": "^6.0.0"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.13.0",
     "@playwright/test": "^1.55.0",
     "@types/react": "^19.1.10",
     "@types/react-dom": "^19.1.7",

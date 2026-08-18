@@ -168,10 +168,25 @@ namespace agent_framework::example
 
     using GraphTurnCallback = std::function<WorkflowResult()>;
 
+    // Explicit correlation supplied by durable Session/Run ingress.  Interactive
+    // CLIs may keep using environment/default discovery, but a multi-session HTTP
+    // host must never mutate process-global environment variables to select the
+    // Conversation, Task, Turn or Run being executed.
+    struct ConversationTurnBinding
+    {
+        std::optional<std::filesystem::path> database;
+        std::optional<conversation::ConversationIdentity> identity;
+        std::string session_id;
+        std::string turn_id;
+        std::string task_id;
+        std::string run_id;
+    };
+
     inline conversation::TurnResult run_conversation_turn(
         const LiveRuntime &runtime, std::string_view agent_name, std::string input,
         GraphTurnCallback graph, conversation::RuntimeEventSink event_sink = {},
-        std::optional<std::uint64_t> expected_task_revision = std::nullopt)
+        std::optional<std::uint64_t> expected_task_revision = std::nullopt,
+        const ConversationTurnBinding &binding = {})
     {
         if (!runtime.harness_ready && !runtime.explicit_legacy_fallback)
             throw std::runtime_error(
@@ -180,17 +195,20 @@ namespace agent_framework::example
         if (!graph)
             throw std::invalid_argument("model/tool execution callback required");
         const char *configured_db = std::getenv("AGENT_CONVERSATION_DB");
-        std::filesystem::path database = configured_db && *configured_db
-                                             ? std::filesystem::path(configured_db)
-                                             : std::filesystem::path(".agent-framework") /
-                                                   (std::string(agent_name) + "-conversation.sqlite3");
+        std::filesystem::path database = binding.database
+                                             ? *binding.database
+                                             : configured_db && *configured_db
+                                                   ? std::filesystem::path(configured_db)
+                                                   : std::filesystem::path(".agent-framework") /
+                                                         (std::string(agent_name) + "-conversation.sqlite3");
         const char *configured_tenant = std::getenv("AGENT_TENANT_ID");
         const char *configured_conversation = std::getenv("AGENT_CONVERSATION_ID");
-        conversation::ConversationIdentity identity{
-            configured_tenant && *configured_tenant ? configured_tenant : "local",
-            configured_conversation && *configured_conversation
-                ? configured_conversation
-                : std::string(agent_name)};
+        conversation::ConversationIdentity identity = binding.identity.value_or(
+            conversation::ConversationIdentity{
+                configured_tenant && *configured_tenant ? configured_tenant : "local",
+                configured_conversation && *configured_conversation
+                    ? configured_conversation
+                    : std::string(agent_name)});
         static std::atomic<std::uint64_t> serial{0};
         const auto now = std::chrono::duration_cast<std::chrono::microseconds>(
                              std::chrono::system_clock::now().time_since_epoch())
@@ -201,6 +219,8 @@ namespace agent_framework::example
                 std::to_string(serial.fetch_add(1, std::memory_order_relaxed)),
             std::move(input), runtime.task_profile,
             static_cast<std::uint64_t>(std::max(1, runtime.config.max_iterations))};
+        if (!binding.turn_id.empty())
+            request.turn_id = binding.turn_id;
         conversation::SQLiteConversationStore store(database.string());
         conversation::SQLiteTaskRegistry task_registry(database.string());
         conversation::SQLiteTaskProfileClarificationStore clarification_store(database.string());
@@ -211,12 +231,24 @@ namespace agent_framework::example
         // the authoritative conversation tenant must never be silently replaced
         // with "local" or a durable Decision becomes undiscoverable on resume.
         runtime_subject.tenant_id=identity.tenant_id;
+        if (!binding.session_id.empty())
+            runtime_subject.session_id = binding.session_id;
         const auto invocation_now_ms = static_cast<std::uint64_t>(
             std::chrono::duration_cast<std::chrono::milliseconds>(
                 std::chrono::system_clock::now().time_since_epoch())
                 .count());
-        const char *configured_task = std::getenv("AGENT_TASK_ID");
-        const char *configured_run = std::getenv("AGENT_RUN_ID");
+        const char *configured_task_env = std::getenv("AGENT_TASK_ID");
+        const char *configured_run_env = std::getenv("AGENT_RUN_ID");
+        const std::string configured_task = !binding.task_id.empty()
+                                                ? binding.task_id
+                                                : configured_task_env && *configured_task_env
+                                                      ? configured_task_env
+                                                      : "";
+        const std::string configured_run = !binding.run_id.empty()
+                                               ? binding.run_id
+                                               : configured_run_env && *configured_run_env
+                                                     ? configured_run_env
+                                                     : "";
         auto active_task = task_registry.active(identity);
         auto pending_decision=decision_store.pending(identity.tenant_id,
             runtime_subject.session_id,identity.conversation_id);
@@ -384,7 +416,7 @@ namespace agent_framework::example
             request.task_id = pending_clarification->task_id;
             request.run_id = pending_clarification->run_id;
         }
-        else if (configured_task && *configured_task)
+        else if (!configured_task.empty())
         {
             request.task_id = configured_task;
             auto selected = task_registry.load(identity, request.task_id);
@@ -409,7 +441,7 @@ namespace agent_framework::example
         // it.  An explicit AGENT_RUN_ID remains an operator-owned idempotency key.
         if (!pending_decision && !pending_clarification)
             request.run_id = conversation::select_task_run_id(
-                configured_run && *configured_run ? configured_run : "",
+                configured_run,
                 active_task ? active_task->current_run_id : "", control_only,
                 request.turn_id);
         runtime_subject.task_id=request.task_id;
@@ -527,7 +559,7 @@ namespace agent_framework::example
             return control_engine.start_turn(request);
         }
         conversation::TaskOrchestrator task_orchestrator(task_registry);
-        if (!pending_clarification && !needs_clarification)
+        if (!pending_decision && !pending_clarification && !needs_clarification)
         {
             const auto task_open = task_orchestrator.open_or_resume(request, intent);
             if (!task_open.ok)
@@ -543,7 +575,7 @@ namespace agent_framework::example
             }
             active_task = task_open.task;
         }
-        if (active_task && !pending_clarification && !needs_clarification &&
+        if (active_task && !pending_decision && !pending_clarification && !needs_clarification &&
             runtime.task_action_observer && runtime.task_command_policy &&
             runtime.task_principal_resolver)
         {

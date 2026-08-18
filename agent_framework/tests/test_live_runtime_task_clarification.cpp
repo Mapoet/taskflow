@@ -1,6 +1,7 @@
 #include <cassert>
 #include <cstdlib>
 #include <filesystem>
+#include <iostream>
 #include <memory>
 
 #include "../examples/common/agent_example_bootstrap.hpp"
@@ -43,6 +44,9 @@ int main(){
     assert(waiting.error.empty()&&waiting.checkpoint.phase==conversation::TurnPhase::AwaitingInput);
     assert(calls==0);
     auto resumed=example::run_conversation_turn(runtime,"clarification-demo","implement",graph);
+    if(!resumed.error.empty()||resumed.checkpoint.phase!=conversation::TurnPhase::Completed)
+        std::cerr<<"resume error="<<resumed.error<<" phase="
+                 <<conversation::name(resumed.checkpoint.phase)<<" calls="<<calls<<'\n';
     assert(resumed.error.empty()&&resumed.checkpoint.phase==conversation::TurnPhase::Completed);
     assert(calls==1);
     auto replay=example::run_conversation_turn(runtime,"clarification-demo","implement",graph);

@@ -13,6 +13,7 @@
 #include "common/phase4_operations_bootstrap.hpp"
 #include "common/imgui_console_view.hpp"
 #include "common/imgui_text_input_support.hpp"
+#include "common/native_workbench_bootstrap.hpp"
 
 #include <agent/agent/execution_context.hpp>
 #include <agent/agent/task_state_machine.hpp>
@@ -253,7 +254,8 @@ int run_graph_ui(tf::Executor& executor,
                  const std::shared_ptr<TaskControl>& control,
                  const std::shared_ptr<UiPresentationModel>& presentation,
                  const std::shared_ptr<LiveOperationsProjection>& operations,
-                 const example::LiveRuntime& runtime) {
+                 const example::LiveRuntime& runtime,
+                 std::string_view conversation_scope) {
     GraphExecutor gx;
     ReactCliRunRequest req;
     req.config = cfg;
@@ -279,7 +281,8 @@ int run_graph_ui(tf::Executor& executor,
     };
     try {
         WorkflowResult wr{};
-        auto turn = example::run_conversation_turn(runtime, "imgui_agent_demo",
+        auto turn = example::run_conversation_turn(runtime,
+            conversation_scope.empty() ? "imgui_agent_demo" : std::string(conversation_scope),
             state->initial_user_prompt,
             [&] { wr = gx.run_react_cli_sync(executor, req); return wr; },
             [operations](const conversation::RuntimeEventEnvelope& event) {
@@ -319,6 +322,7 @@ int imgui_agent_demo_main(int argc, char** argv) {
     std::string skills_root_arg;
     std::string skill_authoring_root_arg;
     std::string operations_db_arg;
+    std::string workbench_state_dir_arg;
     std::string operations_tenant_arg{"demo-tenant"};
     std::string operations_run_arg{"run-orbit-042"};
     int max_iterations = -1;
@@ -343,6 +347,8 @@ int imgui_agent_demo_main(int argc, char** argv) {
     app.add_option("--operations-db", operations_db_arg, "Operations snapshot SQLite database");
     app.add_option("--operations-tenant", operations_tenant_arg, "Operations tenant identity");
     app.add_option("--operations-run", operations_run_arg, "Operations run identity");
+    app.add_option("--workbench-state-dir", workbench_state_dir_arg,
+                   "Durable native Session and settings directory");
     app.add_flag("-v,--verbose", verbose, "AGENT_LOG_LEVEL=debug");
     CLI11_PARSE(app, argc, argv);
 
@@ -386,6 +392,15 @@ int imgui_agent_demo_main(int argc, char** argv) {
     AgentConfig cfg = runtime.config;
     const bool skip_cursor_mcp = !runtime.bootstrap.mcp_services;
     const auto& mcp_boot = runtime.bootstrap;
+
+    const char* fs_root = std::getenv("AGENT_FS_ROOT");
+    auto native_workbench = example::build_native_workbench({
+        workbench_state_dir_arg, "imgui_agent_demo",
+        provider_arg.empty() ? "openai" : provider_arg,
+        cfg.model_config.model_name, skills_root_arg, cursor_mcp_json_arg,
+        fs_root ? fs_root : "", !skip_cursor_mcp, !no_skills});
+    if (const char* initial_view = std::getenv("AGENT_UI_INITIAL_VIEW"); initial_view)
+        (void)example::apply_native_initial_view(native_workbench.controller, initial_view);
 
     // Same rationale as web_ui_demo: avoid AgentLoop/OpenAIAdapter std::cout spam in GUI apps.
 #if defined(_WIN32)
@@ -448,11 +463,20 @@ int imgui_agent_demo_main(int argc, char** argv) {
     auto queue = std::make_shared<ThreadSafeQueue<StreamMessage>>();
     auto presentation = std::make_shared<UiPresentationModel>();
     const char* provider_env = std::getenv("AGENT_LLM_PROVIDER");
-    presentation->set_runtime_metadata("orbital-analysis",
+    presentation->set_runtime_metadata(native_workbench.controller->snapshot().selected_session_id,
                                        provider_env && *provider_env ? provider_env : "OpenAI",
                                        cfg.model_config.model_name.empty() ? "provider default" : cfg.model_config.model_name,
                                        skip_cursor_mcp ? "Core tools ready" :
                                        mcp_boot.diagnostics.empty() ? "MCP connected" : "MCP partial");
+    if (demo_state) {
+        presentation->load_demo_state();
+        presentation->set_runtime_metadata(
+            native_workbench.controller->snapshot().selected_session_id,
+            provider_env && *provider_env ? provider_env : "OpenAI",
+            cfg.model_config.model_name.empty() ? "provider default" : cfg.model_config.model_name,
+            skip_cursor_mcp ? "Core tools ready" :
+                mcp_boot.diagnostics.empty() ? "MCP connected" : "MCP partial");
+    }
     for (const auto& diagnostic : mcp_boot.diagnostics)
         presentation->add_system_notice("MCP unavailable: " + diagnostic, true);
     for (const auto& service : mcp_boot.skipped_mcp_services)
@@ -525,7 +549,8 @@ int imgui_agent_demo_main(int argc, char** argv) {
             return;
         }
         apply_processed_to_agent_state(std::move(proc), ectx, *state);
-        (void)run_graph_ui(executor, cfg, deps, state, ui, control, presentation, operations, runtime);
+        (void)run_graph_ui(executor, cfg, deps, state, ui, control, presentation, operations,
+                           runtime, native_workbench.controller->snapshot().selected_session_id);
         {
             std::lock_guard<std::mutex> lock(control_mutex);
             if (active_control == control) active_control.reset();
@@ -534,7 +559,8 @@ int imgui_agent_demo_main(int argc, char** argv) {
 
     if (demo_state) {
         presentation->add_system_notice(
-            "中文显示验证：GNSS 掩星、电离层建模、数据同化、轨道与气象卫星；扩展字：龘。");
+            "自动换行验证：GNSS掩星电离层建模数据同化轨道与气象卫星连续中文；"
+            "https://example.invalid/research/gnss-ro/very/long/path/without/manual-breaks；扩展字：龘。");
     } else if (!prompt_arg.empty()) {
         agent_busy = true;
         run_line(prompt_arg);
@@ -542,6 +568,7 @@ int imgui_agent_demo_main(int argc, char** argv) {
     }
 
     char input_buf[4096] = {};
+    std::string active_native_session = native_workbench.controller->snapshot().selected_session_id;
 
     while (!glfwWindowShouldClose(window) && !g_shutdown.load()) {
         glfwPollEvents();
@@ -553,6 +580,19 @@ int imgui_agent_demo_main(int argc, char** argv) {
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
 
+        const auto native_snapshot = native_workbench.controller->snapshot();
+        if (native_snapshot.selected_session_id != active_native_session && !agent_busy.load()) {
+            active_native_session = native_snapshot.selected_session_id;
+            presentation->reset();
+            presentation->set_runtime_metadata(
+                active_native_session,
+                provider_env && *provider_env ? provider_env : "OpenAI",
+                cfg.model_config.model_name.empty() ? "provider default" : cfg.model_config.model_name,
+                skip_cursor_mcp ? "Core tools ready" :
+                    mcp_boot.diagnostics.empty() ? "MCP connected" : "MCP partial");
+            state = std::make_shared<internal::AgentThreadState>();
+        }
+
         const auto runtime_skills = example::skill_ui_status(deps.skills);
         example::ImGuiSkillStatus imgui_skills;
         imgui_skills.enabled = runtime_skills.enabled;
@@ -563,7 +603,8 @@ int imgui_agent_demo_main(int argc, char** argv) {
         imgui_skills.root = runtime_skills.root;
         imgui_skills.active = runtime_skills.active;
         auto action = example::render_scientific_console(
-            presentation->snapshot(), imgui_skills, input_buf, sizeof(input_buf), agent_busy.load());
+            presentation->snapshot(), imgui_skills, input_buf, sizeof(input_buf), agent_busy.load(),
+            native_workbench.controller);
         if (action.send && !agent_busy.exchange(true)) {
             std::thread([&, line = std::move(action.prompt)]() {
                 run_line(line);

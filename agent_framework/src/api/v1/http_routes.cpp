@@ -53,6 +53,15 @@ void register_session_run_routes(httplib::Server& server,SessionRunApi& api,
         try {
             session::SessionListQuery query;
             if(request.has_param("search"))query.search=request.get_param_value("search");
+            if(request.has_param("state")) {
+                const auto requested=request.get_param_value("state");
+                if(requested=="all")query.state.reset();
+                else {
+                    auto parsed=session_state(requested);
+                    if(!parsed){send(response,{422,{{"error","invalid_session_state"}}});return;}
+                    query.state=*parsed;
+                }
+            }
             if(request.has_param("before"))query.before_sequence=std::stoull(request.get_param_value("before"));
             if(request.has_param("limit"))query.limit=std::stoull(request.get_param_value("limit"));
             send(response,api.list_sessions(*subject,std::move(query)));

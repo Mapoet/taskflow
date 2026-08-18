@@ -11,7 +11,9 @@ enum class RecoveryEvidenceLevel { Offline, ProcessLive, ProviderLive };
 enum class RecoveryScenario {
     WorkerCrashTakeover, StaleCompletion, CancelBeforeStart, CancelCompleteRace,
     DeadlineResultRace, CancelRestartEscalation, ObjectCorruption, MissingObject,
-    SqliteBusy, StorageFailure, SchemaMigration, ProviderDisconnect, ProviderReattach
+    SqliteBusy, StorageFailure, DiskWriteFailure, SchemaMigration, SchemaIncompatible,
+    ReceiptLossReconciliation, ClientReconnect, ProviderDisconnect, ProviderReattach,
+    McpDisconnect, McpLateResult
 };
 struct RecoveryCell {
     RecoveryScenario scenario{RecoveryScenario::WorkerCrashTakeover};
@@ -21,7 +23,7 @@ struct RecoveryCell {
     std::uint64_t operations{0}, failures{0};
 };
 struct RecoveryCertificationReport {
-    std::string matrix_revision{"ltw9-v1"}, environment_digest;
+    std::string matrix_revision{"af-tgui-v3-r1"}, environment_digest;
     std::vector<RecoveryCell> cells;
     std::vector<std::string> blockers;
     bool certified{false};

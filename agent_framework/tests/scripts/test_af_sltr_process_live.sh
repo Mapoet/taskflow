@@ -51,6 +51,19 @@ capture_sse() {
 }
 
 start_server
+curl -fsS "${BASE}/" >"${WORK}/workbench.html"
+grep -q '<title>Agent Workbench</title>' "${WORK}/workbench.html" || {
+    printf 'formal Workbench is not mounted at /\n' >&2; exit 1;
+}
+curl -fsS "${BASE}/legacy/" >"${WORK}/legacy.html"
+grep -q '<title>Scientific Console · Agent Framework</title>' "${WORK}/legacy.html" || {
+    printf 'legacy compatibility UI is not mounted at /legacy/\n' >&2; exit 1;
+}
+curl -fsS "${BASE}/api/v1/sessions" >"${WORK}/sessions.json"
+python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); assert any(s.get("session_id")=="default" and s.get("title")=="Agent Framework Workbench" for s in d.get("items", []))' \
+    "${WORK}/sessions.json" || {
+    printf 'formal Session API did not expose the durable default Workbench\n' >&2; exit 1;
+}
 curl -fsS "${BASE}/ui/operations/snapshot" >"${WORK}/before.json"
 FIRST_PROGRESS_STARTED_MS="$(date +%s%3N)"
 capture_sse "${WORK}/client-a.sse"
@@ -104,7 +117,7 @@ SSE_DIGEST="$(sha256sum "${WORK}/client-a.sse" | awk '{print $1}')"
 if [[ -n "${REPORT_DIR}" ]]; then
     mkdir -p -- "${REPORT_DIR}"
     REPORT="${REPORT_DIR}/af-sltr-process-live-$(date -u +%Y%m%dT%H%M%SZ).json"
-    printf '{\n  "schema":"agent.af_sltr.process_live/v1",\n  "state":"Passed",\n  "task_id":"%s",\n  "before_revision":%s,\n  "after_revision":%s,\n  "metrics":{"orphan_running":0,"state_divergence":0,"duplicate_effects":0,"empty_completed":0,"resume_attempts":1,"resume_successes":1,"first_progress_p95_upper_bound_ms":%s,"heartbeat_interval_p95_ms":5000,"heartbeats_observed":%s},\n  "before_snapshot_sha256":"%s",\n  "after_snapshot_sha256":"%s",\n  "sse_replay_sha256":"%s",\n  "checks":["two_client_replay","last_event_id_resume","process_restart","operations_identity","revision_monotonicity","first_progress_gate","heartbeat_gate"]\n}\n' \
+    printf '{\n  "schema":"agent.af_sltr.process_live/v1",\n  "state":"Passed",\n  "task_id":"%s",\n  "before_revision":%s,\n  "after_revision":%s,\n  "metrics":{"orphan_running":0,"state_divergence":0,"duplicate_effects":0,"empty_completed":0,"resume_attempts":1,"resume_successes":1,"first_progress_p95_upper_bound_ms":%s,"heartbeat_interval_p95_ms":5000,"heartbeats_observed":%s},\n  "before_snapshot_sha256":"%s",\n  "after_snapshot_sha256":"%s",\n  "sse_replay_sha256":"%s",\n  "checks":["formal_workbench_root","legacy_compatibility_mount","durable_session_api","two_client_replay","last_event_id_resume","process_restart","operations_identity","revision_monotonicity","first_progress_gate","heartbeat_gate"]\n}\n' \
         "${BEFORE_TASK}" "${BEFORE_REVISION}" "${AFTER_REVISION}" \
         "${FIRST_PROGRESS_UPPER_BOUND_MS}" "${HEARTBEATS}" \
         "${BEFORE_DIGEST}" "${AFTER_DIGEST}" "${SSE_DIGEST}" >"${REPORT}"

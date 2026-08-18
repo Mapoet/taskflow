@@ -53,9 +53,16 @@ conversation::TurnResult TaskDecisionCoordinator::begin(
     decision.resume_payload={{"task_intent",conversation::name(intent)},
         {"fallback_profile",conversation::name(classification.profile)}};
     decision.question=classification.clarification->question;
-    for(const auto& option:classification.clarification->options)
+    for(const auto& option:classification.clarification->options) {
+        auto patch=option.semantic_patch;
+        // Programmatic/legacy classifiers may still populate only the
+        // compatibility profile. Preserve that meaning when promoting their
+        // clarification into the general Decision workflow.
+        if(patch.empty())
+            patch["compatibility_profile"]=conversation::name(option.profile);
         decision.options.push_back({option.id,option.label,option.description,
-                                    option.semantic_patch});
+                                    std::move(patch)});
+    }
     decision.expires_at_ms=now_ms+ttl_ms;decision.created_at=std::to_string(now_ms);
     decision.updated_at=decision.created_at;
     decision.origin_digest=contracts::canonical_digest({{"decision_id",decision.decision_id},

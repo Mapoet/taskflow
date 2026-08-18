@@ -9,9 +9,12 @@
 #include <stb_image.h>
 
 #include <algorithm>
+#include <array>
 #include <cstdio>
+#include <cstring>
 #include <cstdlib>
 #include <filesystem>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -176,14 +179,26 @@ void render_content_block(const UiTurn& turn, const UiContentBlock& block) {
     }
 }
 
-void render_header(const UiPresentationSnapshot& s) {
+void render_header(const UiPresentationSnapshot& s,
+                   const ui::NativeWorkbenchSnapshot* workbench = nullptr) {
     ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.055f, 0.071f, 0.09f, 1.0f));
     ImGui::BeginChild("##header", ImVec2(0, 54), false,
                       ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
     ImGui::SetCursorPos(ImVec2(18, 18));
-    ImGui::TextColored(kAccent, "SCIENTIFIC CONSOLE");
+    ImGui::TextColored(kAccent, "%s", workbench ? "AGENT WORKBENCH" : "SCIENTIFIC CONSOLE");
     ImGui::SameLine(238);
-    ImGui::TextColored(kMuted, "Session:"); ImGui::SameLine(); ImGui::TextUnformatted(s.session_id.c_str());
+    std::string session_label = s.session_id;
+    std::uint64_t session_revision = 0;
+    if (workbench) {
+        const auto selected = std::find_if(workbench->sessions.begin(), workbench->sessions.end(),
+            [&](const auto& item) { return item.session_id == workbench->selected_session_id; });
+        if (selected != workbench->sessions.end()) {
+            session_label = selected->title;
+            session_revision = selected->revision;
+        }
+    }
+    ImGui::TextColored(kMuted, "Session:"); ImGui::SameLine(); ImGui::TextUnformatted(session_label.c_str());
+    if (session_revision) { ImGui::SameLine(); ImGui::TextColored(kMuted, "r%llu", static_cast<unsigned long long>(session_revision)); }
     ImGui::SameLine(); ImGui::TextColored(kMuted, "  Model:"); ImGui::SameLine(); ImGui::TextUnformatted(s.model.empty() ? "provider default" : s.model.c_str());
     ImGui::SameLine(); ImGui::TextColored(kMuted, "  Provider:"); ImGui::SameLine(); ImGui::TextUnformatted(s.provider.empty() ? "OpenAI" : s.provider.c_str());
     const float label_w = ImGui::CalcTextSize(s.connection_label.c_str()).x;
@@ -222,6 +237,213 @@ void render_left_rail(const UiPresentationSnapshot& s, const ImGuiSkillStatus& s
     }
     ImGui::SetCursorPosY(std::max(ImGui::GetCursorPosY(), ImGui::GetWindowHeight() - 52.0f));
     ImGui::Separator(); ImGui::TextColored(kMuted, "Agent Framework\nFS jail enabled");
+    ImGui::EndChild();
+}
+
+const ui::NativeSessionItem* selected_session(const ui::NativeWorkbenchSnapshot& workbench) {
+    const auto found = std::find_if(workbench.sessions.begin(), workbench.sessions.end(),
+        [&](const auto& item) { return item.session_id == workbench.selected_session_id; });
+    return found == workbench.sessions.end() ? nullptr : &*found;
+}
+
+void render_native_session_rail(const ui::NativeWorkbenchSnapshot& workbench,
+                                const std::shared_ptr<ui::NativeWorkbenchController>& controller,
+                                float width) {
+    ImGui::BeginChild("##native-session-rail", ImVec2(width, 0), true);
+    ImGui::TextColored(kAccent, "AGENT");
+    ImGui::SameLine(); ImGui::TextColored(kMuted, "Workbench");
+    static std::array<char, 160> search{};
+    ImGui::SetNextItemWidth(-1); ImGui::InputTextWithHint("##session-search", "Search Sessions", search.data(), search.size());
+    if (ImGui::Button("New Session", ImVec2(-1, 32))) ImGui::OpenPopup("Create Session");
+    static std::array<char, 256> new_title{};
+    if (ImGui::BeginPopupModal("Create Session", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::TextUnformatted("Create a durable Product Session");
+        ImGui::SetNextItemWidth(360); ImGui::InputTextWithHint("##new-title", "Session title", new_title.data(), new_title.size());
+        if (ImGui::Button("Cancel")) { new_title.fill(0); ImGui::CloseCurrentPopup(); }
+        ImGui::SameLine();
+        if (ImGui::Button("Create")) {
+            controller->create_session(new_title.data()); new_title.fill(0); ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
+    ImGui::Spacing(); ImGui::TextColored(kMuted, "SESSIONS  %zu", workbench.sessions.size());
+    ImGui::BeginChild("##session-list", ImVec2(0, -174), false);
+    const std::string needle = search.data();
+    for (const auto& session : workbench.sessions) {
+        if (!needle.empty() && session.title.find(needle) == std::string::npos &&
+            session.session_id.find(needle) == std::string::npos) continue;
+        ImGui::PushID(session.session_id.c_str());
+        const bool active = session.session_id == workbench.selected_session_id;
+        if (ImGui::Selectable(session.title.c_str(), active, ImGuiSelectableFlags_None, ImVec2(0, 27)))
+            controller->select_session(session.session_id);
+        ImGui::TextColored(session.state == "active" ? kSuccess : kMuted,
+                           "%s · r%llu", session.state.c_str(),
+                           static_cast<unsigned long long>(session.revision));
+        ImGui::Spacing(); ImGui::PopID();
+    }
+    ImGui::EndChild();
+
+    const auto* selected = selected_session(workbench);
+    if (selected) {
+        static std::array<char, 256> rename_title{};
+        if (ImGui::Button("Rename", ImVec2((width - 24) * 0.5f, 28))) {
+            std::snprintf(rename_title.data(), rename_title.size(), "%s", selected->title.c_str());
+            ImGui::OpenPopup("Rename Session");
+        }
+        ImGui::SameLine();
+        if (selected->state == "active" || selected->state == "archived") {
+            if (ImGui::Button("Trash", ImVec2(-1, 28))) ImGui::OpenPopup("Move Session to trash");
+        } else if (ImGui::Button("Restore", ImVec2(-1, 28))) controller->restore_selected();
+        if (ImGui::BeginPopupModal("Rename Session", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+            ImGui::SetNextItemWidth(360); ImGui::InputText("##rename-title", rename_title.data(), rename_title.size());
+            if (ImGui::Button("Cancel")) ImGui::CloseCurrentPopup(); ImGui::SameLine();
+            ImGui::BeginDisabled(rename_title[0] == '\0');
+            if (ImGui::Button("Save")) { controller->rename_selected(rename_title.data()); ImGui::CloseCurrentPopup(); }
+            ImGui::EndDisabled(); ImGui::EndPopup();
+        }
+        if (ImGui::BeginPopupModal("Move Session to trash", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+            ImGui::TextWrapped("Move %s to trash? It can be restored.", selected->title.c_str());
+            if (ImGui::Button("Cancel")) ImGui::CloseCurrentPopup(); ImGui::SameLine();
+            if (ImGui::Button("Move to trash")) { controller->trash_selected(); ImGui::CloseCurrentPopup(); }
+            ImGui::EndPopup();
+        }
+        if (selected->state == "trashed") {
+            if (ImGui::Button("Prepare permanent purge", ImVec2(-1, 27))) controller->request_purge_selected();
+        } else if (selected->state == "purge_pending") {
+            if (ImGui::Button("Permanently purge", ImVec2(-1, 27))) ImGui::OpenPopup("Permanently purge Session");
+        }
+        static std::array<char, 256> purge_title{};
+        if (ImGui::BeginPopupModal("Permanently purge Session", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+            ImGui::TextWrapped("Type the exact title to permanently purge: %s", selected->title.c_str());
+            ImGui::SetNextItemWidth(400); ImGui::InputText("##purge-title", purge_title.data(), purge_title.size());
+            if (ImGui::Button("Cancel")) { purge_title.fill(0); ImGui::CloseCurrentPopup(); }
+            ImGui::SameLine(); ImGui::BeginDisabled(std::string_view(purge_title.data()) != selected->title);
+            if (ImGui::Button("Permanently purge")) {
+                controller->confirm_purge_selected(); purge_title.fill(0); ImGui::CloseCurrentPopup();
+            }
+            ImGui::EndDisabled(); ImGui::EndPopup();
+        }
+    }
+    ImGui::Separator();
+    if (ImGui::Selectable(workbench.subject.principal_id.c_str(), workbench.view == ui::NativeWorkbenchView::Profile))
+        controller->set_view(ui::NativeWorkbenchView::Profile);
+    ImGui::TextColored(kMuted, "%s / %s", workbench.subject.organization_id.c_str(), workbench.subject.project_id.c_str());
+    if (ImGui::Button("System settings", ImVec2(-1, 30))) controller->set_view(ui::NativeWorkbenchView::Settings);
+    ImGui::EndChild();
+}
+
+void render_native_run_strip(const UiPresentationSnapshot& presentation,
+                             const ui::NativeWorkbenchSnapshot& workbench, bool busy) {
+    ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.055f, 0.075f, 0.115f, 1.0f));
+    ImGui::BeginChild("##run-strip", ImVec2(0, 58), true,
+                      ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+    ImGui::TextColored(state_color(presentation.run_state), "%s",
+                       busy ? "RUNNING" : UiPresentationModel::state_name(presentation.run_state));
+    if (presentation.has_operations) {
+        ImGui::SameLine(); ImGui::Text("Task %s · Run %s · plan r%llu",
+            presentation.operations.task_id.c_str(), presentation.operations.run_id.c_str(),
+            static_cast<unsigned long long>(presentation.operations.plan_revision));
+        ImGui::SameLine(ImGui::GetWindowWidth() - 210);
+        ImGui::TextColored(kMuted, "%llu/%llu criteria · Settings r%llu",
+            static_cast<unsigned long long>(presentation.operations.criteria_closed),
+            static_cast<unsigned long long>(presentation.operations.criteria_total),
+            static_cast<unsigned long long>(workbench.settings_revision));
+    } else { ImGui::SameLine(); ImGui::TextColored(kMuted, "No active durable Run"); }
+    ImGui::EndChild(); ImGui::PopStyleColor();
+}
+
+void render_native_navigation(const ui::NativeWorkbenchSnapshot& workbench,
+                              const std::shared_ptr<ui::NativeWorkbenchController>& controller) {
+    for (const auto view : {ui::NativeWorkbenchView::Conversation, ui::NativeWorkbenchView::Understanding,
+                            ui::NativeWorkbenchView::Plan, ui::NativeWorkbenchView::Memory,
+                            ui::NativeWorkbenchView::Files, ui::NativeWorkbenchView::Approval,
+                            ui::NativeWorkbenchView::Evidence}) {
+        if (view != ui::NativeWorkbenchView::Conversation) ImGui::SameLine();
+        const bool active = workbench.view == view;
+        if (active) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.16f, 0.28f, 0.50f, 1.0f));
+        if (ImGui::Button(std::string(ui::NativeWorkbenchController::name(view)).c_str())) controller->set_view(view);
+        if (active) ImGui::PopStyleColor();
+    }
+    ImGui::Separator();
+}
+
+void render_native_profile(const ui::NativeWorkbenchSnapshot& workbench) {
+    ImGui::BeginChild("##profile", ImVec2(0, 0), true);
+    ImGui::TextColored(kAccent, "AUTHENTICATED RUNTIME IDENTITY");
+    ImGui::SameLine(); ImGui::TextColored(kSuccess, "authorization r%llu",
+        static_cast<unsigned long long>(workbench.subject.authorization_revision));
+    ImGui::Separator();
+    if (ImGui::BeginTable("##profile-table", 2, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg)) {
+        const std::vector<std::pair<const char*, const std::string*>> rows{
+            {"Principal", &workbench.subject.principal_id}, {"Tenant", &workbench.subject.tenant_id},
+            {"Organization", &workbench.subject.organization_id}, {"Project", &workbench.subject.project_id},
+            {"Workspace", &workbench.subject.workspace_id}, {"Agent", &workbench.subject.agent_id},
+            {"Session", &workbench.subject.session_id}};
+        for (const auto& [label, value] : rows) {
+            ImGui::TableNextRow(); ImGui::TableSetColumnIndex(0); ImGui::TextColored(kMuted, "%s", label);
+            ImGui::TableSetColumnIndex(1); ImGui::TextWrapped("%s", value->c_str());
+        }
+        ImGui::EndTable();
+    }
+    ImGui::EndChild();
+}
+
+void render_native_settings(const ui::NativeWorkbenchSnapshot& workbench,
+                            const std::shared_ptr<ui::NativeWorkbenchController>& controller) {
+    ImGui::BeginChild("##settings", ImVec2(0, 0), true);
+    ImGui::TextColored(kAccent, "SYSTEM SETTINGS");
+    ImGui::SameLine(); ImGui::TextColored(kSuccess, "Settings r%llu · authorization r%llu",
+        static_cast<unsigned long long>(workbench.settings_revision),
+        static_cast<unsigned long long>(workbench.settings_authorization_revision));
+    ImGui::TextColored(kMuted, "Revision-aware deployment configuration; secrets are never returned.");
+    static std::unordered_map<std::string, std::array<char, 768>> text_values;
+    static std::unordered_map<std::string, std::uint64_t> text_revisions;
+    std::string category;
+    for (const auto& field : workbench.settings_fields) {
+        const auto next_category = field.value("category", "Other");
+        if (next_category != category) {
+            category = next_category; ImGui::Spacing(); ImGui::SeparatorText(category.c_str());
+        }
+        const auto key = field.value("key", "");
+        const auto label = field.value("label", key);
+        const auto type = field.value("type", "status");
+        const auto mutability = field.value("mutability", "read_only");
+        const bool read_only = mutability == "read_only";
+        ImGui::PushID(key.c_str()); ImGui::AlignTextToFramePadding(); ImGui::TextUnformatted(label.c_str());
+        ImGui::SameLine(270); ImGui::SetNextItemWidth(-120);
+        const auto value = field.value("value", json{});
+        ImGui::BeginDisabled(read_only);
+        if (type == "boolean") {
+            bool checked = value.is_boolean() && value.get<bool>();
+            if (ImGui::Checkbox("##value", &checked)) controller->update_setting(key, checked);
+        } else if (type == "select") {
+            const std::string selected = value.is_string() ? value.get<std::string>() : "";
+            if (ImGui::BeginCombo("##value", selected.c_str())) {
+                for (const auto& option : field.value("options", json::array())) {
+                    const auto text = option.get<std::string>();
+                    if (ImGui::Selectable(text.c_str(), text == selected)) controller->update_setting(key, text);
+                }
+                ImGui::EndCombo();
+            }
+        } else if (read_only || type == "status") {
+            const std::string text = value.is_boolean() ? (value.get<bool>() ? "configured" : "not configured")
+                : value.is_string() ? value.get<std::string>() : "—";
+            ImGui::TextUnformatted(text.c_str());
+        } else {
+            auto& buffer = text_values[key];
+            if (text_revisions[key] != workbench.settings_revision) {
+                const auto current = value.is_string() ? value.get<std::string>() : value.dump();
+                std::snprintf(buffer.data(), buffer.size(), "%s", current.c_str());
+                text_revisions[key] = workbench.settings_revision;
+            }
+            ImGui::InputText("##value", buffer.data(), buffer.size());
+            ImGui::SameLine();
+            if (ImGui::Button("Apply")) controller->update_setting(key, std::string(buffer.data()));
+        }
+        ImGui::EndDisabled();
+        if (mutability == "restart_required") { ImGui::SameLine(); ImGui::TextColored(kMuted, "restart"); }
+        ImGui::PopID();
+    }
     ImGui::EndChild();
 }
 
@@ -419,6 +641,64 @@ void render_operations(const UiPresentationSnapshot& s) {
     ImGui::EndChild();
 }
 
+void render_native_context(const UiPresentationSnapshot& s, ui::NativeWorkbenchView view) {
+    ImGui::BeginChild("##native-context", ImVec2(0, 0), true);
+    ImGui::TextColored(kAccent, "%s", std::string(ui::NativeWorkbenchController::name(view)).c_str());
+    ImGui::Separator();
+    if (!s.has_operations) {
+        ImGui::TextColored(kMuted, "No durable context is available.");
+        ImGui::EndChild(); return;
+    }
+    const auto& ops = s.operations;
+    if (view == ui::NativeWorkbenchView::Understanding || view == ui::NativeWorkbenchView::Plan) {
+        if (ImGui::BeginTable("##native-plan", 4, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg |
+                                                   ImGuiTableFlags_SizingStretchProp)) {
+            for (const char* title : {"Stage", "Status", "Role / revision", "Summary"}) ImGui::TableSetupColumn(title);
+            ImGui::TableHeadersRow();
+            for (const auto& stage : ops.stages) {
+                ImGui::TableNextRow(); ImGui::TableSetColumnIndex(0); ImGui::TextWrapped("%s", stage.label.c_str());
+                ImGui::TableSetColumnIndex(1); ImGui::TextColored(operations_color(stage.status), "%s", Phase4OperationsProjection::status_name(stage.status));
+                ImGui::TableSetColumnIndex(2); ImGui::Text("%s / r%llu", stage.role.c_str(), static_cast<unsigned long long>(stage.revision));
+                ImGui::TableSetColumnIndex(3); ImGui::TextWrapped("%s", stage.summary.c_str());
+            }
+            ImGui::EndTable();
+        }
+    } else if (view == ui::NativeWorkbenchView::Memory) {
+        ImGui::TextColored(kMuted, "Selected and excluded memory metadata; content remains governed.");
+        for (const auto& item : ops.memory) {
+            ImGui::TextColored(item.selected ? kSuccess : kMuted, "%s · %s",
+                               item.selected ? "selected" : "excluded", item.scope.c_str());
+            ImGui::SameLine(); ImGui::TextWrapped("%s · %s · %s", item.source.c_str(), item.authority.c_str(), item.freshness.c_str());
+            ImGui::TextColored(kMuted, "%s", item.selection_reason.c_str()); ImGui::Separator();
+        }
+    } else if (view == ui::NativeWorkbenchView::Approval) {
+        if (ops.hitl.empty()) ImGui::TextColored(kMuted, "No pending approval.");
+        for (const auto& item : ops.hitl) {
+            ImGui::TextColored(operations_color(item.status), "HITL · %s", item.kind.c_str());
+            ImGui::TextWrapped("%s", item.summary.c_str());
+            ImGui::TextColored(kMuted, "%zu allowed actions · requested by %s · due %s",
+                               item.allowed_actions.size(), item.requested_by.c_str(), item.deadline.c_str());
+            ImGui::Separator();
+        }
+    } else if (view == ui::NativeWorkbenchView::Evidence) {
+        for (const auto& layer : ops.assurance) {
+            ImGui::TextColored(operations_color(layer.status), "%s", Phase4OperationsProjection::status_name(layer.status));
+            ImGui::SameLine(); ImGui::TextWrapped("%s", layer.label.c_str());
+            ImGui::TextColored(kMuted, "%s · %s", layer.oracle.c_str(), layer.verifier.c_str());
+            ImGui::Separator();
+        }
+    } else if (view == ui::NativeWorkbenchView::Files) {
+        bool found = false;
+        for (const auto& turn : s.turns) for (const auto& item : turn.attachments) {
+            found = true; ImGui::TextWrapped("%s", item.caption.c_str());
+            ImGui::TextColored(kMuted, "%s · %s · %zu bytes", item.path.c_str(), item.mime.c_str(), item.byte_size);
+            ImGui::Separator();
+        }
+        if (!found) ImGui::TextColored(kMuted, "No artifacts attached.");
+    }
+    ImGui::EndChild();
+}
+
 void render_interactions(const UiPresentationSnapshot& s) {
     ImGui::BeginChild("##interactions",ImVec2(0,0),true);
     ImGui::TextColored(kAccent,"CANONICAL INTERACTION GRAPH");
@@ -470,7 +750,8 @@ void apply_scientific_console_theme() {
 
 ImGuiConsoleAction render_scientific_console(const UiPresentationSnapshot& s,
                                              const ImGuiSkillStatus& skills, char* input,
-                                             std::size_t input_size, bool busy) {
+                                             std::size_t input_size, bool busy,
+                                             const std::shared_ptr<ui::NativeWorkbenchController>& workbench) {
     ImGuiConsoleAction action;
     const ImGuiViewport* viewport = ImGui::GetMainViewport();
     ImGui::SetNextWindowPos(viewport->WorkPos);
@@ -478,7 +759,43 @@ ImGuiConsoleAction render_scientific_console(const UiPresentationSnapshot& s,
     ImGui::Begin("Scientific Console", nullptr,
                  ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
                      ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoSavedSettings);
-    render_header(s);
+    const auto native = workbench ? std::optional(workbench->snapshot()) : std::nullopt;
+    render_header(s, native ? &*native : nullptr);
+    if (native) {
+        render_native_run_strip(s, *native, busy);
+        render_native_navigation(*native, workbench);
+        const float available = ImGui::GetContentRegionAvail().x;
+        const bool wide = available >= 960.0f;
+        const float left = wide ? 252.0f : 0.0f;
+        if (wide) { render_native_session_rail(*native, workbench, left); ImGui::SameLine(); }
+        ImGui::BeginGroup();
+        const bool conversation = native->view == ui::NativeWorkbenchView::Conversation;
+        const float right = wide && conversation ? 318.0f : 0.0f;
+        const float main_width = std::max(320.0f, available - left - right - (wide ? 16.0f : 0.0f));
+        ImGui::BeginChild("##native-main", ImVec2(main_width, 0), false);
+        if (native->view == ui::NativeWorkbenchView::Profile) render_native_profile(*native);
+        else if (native->view == ui::NativeWorkbenchView::Settings) render_native_settings(*native, workbench);
+        else if (native->view == ui::NativeWorkbenchView::Conversation)
+            render_conversation(s, action, input, input_size, busy);
+        else render_native_context(s, native->view);
+        ImGui::EndChild(); ImGui::EndGroup();
+        if (right > 0) { ImGui::SameLine(); render_activity(s, right); }
+        if (!native->error.empty() || !native->status.empty()) {
+            const bool error = !native->error.empty();
+            ImGui::SetNextWindowBgAlpha(0.96f);
+            ImGui::SetNextWindowPos(ImVec2(viewport->WorkPos.x + viewport->WorkSize.x * 0.5f,
+                                          viewport->WorkPos.y + viewport->WorkSize.y - 34.0f),
+                                    ImGuiCond_Always, ImVec2(0.5f, 1.0f));
+            ImGui::Begin("##native-status", nullptr, ImGuiWindowFlags_NoDecoration |
+                ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings |
+                ImGuiWindowFlags_NoInputs);
+            ImGui::TextColored(error ? kDanger : kSuccess, "%s",
+                               (error ? native->error : native->status).c_str());
+            ImGui::End();
+        }
+        ImGui::End();
+        return action;
+    }
     static bool select_operations = [] {
         const char* value = std::getenv("AGENT_UI_INITIAL_VIEW");
         return value && std::string_view(value) == "operations";
