@@ -89,6 +89,19 @@ void test_stream_isolated_by_session_and_channel() {
     assert(chunk.find("\"kind\":\"thinking\"") != std::string::npos);
     assert(chunk.find("summary") != std::string::npos);
     assert(!pb->try_pop_sse_chunk(chunk));
+
+    ui.dispatch_message("a", "tool_started", json{{"tool_name", "only-a"}});
+    ui.dispatch_final_result("a", json{{"final_answer", "only-a"}});
+    ui.dispatch_error("a", "only-a-error");
+
+    auto targeted_a = pa->subscribe_sse(2);
+    assert(pa->try_read_sse(targeted_a, chunk));
+    assert(chunk.find("tool_started") != std::string::npos);
+    assert(pa->try_read_sse(targeted_a, chunk));
+    assert(chunk.find("only-a") != std::string::npos);
+    assert(pa->try_read_sse(targeted_a, chunk));
+    assert(chunk.find("only-a-error") != std::string::npos);
+    assert(!pb->try_pop_sse_chunk(chunk));
 }
 
 } // namespace

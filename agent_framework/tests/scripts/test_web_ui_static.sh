@@ -49,6 +49,13 @@ grep -Fq 'renderOperations' "${JS}"
 grep -Fq '/ui/operations/hitl' "${JS}"
 grep -Fq '/ui/operations/snapshot' "${JS}"
 grep -Fq 'svr.Post("/ui/cancel"' "${CPP}"
+grep -Fq 'LegacyUiSessionRuns' "${CPP}"
+grep -Fq 'session already has an active run' "${CPP}"
+grep -Fq 'activeRunId' "${JS}"
+if grep -Eq 'g_agent_busy|g_active_control|g_control_mutex' "${CPP}"; then
+    printf 'process-global legacy run control found\n' >&2
+    exit 1
+fi
 grep -Fq 'svr.Post("/ui/operations/hitl"' "${CPP}"
 grep -Fq 'svr.Get("/ui/operations/snapshot"' "${CPP}"
 grep -Fq 'svr.Get("/ui/interactions/snapshot"' "${CPP}"

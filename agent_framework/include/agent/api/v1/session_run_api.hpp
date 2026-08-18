@@ -11,6 +11,7 @@
 #include "agent/conversation/task_registry.hpp"
 #include "agent/approval/store.hpp"
 #include "agent/decision/decision_store.hpp"
+#include "agent/planning/plan_store.hpp"
 #include "agent/ui/interaction_projection_store.hpp"
 #include "agent/session/run_supervisor.hpp"
 #include "agent/session/session_catalog.hpp"
@@ -31,9 +32,12 @@ public:
                   ui::InteractionProjectionStore* interactions=nullptr,
                   approval::ApprovalStore* approvals=nullptr,
                   decision::DecisionStore* decisions=nullptr,
-                  conversation::TaskRegistry* tasks=nullptr)
+                  conversation::TaskRegistry* tasks=nullptr,
+                  planning::PlanStore* plans=nullptr,
+                  planning::EvidenceStore* evidence=nullptr)
         : catalog_(catalog), supervisor_(supervisor), events_(events),
-          interactions_(interactions), approvals_(approvals),decisions_(decisions),tasks_(tasks) {}
+          interactions_(interactions), approvals_(approvals),decisions_(decisions),tasks_(tasks),
+          plans_(plans),evidence_(evidence) {}
 
     ApiResult list_sessions(const identity::RuntimeSubject&,
                             session::SessionListQuery) const;
@@ -85,6 +89,14 @@ public:
         std::string_view run_id={});
     ApiResult get_task(const identity::RuntimeSubject&,std::string_view session_id,
                        std::string_view task_id);
+    ApiResult get_task_semantics(const identity::RuntimeSubject&,std::string_view session_id,
+                                 std::string_view task_id);
+    ApiResult get_plan(const identity::RuntimeSubject&,std::string_view session_id,
+                       std::string_view task_id,std::string_view plan_id);
+    ApiResult get_observations(const identity::RuntimeSubject&,std::string_view session_id,
+                               std::string_view task_id);
+    ApiResult get_evidence(const identity::RuntimeSubject&,std::string_view session_id,
+                           std::string_view task_id,std::string_view evidence_id);
     ApiResult capabilities(const identity::RuntimeSubject&,
                            std::string_view session_id);
 
@@ -99,6 +111,8 @@ private:
     approval::ApprovalStore* approvals_{nullptr};
     decision::DecisionStore* decisions_{nullptr};
     conversation::TaskRegistry* tasks_{nullptr};
+    planning::PlanStore* plans_{nullptr};
+    planning::EvidenceStore* evidence_{nullptr};
 };
 
 } // namespace agent_framework::api::v1

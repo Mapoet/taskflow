@@ -304,6 +304,86 @@ ApiResult SessionRunApi::get_task(const identity::RuntimeSubject& subject,
         {"requirements",std::move(requirements)},{"runs",std::move(runs)}}};
 }
 
+ApiResult SessionRunApi::get_task_semantics(const identity::RuntimeSubject& subject,
+    std::string_view session_id,std::string_view task_id) {
+    const auto aggregate=get_task(subject,session_id,task_id);
+    if(!aggregate.ok())return aggregate;
+    if(!events_)return denied("task_semantics_event_source_unavailable",503);
+    const auto product=catalog_.get(subject.tenant_id,session_id);
+    json items=json::array();
+    for(const auto& event:events_->events({subject.tenant_id,product->conversation_id},0,500)) {
+        if(event.payload.value("task_id",std::string{})!=task_id)continue;
+        if(event.event_type.find("semantic")==std::string::npos&&
+           event.event_type.find("planning_")!=0&&
+           event.event_type.find("task_classification")==std::string::npos)continue;
+        items.push_back(conversation::encode(event));
+    }
+    return {200,{{"schema","agent.task_semantics_projection/v1"},
+        {"session_id",session_id},{"conversation_id",product->conversation_id},
+        {"task_id",task_id},{"task_revision",aggregate.body.at("task").at("revision")},
+        {"items",std::move(items)},{"event_head",events_->last_event_sequence(
+            {subject.tenant_id,product->conversation_id})}}};
+}
+
+ApiResult SessionRunApi::get_plan(const identity::RuntimeSubject& subject,
+    std::string_view session_id,std::string_view task_id,std::string_view plan_id) {
+    const auto aggregate=get_task(subject,session_id,task_id);
+    if(!aggregate.ok())return aggregate;
+    if(!plans_)return denied("plan_source_unavailable",503);
+    const auto product=catalog_.get(subject.tenant_id,session_id);
+    contracts::ContractIdentity identity;identity.tenant_id=subject.tenant_id;
+    identity.organization_id=subject.organization_id;identity.project_id=subject.project_id;
+    identity.principal_id=product->conversation_id;identity.task_id=std::string(task_id);
+    identity.plan_id=std::string(plan_id);
+    const auto plan=plans_->current(identity);
+    if(!plan)return denied("plan_not_found",404);
+    if(plan->metadata.identity.tenant_id!=subject.tenant_id||
+       plan->metadata.identity.task_id!=task_id||plan->metadata.identity.plan_id!=plan_id)
+        return denied("plan_scope_mismatch");
+    return {200,planning::encode(*plan)};
+}
+
+ApiResult SessionRunApi::get_observations(const identity::RuntimeSubject& subject,
+    std::string_view session_id,std::string_view task_id) {
+    const auto aggregate=get_task(subject,session_id,task_id);
+    if(!aggregate.ok())return aggregate;
+    if(!interactions_)return denied("observation_projection_unavailable",503);
+    const auto product=catalog_.get(subject.tenant_id,session_id);
+    const auto snapshot=interactions_->snapshot(subject.tenant_id,product->conversation_id,
+                                                 ui::InteractionVisibility::User);
+    if(!snapshot)return denied("observation_projection_not_built",404);
+    json items=json::array();
+    for(const auto& node:snapshot->nodes) {
+        if(node.ref.task_id!=task_id)continue;
+        if(node.kind==ui::InteractionNodeKind::ToolInvocation||
+           node.kind==ui::InteractionNodeKind::Evidence||
+           node.kind==ui::InteractionNodeKind::Finding||
+           node.kind==ui::InteractionNodeKind::Artifact)
+            items.push_back(ui::encode(node));
+    }
+    return {200,{{"schema","agent.task_observation_projection/v1"},
+        {"session_id",session_id},{"conversation_id",product->conversation_id},
+        {"task_id",task_id},{"projection_revision",snapshot->revision},
+        {"projection_digest",snapshot->digest},{"head_sequence",snapshot->head_sequence},
+        {"items",std::move(items)}}};
+}
+
+ApiResult SessionRunApi::get_evidence(const identity::RuntimeSubject& subject,
+    std::string_view session_id,std::string_view task_id,std::string_view evidence_id) {
+    const auto aggregate=get_task(subject,session_id,task_id);
+    if(!aggregate.ok())return aggregate;
+    if(!evidence_)return denied("evidence_source_unavailable",503);
+    const auto product=catalog_.get(subject.tenant_id,session_id);
+    contracts::ContractMetadata scope;scope.identity.tenant_id=subject.tenant_id;
+    scope.identity.organization_id=subject.organization_id;scope.identity.project_id=subject.project_id;
+    scope.identity.principal_id=product->conversation_id;scope.identity.task_id=std::string(task_id);
+    const auto record=evidence_->get(scope,evidence_id);
+    if(!record)return denied("evidence_not_found",404);
+    auto bundle=evidence_->bundle(scope,{std::string(evidence_id)});
+    if(bundle.records.empty())return denied("evidence_not_found",404);
+    return {200,planning::encode(bundle)};
+}
+
 ApiResult SessionRunApi::get_run(const identity::RuntimeSubject& subject,
                                  std::string_view run_id) {
     if(!production_identity_valid(subject)) return denied("production_identity_required",401);
@@ -506,6 +586,14 @@ ApiResult SessionRunApi::capabilities(const identity::RuntimeSubject& subject,
     add("execution_snapshot.view",base+"/tasks/{task_id}/execution-snapshot",0,
         tasks_!=nullptr&&events_!=nullptr&&interactions_!=nullptr,"link");
     add("task.view",base+"/tasks/{task_id}",0,tasks_!=nullptr,"link");
+    add("task.semantics.view",base+"/tasks/{task_id}/semantics",0,
+        tasks_!=nullptr&&events_!=nullptr,"link");
+    add("plan.view",base+"/tasks/{task_id}/plans/{plan_id}",0,
+        tasks_!=nullptr&&plans_!=nullptr,"link");
+    add("observation.view",base+"/tasks/{task_id}/observations",0,
+        tasks_!=nullptr&&interactions_!=nullptr,"link");
+    add("evidence.view",base+"/tasks/{task_id}/evidence/{evidence_id}",0,
+        tasks_!=nullptr&&evidence_!=nullptr,"link");
     add("artifact.view",base+"/artifacts/{artifact_id}",0,interactions_!=nullptr,"link");
     add("approval.view",base+"/approvals/{approval_id}",1,approvals_!=nullptr,"link");
     add("decision.view",base+"/decisions/{decision_id}",0,decisions_!=nullptr,"link");

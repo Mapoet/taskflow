@@ -40,6 +40,7 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <unordered_map>
 
 #ifndef AGENT_WEB_UI_STATIC_ROOT
 #define AGENT_WEB_UI_STATIC_ROOT "."
@@ -50,9 +51,72 @@ namespace {
 using json = nlohmann::json;
 using namespace agent_framework;
 
-std::atomic<bool> g_agent_busy{false};
-std::mutex g_control_mutex;
-std::shared_ptr<TaskControl> g_active_control;
+class LegacyUiSessionRuns {
+public:
+    struct Lease {
+        std::string session_id;
+        std::string run_id;
+        std::shared_ptr<TaskControl> control;
+        std::shared_ptr<internal::AgentThreadState> state;
+
+        explicit operator bool() const { return control && state; }
+    };
+
+    std::optional<Lease> begin(const std::string& session_id, const std::string& run_id) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        auto& session = sessions_[session_id];
+        if (session.control) return std::nullopt;
+        if (!session.state) session.state = std::make_shared<internal::AgentThreadState>();
+        session.run_id = run_id;
+        session.control = std::make_shared<TaskControl>();
+        return Lease{session_id, run_id, session.control, session.state};
+    }
+
+    bool finish(const Lease& lease) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        const auto it = sessions_.find(lease.session_id);
+        if (it == sessions_.end() || it->second.run_id != lease.run_id ||
+            it->second.control != lease.control) return false;
+        it->second.run_id.clear();
+        it->second.control.reset();
+        return true;
+    }
+
+    bool cancel(const std::string& session_id, const std::optional<std::string>& run_id) {
+        std::shared_ptr<TaskControl> control;
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            const auto it = sessions_.find(session_id);
+            if (it == sessions_.end() || !it->second.control ||
+                (run_id && *run_id != it->second.run_id)) return false;
+            control = it->second.control;
+        }
+        control->request_cancel();
+        return true;
+    }
+
+private:
+    struct Session {
+        std::string run_id;
+        std::shared_ptr<TaskControl> control;
+        std::shared_ptr<internal::AgentThreadState> state;
+    };
+    std::mutex mutex_;
+    std::unordered_map<std::string, Session> sessions_;
+};
+
+class LegacyUiRunCompletion {
+public:
+    LegacyUiRunCompletion(std::shared_ptr<LegacyUiSessionRuns> runs,
+                          LegacyUiSessionRuns::Lease lease)
+        : runs_(std::move(runs)), lease_(std::move(lease)) {}
+    ~LegacyUiRunCompletion() { (void)runs_->finish(lease_); }
+    LegacyUiRunCompletion(const LegacyUiRunCompletion&) = delete;
+    LegacyUiRunCompletion& operator=(const LegacyUiRunCompletion&) = delete;
+private:
+    std::shared_ptr<LegacyUiSessionRuns> runs_;
+    LegacyUiSessionRuns::Lease lease_;
+};
 
 ToolMeta make_add_meta() {
     ToolMeta m;
@@ -162,6 +226,7 @@ int run_graph_ui(tf::Executor& executor,
                  const std::shared_ptr<TaskControl>& control,
                  const std::shared_ptr<LiveOperationsProjection>& operations,
                  const example::LiveRuntime& runtime,
+                 const std::string& session_id,
                  std::optional<std::uint64_t> expected_task_revision = std::nullopt) {
     GraphExecutor gx;
     ReactCliRunRequest req;
@@ -169,20 +234,23 @@ int run_graph_ui(tf::Executor& executor,
     req.deps = deps;
     req.session = state;
     req.options.sink.sink_node_name = "CliSink";
-    req.options.sink.on_final_json = [&ui](const json& j) { ui.dispatch_final_result(j); };
-    req.options.graph_options.stream_callback = [&ui](std::string_view tok) {
-        ui.stream_token("default", tok);
+    req.options.sink.on_final_json = [&ui, session_id](const json& j) {
+        ui.dispatch_final_result(session_id, j);
     };
-    req.options.graph_options.thinking_stream_callback = [&ui](std::string_view tok) {
-        ui.stream_thinking("default", tok);
+    req.options.graph_options.stream_callback = [&ui, session_id](std::string_view tok) {
+        ui.stream_token(session_id, tok);
+    };
+    req.options.graph_options.thinking_stream_callback = [&ui, session_id](std::string_view tok) {
+        ui.stream_thinking(session_id, tok);
     };
     req.options.graph_options.task_control = control;
-    req.options.graph_options.tool_execution_observer = [&ui, operations](const ToolExecutionEvent& event) {
+    req.options.graph_options.tool_execution_observer = [&ui, operations, session_id](const ToolExecutionEvent& event) {
         json payload{{"tool_name", event.tool_name},
                      {"tool_call_id", event.tool_call_id},
                      {"arguments", event.arguments}};
         if (event.phase == ToolExecutionPhase::Completed) payload["result"] = event.result;
-        ui.dispatch_message(event.phase == ToolExecutionPhase::Started ? "tool_started"
+        ui.dispatch_message(session_id,
+                            event.phase == ToolExecutionPhase::Started ? "tool_started"
                                                                        : "tool_completed",
                             payload);
         if (operations) operations->observe_tool(event);
@@ -195,16 +263,16 @@ int run_graph_ui(tf::Executor& executor,
         auto turn = example::run_conversation_turn(runtime, "web_ui_demo",
             state->initial_user_prompt,
             [&] { wr = gx.run_react_cli_sync(executor, req); return wr; },
-            [&ui, operations](const conversation::RuntimeEventEnvelope& event) {
+            [&ui, operations, session_id](const conversation::RuntimeEventEnvelope& event) {
                 if(operations) operations->observe_runtime(event);
-                ui.dispatch_message("runtime_event", conversation::encode(event));
+                ui.dispatch_message(session_id, "runtime_event", conversation::encode(event));
             }, expected_task_revision);
         if(!turn.error.empty()) {
             try {
                 const auto conflict=json::parse(turn.error);
                 if(conflict.is_object()&&
                    conflict.value("code",std::string{})=="task_command_stale_revision") {
-                    ui.dispatch_message("task_revision_conflict",conflict);
+                    ui.dispatch_message(session_id, "task_revision_conflict",conflict);
                     return 0;
                 }
             } catch(const json::exception&) {}
@@ -215,21 +283,21 @@ int run_graph_ui(tf::Executor& executor,
             payload["message"]=*turn.outcome.clarification;
             payload["clarification_id"]=turn.checkpoint.turn_id;
             payload["options"]=turn.outcome.clarification_options;
-            ui.dispatch_message("task_clarification",payload);
+            ui.dispatch_message(session_id, "task_clarification",payload);
             return 0;
         }
         if (!turn.error.empty() || turn.outcome.reason != conversation::ModelTurnStopReason::EndTurn) {
             if (control && control->is_cancel_requested()) {
-                ui.dispatch_message("run_cancelled", json{{"message", "Run cancelled by user"}});
+                ui.dispatch_message(session_id, "run_cancelled", json{{"message", "Run cancelled by user"}});
                 return 0;
             }
-            ui.dispatch_error(!turn.error.empty() ? turn.error :
+            ui.dispatch_error(session_id, !turn.error.empty() ? turn.error :
                 wr.error_message.value_or(
                     conversation::user_facing_turn_failure(turn.outcome.candidate_answer)));
             return wr.exit_code != 0 ? wr.exit_code : 1;
         }
     } catch (const std::exception& e) {
-        ui.dispatch_error(std::string("run_react_cli_sync: ") + e.what());
+        ui.dispatch_error(session_id, std::string("run_react_cli_sync: ") + e.what());
         return 1;
     }
     return 0;
@@ -430,11 +498,13 @@ int web_ui_demo_main(int argc, char** argv) {
         (void)approval_store->put_request(request);
     }
 
-    auto state = std::make_shared<internal::AgentThreadState>();
-    auto executor = std::make_shared<tf::Executor>();
+    auto session_runs = std::make_shared<LegacyUiSessionRuns>();
+    auto run_sequence = std::make_shared<std::atomic<std::uint64_t>>(0);
 
     auto run_line = [&](const std::string& line,
+                        const LegacyUiSessionRuns::Lease& lease,
                         std::optional<std::uint64_t> expected_task_revision = std::nullopt) {
+        LegacyUiRunCompletion completion(session_runs, lease);
         {
             std::lock_guard<std::mutex> lock(*interaction_mutex);
             const auto ordinal=std::chrono::steady_clock::now().time_since_epoch().count();
@@ -442,11 +512,8 @@ int web_ui_demo_main(int argc, char** argv) {
             interaction_context->user_message_id="message-"+std::to_string(ordinal);
             interaction_context->user_message_summary=line;
         }
-        auto control = std::make_shared<TaskControl>();
-        {
-            std::lock_guard<std::mutex> lock(g_control_mutex);
-            g_active_control = control;
-        }
+        const auto& state = lease.state;
+        const auto& control = lease.control;
         state->skill_prompt_cache.reset();
         state->active_skill_id.reset();
         state->pending_injected_context.clear();
@@ -459,19 +526,14 @@ int web_ui_demo_main(int argc, char** argv) {
         ProcessedUserInput proc = prep.process(line, ectx);
         if (env_input_strict_enabled() && !proc.tier_a_violations.empty()) {
             for (const auto& v : proc.tier_a_violations) {
-                ui.dispatch_error(v);
+                ui.dispatch_error(lease.session_id, v);
             }
-            std::lock_guard<std::mutex> lock(g_control_mutex);
-            if (g_active_control == control) g_active_control.reset();
             return;
         }
         apply_processed_to_agent_state(std::move(proc), ectx, *state);
-        (void)run_graph_ui(*executor, cfg, deps, state, ui, control, live_operations,
-                           runtime, expected_task_revision);
-        {
-            std::lock_guard<std::mutex> lock(g_control_mutex);
-            if (g_active_control == control) g_active_control.reset();
-        }
+        tf::Executor executor;
+        (void)run_graph_ui(executor, cfg, deps, state, ui, control, live_operations,
+                           runtime, lease.session_id, expected_task_revision);
     };
 
     const char* provider_env = std::getenv("AGENT_LLM_PROVIDER");
@@ -536,21 +598,24 @@ int web_ui_demo_main(int argc, char** argv) {
     };
 
     if (!demo_state && !prompt_arg.empty()) {
-        g_agent_busy = true;
-        std::thread([run_line, prompt_arg]() { run_line(prompt_arg); g_agent_busy = false; }).detach();
+        const std::string run_id = "startup-" + std::to_string(++*run_sequence);
+        if (auto lease = session_runs->begin("default", run_id)) {
+            std::thread([run_line, prompt_arg, lease = *lease]() { run_line(prompt_arg, lease); }).detach();
+        }
     }
 
     httplib::Server svr;
 
     svr.Post("/ui/run", [&](const httplib::Request& req, httplib::Response& res) {
-        if (g_agent_busy.load()) {
-            res.status = 429;
-            res.set_content(R"({"error":"agent busy"})", "application/json");
-            return;
-        }
         try {
             json body = json::parse(req.body);
             std::string prompt = body.at("prompt").get<std::string>();
+            const std::string session_id = body.value("session_id", std::string("default"));
+            if (session_id != "default") {
+                res.status = 404;
+                res.set_content(R"({"error":"unknown legacy UI session"})", "application/json");
+                return;
+            }
             std::optional<std::uint64_t> expected_task_revision;
             if(body.contains("expected_task_revision"))
                 expected_task_revision=body.at("expected_task_revision").get<std::uint64_t>();
@@ -559,13 +624,20 @@ int web_ui_demo_main(int argc, char** argv) {
                 res.set_content(R"({"error":"empty prompt"})", "application/json");
                 return;
             }
-            g_agent_busy = true;
-            std::thread([run_line, prompt, expected_task_revision]() {
-                run_line(prompt, expected_task_revision);
-                g_agent_busy = false;
+            const std::string run_id = "legacy-" + std::to_string(++*run_sequence);
+            auto lease = session_runs->begin(session_id, run_id);
+            if (!lease) {
+                res.status = 429;
+                res.set_content(json{{"error", "session already has an active run"},
+                                     {"session_id", session_id}}.dump(), "application/json");
+                return;
+            }
+            std::thread([run_line, prompt, expected_task_revision, lease = *lease]() {
+                run_line(prompt, lease, expected_task_revision);
             }).detach();
             res.status = 202;
-            res.set_content(R"({"accepted":true})", "application/json");
+            res.set_content(json{{"accepted", true}, {"session_id", session_id},
+                                 {"run_id", run_id}}.dump(), "application/json");
         } catch (const std::exception& e) {
             res.status = 400;
             json err{{"error", e.what()}};
@@ -573,20 +645,30 @@ int web_ui_demo_main(int argc, char** argv) {
         }
     });
 
-    svr.Post("/ui/cancel", [&](const httplib::Request&, httplib::Response& res) {
-        std::shared_ptr<TaskControl> control;
-        {
-            std::lock_guard<std::mutex> lock(g_control_mutex);
-            control = g_active_control;
+    svr.Post("/ui/cancel", [&](const httplib::Request& req, httplib::Response& res) {
+        std::string session_id = "default";
+        std::optional<std::string> run_id;
+        if (!req.body.empty()) {
+            try {
+                const auto body = json::parse(req.body);
+                session_id = body.value("session_id", session_id);
+                if (body.contains("run_id") && body.at("run_id").is_string() &&
+                    !body.at("run_id").get_ref<const std::string&>().empty())
+                    run_id = body.at("run_id").get<std::string>();
+            } catch (const json::exception& e) {
+                res.status = 400;
+                res.set_content(json{{"error", e.what()}}.dump(), "application/json");
+                return;
+            }
         }
-        if (!control || !g_agent_busy.load()) {
+        if (!session_runs->cancel(session_id, run_id)) {
             res.status = 409;
             res.set_content(R"({"cancelled":false,"reason":"no active run"})", "application/json");
             return;
         }
-        control->request_cancel();
         res.status = 202;
-        res.set_content(R"({"cancelled":true})", "application/json");
+        res.set_content(json{{"cancelled", true}, {"session_id", session_id},
+                             {"run_id", run_id.value_or("")}}.dump(), "application/json");
     });
 
     svr.Post("/ui/operations/hitl", [&](const httplib::Request& req, httplib::Response& res) {

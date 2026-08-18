@@ -5,7 +5,8 @@
 namespace agent_framework::planning {
 
 std::string InMemoryEvidenceStore::scope_key(const contracts::ContractMetadata& scope) {
-    return scope.identity.tenant_id + '\x1f' + scope.identity.task_id;
+    return scope.identity.tenant_id + '\x1f' + scope.identity.principal_id + '\x1f' +
+           scope.identity.task_id;
 }
 
 PlanningCommitResult InMemoryEvidenceStore::append(

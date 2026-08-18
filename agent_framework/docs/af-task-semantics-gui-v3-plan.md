@@ -82,7 +82,7 @@
 - [x] Emit lifecycle events without raw sensitive prompts.
 - [x] Record latency, token use, cost, confidence, fallback and decision outcome.
 - [x] Expose calibration and unnecessary-clarification metrics.
-- [ ] Validate malformed output, timeout, cancellation and restart behavior.
+- [x] Validate malformed output, timeout, cancellation and restart behavior.
 
 ## AF-TGUI6 — Unified execution snapshot
 
@@ -94,16 +94,29 @@
 ## AF-TGUI7 — Run Supervisor execution integration
 
 - [x] Add `SessionRunWorker`, command dispatcher, lease heartbeat and recovery coordinator.
-- [ ] Execute claimed Runs through the production runtime composition.
-- [ ] Apply start, steer, queue, comment, fork, cancel, retry, reconcile and escalation commands durably.
+- [x] Execute claimed Runs through the production runtime composition.
+- [x] Apply start, steer, queue, comment, fork, cancel, retry, reconcile and escalation commands durably.
 - [x] Ensure waiting Decisions and Approvals release execution capacity.
-- [ ] Replace `g_agent_busy` and process-global active control with Session/Run ownership.
-- [ ] Prove three concurrent Sessions, browser detach, restart takeover and stale fencing rejection.
+- [x] Replace `g_agent_busy` and process-global active control with Session/Run ownership.
+- [x] Prove three concurrent Sessions, client detach, restart takeover and stale fencing rejection offline; retain real browser detach in TGUI12 certification.
 
 Implemented boundary: `ProductionLiveRuntime::session_run_executor()` is now the sole
 typed bridge from a leased Session Run to the production long-task Harness. It rejects
-missing Session/Conversation/Task/Turn bindings and stale leases. Deployment wiring and
-positive ProviderLive execution remain required before the execution item may be checked.
+missing Session/Conversation/Task/Turn bindings and stale leases. The production-runtime
+integration test now claims a durable Run and traverses PlanApproval, Execution and
+Assurance, while the empty-deliverable gate correctly prevents false completion. The
+worker/supervisor tests additionally prove three-Session isolation, connection-independent
+execution, restart takeover and stale-owner rejection. Deployed ProviderLive and real
+browser-detach certification remain TGUI12 release evidence rather than offline claims.
+
+Legacy Web execution now uses an exception-safe `(session_id, run_id)` lease registry:
+one active Run is permitted per legacy Session, cancellation is fenced by Run identity,
+and conversation state is retained per Session. The former process-global busy flag and
+active control pointer have been removed. The legacy adapter still intentionally exposes
+only `default`; product multi-Session execution remains the versioned Session/Run API path.
+Runtime HTTP verification accepted the first Run as `legacy-1` (`202`), rejected a second
+concurrent Run in the same Session (`429`), rejected cancellation with a stale Run ID
+(`409`) and accepted cancellation with the active Run ID (`202`).
 
 ## AF-TGUI8 — Canonical runtime events and projections
 
@@ -111,11 +124,13 @@ positive ProviderLive execution remain required before the execution item may be
 - [x] Build rebuildable Session, Task, Plan, Observation, Activity, Approval, Evidence and Closure projections.
 - [x] Drive Conversation and Observation Snapshot from the same run-scoped cursor.
 - [x] Detect duplicate, reordered, expired-cursor and schema-incompatible events.
+- [x] Route token, thinking, auxiliary, final and error events to the addressed Web Session;
+  regression tests prove a second Session receives none of the targeted events.
 
 ## AF-TGUI9 — Complete versioned API
 
 - [x] Complete Session mutation, membership, restore, purge, data and fork endpoints.
-- [ ] Add Task semantics, Decision, Plan, Run snapshot, Observation and Evidence endpoints.
+- [x] Add Task semantics, Decision, Plan, Run snapshot, Observation and Evidence endpoints.
 - [x] Route approval mutations only through PDP and `AccountableApprovalExecutor`.
 - [x] Publish OpenAPI 3.1 and versioned schemas.
 - [ ] Make `/ui/*` a read-compatible legacy adapter with no new feature authority.
@@ -133,8 +148,8 @@ positive ProviderLive execution remain required before the execution item may be
 
 - [x] Extend the multilingual corpus with clear conversation, deep read-only research, bounded code, external effect, professional assurance and active-task increments.
 - [ ] Measure false high-effect routing, missed planning, unnecessary planning, unnecessary clarification and decision abandonment.
-- [ ] Run unit, repository, API, concurrency, restart, event replay, projection rebuild, security and browser E2E suites.
-- [ ] Verify no cross-Session message, memory, tool, artifact or event leakage. Event/projection isolation is proved; memory, tool and artifact end-to-end isolation remains.
+- [ ] Run unit, repository, API, concurrency, restart, event replay, projection rebuild, security and browser E2E suites. Offline and ProcessLive suites pass; real browser E2E remains uncertified.
+- [ ] Verify no cross-Session message, memory, tool, artifact or event leakage. Event/projection and Plan/Evidence repository isolation are proved; Memory, Tool and Artifact end-to-end isolation remains.
 
 ## AF-TGUI12 — Live certification and legacy closure
 
@@ -142,8 +157,8 @@ positive ProviderLive execution remain required before the execution item may be
 - [ ] Validate SQLite local and PostgreSQL service profiles without claiming an unexecuted multi-node topology.
 - [ ] Execute crash, busy, disk, schema, provider, MCP, receipt and reconnect fault matrices.
 - [ ] Validate Chromium, Firefox and WebKit plus keyboard, WCAG 2.2 AA and bilingual content.
-- [ ] Capture real desktop, tablet and mobile screenshots.
-- [ ] Remove fixed default writes, `g_agent_busy` and legacy write endpoints after parity observation.
+- [x] Capture and inspect real Chromium desktop, tablet and narrow/mobile screenshots.
+- [ ] Remove fixed default writes and legacy write endpoints after parity observation. `g_agent_busy` and process-global active control are already removed.
 
 ## Completion gates
 
@@ -156,3 +171,21 @@ positive ProviderLive execution remain required before the execution item may be
 - Observation and Conversation converge on the same event head and projection revision.
 - Completion is authorized only by TaskClosureController from durable facts.
 - Production claims require real Live evidence; skipped or unavailable cells remain explicit blockers.
+
+### 2026-08-18 Chromium visual evidence
+
+The legacy compatibility UI was rendered by the installed Google Chrome 143 using
+`--headless=new` against a running `web_ui_demo --demo-state` process. This is visual
+evidence for the compatibility client only; it does not certify Firefox/WebKit or the
+formal React Workbench.
+
+| View | Runtime file | SHA-256 | Inspection |
+|---|---|---|---|
+| Desktop 1440×1000 | `/tmp/af-tgui12-desktop.png` | `0b78d441ab1b19ebb2de99ebde839e5f06136498d3fe7b1df1aa26d85c77aed0` | pass |
+| Tablet 820×1180 | `/tmp/af-tgui12-tablet.png` | `dde575a8d73637b81298ef527ae97dce26eea368d4b17e08587fff54b688b563` | pass |
+| Narrow/mobile render | `/tmp/af-tgui12-mobile-emulated.png` | `3d10f49fb56d3680086d7ecfa1e1f1315f9c2a3a94f0a449b5b6637899029471` | pass after responsive min-width/action repair |
+
+The first direct 390-pixel Chrome CLI capture exposed Chrome's headless minimum CSS
+viewport as a cropped image rather than valid device emulation and was rejected as
+evidence. The accepted narrow render uses device scaling, shows wrapped answer content,
+the full composer and an accessible Send action without horizontal clipping.

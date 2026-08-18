@@ -260,6 +260,10 @@ public:
      */
     void dispatch_message(const std::string& type, const json& data);
 
+    /** Dispatch an auxiliary event to generic observers and one Web session only. */
+    void dispatch_message(const std::string& session_id, const std::string& type,
+                          const json& data);
+
     /** Publish the canonical display-safe Phase 4 control-plane projection. */
     void publish_phase4_operations(const Phase4OperationsSnapshot& snapshot);
     void publish_interactions(const ui::InteractionSnapshot& snapshot);
@@ -269,10 +273,16 @@ public:
      */
     void dispatch_final_result(const json& result);
 
+    /** Dispatch a final result to generic observers and one Web session only. */
+    void dispatch_final_result(const std::string& session_id, const json& result);
+
     /**
      * @brief WP2.U：错误分发到全部 handler
      */
     void dispatch_error(const std::string& error_message);
+
+    /** Dispatch an error to generic observers and one Web session only. */
+    void dispatch_error(const std::string& session_id, const std::string& error_message);
 
     /**
      * @brief 流式输出（分发到所有处理器）

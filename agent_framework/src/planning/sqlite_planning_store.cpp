@@ -115,23 +115,36 @@ void SQLitePlanningStore::migrate() {
             if(sqlite::step(query.get()) == SQLITE_ROW)
                 version = sqlite::column_int(query.get(), 0);
         }
-        if(version > 1) throw std::runtime_error("planning schema newer than binary");
+        if(version > 2) throw std::runtime_error("planning schema newer than binary");
         if(version == 0) {
             sqlite::exec(db, "CREATE TABLE planning_evidence("
-                        "tenant_id TEXT NOT NULL,task_id TEXT NOT NULL,evidence_id TEXT NOT NULL,"
+                        "tenant_id TEXT NOT NULL,principal_id TEXT NOT NULL,task_id TEXT NOT NULL,evidence_id TEXT NOT NULL,"
                         "locator TEXT NOT NULL,content_digest TEXT NOT NULL,document_json TEXT NOT NULL,"
                         "created_at TEXT NOT NULL DEFAULT(strftime('%Y-%m-%dT%H:%M:%fZ','now')),"
-                        "PRIMARY KEY(tenant_id,task_id,evidence_id),"
-                        "UNIQUE(tenant_id,task_id,locator,content_digest))");
+                        "PRIMARY KEY(tenant_id,principal_id,task_id,evidence_id),"
+                        "UNIQUE(tenant_id,principal_id,task_id,locator,content_digest))");
             sqlite::exec(db, "CREATE TABLE planning_plans("
-                        "tenant_id TEXT NOT NULL,task_id TEXT NOT NULL,plan_id TEXT NOT NULL,"
+                        "tenant_id TEXT NOT NULL,principal_id TEXT NOT NULL,task_id TEXT NOT NULL,plan_id TEXT NOT NULL,"
                         "revision INTEGER NOT NULL,plan_digest TEXT NOT NULL,parent_digest TEXT NOT NULL,"
                         "document_json TEXT NOT NULL,"
                         "created_at TEXT NOT NULL DEFAULT(strftime('%Y-%m-%dT%H:%M:%fZ','now')),"
-                        "PRIMARY KEY(tenant_id,task_id,plan_id,revision),"
-                        "UNIQUE(tenant_id,task_id,plan_id,plan_digest))");
+                        "PRIMARY KEY(tenant_id,principal_id,task_id,plan_id,revision),"
+                        "UNIQUE(tenant_id,principal_id,task_id,plan_id,plan_digest))");
             sqlite::exec(db, "INSERT INTO planning_schema_version VALUES("
-                        "1,strftime('%Y-%m-%dT%H:%M:%fZ','now'))");
+                        "2,strftime('%Y-%m-%dT%H:%M:%fZ','now'))");
+        } else if(version == 1) {
+            // v1 omitted the conversation-scoping principal from physical keys.
+            // Rebuild both tables and recover it from the canonical document. Empty
+            // historical principals remain in an inaccessible legacy scope.
+            sqlite::exec(db,"ALTER TABLE planning_evidence RENAME TO planning_evidence_v1");
+            sqlite::exec(db,"ALTER TABLE planning_plans RENAME TO planning_plans_v1");
+            sqlite::exec(db,"CREATE TABLE planning_evidence(tenant_id TEXT NOT NULL,principal_id TEXT NOT NULL,task_id TEXT NOT NULL,evidence_id TEXT NOT NULL,locator TEXT NOT NULL,content_digest TEXT NOT NULL,document_json TEXT NOT NULL,created_at TEXT NOT NULL,PRIMARY KEY(tenant_id,principal_id,task_id,evidence_id),UNIQUE(tenant_id,principal_id,task_id,locator,content_digest))");
+            sqlite::exec(db,"INSERT INTO planning_evidence SELECT tenant_id,COALESCE(json_extract(document_json,'$.identity.principal_id'),''),task_id,evidence_id,locator,content_digest,document_json,created_at FROM planning_evidence_v1");
+            sqlite::exec(db,"CREATE TABLE planning_plans(tenant_id TEXT NOT NULL,principal_id TEXT NOT NULL,task_id TEXT NOT NULL,plan_id TEXT NOT NULL,revision INTEGER NOT NULL,plan_digest TEXT NOT NULL,parent_digest TEXT NOT NULL,document_json TEXT NOT NULL,created_at TEXT NOT NULL,PRIMARY KEY(tenant_id,principal_id,task_id,plan_id,revision),UNIQUE(tenant_id,principal_id,task_id,plan_id,plan_digest))");
+            sqlite::exec(db,"INSERT INTO planning_plans SELECT tenant_id,COALESCE(json_extract(document_json,'$.identity.principal_id'),''),task_id,plan_id,revision,plan_digest,parent_digest,document_json,created_at FROM planning_plans_v1");
+            sqlite::exec(db,"DROP TABLE planning_evidence_v1");
+            sqlite::exec(db,"DROP TABLE planning_plans_v1");
+            sqlite::exec(db,"INSERT INTO planning_schema_version VALUES(2,strftime('%Y-%m-%dT%H:%M:%fZ','now'))");
         }
         sqlite::exec(db, "COMMIT");
     } catch(...) {
@@ -147,14 +160,15 @@ PlanningCommitResult SQLitePlanningStore::append(
         return {PlanningCommitStatus::Invalid, {}, std::move(validation_error)};
     std::lock_guard lock(mutex_);
     auto* db = sqlite::database(db_);
-    sqlite::Statement statement(db, "INSERT INTO planning_evidence(tenant_id,task_id,evidence_id,locator,"
-                            "content_digest,document_json) VALUES(?,?,?,?,?,?)");
+    sqlite::Statement statement(db, "INSERT INTO planning_evidence(tenant_id,principal_id,task_id,evidence_id,locator,"
+                            "content_digest,document_json) VALUES(?,?,?,?,?,?,?)");
     sqlite::bind_text(statement.get(), 1, scope.identity.tenant_id);
-    sqlite::bind_text(statement.get(), 2, scope.identity.task_id);
-    sqlite::bind_text(statement.get(), 3, record.evidence_id);
-    sqlite::bind_text(statement.get(), 4, record.locator);
-    sqlite::bind_text(statement.get(), 5, record.content_digest);
-    sqlite::bind_text(statement.get(), 6, evidence_document(scope, record));
+    sqlite::bind_text(statement.get(), 2, scope.identity.principal_id);
+    sqlite::bind_text(statement.get(), 3, scope.identity.task_id);
+    sqlite::bind_text(statement.get(), 4, record.evidence_id);
+    sqlite::bind_text(statement.get(), 5, record.locator);
+    sqlite::bind_text(statement.get(), 6, record.content_digest);
+    sqlite::bind_text(statement.get(), 7, evidence_document(scope, record));
     const auto status = sqlite::step(statement.get());
     if(status != SQLITE_DONE) {
         auto result = sqlite_failure(db, status);
@@ -168,10 +182,11 @@ std::optional<EvidenceRecord> SQLitePlanningStore::get(
     const contracts::ContractMetadata& scope, std::string_view evidence_id) {
     std::lock_guard lock(mutex_);
     sqlite::Statement query(sqlite::database(db_), "SELECT document_json FROM planning_evidence "
-                                   "WHERE tenant_id=? AND task_id=? AND evidence_id=?");
+                                   "WHERE tenant_id=? AND principal_id=? AND task_id=? AND evidence_id=?");
     sqlite::bind_text(query.get(), 1, scope.identity.tenant_id);
-    sqlite::bind_text(query.get(), 2, scope.identity.task_id);
-    sqlite::bind_text(query.get(), 3, evidence_id);
+    sqlite::bind_text(query.get(), 2, scope.identity.principal_id);
+    sqlite::bind_text(query.get(), 3, scope.identity.task_id);
+    sqlite::bind_text(query.get(), 4, evidence_id);
     return sqlite::step(query.get()) == SQLITE_ROW
         ? decode_evidence(sqlite::column_text(query.get(), 0)) : std::nullopt;
 }
@@ -183,10 +198,11 @@ EvidenceBundle SQLitePlanningStore::bundle(
     std::lock_guard lock(mutex_);
     for(const auto& id : evidence_ids) {
         sqlite::Statement query(sqlite::database(db_), "SELECT document_json FROM planning_evidence "
-                                       "WHERE tenant_id=? AND task_id=? AND evidence_id=?");
+                                       "WHERE tenant_id=? AND principal_id=? AND task_id=? AND evidence_id=?");
         sqlite::bind_text(query.get(), 1, scope.identity.tenant_id);
-        sqlite::bind_text(query.get(), 2, scope.identity.task_id);
-        sqlite::bind_text(query.get(), 3, id);
+        sqlite::bind_text(query.get(), 2, scope.identity.principal_id);
+        sqlite::bind_text(query.get(), 3, scope.identity.task_id);
+        sqlite::bind_text(query.get(), 4, id);
         if(sqlite::step(query.get()) == SQLITE_ROW) {
             auto record = decode_evidence(sqlite::column_text(query.get(), 0));
             if(record) result.records.push_back(std::move(*record));
@@ -210,15 +226,16 @@ PlanningCommitResult SQLitePlanningStore::create(const ExecutionPlan& plan) {
     const auto digest = document.at("canonical_digest").get<std::string>();
     std::lock_guard lock(mutex_);
     auto* db = sqlite::database(db_);
-    sqlite::Statement statement(db, "INSERT INTO planning_plans(tenant_id,task_id,plan_id,revision,"
-                            "plan_digest,parent_digest,document_json) VALUES(?,?,?,?,?,?,?)");
+    sqlite::Statement statement(db, "INSERT INTO planning_plans(tenant_id,principal_id,task_id,plan_id,revision,"
+                            "plan_digest,parent_digest,document_json) VALUES(?,?,?,?,?,?,?,?)");
     sqlite::bind_text(statement.get(), 1, plan.metadata.identity.tenant_id);
-    sqlite::bind_text(statement.get(), 2, plan.metadata.identity.task_id);
-    sqlite::bind_text(statement.get(), 3, plan.metadata.identity.plan_id);
-    sqlite::bind_int64(statement.get(), 4, static_cast<sqlite3_int64>(plan.plan_revision));
-    sqlite::bind_text(statement.get(), 5, digest);
-    sqlite::bind_text(statement.get(), 6, plan.parent_plan_digest);
-    sqlite::bind_text(statement.get(), 7, contracts::canonical_json(document));
+    sqlite::bind_text(statement.get(), 2, plan.metadata.identity.principal_id);
+    sqlite::bind_text(statement.get(), 3, plan.metadata.identity.task_id);
+    sqlite::bind_text(statement.get(), 4, plan.metadata.identity.plan_id);
+    sqlite::bind_int64(statement.get(), 5, static_cast<sqlite3_int64>(plan.plan_revision));
+    sqlite::bind_text(statement.get(), 6, digest);
+    sqlite::bind_text(statement.get(), 7, plan.parent_plan_digest);
+    sqlite::bind_text(statement.get(), 8, contracts::canonical_json(document));
     const auto status = sqlite::step(statement.get());
     if(status != SQLITE_DONE) {
         auto result = sqlite_failure(db, status);
@@ -238,11 +255,12 @@ PlanningCommitResult SQLitePlanningStore::compare_exchange(
         std::string current_digest;
         {
             sqlite::Statement query(db, "SELECT revision,plan_digest FROM planning_plans "
-                                "WHERE tenant_id=? AND task_id=? AND plan_id=? "
+                                "WHERE tenant_id=? AND principal_id=? AND task_id=? AND plan_id=? "
                                 "ORDER BY revision DESC LIMIT 1");
             sqlite::bind_text(query.get(), 1, plan.metadata.identity.tenant_id);
-            sqlite::bind_text(query.get(), 2, plan.metadata.identity.task_id);
-            sqlite::bind_text(query.get(), 3, plan.metadata.identity.plan_id);
+            sqlite::bind_text(query.get(), 2, plan.metadata.identity.principal_id);
+            sqlite::bind_text(query.get(), 3, plan.metadata.identity.task_id);
+            sqlite::bind_text(query.get(), 4, plan.metadata.identity.plan_id);
             if(sqlite::step(query.get()) != SQLITE_ROW) {
                 sqlite::exec(db, "ROLLBACK");
                 return {PlanningCommitStatus::NotFound, {}, "plan not found"};
@@ -263,15 +281,16 @@ PlanningCommitResult SQLitePlanningStore::compare_exchange(
         }
         const auto document = encode(plan);
         const auto digest = document.at("canonical_digest").get<std::string>();
-        sqlite::Statement insert(db, "INSERT INTO planning_plans(tenant_id,task_id,plan_id,revision,"
-                             "plan_digest,parent_digest,document_json) VALUES(?,?,?,?,?,?,?)");
+        sqlite::Statement insert(db, "INSERT INTO planning_plans(tenant_id,principal_id,task_id,plan_id,revision,"
+                             "plan_digest,parent_digest,document_json) VALUES(?,?,?,?,?,?,?,?)");
         sqlite::bind_text(insert.get(), 1, plan.metadata.identity.tenant_id);
-        sqlite::bind_text(insert.get(), 2, plan.metadata.identity.task_id);
-        sqlite::bind_text(insert.get(), 3, plan.metadata.identity.plan_id);
-        sqlite::bind_int64(insert.get(), 4, static_cast<sqlite3_int64>(plan.plan_revision));
-        sqlite::bind_text(insert.get(), 5, digest);
-        sqlite::bind_text(insert.get(), 6, plan.parent_plan_digest);
-        sqlite::bind_text(insert.get(), 7, contracts::canonical_json(document));
+        sqlite::bind_text(insert.get(), 2, plan.metadata.identity.principal_id);
+        sqlite::bind_text(insert.get(), 3, plan.metadata.identity.task_id);
+        sqlite::bind_text(insert.get(), 4, plan.metadata.identity.plan_id);
+        sqlite::bind_int64(insert.get(), 5, static_cast<sqlite3_int64>(plan.plan_revision));
+        sqlite::bind_text(insert.get(), 6, digest);
+        sqlite::bind_text(insert.get(), 7, plan.parent_plan_digest);
+        sqlite::bind_text(insert.get(), 8, contracts::canonical_json(document));
         const auto status = sqlite::step(insert.get());
         if(status != SQLITE_DONE) {
             auto result = sqlite_failure(db, status);
@@ -290,11 +309,12 @@ std::optional<ExecutionPlan> SQLitePlanningStore::current(
     const contracts::ContractIdentity& identity) {
     std::lock_guard lock(mutex_);
     sqlite::Statement query(sqlite::database(db_), "SELECT document_json FROM planning_plans "
-                                   "WHERE tenant_id=? AND task_id=? AND plan_id=? "
+                                   "WHERE tenant_id=? AND principal_id=? AND task_id=? AND plan_id=? "
                                    "ORDER BY revision DESC LIMIT 1");
     sqlite::bind_text(query.get(), 1, identity.tenant_id);
-    sqlite::bind_text(query.get(), 2, identity.task_id);
-    sqlite::bind_text(query.get(), 3, identity.plan_id);
+    sqlite::bind_text(query.get(), 2, identity.principal_id);
+    sqlite::bind_text(query.get(), 3, identity.task_id);
+    sqlite::bind_text(query.get(), 4, identity.plan_id);
     return sqlite::step(query.get()) == SQLITE_ROW
         ? decode_plan(sqlite::column_text(query.get(), 0)) : std::nullopt;
 }
@@ -304,11 +324,12 @@ std::vector<ExecutionPlan> SQLitePlanningStore::history(
     std::vector<ExecutionPlan> result;
     std::lock_guard lock(mutex_);
     sqlite::Statement query(sqlite::database(db_), "SELECT document_json FROM planning_plans "
-                                   "WHERE tenant_id=? AND task_id=? AND plan_id=? "
+                                   "WHERE tenant_id=? AND principal_id=? AND task_id=? AND plan_id=? "
                                    "ORDER BY revision ASC");
     sqlite::bind_text(query.get(), 1, identity.tenant_id);
-    sqlite::bind_text(query.get(), 2, identity.task_id);
-    sqlite::bind_text(query.get(), 3, identity.plan_id);
+    sqlite::bind_text(query.get(), 2, identity.principal_id);
+    sqlite::bind_text(query.get(), 3, identity.task_id);
+    sqlite::bind_text(query.get(), 4, identity.plan_id);
     while(sqlite::step(query.get()) == SQLITE_ROW) {
         auto plan = decode_plan(sqlite::column_text(query.get(), 0));
         if(plan) result.push_back(std::move(*plan));

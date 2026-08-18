@@ -29,6 +29,8 @@
   let currentTaskRevision = 0;
   let pendingTaskCommand = null;
   let lastSubmittedPrompt = "";
+  const legacySessionId = "default";
+  let activeRunId = null;
 
   if (window.mermaid) {
     window.mermaid.initialize({ startOnLoad: false, securityLevel: "strict", theme: "dark" });
@@ -505,8 +507,9 @@
         setTimeout(async function(){
           try {
             const response=await fetch("/ui/run",{method:"POST",headers:{"Content-Type":"application/json"},
-              body:JSON.stringify({prompt:retryPrompt,expected_task_revision:currentTaskRevision})});
+              body:JSON.stringify({prompt:retryPrompt,session_id:legacySessionId,expected_task_revision:currentTaskRevision})});
             if(response.status!==202)throw new Error("HTTP "+response.status+" "+await response.text());
+            const accepted=await response.json();activeRunId=text(accepted.run_id||"")||null;
           } catch(error) { addTurn("system","只读命令自动重试失败："+text(error.message||error),false);setBusy(false);setRunState("failed"); }
         },250);
       }).catch(function(){ setStatus("Task revision changed; latest revision shown from conflict response"); });
@@ -527,12 +530,12 @@
       else if (activeAssistant && !activeAssistant.rawAnswer && o.final_answer) activeAssistant.rawAnswer = text(o.final_answer);
       const summary = text(o.displayable_reasoning || o.reasoning_summary || "");
       if (activeAssistant && !activeAssistant.rawThinking && summary) appendThinking(summary);
-      finishAssistant(); setBusy(false); setRunState("completed"); setStatus("Run completed");pendingTaskCommand=null;
+      finishAssistant(); setBusy(false); setRunState("completed"); setStatus("Run completed");pendingTaskCommand=null;activeRunId=null;
     } else if (o.kind === "error") {
       const message = o.message || "Unknown error";
       if (activeAssistant && activeAssistant.rawAnswer.includes(message)) activeAssistant.article.classList.add("error");
       else addTurn("system", message, false);
-      finishAssistant(); setBusy(false); setRunState("failed"); setStatus("Run failed");pendingTaskCommand=null;
+      finishAssistant(); setBusy(false); setRunState("failed"); setStatus("Run failed");pendingTaskCommand=null;activeRunId=null;
     } else if (o.kind === "aux") handleAux(o);
   }
   function loadOperationsSnapshot() {
@@ -570,9 +573,10 @@
     lastSubmittedPrompt=prompt;
     addTurn("user", prompt, false); activeAssistant = null; setBusy(true); setStatus("Submitting task…");
     try {
-      const body={prompt};if(pendingTaskRevision!==null)body.expected_task_revision=pendingTaskRevision;
+      const body={prompt,session_id:legacySessionId};if(pendingTaskRevision!==null)body.expected_task_revision=pendingTaskRevision;
       const r = await fetch("/ui/run", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
       if (r.status !== 202) throw new Error("HTTP " + r.status + " " + await r.text());
+      const accepted=await r.json();activeRunId=text(accepted.run_id||"")||null;
       promptEl.value = ""; pendingTaskRevision=null; setStatus("Agent is working…");
     } catch (error) { addTurn("system", error.message || error, false); setBusy(false); setRunState("failed"); }
   }
@@ -581,7 +585,7 @@
   promptEl.addEventListener("keydown", function (event) { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); composer.requestSubmit(); } });
   stopBtn.addEventListener("click", async function () {
     stopBtn.disabled = true;
-    try { await fetch("/ui/cancel", { method: "POST" }); setStatus("Cancellation requested…"); }
+    try { await fetch("/ui/cancel", { method: "POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({session_id:legacySessionId,run_id:activeRunId}) }); setStatus("Cancellation requested…"); }
     finally { stopBtn.disabled = false; }
   });
   $("clear-button").addEventListener("click", function () { conversation.replaceChildren(); tools.clear(); activityList.replaceChildren(); activeAssistant = null; turnCount = 0; updateCounts(); });

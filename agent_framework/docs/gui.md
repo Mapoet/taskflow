@@ -83,11 +83,16 @@ AF 工作树在审核时已有用户未提交修改。本报告只读取这些�
 
 ## 2. AF 当前界面的事实审计
 
-### 2.1 Session 只是固定连接名，不是产品对象
+### 2.1 Legacy Session 仍是固定连接名；正式 API 已具备产品对象
+
+> 2026-08-18 实现更新：下列原始截图和逐行事实记录保留为历史审计基线。
+> 当前正式 `web/` Workbench 已接入版本化 Session/Run API；legacy
+> `examples/web_ui_static` 仍只接受 `default`，不应被解释为产品级多 Session UI。
 
 【源代码事实】
 
-- agent_framework/examples/web_ui_demo.cpp:53 定义进程级 g_agent_busy。
+- ~~agent_framework/examples/web_ui_demo.cpp:53 定义进程级 g_agent_busy。~~ 已移除；legacy
+  adapter 改用 `(session_id, run_id)` 租约注册表。
 - 同文件约 312 行把 WebConnectionInfo.session_id 固定为 default。
 - 同文件约 337 行把 interaction_context.conversation_id 固定为 default。
 - /ui/sse 只接受 default，其他 Session 返回 404。
@@ -109,15 +114,20 @@ AF 工作树在审核时已有用户未提交修改。本报告只读取这些�
 
 因此，当前 UI 上的 Session 更接近一个 SSE 连接标签，而不是用户可管理的工作对象。
 
-### 2.2 全局 busy 阻止单用户多 Session 并行
+### 2.2 Legacy 单 Session 门闩与正式多 Session Run Supervisor
 
 【源代码事实】
 
-/ui/run 在 g_agent_busy 为 true 时直接拒绝请求，运行线程结束后才重置。这个状态属于进程，而不属于 Session、Run 或用户。
+2026-08-18 后，`/ui/run` 不再使用进程级 `g_agent_busy`。legacy adapter
+按 Session 保存对话状态，并以 Run 身份持有取消控制；同一 legacy Session 的并发
+Run 被拒绝，错误或异常退出会自动释放租约。正式多 Session 并行、lease/fencing、
+重启接管和命令队列由 `SessionRunWorker`/`SQLiteRunSupervisor` 承担。
 
 【判断】
 
-即使前端复制出多个 Session 行，当前后端仍然只能执行一个顶层请求。若直接删除该判断，又会暴露共享单例、连接、Skill 状态、工具提交、记忆上下文和事件流之间的串扰风险。
+不能通过复制 legacy 前端 Session 行来获得产品级并行能力；该入口仍只服务
+`default`。事件层已补齐 session 定向 token/thinking/aux/final/error 分发并有负向
+隔离测试，但 Memory、Tool、Artifact 的真实浏览器端到端隔离仍需 Live 认证。
 
 正确做法不是把 bool 改成 map<bool>，而是引入：
 

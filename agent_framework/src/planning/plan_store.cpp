@@ -3,7 +3,8 @@
 namespace agent_framework::planning {
 
 std::string InMemoryPlanStore::key(const contracts::ContractIdentity& identity) {
-    return identity.tenant_id + '\x1f' + identity.task_id + '\x1f' + identity.plan_id;
+    return identity.tenant_id + '\x1f' + identity.principal_id + '\x1f' +
+           identity.task_id + '\x1f' + identity.plan_id;
 }
 
 PlanningCommitResult InMemoryPlanStore::create(const ExecutionPlan& plan) {

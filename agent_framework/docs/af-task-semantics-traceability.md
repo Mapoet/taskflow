@@ -12,11 +12,11 @@ Evidence levels: `S` source, `B` built, `O` offline test, `R` real runtime, `L` 
 | LLM task cognition and Plan binding | independent work/effect/assurance axes, typed planning decision and requirement revision binding | O | ProviderLive calibration and production planner invocation matrix |
 | LLM invocation observability | classifier per-call observer publishes provider/model/prompt/deployment, digests, latency, usage, confidence and fallback without raw prompt; text-free calibration aggregate exposes false high-effect, planning, clarification and abandonment rates | B/O-partial | persist all workflow roles through one LLMRuntimeStore and run ProviderLive calibration campaigns |
 | Product Session catalog | create/list/get/rename/organize/member/lifecycle/fork/restore/two-phase purge/data APIs and CAS tests | O | background physical-erasure receipt |
-| Versioned Task API | durable Task aggregate exposes requirement history and Run/Plan bindings; execution snapshot carries authoritative revisions/digests | O | authoritative Plan document and Evidence repository endpoints |
-| Per-Session Run supervision | Run Worker, lease/heartbeat/fencing, parked waits and typed commands including retry/reconcile/escalate | O/R | production Harness executor composition, consumed-command checkpoint and removal of demo globals |
-| Production Session Run bridge | `ProductionLiveRuntime::session_run_executor` and production-runtime tests | S/O | positive deployment wiring and ProviderLive Harness execution |
+| Versioned Task API | durable Task aggregate plus semantics, Decision, Plan, Run/execution snapshot, Observation and Evidence endpoints; capability and OpenAPI contracts | O/R | browser/provider-live certification |
+| Per-Session Run supervision | Run Worker, lease/heartbeat/fencing, parked waits, all typed commands and atomic child-Run fork | O/R | removal of legacy demo globals |
+| Production Session Run bridge | `ProductionLiveRuntime::session_run_executor`; a leased durable Run traverses production PlanApproval, Execution and Assurance with empty-delivery fail-closed | S/O | deployed ProviderLive Harness execution |
 | Authorized replay transport | HTTP/SSE/WebSocket replay plus typed interaction and execution-snapshot APIs | O/R | sustained slow-consumer and reconnect browser certification |
-| Unified RuntimeSubject | typed subject and API validation | O | Tool, Memory, Approval, Artifact and runtime propagation |
+| Unified RuntimeSubject | typed subject and API validation; Planning/Evidence v2 keys include conversation scope with tested v1 migration and same-task cross-Session isolation | O | full Tool/Memory/Artifact end-to-end isolation |
 | Authoritative completion | TaskClosureController and production runtime integration | O | all entrypoints and Live recovery evidence |
 | Observation consistency | canonical Conversation events project one-for-one to typed interactions; runtime/projection heads converge and isolation is tested | O/R | continuous projector wiring in every production entrypoint and rebuild-from-retention recovery |
 | Runtime event integrity | write-time sequence enforcement plus read-time digest/schema/scope/order diagnostics and projection cursor checks | O | remote/multi-node fault injection |
@@ -37,10 +37,13 @@ Evidence levels: `S` source, `B` built, `O` offline test, `R` real runtime, `L` 
 
 ## Executed evidence in this batch
 
-- Phase 4 labeled CTest: 121 selected, 120 passed, 0 failed, 1 environment-gated PostgreSQL queue test skipped.
+- Phase 4 labeled CTest: 121 selected, 120 passed, 0 failed, 1 environment-gated PostgreSQL queue test skipped (37.78 s).
 - Focused CTest: production Session Run bridge, task semantics, routing, Decision, Task orchestration, execution snapshot, Run supervisor/worker/API, event integrity, projection and harness-supported runtime.
 - Runtime HTTP: capability manifest, typed interactions and execution snapshot returned consistent heads; answering a durable Decision woke the parked Run and completed it under a new lease epoch.
 - Runtime HTTP: Session fork created independent Session/Conversation identities against the expected source revision; Session data reported matching runtime and interaction heads.
+- Runtime HTTP: Task semantics, current Plan, task observations and Evidence endpoints each returned 200 from the formal Workbench service; the Capability Manifest advertised the same resources.
+- SQLite Planning/Evidence schema v2: conversation-scoped physical keys, v1 data migration, restart, and same-tenant/same-task/same-object-id Session isolation passed.
+- Run command matrix: start, steer, queue, comment, fork, cancel, retry, reconcile and escalation persistence/dispatch passed; Run fork creates its child Run and Start command atomically.
 - React production build: TypeScript and Vite completed successfully; active input now steers the current revision instead of incorrectly opening a new Run.
 - SQLite boundary: operational calls and schema introspection are centralized in `agent/internal/sqlite_utils.hpp` and enforced by a source-boundary test.
 

@@ -127,5 +127,49 @@ int main() {
     const auto calibration_denied = pinned_runtime.invoke(request("invocation-d"));
     assert(!calibration_denied.ok && calibration_denied.error_code == "calibration_denied");
     assert(pinned_primary->calls() == 1 && pinned_fallback->calls() == 0);
+
+    // Provider timeouts are bounded by the role profile, classified as retryable,
+    // retained in every attempt, and terminate when the durable attempt budget is exhausted.
+    auto timeout_store = std::make_shared<InMemoryLLMRuntimeStore>();
+    publish_baseline(timeout_store);
+    auto timeout_router = std::make_shared<ModelRouter>();
+    assert(timeout_router->register_candidate(candidate("primary","timeout-a","model-a",10)));
+    assert(timeout_router->register_candidate(candidate("fallback","timeout-b","model-b",20)));
+    auto timeout_a = std::make_shared<ScriptedAdapter>();
+    timeout_a->push([]() -> LLMOutput { throw llm_http_error(408,"timeout-a","deadline"); });
+    auto timeout_b = std::make_shared<ScriptedAdapter>();
+    timeout_b->push([]() -> LLMOutput { throw llm_http_error(408,"timeout-b","deadline"); });
+    timeout_b->push([]() -> LLMOutput { throw llm_http_error(408,"timeout-b","deadline"); });
+    auto timeout_client = std::make_shared<LLMClient>();
+    timeout_client->set_prompt_renderer(std::make_shared<PromptRenderer>());
+    timeout_client->register_adapter("timeout-a",timeout_a);
+    timeout_client->register_adapter("timeout-b",timeout_b);
+    RoleRuntime timeout_runtime(timeout_client,timeout_store,timeout_router);
+    const auto timed_out=timeout_runtime.invoke(request("invocation-timeout"));
+    assert(!timed_out.ok&&timed_out.error_code=="attempt_budget_exhausted");
+    assert(timed_out.manifest.state==InvocationState::Failed&&
+           timed_out.manifest.attempts.size()==3);
+    for(const auto& attempt:timed_out.manifest.attempts)
+        assert(attempt.failure_class==FailureClass::Retryable&&
+               attempt.error_code=="provider_http_408");
+    assert(timeout_a->rendered().front().model_config->http_timeout_sec==5);
+
+    // Cooperative cancellation is terminal and must not fall through to retries/fallbacks.
+    auto cancel_store = std::make_shared<InMemoryLLMRuntimeStore>();
+    publish_baseline(cancel_store);
+    auto cancel_router = std::make_shared<ModelRouter>();
+    assert(cancel_router->register_candidate(candidate("primary","cancel-provider","model-c",10)));
+    auto cancel_adapter = std::make_shared<ScriptedAdapter>();
+    cancel_adapter->push([]() -> LLMOutput { throw std::runtime_error("provider cancelled"); });
+    auto cancel_client = std::make_shared<LLMClient>();
+    cancel_client->set_prompt_renderer(std::make_shared<PromptRenderer>());
+    cancel_client->register_adapter("cancel-provider",cancel_adapter);
+    RoleRuntime cancel_runtime(cancel_client,cancel_store,cancel_router);
+    auto cancel_request=request("invocation-cancelled");
+    cancel_request.input.cancellation_requested=[] { return true; };
+    const auto cancelled=cancel_runtime.invoke(std::move(cancel_request));
+    assert(!cancelled.ok&&cancelled.error_code=="invocation_cancelled");
+    assert(cancelled.manifest.state==InvocationState::Cancelled&&
+           cancelled.manifest.attempts.size()==1&&cancel_adapter->calls()==1);
     return 0;
 }

@@ -180,7 +180,7 @@ namespace agent_framework::session
                 return {same, sql::column_uint64(old.get(), 3), 0,
                         same ? "" : "run_command_idempotency_conflict"};
             }
-            sql::Statement parent(db, "SELECT revision,state FROM supervised_session_runs WHERE tenant=? AND session_id=? AND run_id=?");
+            sql::Statement parent(db, "SELECT revision,state,organization_id,project_id,principal_id,provider_id,payload_json FROM supervised_session_runs WHERE tenant=? AND session_id=? AND run_id=?");
             sql::bind_text(parent.get(), 1, c.tenant_id);
             sql::bind_text(parent.get(), 2, c.session_id);
             sql::bind_text(parent.get(), 3, c.run_id);
@@ -189,6 +189,29 @@ namespace agent_framework::session
             const auto current_revision=sql::column_uint64(parent.get(),0);
             const auto current_state=state_from(sql::column_text(parent.get(),1));
             if(!current_state)return {false,current_revision,0,"stored_run_state_invalid"};
+            std::optional<SessionRunRequest> forked_run;
+            if(c.kind==SessionCommandKind::Fork) {
+                if(!c.payload.contains("new_run_id")||!c.payload.at("new_run_id").is_string()||
+                   !c.payload.contains("new_command_id")||!c.payload.at("new_command_id").is_string())
+                    return {false,current_revision,0,"run_fork_binding_required"};
+                SessionRunRequest child;child.tenant_id=c.tenant_id;
+                child.organization_id=sql::column_text(parent.get(),2);
+                child.project_id=sql::column_text(parent.get(),3);
+                child.principal_id=sql::column_text(parent.get(),4);
+                child.provider_id=sql::column_text(parent.get(),5);
+                child.session_id=c.session_id;child.run_id=c.payload.at("new_run_id").get<std::string>();
+                child.command_id=c.payload.at("new_command_id").get<std::string>();
+                child.payload=nlohmann::json::parse(sql::column_text(parent.get(),6));
+                if(c.payload.contains("run_payload")) {
+                    if(!c.payload.at("run_payload").is_object())
+                        return {false,current_revision,0,"run_fork_payload_invalid"};
+                    child.payload=c.payload.at("run_payload");
+                }
+                if(child.run_id.empty()||child.command_id.empty()||child.run_id==c.run_id||
+                   child.command_id==c.command_id)
+                    return {false,current_revision,0,"run_fork_identity_invalid"};
+                forked_run=std::move(child);
+            }
             const bool command_allowed=c.kind==SessionCommandKind::Comment||
                 (c.kind==SessionCommandKind::Retry&&*current_state==SupervisedRunState::Failed)||
                 ((c.kind==SessionCommandKind::Reconcile||c.kind==SessionCommandKind::Escalate)&&
@@ -220,6 +243,29 @@ namespace agent_framework::session
             sql::bind_text(ins.get(), 8, c.created_at);
             if (sql::step(ins.get()) != SQLITE_DONE)
                 throw std::runtime_error(sqlite3_errmsg(db));
+            if(forked_run) {
+                auto& child=*forked_run;child.created_at=c.created_at;
+                sql::Statement child_run(db,"INSERT INTO supervised_session_runs(tenant,organization_id,project_id,principal_id,provider_id,session_id,run_id,command_id,payload_json,state,revision,lease_epoch,lease_owner,lease_expires_at_ms,created_at,updated_at,command_cursor) VALUES(?,?,?,?,?,?,?,?,?,'queued',1,0,'',0,?,?,0)");
+                int child_index=1;
+                for(const auto* value:{&child.tenant_id,&child.organization_id,&child.project_id,
+                    &child.principal_id,&child.provider_id,&child.session_id,&child.run_id,&child.command_id})
+                    sql::bind_text(child_run.get(),child_index++,*value);
+                sql::bind_text(child_run.get(),child_index++,child.payload.dump());
+                sql::bind_text(child_run.get(),child_index++,child.created_at);
+                sql::bind_text(child_run.get(),child_index++,child.created_at);
+                if(sql::step(child_run.get())!=SQLITE_DONE)
+                    throw std::runtime_error(std::string("run_fork_create_failed:")+sqlite3_errmsg(db));
+                sql::Statement child_start(db,"INSERT INTO supervised_session_commands VALUES(?,?,?,?,?,?,1,?)");
+                sql::bind_text(child_start.get(),1,child.tenant_id);
+                sql::bind_text(child_start.get(),2,child.session_id);
+                sql::bind_text(child_start.get(),3,child.run_id);
+                sql::bind_text(child_start.get(),4,child.command_id);
+                sql::bind_text(child_start.get(),5,name(SessionCommandKind::Start));
+                sql::bind_text(child_start.get(),6,child.payload.dump());
+                sql::bind_text(child_start.get(),7,child.created_at);
+                if(sql::step(child_start.get())!=SQLITE_DONE)
+                    throw std::runtime_error(std::string("run_fork_start_failed:")+sqlite3_errmsg(db));
+            }
             // Awaiting-input is a durable parked state, not an expiring worker
             // lease. A material command explicitly wakes it and invalidates the
             // old fencing epoch; comments remain non-executing annotations.

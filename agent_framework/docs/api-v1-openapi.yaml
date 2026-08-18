@@ -131,6 +131,32 @@ paths:
         - {$ref: '#/components/parameters/TaskId'}
         - {name: run_id, in: query, schema: {type: string}}
       responses: {'200': {description: Digest-bound authoritative execution revisions}, '409': {$ref: '#/components/responses/Conflict'}}
+  /sessions/{session_id}/tasks/{task_id}/semantics:
+    get:
+      operationId: getTaskSemantics
+      parameters: [{$ref: '#/components/parameters/SessionId'}, {$ref: '#/components/parameters/TaskId'}]
+      responses: {'200': {description: Runtime-event-backed Task semantics and planning projection}, '404': {description: Task not found}}
+  /sessions/{session_id}/tasks/{task_id}/plans/{plan_id}:
+    get:
+      operationId: getExecutionPlan
+      parameters:
+        - {$ref: '#/components/parameters/SessionId'}
+        - {$ref: '#/components/parameters/TaskId'}
+        - {name: plan_id, in: path, required: true, schema: {type: string}}
+      responses: {'200': {description: Current digest-bound ExecutionPlan revision}, '404': {description: Plan not found}}
+  /sessions/{session_id}/tasks/{task_id}/observations:
+    get:
+      operationId: getTaskObservations
+      parameters: [{$ref: '#/components/parameters/SessionId'}, {$ref: '#/components/parameters/TaskId'}]
+      responses: {'200': {description: Task-scoped Tool, Evidence, Finding and Artifact projection}, '404': {description: Projection not built}}
+  /sessions/{session_id}/tasks/{task_id}/evidence/{evidence_id}:
+    get:
+      operationId: getTaskEvidence
+      parameters:
+        - {$ref: '#/components/parameters/SessionId'}
+        - {$ref: '#/components/parameters/TaskId'}
+        - {name: evidence_id, in: path, required: true, schema: {type: string}}
+      responses: {'200': {description: Authoritative one-record EvidenceBundle}, '404': {description: Evidence not found}}
   /sessions/{session_id}/decisions/{decision_id}:
     get:
       operationId: getDecision

@@ -2,6 +2,7 @@
 #undef NDEBUG
 #endif
 #include <cassert>
+#include <chrono>
 #include <filesystem>
 #include <memory>
 
@@ -142,10 +143,15 @@ int main() {
     memory_v2::MemoryProviderRegistry providers;
     memory_v2::MemoryViewEngine views(providers);
     planning::InvestigatorRegistry investigators;
+    assert(investigators.register_investigator(
+        std::make_shared<phase4_cognition_test::RepoInvestigator>()));
+    assert(investigators.register_investigator(
+        std::make_shared<phase4_cognition_test::DocsInvestigator>()));
     planning::InMemoryEvidenceStore evidence;
     planning::InMemoryPlanStore plans;
     planning::InMemoryCognitionCheckpointStore cognition_checkpoints;
     phase4_cognition_test::ScriptedStageModel cognition_model;
+    phase4_cognition_test::script_success(cognition_model, false);
     auto cognition = std::make_shared<planning::MultiStageCognitionWorkflow>(
         views, investigators, evidence, plans, cognition_checkpoints,
         cognition_model);
@@ -155,6 +161,8 @@ int main() {
         (root / "assembly-invocations.sqlite3").string());
     auto controls = std::make_shared<tool_runtime::SQLiteExecutionControlStore>(
         (root / "assembly-controls.sqlite3").string());
+    auto durable_runs = std::make_shared<run::SQLiteRunStore>(
+        (root / "assembly-runs.sqlite3").string());
     auto assembly_inputs =
         std::make_shared<harness::SQLiteProductionWorkflowInputRepository>(
             (root / "assembly-inputs.sqlite3").string());
@@ -170,14 +178,51 @@ int main() {
     ProductionRuntimeResources assembly_resources;
     assembly_resources.deployment_profile = "production";
     assembly_resources.dependencies.task_registry = tasks.get();
+    assembly_resources.dependencies.run_store = durable_runs.get();
     assembly_resources.dependencies.invocation_store = invocations.get();
     assembly_resources.dependencies.execution_control_store = controls.get();
     assembly_resources.dependencies.input_repository = assembly_inputs.get();
     assembly_resources.dependencies.cognition_workflow = cognition.get();
     assembly_resources.task_coordination_journal = journal.get();
+    assembly_resources.planning_policy.requested_deliverables = {"code", "tests"};
+    assembly_resources.planning_policy.granted_authorities = {
+        "workspace_read", "workspace_write", "repo_read", "repo_write", "external_read"};
+    assembly_resources.planning_policy.success_signals = {"all tests pass"};
+    assembly_resources.planning_policy.executor_id = "workspace-agent";
+    assembly_resources.planning_policy.executor_revision = "r1";
+    assurance::AcceptanceContract production_acceptance;
+    production_acceptance.revision = 1;
+    production_acceptance.criteria = {{"deliverable-present",
+        assurance::VerificationLayer::System,"a deliverable is committed",
+        "artifact",{"artifact"},"pass",true}};
+    assembly_resources.planning_policy.acceptance_contract = production_acceptance;
     assembly_resources.lifetime_anchors = {
         tasks, invocations, controls, assembly_inputs, journal, cognition,
-        assembly_harness_store, assembly_counters, lifetime};
+        durable_runs, assembly_harness_store, assembly_counters, lifetime};
+
+    conversation::PersistentTask production_task;
+    production_task.identity = {"tenant", "production-conversation"};
+    production_task.task_id = "production-task";
+    production_task.root_turn_id = "production-turn";
+    production_task.current_turn_id = "production-turn";
+    production_task.current_run_id = "production-run";
+    conversation::TaskRequirementRevision production_requirement;
+    production_requirement.identity = production_task.identity;
+    production_requirement.task_id = production_task.task_id;
+    production_requirement.turn_id = production_task.current_turn_id;
+    production_requirement.content = "upgrade the public workflow API without breaking callers";
+    conversation::TurnTaskLink production_link{production_task.identity,
+        production_task.current_turn_id,production_task.task_id,
+        production_task.current_run_id,1,conversation::TaskInputIntent::InitialRequest};
+    assert(tasks->create(production_task,production_requirement,production_link).ok);
+    run::RunCheckpoint production_run;
+    production_run.metadata.identity.tenant_id = "tenant";
+    production_run.metadata.identity.principal_id = "production-conversation";
+    production_run.metadata.identity.task_id = "production-task";
+    production_run.metadata.identity.run_id = "production-run";
+    production_run.metadata.identity.plan_id = "production-task:plan";
+    production_run.created_at = "2026-08-18T00:00:00Z";
+    assert(durable_runs->create(production_run));
     lifetime.reset();
     harness::ProductionBuildReport assembly_report;
     assembly_report.ready = true;
@@ -263,6 +308,36 @@ int main() {
     auto response = assembled.runtime->response_executor();
     auto long_task = assembled.runtime->long_task_executor();
     auto session_run = assembled.runtime->session_run_executor();
+    {
+    session::SQLiteSessionRunSupervisor production_supervisor(
+        (root / "assembly-session-runs.sqlite3").string());
+    session::SessionRunRequest supervised_request;
+    supervised_request.tenant_id = "tenant";
+    supervised_request.organization_id = "organization";
+    supervised_request.project_id = "project";
+    supervised_request.principal_id = "principal";
+    supervised_request.provider_id = "provider";
+    supervised_request.session_id = "production-session";
+    supervised_request.run_id = "production-run";
+    supervised_request.command_id = "start-production-run";
+    supervised_request.payload = {{"conversation_id","production-conversation"},
+        {"task_id","production-task"},{"turn_id","production-turn"},
+        {"input","upgrade the public workflow API without breaking callers"},
+        {"profile","professional"}};
+    assert(production_supervisor.enqueue(std::move(supervised_request)).ok);
+    session::SessionRunWorker production_worker(
+        production_supervisor,"production-worker",5000,session_run);
+    const auto now=static_cast<std::uint64_t>(std::chrono::duration_cast<
+        std::chrono::milliseconds>(std::chrono::system_clock::now()
+        .time_since_epoch()).count());
+    const auto traversed = production_worker.tick(now);
+    assert(traversed.claimed&&traversed.executed);
+    assert(traversed.state == session::SupervisedRunState::Failed);
+    assert(traversed.error == "execution_completed_without_deliverable");
+    assert(assembly_counters->execute[harness::HarnessStage::PlanApproval] == 1);
+    assert(assembly_counters->execute[harness::HarnessStage::Execution] == 1);
+    assert(assembly_counters->execute[harness::HarnessStage::Assurance] == 1);
+    }
     session::WorkerExecutionContext incomplete;
     incomplete.run.request.tenant_id = "tenant";
     incomplete.run.request.run_id = "missing-bindings";

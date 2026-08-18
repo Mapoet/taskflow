@@ -56,6 +56,18 @@ void UIManager::dispatch_message(const std::string& type, const json& data) {
     }
 }
 
+void UIManager::dispatch_message(const std::string& session_id, const std::string& type,
+                                 const json& data) {
+    std::lock_guard<std::mutex> lock(handlers_mutex_);
+    for (auto& h : handlers_) {
+        if (h && h->is_active()) h->handle_aux_event(type, data);
+    }
+    const auto it = session_handlers_.find(session_id);
+    if (it != session_handlers_.end() && it->second && it->second->is_active()) {
+        it->second->handle_aux_event(type, data);
+    }
+}
+
 void UIManager::publish_phase4_operations(const Phase4OperationsSnapshot& snapshot) {
     // Round-trip validation at the UI boundary prevents malformed or unsupported schemas from
     // reaching individual renderers and guarantees every adapter receives byte-equivalent facts.
@@ -82,6 +94,17 @@ void UIManager::dispatch_final_result(const json& result) {
     }
 }
 
+void UIManager::dispatch_final_result(const std::string& session_id, const json& result) {
+    std::lock_guard<std::mutex> lock(handlers_mutex_);
+    for (auto& h : handlers_) {
+        if (h && h->is_active()) h->handle_final_result(result);
+    }
+    const auto it = session_handlers_.find(session_id);
+    if (it != session_handlers_.end() && it->second && it->second->is_active()) {
+        it->second->handle_final_result(result);
+    }
+}
+
 void UIManager::dispatch_error(const std::string& error_message) {
     std::lock_guard<std::mutex> lock(handlers_mutex_);
     for (auto& h : handlers_) {
@@ -93,6 +116,18 @@ void UIManager::dispatch_error(const std::string& error_message) {
         if (kv.second && kv.second->is_active()) {
             kv.second->handle_error(error_message);
         }
+    }
+}
+
+void UIManager::dispatch_error(const std::string& session_id,
+                               const std::string& error_message) {
+    std::lock_guard<std::mutex> lock(handlers_mutex_);
+    for (auto& h : handlers_) {
+        if (h && h->is_active()) h->handle_error(error_message);
+    }
+    const auto it = session_handlers_.find(session_id);
+    if (it != session_handlers_.end() && it->second && it->second->is_active()) {
+        it->second->handle_error(error_message);
     }
 }
 

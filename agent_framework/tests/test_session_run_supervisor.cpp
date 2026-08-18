@@ -44,10 +44,48 @@ int main(){
         resume.expected_run_revision=waiting2.revision;assert(supervisor.enqueue_command(resume).ok);
         auto takeover=supervisor.claim_next("worker-new",201,100);assert(takeover&&takeover->request.run_id=="r2"&&takeover->lease_epoch==b->lease_epoch+1);
         assert(!supervisor.finish("tenant","r2","worker-b",b->lease_epoch,waiting2.revision,SupervisedRunState::Completed).ok);
+        assert(supervisor.enqueue(request("fork-session","fork-parent","fork-parent-start")).ok);
+        SessionRunCommand fork{"tenant","fork-session","fork-parent","fork-command",
+            SessionCommandKind::Fork,{{"new_run_id","fork-child"},
+                {"new_command_id","fork-child-start"},{"run_payload",{{"prompt","branched work"}}}}};
+        fork.expected_run_revision=1;assert(supervisor.enqueue_command(fork).ok);
+        const auto fork_child=supervisor.load("tenant","fork-child");
+        assert(fork_child&&fork_child->request.session_id=="fork-session"&&
+               fork_child->request.payload.at("prompt")=="branched work"&&
+               fork_child->state==SupervisedRunState::Queued);
+        const auto child_commands=supervisor.commands("tenant","fork-child");
+        assert(child_commands.size()==1&&child_commands.front().kind==SessionCommandKind::Start);
+        auto bad_fork=fork;bad_fork.command_id="bad-fork";bad_fork.payload=nlohmann::json::object();
+        assert(!supervisor.enqueue_command(bad_fork).ok);
     }
     {
         SQLiteSessionRunSupervisor reopened(path);auto run=reopened.load("tenant","r2");
         assert(run&&run->lease_owner=="worker-new"&&run->lease_epoch==2);
+    }
+    const auto recovery_path=(std::filesystem::temp_directory_path()/"agent-session-run-recovery.sqlite").string();
+    std::filesystem::remove(recovery_path);
+    std::uint64_t stale_epoch=0,stale_revision=0;
+    {
+        SQLiteSessionRunSupervisor before_restart(recovery_path);
+        assert(before_restart.enqueue(request("restart-session","restart-run","restart-start")).ok);
+        auto claimed=before_restart.claim_next("stale-worker",100,50);assert(claimed);
+        stale_epoch=claimed->lease_epoch;
+        auto running=before_restart.mark_running("tenant","restart-run","stale-worker",
+                                                 claimed->lease_epoch,claimed->revision);
+        assert(running.ok);stale_revision=running.revision;
+    }
+    {
+        SQLiteSessionRunSupervisor after_restart(recovery_path);
+        auto takeover=after_restart.claim_next("recovery-worker",151,50);assert(takeover);
+        assert(takeover->request.run_id=="restart-run"&&takeover->lease_epoch==stale_epoch+1);
+        const auto stale_finish=after_restart.finish("tenant","restart-run","stale-worker",
+            stale_epoch,stale_revision,SupervisedRunState::Completed);
+        assert(!stale_finish.ok&&stale_finish.error=="lease_fence_or_revision_conflict");
+        auto running=after_restart.mark_running("tenant","restart-run","recovery-worker",
+                                                takeover->lease_epoch,takeover->revision);
+        assert(running.ok);
+        assert(after_restart.finish("tenant","restart-run","recovery-worker",
+            takeover->lease_epoch,running.revision,SupervisedRunState::Completed,1).ok);
     }
     const auto quota_path=(std::filesystem::temp_directory_path()/"agent-session-run-quota.sqlite").string();std::filesystem::remove(quota_path);
     {
@@ -73,5 +111,6 @@ int main(){
         assert(migrated.enqueue(request("legacy-session","legacy-run","legacy-start")).ok);
         auto run=migrated.load("tenant","legacy-run");assert(run&&run->command_cursor==0);}
     std::filesystem::remove(path);std::filesystem::remove(quota_path);
+    std::filesystem::remove(recovery_path);
     std::filesystem::remove(legacy_path);
 }

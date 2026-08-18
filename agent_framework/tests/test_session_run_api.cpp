@@ -34,7 +34,10 @@ int main() {
     approval::SQLiteApprovalStore approvals((root/"approvals.sqlite").string());
     decision::SQLiteDecisionStore decisions((root/"decisions.sqlite").string());
     conversation::SQLiteTaskRegistry tasks((root/"tasks.sqlite").string());
-    api::v1::SessionRunApi api(catalog,supervisor,&events,&interactions,&approvals,&decisions,&tasks);
+    planning::InMemoryPlanStore plans;
+    planning::InMemoryEvidenceStore evidence;
+    api::v1::SessionRunApi api(catalog,supervisor,&events,&interactions,&approvals,&decisions,&tasks,
+                               &plans,&evidence);
 
     auto owner=subject();auto created=api.create_session(owner,product());
     assert(created.status==201);
@@ -88,6 +91,35 @@ int main() {
     requirement.content="work";
     conversation::TurnTaskLink task_link;task_link.turn_id="turn";task_link.run_id="run-1";
     assert(tasks.create(task,requirement,task_link).ok);
+    planning::ExecutionPlan plan;plan.metadata.identity.tenant_id="tenant";
+    plan.metadata.identity.organization_id="org";plan.metadata.identity.project_id="project";
+    plan.metadata.identity.principal_id="conversation-1";plan.metadata.identity.task_id="task-1";
+    plan.metadata.identity.plan_id="plan-1";assert(plans.create(plan));
+    planning::EvidenceRecord evidence_record;evidence_record.evidence_id="evidence-1";
+    evidence_record.origin_kind="repository";evidence_record.locator="repo:file.cpp";
+    evidence_record.content_digest="sha256:evidence";evidence_record.trust_class="authoritative";
+    contracts::ContractMetadata evidence_scope;evidence_scope.identity.tenant_id="tenant";
+    evidence_scope.identity.principal_id="conversation-1";
+    evidence_scope.identity.task_id="task-1";assert(evidence.append(evidence_scope,evidence_record));
+    auto second_product=product();second_product.session_id="session-2";
+    second_product.conversation_id="conversation-2";second_product.title="Isolated Session";
+    assert(api.create_session(owner,second_product).status==201);
+    conversation::PersistentTask second_task=task;second_task.identity={"tenant","conversation-2"};
+    second_task.root_turn_id="turn-2";second_task.current_turn_id="turn-2";
+    second_task.current_run_id="run-2";
+    auto second_run=run;second_run.session_id="session-2";second_run.run_id="run-2";
+    second_run.command_id="start-2";assert(supervisor.enqueue(second_run).ok);
+    conversation::TaskRequirementRevision second_requirement;second_requirement.turn_id="turn-2";
+    second_requirement.content="isolated work";
+    conversation::TurnTaskLink second_link;second_link.turn_id="turn-2";second_link.run_id="run-2";
+    assert(tasks.create(second_task,second_requirement,second_link).ok);
+    auto second_plan=plan;second_plan.metadata.identity.principal_id="conversation-2";
+    second_plan.planning_view_digest="sha256:session-2-view";assert(plans.create(second_plan));
+    auto second_evidence=evidence_record;second_evidence.locator="repo:session-2.cpp";
+    second_evidence.content_digest="sha256:session-2-evidence";
+    auto second_evidence_scope=evidence_scope;
+    second_evidence_scope.identity.principal_id="conversation-2";
+    assert(evidence.append(second_evidence_scope,second_evidence));
 
     session::SessionRunCommand comment{"tenant","session-1","run-1","comment-1",
         session::SessionCommandKind::Comment,{{"text","note"}}};
@@ -105,7 +137,8 @@ int main() {
         conversation::RuntimeEventEnvelope event;event.event_id="event-"+std::to_string(sequence);
         event.tenant_id="tenant";event.conversation_id="conversation-1";event.turn_id="turn";
         event.run_id="run-1";event.sequence=sequence;event.durability=conversation::EventDurability::Durable;
-        event.visibility=visibility;event.event_type="test";event.timestamp="now";
+        event.visibility=visibility;event.event_type=sequence==2?"task_semantics_decided":"test";
+        event.timestamp="now";if(sequence==2)event.payload={{"task_id","task-1"},{"work_shape","bounded_task"}};
         assert(events.append_event(event,nullptr));
     };
     append(1,conversation::EventVisibility::Internal);
@@ -120,7 +153,7 @@ int main() {
     assert(api.replay_events(subject("viewer"),"session-1",4,10).status==409);
 
     ui::InteractionRef ref;ref.tenant_id="tenant";ref.conversation_id="conversation-1";
-    ref.turn_id="turn";ref.run_id="run-1";ref.artifact_id="sha256:artifact";
+    ref.turn_id="turn";ref.task_id="task-1";ref.run_id="run-1";ref.artifact_id="sha256:artifact";
     ui::InteractionSourceRevision source{"assurance","artifact",1,"sha256:source"};
     ui::InteractionNode artifact;artifact.node_id="artifact:sha256:artifact";
     artifact.kind=ui::InteractionNodeKind::Artifact;artifact.ref=ref;artifact.label="Report";
@@ -144,6 +177,23 @@ int main() {
     assert(task_aggregate.ok()&&task_aggregate.body.at("schema")=="agent.task_aggregate/v1"&&
            task_aggregate.body.at("requirements").size()==1);
     assert(api.get_task(outsider,"session-1","task-1").status==403);
+    const auto semantics=api.get_task_semantics(subject("viewer"),"session-1","task-1");
+    assert(semantics.ok()&&semantics.body.at("schema")=="agent.task_semantics_projection/v1"&&
+           semantics.body.at("items").size()==1);
+    const auto plan_view=api.get_plan(subject("viewer"),"session-1","task-1","plan-1");
+    assert(plan_view.ok()&&plan_view.body.at("kind")=="agent.execution_plan/v1");
+    const auto observations=api.get_observations(subject("viewer"),"session-1","task-1");
+    assert(observations.ok()&&observations.body.at("schema")=="agent.task_observation_projection/v1"&&
+           observations.body.at("items").size()==1);
+    const auto evidence_view=api.get_evidence(subject("viewer"),"session-1","task-1","evidence-1");
+    assert(evidence_view.ok()&&evidence_view.body.at("kind")=="agent.evidence_bundle/v1"&&
+           evidence_view.body.at("payload").at("records").size()==1);
+    const auto isolated_plan=api.get_plan(owner,"session-2","task-1","plan-1");
+    assert(isolated_plan.ok()&&isolated_plan.body.at("payload").at("planning_view_digest")==
+           "sha256:session-2-view");
+    const auto isolated_evidence=api.get_evidence(owner,"session-2","task-1","evidence-1");
+    assert(isolated_evidence.ok()&&isolated_evidence.body.at("payload").at("records").at(0)
+           .at("content_digest")=="sha256:session-2-evidence");
     auto snapshot=api.get_execution_snapshot(subject("viewer"),"session-1","task-1","run-1");
     assert(snapshot.ok()&&snapshot.body.at("task_revision")==1&&
            snapshot.body.at("run_revision")==1&&snapshot.body.at("projection_revision")==1);

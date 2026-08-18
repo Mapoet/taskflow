@@ -23,6 +23,7 @@ int main(int argc,char** argv) {
     approval::SQLiteApprovalStore approvals((root/"approvals.sqlite").string());
     decision::SQLiteDecisionStore decisions((root/"decisions.sqlite").string());
     conversation::SQLiteTaskRegistry tasks((root/"tasks.sqlite").string());
+    planning::SQLitePlanningStore planning_store((root/"planning.sqlite").string(),{3000,false});
     session::ProductSession product;product.tenant_id="local";product.organization_id="local";
     product.project_id="local";product.workspace_id="local";product.session_id="session-orbital";
     product.conversation_id="conversation-orbital";product.owner_principal_id="local-user";
@@ -43,6 +44,26 @@ int main(int argc,char** argv) {
     requirement.content="Verify orbital workflow with professional assurance";
     conversation::TurnTaskLink link;link.turn_id="turn-orbital";link.run_id="run-orbital";
     tasks.create(task,requirement,link);
+    planning::ExecutionPlan seeded_plan;seeded_plan.metadata.identity.tenant_id="local";
+    seeded_plan.metadata.identity.organization_id="local";
+    seeded_plan.metadata.identity.project_id="local";
+    seeded_plan.metadata.identity.principal_id="conversation-orbital";
+    seeded_plan.metadata.identity.task_id="task-orbital";
+    seeded_plan.metadata.identity.plan_id="plan-orbital";
+    seeded_plan.task_understanding_digest="sha256:workbench-understanding";
+    seeded_plan.evidence_bundle_digest="sha256:workbench-evidence-bundle";
+    seeded_plan.acceptance_contract_digest="sha256:workbench-acceptance";
+    seeded_plan.memory_snapshot_id="memory-orbital";
+    seeded_plan.planning_view_digest="sha256:workbench-planning-view";
+    if(!planning_store.create(seeded_plan))throw std::runtime_error("seed plan failed");
+    planning::EvidenceRecord seeded_evidence;seeded_evidence.evidence_id="evidence-repository";
+    seeded_evidence.origin_kind="repository";seeded_evidence.locator="repo:agent_framework";
+    seeded_evidence.content_digest="sha256:workbench-repository-evidence";
+    seeded_evidence.collected_at="2026-08-18T09:00:00Z";
+    seeded_evidence.trust_class="authoritative";
+    seeded_evidence.supported_claims={"production workbench exposes durable task evidence"};
+    if(!planning_store.append(seeded_plan.metadata,seeded_evidence))
+        throw std::runtime_error("seed evidence failed");
     decision::DecisionRequest choice;choice.subject=subject;choice.subject.task_id="task-orbital";
     choice.subject.run_id="run-orbital";choice.subject.turn_id="turn-orbital";
     choice.decision_id="scope-decision";choice.question="How deeply should the orbital workflow be verified?";
@@ -67,7 +88,8 @@ int main(int argc,char** argv) {
     ui::RuntimeEventInteractionProjector projector(events,interactions);
     if(auto projected=projector.synchronize({"local",product.conversation_id});!projected.ok)
         throw std::runtime_error("initial interaction projection failed: "+projected.error);
-    api::v1::SessionRunApi api(catalog,supervisor,&events,&interactions,&approvals,&decisions,&tasks);
+    api::v1::SessionRunApi api(catalog,supervisor,&events,&interactions,&approvals,&decisions,&tasks,
+                               &planning_store,&planning_store);
     session::SessionRunWorker worker(supervisor,"workbench-worker",2000,
         [&](session::WorkerExecutionContext& context) {
             for(const auto& command:context.commands)

@@ -140,6 +140,22 @@ void register_session_run_routes(httplib::Server& server,SessionRunApi& api,
         auto subject=resolve(request,resolver,response);if(!subject)return;
         send(response,api.get_task(*subject,request.matches[1].str(),request.matches[2].str()));
     });
+    server.Get(R"(/api/v1/sessions/([^/]+)/tasks/([^/]+)/semantics)",[&api,resolver](const auto& request,auto& response) {
+        auto subject=resolve(request,resolver,response);if(!subject)return;
+        send(response,api.get_task_semantics(*subject,request.matches[1].str(),request.matches[2].str()));
+    });
+    server.Get(R"(/api/v1/sessions/([^/]+)/tasks/([^/]+)/plans/([^/]+))",[&api,resolver](const auto& request,auto& response) {
+        auto subject=resolve(request,resolver,response);if(!subject)return;
+        send(response,api.get_plan(*subject,request.matches[1].str(),request.matches[2].str(),request.matches[3].str()));
+    });
+    server.Get(R"(/api/v1/sessions/([^/]+)/tasks/([^/]+)/observations)",[&api,resolver](const auto& request,auto& response) {
+        auto subject=resolve(request,resolver,response);if(!subject)return;
+        send(response,api.get_observations(*subject,request.matches[1].str(),request.matches[2].str()));
+    });
+    server.Get(R"(/api/v1/sessions/([^/]+)/tasks/([^/]+)/evidence/([^/]+))",[&api,resolver](const auto& request,auto& response) {
+        auto subject=resolve(request,resolver,response);if(!subject)return;
+        send(response,api.get_evidence(*subject,request.matches[1].str(),request.matches[2].str(),request.matches[3].str()));
+    });
     server.Post(R"(/api/v1/sessions/([^/]+)/decisions/([^/]+)/answer)",[&api,resolver](const auto& request,auto& response) {
         auto subject=resolve(request,resolver,response);if(!subject)return;
         try {const auto body=json::parse(request.body);
