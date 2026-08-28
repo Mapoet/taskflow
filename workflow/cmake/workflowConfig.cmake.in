@@ -1,0 +1,7 @@
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+find_dependency(Taskflow CONFIG)
+
+include("${CMAKE_CURRENT_LIST_DIR}/workflowTargets.cmake")
+check_required_components(workflow)

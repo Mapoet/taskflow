@@ -816,13 +816,29 @@ cmake --build . --target declarative_example
 
 ### Standalone
 
-From the workflow directory:
+Install Taskflow and Workflow to a prefix from the Taskflow root:
 
 ```bash
-mkdir build && cd build
-cmake ..
-cmake --build . --target declarative_example
-./declarative_example
+cmake -S . -B build \
+  -DTF_BUILD_WORKFLOW=ON \
+  -DTF_BUILD_AGENT_FRAMEWORK=OFF
+cmake --build build --target workflow
+cmake --install build --prefix /path/to/prefix
+```
+
+An independent CMake project can then consume the installed package without source-tree include
+paths:
+
+```cmake
+find_package(workflow CONFIG REQUIRED)
+target_link_libraries(my_application PRIVATE workflow::workflow)
+```
+
+Configure that consumer with the installation prefix:
+
+```bash
+cmake -S . -B build -DCMAKE_PREFIX_PATH=/path/to/prefix
+cmake --build build
 ```
 
 ## 🔬 Technical Details

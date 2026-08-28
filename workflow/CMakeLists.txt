@@ -1,5 +1,14 @@
 cmake_minimum_required(VERSION 3.18)
-project(workflow LANGUAGES CXX)
+
+if(DEFINED Taskflow_VERSION)
+  set(WORKFLOW_VERSION "${Taskflow_VERSION}")
+else()
+  set(WORKFLOW_VERSION "4.1.0")
+endif()
+project(workflow VERSION ${WORKFLOW_VERSION} LANGUAGES CXX)
+
+include(GNUInstallDirs)
+include(CMakePackageConfigHelpers)
 
 # Use C++20 for template lambda support (required by nodeflow_impl.hpp)
 # Can be overridden by parent CMakeLists.txt via CMAKE_CXX_STANDARD
@@ -24,7 +33,12 @@ set(WORKFLOW_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include")
 # Workflow library with source files
 file(GLOB_RECURSE WORKFLOW_SOURCES "src/*.cpp")
 add_library(workflow STATIC ${WORKFLOW_SOURCES})
-target_include_directories(workflow PUBLIC ${WORKFLOW_INCLUDE_DIR})
+add_library(workflow::workflow ALIAS workflow)
+target_compile_features(workflow PUBLIC cxx_std_20)
+target_include_directories(workflow PUBLIC
+  $<BUILD_INTERFACE:${WORKFLOW_INCLUDE_DIR}>
+  $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+)
 
 # Ensure C++20 for workflow library (required for template lambdas)
 set_property(TARGET workflow PROPERTY CXX_STANDARD 20)
@@ -51,15 +65,27 @@ if(BUILD_TESTING)
   target_link_libraries(test_workflow_control_flow PRIVATE workflow)
   add_test(NAME workflow_control_flow COMMAND test_workflow_control_flow)
   set_tests_properties(workflow_control_flow PROPERTIES LABELS "workflow-control-flow")
+
+  add_test(
+    NAME workflow_package_consumer
+    COMMAND ${CMAKE_COMMAND}
+      -DBUILD_DIR=${CMAKE_BINARY_DIR}
+      -DINSTALL_PREFIX=${CMAKE_CURRENT_BINARY_DIR}/package-prefix
+      -DCONSUMER_SOURCE=${CMAKE_CURRENT_SOURCE_DIR}/tests/package-consumer
+      -DCONSUMER_BUILD=${CMAKE_CURRENT_BINARY_DIR}/package-consumer-build
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_install_package.cmake
+  )
+  set_tests_properties(workflow_package_consumer PROPERTIES LABELS "workflow-package")
 endif()
 
 # Link against Taskflow
-get_filename_component(TASKFLOW_PARENT_DIR ${CMAKE_SOURCE_DIR} DIRECTORY)
-target_include_directories(workflow PUBLIC ${TASKFLOW_PARENT_DIR})
 if(TARGET Taskflow::Taskflow)
   target_link_libraries(workflow PUBLIC Taskflow::Taskflow)
 elseif(TARGET Taskflow)
   target_link_libraries(workflow PUBLIC Taskflow)
+else()
+  find_package(Taskflow CONFIG REQUIRED)
+  target_link_libraries(workflow PUBLIC Taskflow::Taskflow)
 endif()
 
 # Examples
@@ -149,14 +175,36 @@ elseif(TARGET Taskflow)
   target_link_libraries(algorithm_example Taskflow)
 endif()
 
-# Install rules (optional)
-# install(TARGETS workflow EXPORT workflowTargets
-#   ARCHIVE DESTINATION lib
-#   LIBRARY DESTINATION lib
-#   RUNTIME DESTINATION bin)
-# install(FILES include/workflow/nodeflow.hpp
-#   DESTINATION include/workflow)
-# install(EXPORT workflowTargets
-#   FILE workflowTargets.cmake
-#   NAMESPACE workflow::
-#   DESTINATION lib/cmake/workflow)
+# Installable CMake package
+install(TARGETS workflow EXPORT workflowTargets
+  ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+  LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+  RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+  INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+)
+install(DIRECTORY include/workflow DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+install(EXPORT workflowTargets
+  FILE workflowTargets.cmake
+  NAMESPACE workflow::
+  DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/workflow
+)
+export(EXPORT workflowTargets
+  FILE ${CMAKE_CURRENT_BINARY_DIR}/workflowTargets.cmake
+  NAMESPACE workflow::
+)
+
+configure_package_config_file(
+  ${CMAKE_CURRENT_SOURCE_DIR}/cmake/workflowConfig.cmake.in
+  ${CMAKE_CURRENT_BINARY_DIR}/workflowConfig.cmake
+  INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/workflow
+)
+write_basic_package_version_file(
+  ${CMAKE_CURRENT_BINARY_DIR}/workflowConfigVersion.cmake
+  VERSION ${PROJECT_VERSION}
+  COMPATIBILITY SameMajorVersion
+)
+install(FILES
+  ${CMAKE_CURRENT_BINARY_DIR}/workflowConfig.cmake
+  ${CMAKE_CURRENT_BINARY_DIR}/workflowConfigVersion.cmake
+  DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/workflow
+)
